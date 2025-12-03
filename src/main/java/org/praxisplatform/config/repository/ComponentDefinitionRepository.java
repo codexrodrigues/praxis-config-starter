@@ -1,24 +1,27 @@
 package org.praxisplatform.config.repository;
 
+import java.util.List;
+
 import org.praxisplatform.config.domain.ComponentDefinition;
+import org.praxisplatform.config.projection.ComponentDefinitionProjection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
-
 @Repository
 public interface ComponentDefinitionRepository extends JpaRepository<ComponentDefinition, String> {
 
-    /**
-     * Finds components similar to the given vector.
-     * Uses PostgreSQL pgvector operator <-> (L2 distance).
-     * 
-     * @param embedding The query vector.
-     * @param limit Max results.
-     * @return List of matching definitions.
-     */
-    @Query(nativeQuery = true, value = "SELECT * FROM component_definition ORDER BY embedding <-> cast(:embedding as vector) LIMIT :limit")
-    List<ComponentDefinition> findByVectorSimilarity(@Param("embedding") String embedding, @Param("limit") int limit);
+    @Query(value = """
+        SELECT
+            e.id,
+            e.description,
+            e.json_schema as jsonSchema,
+            (1 - (e.embedding <=> CAST(:vector AS vector))) as similarityScore
+        FROM component_definition e
+        ORDER BY e.embedding <=> CAST(:vector AS vector)
+        LIMIT :limit
+    """, nativeQuery = true)
+    List<ComponentDefinitionProjection> findByVectorSimilarity(@Param("vector") String vector,
+                                                               @Param("limit") int limit);
 }

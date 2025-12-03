@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.dto.ApiCatalogRequest;
+import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,31 +27,25 @@ public class ApiMetadataIngestionService {
     private final EmbeddingService embeddingService;
 
     @Transactional
-    public void ingestCatalog(String catalogJson) {
-        try {
-            JsonNode root = objectMapper.readTree(catalogJson);
-            JsonNode endpoints = root.path("endpoints");
-            if (endpoints.isMissingNode() || !endpoints.isArray()) {
-                log.warn("No endpoints array found in catalog JSON");
-                return;
-            }
+    public void ingestCatalog(ApiCatalogRequest request) {
+        if (request.getEndpoints() == null || request.getEndpoints().isEmpty()) {
+            log.warn("No endpoints found in catalog request");
+            return;
+        }
 
-            for (JsonNode ep : endpoints) {
-                String path = ep.path("path").asText(null);
-                String method = ep.path("method").asText(null);
-                if (path == null || method == null) {
-                    log.warn("Skipping endpoint without path/method: {}", ep);
-                    continue;
-                }
+        for (ApiCatalogRequest.ApiEndpointEntry ep : request.getEndpoints()) {
+            try {
+                String path = ep.getPath();
+                String method = ep.getMethod();
+                
+                String tags = toCommaSeparated(ep.getTags());
+                String summary = ep.getSummary();
+                String description = ep.getDescription();
+                String operationId = ep.getOperationId();
 
-                String tags = toCommaSeparated(ep.path("tags"));
-                String summary = ep.path("summary").asText(null);
-                String description = ep.path("description").asText(null);
-                String operationId = ep.path("operationId").asText(null);
-
-                String requestSchema = safeWrite(ep.path("requestSchema"));
-                String responseSchema = safeWrite(ep.path("responseSchema"));
-                String parameters = safeWrite(ep.path("parameters"));
+                String requestSchema = safeWrite(ep.getRequestSchema());
+                String responseSchema = safeWrite(ep.getResponseSchema());
+                String parameters = safeWrite(ep.getParameters());
                 String rawJson = safeWrite(ep);
 
                 String embeddingSummary = buildSummary(path, method, tags, summary, description, operationId, ep);
@@ -59,49 +55,59 @@ public class ApiMetadataIngestionService {
                         requestSchema, responseSchema, parameters, rawJson, embedding);
 
                 log.info("Ingested api metadata: {} {}", meta.getMethod(), meta.getPath());
+            } catch (Exception e) {
+                String msg = "Error ingesting endpoint: " + ep.getMethod() + " " + ep.getPath();
+                log.error(msg, e);
+                throw new ConfigurationIngestionException(msg, e);
             }
-        } catch (Exception e) {
-            log.error("Error ingesting API catalog", e);
-            throw new RuntimeException("Failed to ingest API catalog", e);
         }
     }
 
-    private ApiMetadata upsert(String path, String method, String tags, String summary, String description,
-                               String operationId, String requestSchema, String responseSchema, String parameters,
-                               String rawJson, List<Float> embedding) {
-        Optional<ApiMetadata> existing = repository.findByPathAndMethod(path, method);
-        ApiMetadata meta = existing.orElse(new ApiMetadata());
-        meta.setPath(path);
-        meta.setMethod(method);
-        meta.setTags(tags);
-        meta.setSummary(summary);
-        meta.setDescription(description);
-        meta.setOperationId(operationId);
-        meta.setRequestSchema(requestSchema);
-        meta.setResponseSchema(responseSchema);
-        meta.setParameters(parameters);
-        meta.setRawJson(rawJson);
-        meta.setEmbedding(embedding);
-        return repository.save(meta);
-    }
-
+    // Helper to keep using existing logic for now, adapted for DTO
     private String buildSummary(String path, String method, String tags, String summary, String description,
-                                String operationId, JsonNode ep) {
+                                String operationId, ApiCatalogRequest.ApiEndpointEntry ep) {
         StringJoiner joiner = new StringJoiner(" | ");
         joiner.add(method + " " + path);
         if (summary != null) joiner.add("Summary: " + summary);
         if (description != null) joiner.add("Desc: " + description);
         if (operationId != null) joiner.add("OpId: " + operationId);
         if (tags != null && !tags.isBlank()) joiner.add("Tags: " + tags);
-        joiner.add("Params: " + summarizeParams(ep.path("parameters")));
-        joiner.add("Req: " + summarizeSchema(ep.path("requestSchema")));
-        joiner.add("Res: " + summarizeSchema(ep.path("responseSchema")));
-        joiner.add("ReqFields: " + summarizeFields(ep.path("requestSchema").path("fields")));
-        joiner.add("ResFields: " + summarizeFields(ep.path("responseSchema").path("fields")));
-        joiner.add("ReqRelations: " + summarizeRelations(ep.path("requestSchema").path("relations")));
-        joiner.add("ResRelations: " + summarizeRelations(ep.path("responseSchema").path("relations")));
+        
+        joiner.add("Params: " + summarizeParams(ep.getParameters()));
+        
+        // For complex schemas, we still rely on JsonNode navigation inside the DTO
+        joiner.add("Req: " + summarizeSchema(ep.getRequestSchema()));
+        joiner.add("Res: " + summarizeSchema(ep.getResponseSchema()));
+        
+        if (ep.getRequestSchema() != null) {
+             joiner.add("ReqFields: " + summarizeFields(ep.getRequestSchema().path("fields")));
+             joiner.add("ReqRelations: " + summarizeRelations(ep.getRequestSchema().path("relations")));
+        }
+        if (ep.getResponseSchema() != null) {
+             joiner.add("ResFields: " + summarizeFields(ep.getResponseSchema().path("fields")));
+             joiner.add("ResRelations: " + summarizeRelations(ep.getResponseSchema().path("relations")));
+        }
+        
         return joiner.toString();
     }
+    
+    private String toCommaSeparated(List<String> tags) {
+        if (tags == null || tags.isEmpty()) return null;
+        return String.join(",", tags);
+    }
+    
+    private String safeWrite(Object node) {
+        if (node == null) return null;
+        try {
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception e) {
+            return node.toString();
+        }
+    }
+
+    // Keep existing private methods that deal with JsonNodes (summarizeFields, etc) as they are utilities
+    // but remove the old ingestCatalog and old buildSummary
+
 
     private String summarizeFields(JsonNode fieldsNode) {
         if (fieldsNode == null || !fieldsNode.isArray()) return "none";
@@ -163,23 +169,22 @@ public class ApiMetadataIngestionService {
         return "inline";
     }
 
-    private String toCommaSeparated(JsonNode array) {
-        if (array == null || !array.isArray()) return null;
-        StringJoiner joiner = new StringJoiner(",");
-        array.forEach(n -> joiner.add(n.asText("")));
-        String res = joiner.toString();
-        return res.isEmpty() ? null : res;
-    }
-
-    private String safeWrite(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        try {
-            return objectMapper.writeValueAsString(node);
-        } catch (Exception e) {
-            log.warn("Failed to serialize node, using toString", e);
-            return node.toString();
-        }
+    private ApiMetadata upsert(String path, String method, String tags, String summary, String description,
+                               String operationId, String requestSchema, String responseSchema, String parameters,
+                               String rawJson, List<Float> embedding) {
+        Optional<ApiMetadata> existing = repository.findByPathAndMethod(path, method);
+        ApiMetadata meta = existing.orElse(new ApiMetadata());
+        meta.setPath(path);
+        meta.setMethod(method);
+        meta.setTags(tags);
+        meta.setSummary(summary);
+        meta.setDescription(description);
+        meta.setOperationId(operationId);
+        meta.setRequestSchema(requestSchema);
+        meta.setResponseSchema(responseSchema);
+        meta.setParameters(parameters);
+        meta.setRawJson(rawJson);
+        meta.setEmbedding(embedding);
+        return repository.save(meta);
     }
 }

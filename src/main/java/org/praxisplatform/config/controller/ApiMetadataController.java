@@ -1,6 +1,8 @@
 package org.praxisplatform.config.controller;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.praxisplatform.config.dto.ApiCatalogRequest;
 import org.praxisplatform.config.service.ApiMetadataIngestionService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,8 +18,8 @@ public class ApiMetadataController {
     private final ApiMetadataIngestionService ingestionService;
 
     @PostMapping("/ingest")
-    public ResponseEntity<Void> ingestCatalog(@RequestBody String catalogJson) {
-        ingestionService.ingestCatalog(catalogJson);
+    public ResponseEntity<Void> ingestCatalog(@RequestBody @Valid ApiCatalogRequest request) {
+        ingestionService.ingestCatalog(request);
         return ResponseEntity.accepted().build();
     }
 }

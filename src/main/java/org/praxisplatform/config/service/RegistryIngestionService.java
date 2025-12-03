@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.dto.RegistryIngestionRequest;
 import org.praxisplatform.config.domain.ComponentDefinition;
+import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.ComponentDefinitionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,43 +27,35 @@ public class RegistryIngestionService {
     private final EmbeddingService embeddingService;
 
     @Transactional
-    public void ingestRegistry(String registryJson) {
-        try {
-            JsonNode root = objectMapper.readTree(registryJson);
-            JsonNode components = root.path("components");
+    public void ingestRegistry(RegistryIngestionRequest request) {
+        if (request.getComponents() == null || request.getComponents().isEmpty()) {
+            log.warn("No 'components' map found in registry request.");
+            return;
+        }
 
-            if (components.isMissingNode()) {
-                log.warn("No 'components' node found in registry JSON.");
-                return;
-            }
-
-            Iterator<Map.Entry<String, JsonNode>> fields = components.fields();
-            while (fields.hasNext()) {
-                Map.Entry<String, JsonNode> entry = fields.next();
-                String componentId = entry.getKey();
-                JsonNode data = entry.getValue();
-
-                ComponentDefinition def = toComponentDefinition(componentId, data);
-
+        request.getComponents().forEach((componentId, entry) -> {
+            try {
+                ComponentDefinition def = toComponentDefinition(componentId, entry);
                 repository.save(def);
                 log.info("Ingested component: {}", componentId);
+            } catch (Exception e) {
+                log.error("Failed to process component: " + componentId, e);
+                throw new ConfigurationIngestionException("Error processing component: " + componentId, e);
             }
-
-        } catch (Exception e) {
-            log.error("Error ingesting registry", e);
-            throw new RuntimeException("Failed to ingest registry", e);
-        }
+        });
     }
 
-    private ComponentDefinition toComponentDefinition(String componentId, JsonNode data) {
-        String description = data.path("description").asText(null);
+    private ComponentDefinition toComponentDefinition(String componentId, RegistryIngestionRequest.ComponentEntry entry) {
+        String description = entry.getDescription();
         if (description == null || description.isEmpty()) {
             description = "Component " + componentId;
         }
 
-        String summary = buildSummary(componentId, description, data);
+        String summary = buildSummary(componentId, description, entry);
         List<Float> embedding = embeddingService.embed(summary);
-        String compactJson = compactJson(data);
+        
+        // Serialize the entry back to JSON for storage as the 'jsonSchema' column requires it
+        String compactJson = toJson(entry);
 
         return ComponentDefinition.builder()
                 .id(componentId)
@@ -71,59 +65,43 @@ public class RegistryIngestionService {
                 .build();
     }
 
-    private String buildSummary(String id, String description, JsonNode data) {
+    private String buildSummary(String id, String description, RegistryIngestionRequest.ComponentEntry entry) {
         StringJoiner joiner = new StringJoiner(" | ");
         joiner.add("Component: " + id);
         joiner.add("Description: " + description);
 
-        String category = data.path("category").asText(null);
-        if (category != null && !category.isBlank()) {
-            joiner.add("Category: " + category);
+        if (entry.getCategory() != null && !entry.getCategory().isBlank()) {
+            joiner.add("Category: " + entry.getCategory());
         }
 
-        joiner.add("Inputs: " + summarizeIO(data.path("inputs")));
-        joiner.add("Outputs: " + summarizeIO(data.path("outputs")));
+        joiner.add("Inputs: " + summarizeIO(entry.getInputs()));
+        joiner.add("Outputs: " + summarizeIO(entry.getOutputs()));
 
         return joiner.toString();
     }
 
-    private String summarizeIO(JsonNode ioNode) {
-        if (ioNode == null || ioNode.isMissingNode()) {
+    private String summarizeIO(List<RegistryIngestionRequest.IoEntry> ioEntries) {
+        if (ioEntries == null || ioEntries.isEmpty()) {
             return "none";
         }
         StringJoiner joiner = new StringJoiner("; ");
-        if (ioNode.isArray()) {
-            for (JsonNode item : ioNode) {
-                joiner.add(buildIoEntry(item));
-            }
-        } else if (ioNode.isObject()) {
-            Iterator<Map.Entry<String, JsonNode>> fields = ioNode.fields();
-            while (fields.hasNext()) {
-                Map.Entry<String, JsonNode> entry = fields.next();
-                joiner.add(buildIoEntry(entry.getValue()));
-            }
+        for (RegistryIngestionRequest.IoEntry item : ioEntries) {
+            String name = item.getName() != null ? item.getName() : "";
+            String type = item.getType() != null ? item.getType() : "";
+            boolean required = item.isRequired();
+            joiner.add(name + ":" + type + (required ? " (required)" : ""));
         }
-        String result = joiner.toString();
-        return result.isEmpty() ? "none" : result;
+        return joiner.toString();
     }
 
-    private String buildIoEntry(JsonNode item) {
-        String name = item.path("name").asText("");
-        String type = item.path("type").asText("");
-        boolean required = item.path("required").asBoolean(false);
-        return name + ":" + type + (required ? " (required)" : "");
-    }
-
-    private String compactJson(JsonNode data) {
-        if (data instanceof ObjectNode obj) {
-            obj.remove("sourceFile");
-            obj.remove("schema");
-        }
+    private String toJson(Object data) {
         try {
             return objectMapper.writeValueAsString(data);
         } catch (Exception e) {
-            log.warn("Failed to compact component json, storing as string", e);
-            return data.toString();
+            throw new ConfigurationIngestionException("Failed to serialize component entry", e);
         }
     }
+
+    // Old methods removed as they are replaced by typed versions above
+
 }

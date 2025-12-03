@@ -40,16 +40,16 @@ public class ApiMetadata {
     @Column(name = "operation_id")
     private String operationId;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(name = "request_schema", columnDefinition = "TEXT")
     private String requestSchema;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(name = "response_schema", columnDefinition = "TEXT")
     private String responseSchema;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(name = "parameters", columnDefinition = "TEXT")
     private String parameters;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(name = "raw_json", columnDefinition = "TEXT")
     private String rawJson;
 
     @Column(columnDefinition = "vector(768)")
