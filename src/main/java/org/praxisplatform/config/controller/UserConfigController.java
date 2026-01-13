@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.dto.UpsertUserConfigRequest;
 import org.praxisplatform.config.dto.UserConfigResponse;
+import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -32,6 +33,20 @@ public class UserConfigController {
 
   private final UserConfigService service;
   private final ObjectMapper objectMapper;
+  private final AiApiKeyProtectionService apiKeyProtectionService;
+
+  @GetMapping(params = {"componentType", "componentId"})
+  public ResponseEntity<UserConfigResponse> getConfigByParams(
+      @RequestParam String componentType,
+      @RequestParam String componentId,
+      @RequestHeader("X-Tenant-ID") String tenantId,
+      @RequestHeader(value = "X-User-ID", required = false) String userId,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
+      @RequestParam(value = "scope", required = false) String scopeParam) {
+    return getConfigInternal(
+        componentType, componentId, tenantId, userId, environment, ifNoneMatch, scopeParam);
+  }
 
   @GetMapping("/{componentType}/{componentId}")
   public ResponseEntity<UserConfigResponse> getConfig(
@@ -42,7 +57,18 @@ public class UserConfigController {
       @RequestHeader(value = "X-Env", required = false) String environment,
       @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
       @RequestParam(value = "scope", required = false) String scopeParam) {
+    return getConfigInternal(
+        componentType, componentId, tenantId, userId, environment, ifNoneMatch, scopeParam);
+  }
 
+  private ResponseEntity<UserConfigResponse> getConfigInternal(
+      String componentType,
+      String componentId,
+      String tenantId,
+      String userId,
+      String environment,
+      String ifNoneMatch,
+      String scopeParam) {
     UserConfigService.Scope scope = resolveScope(scopeParam, userId);
 
     Optional<UserConfigService.ResolvedConfig> resolved =
@@ -69,11 +95,25 @@ public class UserConfigController {
             .scope(resolved.get().scope().name().toLowerCase())
             .version(cfg.getVersion())
             .etag(etag)
-            .payload(readJson(cfg.getPayload()))
+            .payload(readJsonPayload(cfg.getPayload()))
             .tags(readJson(cfg.getTags()))
             .build();
 
     return ResponseEntity.ok().eTag(formatEtag(etag)).body(body);
+  }
+
+  @PutMapping(params = {"componentType", "componentId"})
+  public ResponseEntity<UserConfigResponse> upsertConfigByParams(
+      @RequestParam String componentType,
+      @RequestParam String componentId,
+      @RequestHeader("X-Tenant-ID") String tenantId,
+      @RequestHeader(value = "X-User-ID", required = false) String userId,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      @RequestHeader(value = "X-Updated-By", required = false) String updatedBy,
+      @RequestParam(value = "scope", required = false) String scopeParam,
+      @Valid @RequestBody UpsertUserConfigRequest request) {
+    return upsertConfigInternal(
+        componentType, componentId, tenantId, userId, environment, updatedBy, scopeParam, request);
   }
 
   @PutMapping("/{componentType}/{componentId}")
@@ -83,11 +123,22 @@ public class UserConfigController {
       @RequestHeader("X-Tenant-ID") String tenantId,
       @RequestHeader(value = "X-User-ID", required = false) String userId,
       @RequestHeader(value = "X-Env", required = false) String environment,
-      @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
       @RequestHeader(value = "X-Updated-By", required = false) String updatedBy,
       @RequestParam(value = "scope", required = false) String scopeParam,
       @Valid @RequestBody UpsertUserConfigRequest request) {
+    return upsertConfigInternal(
+        componentType, componentId, tenantId, userId, environment, updatedBy, scopeParam, request);
+  }
 
+  private ResponseEntity<UserConfigResponse> upsertConfigInternal(
+      String componentType,
+      String componentId,
+      String tenantId,
+      String userId,
+      String environment,
+      String updatedBy,
+      String scopeParam,
+      UpsertUserConfigRequest request) {
     UserConfigService.Scope scope = resolveScope(scopeParam, userId);
 
     UiUserConfig saved =
@@ -100,7 +151,6 @@ public class UserConfigController {
             environment,
             request.getPayload(),
             request.getTags(),
-            ifMatch,
             updatedBy);
 
     String etag = saved.getEtag() != null ? saved.getEtag().toString() : null;
@@ -113,11 +163,22 @@ public class UserConfigController {
             .scope(scope.name().toLowerCase())
             .version(saved.getVersion())
             .etag(etag)
-            .payload(readJson(saved.getPayload()))
+            .payload(readJsonPayload(saved.getPayload()))
             .tags(readJson(saved.getTags()))
             .build();
 
     return ResponseEntity.ok().eTag(formatEtag(etag)).body(body);
+  }
+
+  @DeleteMapping(params = {"componentType", "componentId"})
+  public ResponseEntity<Void> deleteConfigByParams(
+      @RequestParam String componentType,
+      @RequestParam String componentId,
+      @RequestHeader("X-Tenant-ID") String tenantId,
+      @RequestHeader(value = "X-User-ID", required = false) String userId,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      @RequestParam(value = "scope", required = false) String scopeParam) {
+    return deleteConfigInternal(componentType, componentId, tenantId, userId, environment, scopeParam);
   }
 
   @DeleteMapping("/{componentType}/{componentId}")
@@ -127,12 +188,20 @@ public class UserConfigController {
       @RequestHeader("X-Tenant-ID") String tenantId,
       @RequestHeader(value = "X-User-ID", required = false) String userId,
       @RequestHeader(value = "X-Env", required = false) String environment,
-      @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
       @RequestParam(value = "scope", required = false) String scopeParam) {
+    return deleteConfigInternal(componentType, componentId, tenantId, userId, environment, scopeParam);
+  }
 
+  private ResponseEntity<Void> deleteConfigInternal(
+      String componentType,
+      String componentId,
+      String tenantId,
+      String userId,
+      String environment,
+      String scopeParam) {
     UserConfigService.Scope scope = resolveScope(scopeParam, userId);
 
-    service.delete(scope, tenantId, userId, componentType, componentId, environment, ifMatch);
+    service.delete(scope, tenantId, userId, componentType, componentId, environment);
     return ResponseEntity.noContent().build();
   }
 
@@ -180,9 +249,9 @@ public class UserConfigController {
     }
   }
 
-  @ExceptionHandler(UserConfigService.PreconditionFailedException.class)
-  public ResponseEntity<String> handlePrecondition(UserConfigService.PreconditionFailedException ex) {
-    return ResponseEntity.status(HttpStatus.PRECONDITION_FAILED).body(ex.getMessage());
+  private JsonNode readJsonPayload(String raw) {
+    JsonNode parsed = readJson(raw);
+    return apiKeyProtectionService.sanitizeForResponse(parsed);
   }
 
   @ExceptionHandler(UserConfigService.PayloadTooLargeException.class)

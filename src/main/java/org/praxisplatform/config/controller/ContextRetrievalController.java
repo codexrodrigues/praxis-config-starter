@@ -30,8 +30,8 @@ public class ContextRetrievalController {
         return ResponseEntity.ok(results);
     }
 
-    @GetMapping("/ai-context/search")
-    public ResponseEntity<List<ComponentSearchResult>> searchAiContext(
+    @GetMapping("/ai-registry/component-definitions/search")
+    public ResponseEntity<List<ComponentSearchResult>> searchComponentDefinitions(
             @RequestParam String query,
             @RequestParam(defaultValue = "5") int limit) {
 

@@ -49,6 +49,7 @@ public class UiUserConfig {
   private String environment;
 
   @Column(name = "payload", columnDefinition = "jsonb", nullable = false)
+  @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
   private String payload;
 
   @Column(name = "version", nullable = false)
@@ -58,6 +59,7 @@ public class UiUserConfig {
   private UUID etag;
 
   @Column(name = "tags", columnDefinition = "jsonb")
+  @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
   private String tags;
 
   @Column(name = "created_at", nullable = false)

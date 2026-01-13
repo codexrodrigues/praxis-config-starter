@@ -8,7 +8,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.projection.ApiMetadataProjection;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
-import org.praxisplatform.config.repository.ComponentDefinitionRepository;
+import org.praxisplatform.config.repository.AiRegistryRepository;
 
 import java.util.Collections;
 import java.util.List;
@@ -28,7 +28,7 @@ class ContextRetrievalServiceTest {
     private ApiMetadataRepository apiMetadataRepository;
 
     @Mock
-    private ComponentDefinitionRepository componentDefinitionRepository;
+    private AiRegistryRepository aiRegistryRepository;
 
     @InjectMocks
     private ContextRetrievalService contextRetrievalService;

@@ -5,9 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.dto.ComponentSearchResult;
 import org.praxisplatform.config.projection.ApiMetadataProjection;
-import org.praxisplatform.config.projection.ComponentDefinitionProjection;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
-import org.praxisplatform.config.repository.ComponentDefinitionRepository;
+import org.praxisplatform.config.projection.ComponentDefinitionProjection;
+import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,9 +21,10 @@ public class ContextRetrievalService {
 
     private final EmbeddingService embeddingService;
     private final ApiMetadataRepository apiMetadataRepository;
-    private final ComponentDefinitionRepository componentDefinitionRepository;
+    private final AiRegistryRepository aiRegistryRepository;
 
     private static final int DEFAULT_SEARCH_LIMIT = 5; // Limite padrão para buscas
+    private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
 
     @Transactional(readOnly = true)
     /**
@@ -37,16 +38,30 @@ public class ContextRetrievalService {
         String tagsFilter = tags == null ? "" : tags;
         List<ApiMetadataProjection> projections = apiMetadataRepository.findByVectorSimilarity(
                 vectorLiteral, methodFilter, tagsFilter, limit > 0 ? limit : DEFAULT_SEARCH_LIMIT);
-        
+        if (log.isDebugEnabled()) {
+            log.debug(
+                    "[ContextRetrievalService] apiMetadata query='{}' method='{}' tags='{}' results={}",
+                    safeQuery(query),
+                    methodFilter,
+                    tagsFilter,
+                    summarizeApiResults(projections));
+        }
         return projections.stream().map(this::mapToApiSearchResult).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(String query, int limit) {
         String vectorLiteral = toVectorLiteral(embeddingService.embed(query));
-        List<ComponentDefinitionProjection> projections = componentDefinitionRepository.findByVectorSimilarity(
-                vectorLiteral, limit > 0 ? limit : DEFAULT_SEARCH_LIMIT);
+        List<ComponentDefinitionProjection> projections =
+                aiRegistryRepository.findComponentDefinitionsByVectorSimilarity(
+                REGISTRY_TYPE_COMPONENT_DEF, vectorLiteral, limit > 0 ? limit : DEFAULT_SEARCH_LIMIT);
 
+        if (log.isDebugEnabled()) {
+            log.debug(
+                    "[ContextRetrievalService] componentDefinitions query='{}' results={}",
+                    safeQuery(query),
+                    summarizeComponentResults(projections));
+        }
         return projections.stream().map(this::mapToComponentSearchResult).collect(Collectors.toList());
     }
 
@@ -89,5 +104,38 @@ public class ContextRetrievalService {
                 .jsonSchema(projection.getJsonSchemaSnippet()) // Usa o snippet já configurado
                 .similarityScore(projection.getSimilarityScore())
                 .build();
+    }
+
+    private String summarizeApiResults(List<ApiMetadataProjection> projections) {
+        if (projections == null || projections.isEmpty()) {
+            return "[]";
+        }
+        return projections.stream()
+                .map(p -> String.format("%s %s:%.4f",
+                        p.getMethod(),
+                        p.getPath(),
+                        p.getSimilarityScore() != null ? p.getSimilarityScore() : 0.0d))
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private String summarizeComponentResults(List<ComponentDefinitionProjection> projections) {
+        if (projections == null || projections.isEmpty()) {
+            return "[]";
+        }
+        return projections.stream()
+                .map(p -> String.format("%s:%.4f",
+                        p.getId(),
+                        p.getSimilarityScore() != null ? p.getSimilarityScore() : 0.0d))
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private String safeQuery(String query) {
+        if (query == null) {
+            return "";
+        }
+        if (query.length() <= 120) {
+            return query;
+        }
+        return query.substring(0, 120) + "...";
     }
 }

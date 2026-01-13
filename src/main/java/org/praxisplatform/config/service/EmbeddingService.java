@@ -16,6 +16,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @RequiredArgsConstructor
@@ -24,7 +25,11 @@ public class EmbeddingService {
 
     private final ObjectMapper objectMapper;
 
-    @Value("${embedding.provider:mock}")
+    private final AtomicBoolean loggedConfig = new AtomicBoolean(false);
+    private static final String PROVIDER_GEMINI = "gemini";
+    private static final String PROVIDER_MOCK = "mock";
+
+    @Value("${embedding.provider:gemini}")
     private String provider;
 
     @Value("${embedding.dimensions:768}")
@@ -36,14 +41,46 @@ public class EmbeddingService {
     private static final String GEMINI_EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent";
 
     public List<Float> embed(String text) {
-        if ("gemini".equalsIgnoreCase(provider) && geminiApiKey != null && !geminiApiKey.isBlank()) {
+        logEmbeddingConfigIfNeeded();
+        String selected = normalizeProvider(provider);
+        if (selected == null) {
+            selected = PROVIDER_GEMINI;
+        }
+        if (PROVIDER_MOCK.equals(selected)) {
+            return mockEmbedding();
+        }
+        if (PROVIDER_GEMINI.equals(selected)) {
+            if (geminiApiKey == null || geminiApiKey.isBlank()) {
+                throw new IllegalStateException(
+                        "embedding.gemini.api-key is required when embedding.provider=gemini.");
+            }
             try {
                 return embedWithGemini(text);
             } catch (Exception e) {
-                log.warn("Gemini embedding failed, falling back to mock: {}", e.getMessage());
+                throw new IllegalStateException("Gemini embedding failed.", e);
             }
         }
-        return mockEmbedding();
+        throw new IllegalStateException(
+                "Unsupported embedding.provider '" + provider + "'. Supported values: gemini, mock.");
+    }
+
+    private void logEmbeddingConfigIfNeeded() {
+        if (!loggedConfig.compareAndSet(false, true)) {
+            return;
+        }
+        boolean keyPresent = geminiApiKey != null && !geminiApiKey.isBlank();
+        String selected = normalizeProvider(provider);
+        log.info(
+                "Embedding config: provider={}, dimensions={}, geminiKeyPresent={}",
+                selected != null ? selected : provider,
+                dimensions,
+                keyPresent);
+        if (PROVIDER_GEMINI.equals(selected) && !keyPresent) {
+            log.error("Embedding provider=gemini but geminiApiKey missing; embeddings will fail.");
+        } else if (selected == null) {
+            log.error(
+                    "Embedding provider is blank or invalid; supported values are gemini, mock.");
+        }
     }
 
     private List<Float> embedWithGemini(String text) throws Exception {
@@ -86,5 +123,12 @@ public class EmbeddingService {
             dummy.add(0.001f * i);
         }
         return dummy;
+    }
+
+    private String normalizeProvider(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim().toLowerCase();
     }
 }

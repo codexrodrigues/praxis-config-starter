@@ -11,13 +11,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/praxis/config/ai-context")
+@RequestMapping("/api/praxis/config/ai-registry")
 @RequiredArgsConstructor
 public class RegistryIngestionController {
 
     private final RegistryIngestionService registryIngestionService;
 
-    @PostMapping("/ingest-registry")
+    @PostMapping("/component-definitions")
     public ResponseEntity<Void> ingestRegistry(@RequestBody @Valid RegistryIngestionRequest request) {
         registryIngestionService.ingestRegistry(request);
         return ResponseEntity.accepted().build();

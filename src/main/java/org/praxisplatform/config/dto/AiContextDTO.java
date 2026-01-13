@@ -4,11 +4,21 @@ import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Builder;
 import lombok.Data;
 
+import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
+import org.praxisplatform.config.dto.AiSchemaContext;
+
 @Data
 @Builder
 public class AiContextDTO {
     private String componentId;
+    private String componentType;
+    private String aiMode;
+    private boolean requireSchema;
     private String resourcePath;
     private String description;
     private JsonNode currentState;
+    private JsonNode componentDefinition;
+    private AiRegistryTemplateRecord template;
+    private AiSchemaContext schemaContext;
+    private JsonNode schema;
 }

@@ -1,10 +1,13 @@
 package org.praxisplatform.config.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import org.praxisplatform.config.domain.UiConfiguration;
 import org.praxisplatform.config.dto.AiContextDTO;
-import org.praxisplatform.config.service.UiConfigurationService;
+import org.praxisplatform.config.dto.AiContextRuntimeRequest;
+import org.praxisplatform.config.dto.AiSchemaContext;
+import org.praxisplatform.config.service.AiContextService;
+import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,41 +18,91 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class AiContextController {
 
-    private final UiConfigurationService service;
+    private final AiContextService contextService;
+    private final UserConfigService userConfigService;
+    private final ObjectMapper objectMapper;
 
     @GetMapping("/{componentId}")
     public ResponseEntity<AiContextDTO> getAiContext(
             @PathVariable String componentId,
             @RequestHeader("X-Tenant-ID") String tenantId,
-            @RequestHeader("X-App-ID") String appId,
-            @RequestHeader(value = "X-User-ID", required = false) String userId) {
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestParam String componentType,
+            @RequestParam(required = false) String environment,
+            @RequestParam(required = false) String aiMode,
+            @RequestParam(required = false) Boolean requireSchema,
+            @RequestParam(required = false) String resourcePath,
+            @RequestParam(required = false) String schemaPath,
+            @RequestParam(required = false) String schemaOperation,
+            @RequestParam(required = false) String schemaType) {
 
-        // 1. Get Resolved State (System + User Merge)
-        JsonNode resolvedState = service.getResolvedConfig(tenantId, appId, componentId, userId);
-
-        // 2. Get Base System Metadata (for Description/ResourcePath)
-        // We assume System config holds the "Truth" about what the component is
-        Optional<UiConfiguration> systemConfig = service.getSystemConfig(tenantId, appId, componentId);
-
-        if (systemConfig.isEmpty()) {
-            // If no system config, we might return 404 or just the resolved state (which might be empty)
-            // For AI Context, it's better to have the metadata. Let's return what we have.
-            return ResponseEntity.ok(AiContextDTO.builder()
-                    .componentId(componentId)
-                    .currentState(resolvedState)
-                    .description("Dynamic Component")
-                    .build());
+        JsonNode resolvedState = objectMapper.createObjectNode();
+        Optional<UserConfigService.ResolvedConfig> runtimeConfig =
+                userConfigService.getResolved(tenantId, userId, componentType, componentId, environment);
+        if (runtimeConfig.isPresent()) {
+            resolvedState = contextService.parseJson(runtimeConfig.get().config().getPayload());
         }
 
-        UiConfiguration sys = systemConfig.get();
+        AiSchemaContext schemaContext = buildSchemaContext(schemaPath, schemaOperation, schemaType);
+        return ResponseEntity.ok(contextService.buildContext(
+                componentId,
+                componentType,
+                aiMode,
+                requireSchema,
+                resolvedState,
+                resourcePath,
+                schemaContext));
+    }
 
-        AiContextDTO dto = AiContextDTO.builder()
-                .componentId(componentId)
-                .resourcePath(sys.getResourcePath())
-                .description(sys.getAiDescription())
-                .currentState(resolvedState)
+    @PostMapping("/{componentId}")
+    public ResponseEntity<AiContextDTO> postAiContext(
+            @PathVariable String componentId,
+            @RequestParam String componentType,
+            @RequestParam(required = false) String aiMode,
+            @RequestParam(required = false) Boolean requireSchema,
+            @RequestParam(required = false) String resourcePath,
+            @RequestParam(required = false) String schemaPath,
+            @RequestParam(required = false) String schemaOperation,
+            @RequestParam(required = false) String schemaType,
+            @RequestBody(required = false) AiContextRuntimeRequest body) {
+
+        JsonNode currentState = objectMapper.createObjectNode();
+        if (body != null && body.getCurrentState() != null) {
+            currentState = body.getCurrentState();
+        }
+
+        String resolvedResourcePath = resourcePath;
+        if (body != null && body.getResourcePath() != null && !body.getResourcePath().isBlank()) {
+            resolvedResourcePath = body.getResourcePath();
+        }
+
+        AiSchemaContext schemaContext = null;
+        if (body != null && body.getSchemaContext() != null) {
+            schemaContext = body.getSchemaContext();
+        } else {
+            schemaContext = buildSchemaContext(schemaPath, schemaOperation, schemaType);
+        }
+
+        return ResponseEntity.ok(contextService.buildContext(
+                componentId,
+                componentType,
+                aiMode,
+                requireSchema,
+                currentState,
+                resolvedResourcePath,
+                schemaContext));
+    }
+
+    private AiSchemaContext buildSchemaContext(String path, String operation, String schemaType) {
+        if ((path == null || path.isBlank())
+                && (operation == null || operation.isBlank())
+                && (schemaType == null || schemaType.isBlank())) {
+            return null;
+        }
+        return AiSchemaContext.builder()
+                .path(path)
+                .operation(operation)
+                .schemaType(schemaType)
                 .build();
-
-        return ResponseEntity.ok(dto);
     }
 }

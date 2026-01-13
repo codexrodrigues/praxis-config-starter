@@ -1,5 +1,6 @@
 package org.praxisplatform.config.exception;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -13,15 +14,18 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @ControllerAdvice(basePackages = "org.praxisplatform.config.controller")
+@Slf4j
 public class ConfigGlobalExceptionHandler {
 
     @ExceptionHandler(ConfigurationIngestionException.class)
     public ResponseEntity<Object> handleIngestionException(ConfigurationIngestionException ex, WebRequest request) {
+        log.error("Configuration ingestion failed", ex);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", LocalDateTime.now());
         body.put("status", HttpStatus.UNPROCESSABLE_ENTITY.value());
         body.put("error", "Configuration Ingestion Failed");
         body.put("message", ex.getMessage());
+        body.put("cause", buildCauseSummary(ex));
         
         return new ResponseEntity<>(body, HttpStatus.UNPROCESSABLE_ENTITY);
     }
@@ -45,5 +49,26 @@ public class ConfigGlobalExceptionHandler {
         body.put("details", errors);
 
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Object> handleIllegalArgument(IllegalArgumentException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.BAD_REQUEST.value());
+        body.put("error", "Bad Request");
+        body.put("message", ex.getMessage());
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
+    private Map<String, Object> buildCauseSummary(Throwable ex) {
+        Throwable root = ex;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("type", root.getClass().getName());
+        summary.put("message", root.getMessage());
+        return summary;
     }
 }

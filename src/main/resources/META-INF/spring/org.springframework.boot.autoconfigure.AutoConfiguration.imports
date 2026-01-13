@@ -1,0 +1,3 @@
+org.praxisplatform.config.autoconfig.ConfigSecurityAutoConfiguration
+org.praxisplatform.config.autoconfig.AiRegistryBootstrapAutoConfiguration
+org.praxisplatform.config.autoconfig.AiRegistryHealthAutoConfiguration

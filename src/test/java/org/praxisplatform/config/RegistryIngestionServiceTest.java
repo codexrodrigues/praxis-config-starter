@@ -1,15 +1,18 @@
+package org.praxisplatform.config;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.praxisplatform.config.domain.ComponentDefinition;
-import org.praxisplatform.config.dto.RegistryIngestionRequest; // Adicionado
-import org.praxisplatform.config.repository.ComponentDefinitionRepository;
+import org.praxisplatform.config.domain.AiRegistry;
+import org.praxisplatform.config.domain.Scope;
+import org.praxisplatform.config.dto.RegistryIngestionRequest;
+import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
-import java.util.List; // Adicionado
-import java.util.Map; // Adicionado
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,18 +24,32 @@ class RegistryIngestionServiceTest {
     private RegistryIngestionService registryIngestionService;
 
     @Autowired
-    private ComponentDefinitionRepository repository;
+    private AiRegistryRepository repository;
 
     private static final String COMPONENT_ID = "demo-component";
+    private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
+    private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
+    private static final String SYSTEM_SCOPE_KEY = "GLOBAL";
 
     @BeforeEach
     void cleanBefore() {
-        repository.deleteById(COMPONENT_ID);
+        deleteExisting();
     }
 
     @AfterEach
     void cleanAfter() {
-        repository.deleteById(COMPONENT_ID);
+        deleteExisting();
+    }
+
+    private void deleteExisting() {
+        Optional<AiRegistry> existing =
+                repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                        REGISTRY_TYPE_COMPONENT_DEF,
+                        COMPONENT_ID,
+                        COMPONENT_DEF_COMPONENT_TYPE,
+                        Scope.SYSTEM,
+                        SYSTEM_SCOPE_KEY);
+        existing.ifPresent(repository::delete);
     }
 
     @Test
@@ -56,7 +73,13 @@ class RegistryIngestionServiceTest {
 
         registryIngestionService.ingestRegistry(request); // Chamada atualizada
 
-        Optional<ComponentDefinition> stored = repository.findById(COMPONENT_ID);
+        Optional<AiRegistry> stored =
+                repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                        REGISTRY_TYPE_COMPONENT_DEF,
+                        COMPONENT_ID,
+                        COMPONENT_DEF_COMPONENT_TYPE,
+                        Scope.SYSTEM,
+                        SYSTEM_SCOPE_KEY);
         assertThat(stored).isPresent();
         assertThat(stored.get().getEmbedding()).isNotNull();
         assertThat(stored.get().getEmbedding()).isNotEmpty();

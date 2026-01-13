@@ -9,16 +9,23 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface UiUserConfigRepository extends JpaRepository<UiUserConfig, UUID> {
 
-  Optional<UiUserConfig> findByTenantIdAndComponentTypeAndComponentIdAndEnvironmentAndUserId(
-      String tenantId, String componentType, String componentId, String environment, String userId);
-
-  Optional<UiUserConfig> findByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserId(
-      String tenantId, String componentType, String componentId, String userId);
-
-  Optional<UiUserConfig> findByTenantIdAndComponentTypeAndComponentIdAndEnvironmentAndUserIdIsNull(
-      String tenantId, String componentType, String componentId, String environment);
+  Optional<UiUserConfig>
+      findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentAndUserIdOrderByUpdatedAtDesc(
+          String tenantId,
+          String componentType,
+          String componentId,
+          String environment,
+          String userId);
 
   Optional<UiUserConfig>
-      findByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdIsNull(
+      findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+          String tenantId, String componentType, String componentId, String userId);
+
+  Optional<UiUserConfig>
+      findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentAndUserIdIsNullOrderByUpdatedAtDesc(
+          String tenantId, String componentType, String componentId, String environment);
+
+  Optional<UiUserConfig>
+      findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdIsNullOrderByUpdatedAtDesc(
           String tenantId, String componentType, String componentId);
 }
