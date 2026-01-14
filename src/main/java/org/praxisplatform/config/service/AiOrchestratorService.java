@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
@@ -44,6 +45,16 @@ public class AiOrchestratorService {
     private static final double VARIANT_SIMILARITY_THRESHOLD = 0.65d;
     private static final String COMPONENT_ID_TABLE = "praxis-table";
     private static final int MAX_TARGET_CANDIDATES_PER_PATH = 30;
+    private static final int BADGE_CARDINALITY_MAX = 6;
+    private static final List<String> DEFAULT_BADGE_PALETTE = List.of(
+            "primary",
+            "accent",
+            "warn",
+            "success",
+            "info"
+    );
+    private static final String MISSING_VALUES_AND_COLORS = "values_and_colors";
+    private static final String MISSING_BADGE_VALUES = "badge.values";
     private static final String GLOBAL_CONFIG_COMPONENT_TYPE = "praxis-global-config-editor";
     private static final String GLOBAL_CONFIG_KEY = "praxis:global-config";
 
@@ -64,6 +75,9 @@ public class AiOrchestratorService {
 
     @Value("${praxis.ai.prompt.max-chars.capability-notes:3000}")
     private int maxCapabilityNotesChars;
+
+    @Value("${praxis.ai.prompt.max-chars.runtime-metadata:4000}")
+    private int maxRuntimeMetadataChars;
 
     @Value("${praxis.ai.action-plan.provider:#{null}}")
     private String actionPlanProvider;
@@ -141,6 +155,14 @@ public class AiOrchestratorService {
         }
 
         JsonNode currentState = context.getCurrentState();
+        String runtimeMetadata = truncateBlock(
+                "runtime_metadata",
+                safeMetadata(formatRuntimeMetadata(
+                        request.getDataProfile(),
+                        request.getSchemaFields(),
+                        request.getRuntimeState(),
+                        request.getContextHints())),
+                maxRuntimeMetadataChars);
         List<ColumnDescriptor> columnDescriptors = extractColumnDescriptors(currentState);
         List<String> columnNames = extractColumnNames(columnDescriptors);
         List<String> columnOptions = buildColumnOptions(columnDescriptors);
@@ -167,6 +189,30 @@ public class AiOrchestratorService {
                 : List.of();
         List<String> configCategories = extractCategoryNames(configCapabilities);
         List<String> componentCategories = extractCategoryNames(componentCapabilities);
+
+        if (request.getSuggestedPatch() != null && !request.getSuggestedPatch().isNull()) {
+            return applySuggestedPatch(
+                    request.getSuggestedPatch(),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        AiOrchestratorResponse contextHintPatch = tryApplyContextHintPatch(
+                request.getContextHints(),
+                currentState,
+                request.getComponentId(),
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (contextHintPatch != null) {
+            return contextHintPatch;
+        }
+
         AiIntentClassification intent = classifyIntent(
                 request.getUserPrompt(),
                 columnNames,
@@ -174,6 +220,7 @@ public class AiOrchestratorService {
                 outputKeys,
                 configCategories,
                 componentCategories,
+                runtimeMetadata,
                 request,
                 frontendConfig);
 
@@ -184,6 +231,17 @@ public class AiOrchestratorService {
         List<String> missingContext = intent.getMissingContext();
         if (Boolean.TRUE.equals(intent.getNeedsClarification())
                 || (missingContext != null && !missingContext.isEmpty())) {
+            AiOrchestratorResponse badgeResolution = tryResolveBadgeMissingContext(
+                    intent,
+                    request,
+                    currentState,
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+            if (badgeResolution != null) {
+                return badgeResolution;
+            }
             return clarification(buildClarificationMessage(intent), intent.getOptions());
         }
         if ("ask_about_config".equalsIgnoreCase(intent.getIntent())) {
@@ -334,7 +392,8 @@ public class AiOrchestratorService {
                 filteredCaps,
                 combinedNotes,
                 schemaContext,
-                resolvedSchema);
+                resolvedSchema,
+                runtimeMetadata);
 
         JsonNode result = callAiJson("patch_generation", prompt, null, frontendConfig, request, 1);
         if (result == null || result.get("patch") == null) {
@@ -412,6 +471,7 @@ public class AiOrchestratorService {
             List<String> outputs,
             List<String> configCategories,
             List<String> componentCategories,
+            String runtimeMetadata,
             AiOrchestratorRequest request,
             AiCallConfig callConfig) {
         String prompt = AiPromptTemplates.buildPrompt(
@@ -421,6 +481,7 @@ public class AiOrchestratorService {
                         "COLUMNS_LIST", objectMapper.valueToTree(columns).toString(),
                         "INPUTS_LIST", objectMapper.valueToTree(inputs).toString(),
                         "OUTPUTS_LIST", objectMapper.valueToTree(outputs).toString(),
+                        "RUNTIME_METADATA", safeMetadata(runtimeMetadata),
                         "CONFIG_CATEGORIES", objectMapper.valueToTree(configCategories).toString(),
                         "COMPONENT_CATEGORIES", objectMapper.valueToTree(componentCategories).toString()));
         AiJsonSchema schema = buildIntentSchema();
@@ -2907,7 +2968,8 @@ public class AiOrchestratorService {
             List<AiCapability> capabilities,
             String capabilityNotes,
             AiSchemaContext schemaContext,
-            JsonNode schema) {
+            JsonNode schema,
+            String runtimeMetadata) {
         String contextDesc = buildContextDescription(context, schemaContext);
         String caps = truncateBlock("capabilities",
                 formatCapabilities(capabilities),
@@ -2921,6 +2983,7 @@ public class AiOrchestratorService {
         String schemaJson = truncateBlock("schema_json",
                 schema != null ? schema.toPrettyString() : "N/A",
                 maxSchemaChars);
+        String metadataJson = safeMetadata(runtimeMetadata);
         String templateConfig = truncateBlock("template_config",
                 context.getTemplate() != null && context.getTemplate().getConfigJson() != null
                 ? context.getTemplate().getConfigJson().toPrettyString()
@@ -2946,11 +3009,40 @@ public class AiOrchestratorService {
                         Map.entry("TEMPLATE_CONFIG", templateConfig),
                         Map.entry("TEMPLATE_META", templateMeta),
                         Map.entry("SCHEMA_JSON", schemaJson),
+                        Map.entry("RUNTIME_METADATA", metadataJson),
                         Map.entry("CONTRACT_DSL", AiPromptTemplates.CONTRACT_DSL),
                         Map.entry("CONTRACT_ICONS", AiPromptTemplates.CONTRACT_ICONS),
                         Map.entry("CONTRACT_SAFETY", AiPromptTemplates.CONTRACT_SAFETY),
                         Map.entry("CONTRACT_FORMATTING", contractFormatting),
                         Map.entry("CONTRACT_RENDERER_PAYLOADS", contractRenderers)));
+    }
+
+    private String formatRuntimeMetadata(
+            JsonNode dataProfile,
+            JsonNode schemaFields,
+            JsonNode runtimeState,
+            JsonNode contextHints) {
+        ObjectNode metadata = objectMapper.createObjectNode();
+        if (dataProfile != null && !dataProfile.isNull()) {
+            metadata.set("dataProfile", dataProfile);
+        }
+        if (schemaFields != null && !schemaFields.isNull()) {
+            metadata.set("schemaFields", schemaFields);
+        }
+        if (runtimeState != null && !runtimeState.isNull()) {
+            metadata.set("runtimeState", runtimeState);
+        }
+        if (contextHints != null && !contextHints.isNull()) {
+            metadata.set("contextHints", contextHints);
+        }
+        if (metadata.size() == 0) {
+            return "N/A";
+        }
+        return metadata.toPrettyString();
+    }
+
+    private String safeMetadata(String metadata) {
+        return metadata == null || metadata.isBlank() ? "N/A" : metadata;
     }
 
     private String buildContextDescription(AiContextDTO context, AiSchemaContext schemaContext) {
@@ -3725,6 +3817,235 @@ public class AiOrchestratorService {
         return "post";
     }
 
+    private AiOrchestratorResponse tryApplyContextHintPatch(
+            JsonNode contextHints,
+            JsonNode currentState,
+            String componentId,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (contextHints == null || contextHints.isNull()) {
+            return null;
+        }
+        JsonNode patch = buildPatchFromContextHints(contextHints, componentId);
+        if (patch == null || patch.isNull()) {
+            return null;
+        }
+        return applySuggestedPatch(
+                patch,
+                currentState,
+                componentId,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+    }
+
+    private JsonNode buildPatchFromContextHints(JsonNode contextHints, String componentId) {
+        if (!COMPONENT_ID_TABLE.equals(componentId) || contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode badgeHints = resolveBadgeHintsNode(contextHints);
+        if (badgeHints != null) {
+            JsonNode patch = buildBadgePatchFromHints(badgeHints);
+            if (patch != null) {
+                return patch;
+            }
+        }
+        JsonNode computedHints = resolveComputedHintsNode(contextHints);
+        if (computedHints != null) {
+            return buildComputedPatchFromHints(computedHints);
+        }
+        return null;
+    }
+
+    private JsonNode resolveBadgeHintsNode(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode badge = contextHints.get("badge");
+        if (badge != null && badge.isObject()) {
+            return badge;
+        }
+        if (contextHints.has("values") || contextHints.has("valueColorMap") || contextHints.has("palette")) {
+            return contextHints;
+        }
+        return null;
+    }
+
+    private JsonNode resolveComputedHintsNode(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode computed = contextHints.get("computed");
+        if (computed != null && computed.isObject()) {
+            return computed;
+        }
+        return null;
+    }
+
+    private JsonNode buildBadgePatchFromHints(JsonNode badgeHints) {
+        if (badgeHints == null || !badgeHints.isObject()) {
+            return null;
+        }
+        String field = textOrNull(badgeHints.get("field"));
+        List<String> values = readStringArray(badgeHints.get("values"));
+        Map<String, String> colorMap = readStringMap(badgeHints.get("valueColorMap"));
+        if ((values == null || values.isEmpty()) && colorMap != null && !colorMap.isEmpty()) {
+            values = new ArrayList<>(colorMap.keySet());
+        }
+        values = limitBadgeValues(values);
+        if (isBlank(field) || values.isEmpty()) {
+            return null;
+        }
+        List<String> palette = readStringArray(badgeHints.get("palette"));
+        String inferredType = textOrNull(badgeHints.get("inferredType"));
+        String explicitType = textOrNull(badgeHints.get("explicitType"));
+        boolean isBoolean = isBooleanType(inferredType, explicitType) || looksLikeBooleanValues(values);
+        boolean quoteValues = !isBoolean;
+        Map<String, String> resolved = assignColors(values, palette);
+        if (colorMap != null && !colorMap.isEmpty()) {
+            for (Map.Entry<String, String> entry : colorMap.entrySet()) {
+                if (entry.getKey() == null) {
+                    continue;
+                }
+                String key = entry.getKey().trim();
+                if (key.isEmpty()) {
+                    continue;
+                }
+                resolved.put(key, entry.getValue());
+            }
+        }
+        return buildConditionalBadgePatch(field, resolved, quoteValues);
+    }
+
+    private JsonNode buildComputedPatchFromHints(JsonNode computedHints) {
+        if (computedHints == null || !computedHints.isObject()) {
+            return null;
+        }
+        String field = textOrNull(computedHints.get("field"));
+        String expression = textOrNull(computedHints.get("expression"));
+        if (isBlank(field) || isBlank(expression)) {
+            return null;
+        }
+        String trimmed = expression.trim();
+        if (trimmed.length() > 200) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode columns = patch.putArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        ObjectNode computed = column.putObject("computed");
+        computed.put("expression", trimmed);
+        String outputType = textOrNull(computedHints.get("outputType"));
+        if (!isBlank(outputType)) {
+            computed.put("outputType", outputType);
+        }
+        String format = textOrNull(computedHints.get("format"));
+        if (!isBlank(format)) {
+            computed.put("format", format);
+        }
+        JsonNode depsNode = computedHints.get("dependencies");
+        if (depsNode != null && depsNode.isArray()) {
+            ArrayNode deps = computed.putArray("dependencies");
+            for (JsonNode dep : depsNode) {
+                if (dep == null || dep.isNull()) {
+                    continue;
+                }
+                String value = dep.asText();
+                if (value != null && !value.isBlank()) {
+                    deps.add(value);
+                }
+            }
+        }
+        return patch;
+    }
+
+    private AiOrchestratorResponse tryResolveBadgeMissingContext(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (intent == null || request == null) {
+            return null;
+        }
+        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        if (!requiresBadgeValues(intent.getMissingContext())) {
+            return null;
+        }
+        String targetField = intent.getTargetField();
+        if (isBlank(targetField)) {
+            return null;
+        }
+        BadgeValuesContext ctx = resolveBadgeValuesContext(request, targetField);
+        if (ctx == null || ctx.values.isEmpty()) {
+            return null;
+        }
+        boolean isBoolean = isBooleanType(ctx.inferredType, ctx.explicitType) || looksLikeBooleanValues(ctx.values);
+        boolean quoteValues = !isBoolean;
+        Map<String, String> colorMap = assignColors(ctx.values, DEFAULT_BADGE_PALETTE);
+        JsonNode patch = buildConditionalBadgePatch(targetField, colorMap, quoteValues);
+        return applySuggestedPatch(
+                patch,
+                currentState,
+                request.getComponentId(),
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+    }
+
+    private AiOrchestratorResponse applySuggestedPatch(
+            JsonNode suggestedPatch,
+            JsonNode currentState,
+            String componentId,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (suggestedPatch == null || suggestedPatch.isNull()) {
+            return error("Nenhum patch sugerido.");
+        }
+        List<String> outWarnings = warnings != null ? warnings : new ArrayList<>();
+        SemanticPatchCheck semanticCheck = validateSemanticPatch(suggestedPatch, currentState, outWarnings);
+        if (!semanticCheck.valid) {
+            if (semanticCheck.needsClarification) {
+                return clarification(semanticCheck.message, semanticCheck.options);
+            }
+            return errorWithWarnings(semanticCheck.message, outWarnings);
+        }
+        JsonNode normalizedPatch = normalizePatch(componentId, semanticCheck.patch);
+        List<AiCapability> allowedCaps = mergeCapabilities(configCapabilities, componentCapabilities);
+        SanitizeResult sanitizeResult = sanitizePatch(normalizedPatch, allowedCaps);
+        if (sanitizeResult.warnings != null && !sanitizeResult.warnings.isEmpty()) {
+            outWarnings.addAll(sanitizeResult.warnings);
+        }
+        if (sanitizeResult.sanitized == null || isEmptyObject(sanitizeResult.sanitized)) {
+            return errorWithWarnings(
+                    "O patch sugerido não continha configurações válidas permitidas.",
+                    outWarnings);
+        }
+        EnumValidationResult enumValidation = validateEnumValues(
+                sanitizeResult.sanitized,
+                componentContext,
+                allowedCaps);
+        if (!enumValidation.valid) {
+            return invalidEnumValue(enumValidation, outWarnings);
+        }
+        return AiOrchestratorResponse.builder()
+                .type("patch")
+                .patch(sanitizeResult.sanitized)
+                .warnings(outWarnings.isEmpty() ? null : outWarnings)
+                .build();
+    }
+
     private JsonNode normalizePatch(String componentId, JsonNode patch) {
         if (!"praxis-table".equals(componentId) || patch == null || !patch.isObject()) {
             return patch;
@@ -4454,6 +4775,347 @@ public class AiOrchestratorService {
         return new ArrayList<>(values);
     }
 
+    private boolean requiresBadgeValues(List<String> missingContext) {
+        if (missingContext == null || missingContext.isEmpty()) {
+            return false;
+        }
+        for (String item : missingContext) {
+            if (item == null || item.isBlank()) {
+                continue;
+            }
+            String normalized = item.trim().toLowerCase(Locale.ROOT);
+            if (MISSING_VALUES_AND_COLORS.equals(normalized) || MISSING_BADGE_VALUES.equals(normalized)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BadgeValuesContext resolveBadgeValuesContext(AiOrchestratorRequest request, String field) {
+        if (request == null || isBlank(field)) {
+            return new BadgeValuesContext(List.of(), null, null);
+        }
+        JsonNode dataProfile = request.getDataProfile();
+        List<String> values = extractBadgeValuesFromProfile(dataProfile, field);
+        String inferredType = extractInferredType(dataProfile, field);
+        String explicitType = extractSchemaType(request.getSchemaFields(), field);
+        if (values.isEmpty()) {
+            values = extractBadgeValuesFromSchema(request.getSchemaFields(), field);
+        }
+        values = limitBadgeValues(values);
+        return new BadgeValuesContext(values, inferredType, explicitType);
+    }
+
+    private List<String> extractBadgeValuesFromProfile(JsonNode dataProfile, String field) {
+        if (dataProfile == null || !dataProfile.isObject() || isBlank(field)) {
+            return List.of();
+        }
+        JsonNode columns = dataProfile.get("columns");
+        if (columns == null || !columns.isObject()) {
+            return List.of();
+        }
+        JsonNode stats = columns.get(field);
+        if (stats == null || !stats.isObject()) {
+            return List.of();
+        }
+        JsonNode topValues = stats.get("topValues");
+        if (topValues == null || !topValues.isArray()) {
+            return List.of();
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (JsonNode value : topValues) {
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            String text = value.asText();
+            if (isBlank(text)) {
+                continue;
+            }
+            unique.add(text.trim());
+            if (unique.size() >= BADGE_CARDINALITY_MAX) {
+                break;
+            }
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private String extractInferredType(JsonNode dataProfile, String field) {
+        if (dataProfile == null || !dataProfile.isObject() || isBlank(field)) {
+            return null;
+        }
+        JsonNode columns = dataProfile.get("columns");
+        if (columns == null || !columns.isObject()) {
+            return null;
+        }
+        JsonNode stats = columns.get(field);
+        if (stats == null || !stats.isObject()) {
+            return null;
+        }
+        return textOrNull(stats.get("inferredType"));
+    }
+
+    private String extractSchemaType(JsonNode schemaFields, String field) {
+        if (schemaFields == null || !schemaFields.isArray() || isBlank(field)) {
+            return null;
+        }
+        for (JsonNode schemaField : schemaFields) {
+            if (schemaField == null || !schemaField.isObject()) {
+                continue;
+            }
+            String name = textOrNull(schemaField.get("name"));
+            if (isBlank(name)) {
+                name = textOrNull(schemaField.get("field"));
+            }
+            if (!field.equalsIgnoreCase(name)) {
+                continue;
+            }
+            return textOrNull(schemaField.get("type"));
+        }
+        return null;
+    }
+
+    private List<String> extractBadgeValuesFromSchema(JsonNode schemaFields, String field) {
+        if (schemaFields == null || !schemaFields.isArray() || isBlank(field)) {
+            return List.of();
+        }
+        for (JsonNode schemaField : schemaFields) {
+            if (schemaField == null || !schemaField.isObject()) {
+                continue;
+            }
+            String name = textOrNull(schemaField.get("name"));
+            if (isBlank(name)) {
+                name = textOrNull(schemaField.get("field"));
+            }
+            if (!field.equalsIgnoreCase(name)) {
+                continue;
+            }
+            List<String> values = extractFieldOptions(schemaField);
+            if (!values.isEmpty()) {
+                return values;
+            }
+        }
+        return List.of();
+    }
+
+    private List<String> extractFieldOptions(JsonNode field) {
+        if (field == null || !field.isObject()) {
+            return List.of();
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        JsonNode optionsNode = field.get("options");
+        if (optionsNode != null && optionsNode.isArray()) {
+            for (JsonNode option : optionsNode) {
+                if (option == null || option.isNull()) {
+                    continue;
+                }
+                if (option.isTextual() || option.isNumber()) {
+                    String value = option.asText();
+                    if (!isBlank(value)) {
+                        unique.add(value.trim());
+                    }
+                    continue;
+                }
+                if (!option.isObject()) {
+                    continue;
+                }
+                String key = textOrNull(option.get("key"));
+                String value = textOrNull(option.get("value"));
+                if (!isBlank(key)) {
+                    unique.add(key.trim());
+                } else if (!isBlank(value)) {
+                    unique.add(value.trim());
+                }
+            }
+        }
+        JsonNode enumNode = field.get("enumValues");
+        if (enumNode != null && enumNode.isArray()) {
+            for (JsonNode option : enumNode) {
+                if (option == null || option.isNull()) {
+                    continue;
+                }
+                if (option.isTextual() || option.isNumber()) {
+                    String value = option.asText();
+                    if (!isBlank(value)) {
+                        unique.add(value.trim());
+                    }
+                    continue;
+                }
+                if (!option.isObject()) {
+                    continue;
+                }
+                String value = textOrNull(option.get("value"));
+                if (!isBlank(value)) {
+                    unique.add(value.trim());
+                }
+            }
+        }
+        if (unique.isEmpty()) {
+            return List.of();
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private List<String> limitBadgeValues(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            unique.add(value.trim());
+            if (unique.size() >= BADGE_CARDINALITY_MAX) {
+                break;
+            }
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private List<String> readStringArray(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return List.of();
+        }
+        if (node.isTextual() || node.isNumber()) {
+            String value = node.asText();
+            return isBlank(value) ? List.of() : List.of(value);
+        }
+        if (!node.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (item == null || item.isNull()) {
+                continue;
+            }
+            String value = item.asText();
+            if (!isBlank(value)) {
+                values.add(value.trim());
+            }
+        }
+        return values;
+    }
+
+    private Map<String, String> readStringMap(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return Map.of();
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        java.util.Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            String key = entry.getKey();
+            JsonNode valueNode = entry.getValue();
+            if (key == null || key.isBlank() || valueNode == null || valueNode.isNull()) {
+                continue;
+            }
+            String value = valueNode.asText();
+            if (!isBlank(value)) {
+                out.put(key, value.trim());
+            }
+        }
+        return out;
+    }
+
+    private Map<String, String> assignColors(List<String> values, List<String> palette) {
+        if (values == null || values.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        List<String> colors = (palette != null && !palette.isEmpty())
+                ? palette
+                : DEFAULT_BADGE_PALETTE;
+        if (colors.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        int paletteSize = colors.size();
+        int index = 0;
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            String color = colors.get(index % paletteSize);
+            out.put(value, color);
+            index += 1;
+        }
+        return out;
+    }
+
+    private JsonNode buildConditionalBadgePatch(
+            String field,
+            Map<String, String> colorMap,
+            boolean quoteValues) {
+        if (isBlank(field) || colorMap == null || colorMap.isEmpty()) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode columns = patch.putArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        ObjectNode renderer = column.putObject("renderer");
+        renderer.put("type", "badge");
+        ObjectNode badge = renderer.putObject("badge");
+        badge.put("textField", field);
+        badge.put("variant", "filled");
+
+        ArrayNode conditional = column.putArray("conditionalRenderers");
+        for (Map.Entry<String, String> entry : colorMap.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank()) {
+                continue;
+            }
+            ObjectNode rule = conditional.addObject();
+            rule.put("condition", buildEqualityCondition(field, entry.getKey(), quoteValues));
+            ObjectNode ruleRenderer = rule.putObject("renderer");
+            ruleRenderer.put("type", "badge");
+            ObjectNode ruleBadge = ruleRenderer.putObject("badge");
+            ruleBadge.put("textField", field);
+            ruleBadge.put("variant", "filled");
+            if (!isBlank(entry.getValue())) {
+                ruleBadge.put("color", entry.getValue());
+            }
+        }
+        return patch;
+    }
+
+    private String buildEqualityCondition(String field, String value, boolean quoteValue) {
+        String safeValue = escapeDslString(value);
+        if (!quoteValue) {
+            return field + " == " + safeValue;
+        }
+        return field + " == '" + safeValue + "'";
+    }
+
+    private String escapeDslString(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("'", "\\'");
+    }
+
+    private boolean looksLikeBooleanValues(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return false;
+        }
+        for (String value : values) {
+            if (value == null) {
+                return false;
+            }
+            String normalized = value.trim().toLowerCase(Locale.ROOT);
+            if (!"true".equals(normalized) && !"false".equals(normalized)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isBooleanType(String inferredType, String explicitType) {
+        return "boolean".equalsIgnoreCase(inferredType) || "boolean".equalsIgnoreCase(explicitType);
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
     private String textOrNull(JsonNode node) {
         if (node == null || node.isNull()) return null;
         String text = node.asText();
@@ -4471,6 +5133,18 @@ public class AiOrchestratorService {
             out.put(String.valueOf(entry.getKey()), entry.getValue());
         }
         return out;
+    }
+
+    private static final class BadgeValuesContext {
+        private final List<String> values;
+        private final String inferredType;
+        private final String explicitType;
+
+        private BadgeValuesContext(List<String> values, String inferredType, String explicitType) {
+            this.values = values != null ? values : List.of();
+            this.inferredType = inferredType;
+            this.explicitType = explicitType;
+        }
     }
 
     private static final class ColumnDescriptor {

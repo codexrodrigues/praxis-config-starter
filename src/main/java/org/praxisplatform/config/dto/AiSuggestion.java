@@ -1,5 +1,7 @@
 package org.praxisplatform.config.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,4 +20,7 @@ public class AiSuggestion {
     private String intent;
     private String variantId;
     private Double score;
+    private JsonNode patch;
+    private JsonNode contextHints;
+    private List<String> missingContext;
 }

@@ -29,7 +29,7 @@ component identifiers, without reading `ui_user_config` in the AI flow.
 - The AI flow must not query `ui_user_config`; that storage is only for user/tenant state.
 
 ## AI Recipes (Generic Examples)
-- The files under `examples/ai-recipes/` are intentionally generic and serve as
+- The files under `praxis-ui-angular/examples/ai-recipes/` are intentionally generic and serve as
   patterns for the AI to learn expected shapes.
 - Values such as `resource.path`, `actions[].route`, `actions[].formId`, and API
   endpoints are placeholders, not real project routes.

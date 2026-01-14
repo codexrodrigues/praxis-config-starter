@@ -68,7 +68,7 @@ Must include:
 ## Required Artifacts (Ingestion / Templates)
 
 ### 4) AI recipes (templates)
-Location: `examples/ai-recipes/**`
+Location: `praxis-ui-angular/examples/ai-recipes/**`
 
 Rules:
 - JSON object, optional `_comment`, `aiDescription`, `templateMeta`
@@ -79,7 +79,7 @@ Rules:
   - Nested folders are allowed for namespacing
 
 Dynamic fields rule:
-- Use `examples/ai-recipes/praxis-dynamic-fields/<controlType>.json`
+- Use `praxis-ui-angular/examples/ai-recipes/praxis-dynamic-fields/<controlType>.json`
 - If no specific capabilities exist for a controlType, treat as FieldMetadata base
 
 ## Optional but Recommended Artifacts
@@ -125,7 +125,7 @@ Tasks:
    - Identify the config model and its public API
    - Verify config capabilities coverage (100% of public paths)
    - Check for adapter and component wiring
-   - Check for recipes in `examples/ai-recipes/`
+   - Check for recipes in `praxis-ui-angular/examples/ai-recipes/`
    - Note profiler/sanitizer presence (optional)
 3) For dynamic fields:
    - If controlType lacks specific capabilities, treat as FieldMetadata base

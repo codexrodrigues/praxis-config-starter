@@ -10,6 +10,11 @@ import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
 import com.openai.models.chat.completions.StructuredChatCompletion;
 import com.openai.models.chat.completions.StructuredChatCompletionCreateParams;
+import com.openai.models.responses.Response;
+import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseStatus;
+import com.openai.models.responses.StructuredResponse;
+import com.openai.models.responses.StructuredResponseCreateParams;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -159,12 +164,15 @@ public class OpenAiService implements AiProvider {
         String resolvedModel = resolveModel(config);
         double resolvedTemperature = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
-        ChatCompletionCreateParams params = ChatCompletionCreateParams.builder()
+        if (usesResponsesApi(resolvedModel)) {
+            return generateContentWithResponses(client, prompt, resolvedModel, resolvedTemperature, resolvedMaxTokens);
+        }
+        var builder = ChatCompletionCreateParams.builder()
                 .model(resolvedModel)
                 .messages(messages)
-                .temperature(resolvedTemperature)
-                .maxTokens(resolvedMaxTokens)
-                .build();
+                .temperature(resolvedTemperature);
+        applyMaxTokens(builder, resolvedModel, resolvedMaxTokens);
+        ChatCompletionCreateParams params = builder.build();
         ChatCompletion completion = client.chat().completions().create(params);
         if (completion.choices().isEmpty()) {
             return null;
@@ -179,13 +187,22 @@ public class OpenAiService implements AiProvider {
         String resolvedModel = resolveModel(config);
         double resolvedTemperature = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
-        StructuredChatCompletionCreateParams<T> params = ChatCompletionCreateParams.builder()
+        if (usesResponsesApi(resolvedModel)) {
+            return generateStructuredWithResponses(
+                    client,
+                    prompt,
+                    targetClass,
+                    resolvedModel,
+                    resolvedTemperature,
+                    resolvedMaxTokens);
+        }
+        var builder = ChatCompletionCreateParams.builder()
                 .model(resolvedModel)
                 .messages(messages)
                 .temperature(resolvedTemperature)
-                .maxTokens(resolvedMaxTokens)
-                .responseFormat(targetClass)
-                .build();
+                .responseFormat(targetClass);
+        applyMaxTokens(builder, resolvedModel, resolvedMaxTokens);
+        StructuredChatCompletionCreateParams<T> params = builder.build();
         StructuredChatCompletion<T> completion = client.chat().completions().create(params);
         if (completion.choices().isEmpty()) {
             return null;
@@ -235,6 +252,167 @@ public class OpenAiService implements AiProvider {
     private int resolveOpenAiRetries() {
         int attempts = Math.max(1, retryMaxAttempts);
         return Math.max(0, attempts - 1);
+    }
+
+    private void applyMaxTokens(ChatCompletionCreateParams.Builder builder, String model, int maxTokens) {
+        if (maxTokens <= 0) {
+            return;
+        }
+        long tokens = maxTokens;
+        if (requiresMaxCompletionTokens(model)) {
+            builder.maxCompletionTokens(tokens);
+        } else {
+            builder.maxTokens(tokens);
+        }
+    }
+
+    private <T> void applyMaxTokens(StructuredChatCompletionCreateParams.Builder<T> builder, String model, int maxTokens) {
+        if (maxTokens <= 0) {
+            return;
+        }
+        long tokens = maxTokens;
+        if (requiresMaxCompletionTokens(model)) {
+            builder.maxCompletionTokens(tokens);
+        } else {
+            builder.maxTokens(tokens);
+        }
+    }
+
+    private String generateContentWithResponses(
+            OpenAIClient client,
+            String prompt,
+            String model,
+            double temperature,
+            int maxTokens) {
+        var builder = ResponseCreateParams.builder()
+                .model(model)
+                .input(prompt)
+                .temperature(temperature);
+        if (maxTokens > 0) {
+            builder.maxOutputTokens(maxTokens);
+        }
+        Response response = client.responses().create(builder.build());
+        return extractResponseText(response);
+    }
+
+    private <T> JsonNode generateStructuredWithResponses(
+            OpenAIClient client,
+            String prompt,
+            Class<T> targetClass,
+            String model,
+            double temperature,
+            int maxTokens) {
+        var builder = StructuredResponseCreateParams.<T>builder()
+                .model(model)
+                .input(prompt)
+                .temperature(temperature)
+                .text(targetClass, com.openai.core.JsonSchemaLocalValidation.NO);
+        if (maxTokens > 0) {
+            builder.maxOutputTokens(maxTokens);
+        }
+        StructuredResponse<T> response = client.responses().create(builder.build());
+        return extractStructuredResponsePayload(response);
+    }
+
+    private String extractResponseText(Response response) {
+        if (response == null) {
+            return null;
+        }
+        logResponseDiagnostics(response);
+        StringBuilder text = new StringBuilder();
+        String refusal = null;
+        for (var item : response.output()) {
+            var message = item.message();
+            if (message.isEmpty()) {
+                continue;
+            }
+            for (var content : message.get().content()) {
+                if (content.isOutputText()) {
+                    String chunk = content.asOutputText().text();
+                    if (chunk != null && !chunk.isBlank()) {
+                        if (text.length() > 0) {
+                            text.append('\n');
+                        }
+                        text.append(chunk);
+                    }
+                } else if (content.isRefusal() && refusal == null) {
+                    String value = content.asRefusal().refusal();
+                    if (value != null && !value.isBlank()) {
+                        refusal = value;
+                    }
+                }
+            }
+        }
+        if (text.length() > 0) {
+            return text.toString();
+        }
+        return refusal;
+    }
+
+    private <T> JsonNode extractStructuredResponsePayload(StructuredResponse<T> response) {
+        if (response == null) {
+            return null;
+        }
+        logResponseDiagnostics(response.rawResponse());
+        String refusal = null;
+        for (var item : response.output()) {
+            var message = item.message();
+            if (message.isEmpty()) {
+                continue;
+            }
+            for (var content : message.get().content()) {
+                if (content.isOutputText()) {
+                    T payload = content.asOutputText();
+                    return payload != null ? objectMapper.valueToTree(payload) : null;
+                } else if (content.isRefusal() && refusal == null) {
+                    String value = content.asRefusal().refusal();
+                    if (value != null && !value.isBlank()) {
+                        refusal = value;
+                    }
+                }
+            }
+        }
+        if (refusal != null) {
+            log.warn("[OpenAiService] OpenAI response refusal: {}", refusal);
+            return objectMapper.createObjectNode().put("refusal", refusal);
+        }
+        return null;
+    }
+
+    private boolean usesResponsesApi(String model) {
+        return requiresMaxCompletionTokens(model);
+    }
+
+    private void logResponseDiagnostics(Response response) {
+        if (response == null) {
+            return;
+        }
+        log.info(
+                "[OpenAiService] OpenAI response meta: id={}, model={}, usage={}",
+                response.id(),
+                response.model(),
+                response.usage().map(Object::toString).orElse("unknown"));
+        response.error().ifPresent(error ->
+                log.warn("[OpenAiService] OpenAI response error: {}", error));
+        response.incompleteDetails().ifPresent(details -> {
+            String reason = details.reason().map(Object::toString).orElse("unknown");
+            log.warn("[OpenAiService] OpenAI response incomplete: {}", reason);
+        });
+        response.status().ifPresent(status -> {
+            if (status != ResponseStatus.COMPLETED) {
+                log.warn("[OpenAiService] OpenAI response status: {}", status.asString());
+            }
+        });
+    }
+
+    private boolean requiresMaxCompletionTokens(String model) {
+        if (model == null) {
+            return false;
+        }
+        String normalized = model.trim().toLowerCase();
+        return normalized.startsWith("gpt-5")
+                || normalized.startsWith("o1")
+                || normalized.startsWith("o3");
     }
 
     private String sanitizeJsonText(String text) {

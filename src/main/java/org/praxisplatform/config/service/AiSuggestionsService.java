@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -31,6 +32,13 @@ public class AiSuggestionsService {
     private static final int DENSITY_COLUMNS_THRESHOLD = 8;
     private static final int MAX_COLUMN_SUGGESTIONS = 3;
     private static final int BADGE_CARDINALITY_MAX = 6;
+    private static final List<String> DEFAULT_BADGE_PALETTE = List.of(
+            "primary",
+            "accent",
+            "warn",
+            "success",
+            "info"
+    );
 
     private static final Set<String> SELECTION_CONTROL_TYPES = Set.of(
             "select",
@@ -49,10 +57,12 @@ public class AiSuggestionsService {
     private static final class SchemaFieldHint {
         private final String controlType;
         private final String numericFormat;
+        private final List<String> optionValues;
 
-        private SchemaFieldHint(String controlType, String numericFormat) {
+        private SchemaFieldHint(String controlType, String numericFormat, List<String> optionValues) {
             this.controlType = controlType;
             this.numericFormat = numericFormat;
+            this.optionValues = optionValues != null ? optionValues : List.of();
         }
 
         private String getControlType() {
@@ -61,6 +71,10 @@ public class AiSuggestionsService {
 
         private String getNumericFormat() {
             return numericFormat;
+        }
+
+        private List<String> getOptionValues() {
+            return optionValues;
         }
     }
 
@@ -322,15 +336,8 @@ public class AiSuggestionsService {
                     && shouldSuggestBadge(inferredType, explicitType, cardinality, isLongText, hasValueMapping)
                     && hasCapability(allowedPaths, "columns[].renderer.type")
                     && hasCapability(allowedPaths, "columns[].renderer.badge")) {
-                addSuggestion(out, AiSuggestion.builder()
-                        .id("table.renderer.badge." + field)
-                        .label("Badges para " + display)
-                        .description("Destacar valores com badges coloridos.")
-                        .icon("verified")
-                        .group("Visual")
-                        .intent("Usar badges coloridos na coluna " + field + " por valor")
-                        .score(0.68)
-                        .build());
+                boolean supportsConditional = hasCapabilityPrefix(allowedPaths, "columns[].conditionalRenderers");
+                addSuggestion(out, buildBadgeSuggestion(field, display, stats, explicitType, supportsConditional, schemaHint));
                 columnSuggestions++;
             }
 
@@ -630,12 +637,71 @@ public class AiSuggestionsService {
             }
             String controlType = textOrNull(field.get("controlType"));
             String numericFormat = textOrNull(field.get("numericFormat"));
-            if (isBlank(controlType) && isBlank(numericFormat)) {
+            List<String> optionValues = extractFieldOptions(field);
+            if (isBlank(controlType) && isBlank(numericFormat) && optionValues.isEmpty()) {
                 continue;
             }
-            hints.put(name, new SchemaFieldHint(controlType, numericFormat));
+            hints.put(name, new SchemaFieldHint(controlType, numericFormat, optionValues));
         }
         return hints;
+    }
+
+    private List<String> extractFieldOptions(JsonNode field) {
+        if (field == null || !field.isObject()) {
+            return List.of();
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        JsonNode optionsNode = field.get("options");
+        if (optionsNode != null && optionsNode.isArray()) {
+            for (JsonNode option : optionsNode) {
+                if (option == null || option.isNull()) {
+                    continue;
+                }
+                if (option.isTextual() || option.isNumber()) {
+                    String value = option.asText();
+                    if (!isBlank(value)) {
+                        unique.add(value.trim());
+                    }
+                    continue;
+                }
+                if (!option.isObject()) {
+                    continue;
+                }
+                String key = textOrNull(option.get("key"));
+                String value = textOrNull(option.get("value"));
+                if (!isBlank(key)) {
+                    unique.add(key.trim());
+                } else if (!isBlank(value)) {
+                    unique.add(value.trim());
+                }
+            }
+        }
+        JsonNode enumNode = field.get("enumValues");
+        if (enumNode != null && enumNode.isArray()) {
+            for (JsonNode option : enumNode) {
+                if (option == null || option.isNull()) {
+                    continue;
+                }
+                if (option.isTextual() || option.isNumber()) {
+                    String value = option.asText();
+                    if (!isBlank(value)) {
+                        unique.add(value.trim());
+                    }
+                    continue;
+                }
+                if (!option.isObject()) {
+                    continue;
+                }
+                String value = textOrNull(option.get("value"));
+                if (!isBlank(value)) {
+                    unique.add(value.trim());
+                }
+            }
+        }
+        if (unique.isEmpty()) {
+            return List.of();
+        }
+        return new ArrayList<>(unique);
     }
 
     private JsonNode resolveConfig(JsonNode currentState) {
@@ -715,6 +781,199 @@ public class AiSuggestionsService {
             return false;
         }
         return value.equalsIgnoreCase(expected);
+    }
+
+    private AiSuggestion buildBadgeSuggestion(
+            String field,
+            String display,
+            JsonNode stats,
+            String explicitType,
+            boolean supportsConditional,
+            SchemaFieldHint schemaHint) {
+        List<String> values = extractBadgeValues(stats, schemaHint);
+        ObjectNode contextHints = buildBadgeContextHints(values);
+        String inferredType = stats != null ? textOrNull(stats.get("inferredType")) : null;
+        boolean isBoolean = isBooleanType(inferredType, explicitType) || looksLikeBooleanValues(values);
+        boolean quoteValues = !isBoolean;
+        JsonNode patch = (supportsConditional && !values.isEmpty())
+                ? buildConditionalBadgePatch(field, values, quoteValues)
+                : null;
+        List<String> missingContext = patch == null
+                ? List.of("values_and_colors")
+                : List.of();
+
+        AiSuggestion.AiSuggestionBuilder builder = AiSuggestion.builder()
+                .id("table.renderer.badge." + field)
+                .label("Badges para " + display)
+                .description("Destacar valores com badges coloridos.")
+                .icon("verified")
+                .group("Visual")
+                .intent("Usar badges coloridos na coluna " + field + " por valor")
+                .score(0.68);
+
+        if (patch != null) {
+            builder.patch(patch);
+        }
+        if (contextHints != null && contextHints.size() > 0) {
+            contextHints.put("field", field);
+            if (!isBlank(inferredType)) {
+                contextHints.put("inferredType", inferredType);
+            }
+            if (!isBlank(explicitType)) {
+                contextHints.put("explicitType", explicitType);
+            }
+            builder.contextHints(contextHints);
+        }
+        if (!missingContext.isEmpty()) {
+            builder.missingContext(missingContext);
+        }
+
+        return builder.build();
+    }
+
+    private List<String> extractBadgeValues(JsonNode stats, SchemaFieldHint schemaHint) {
+        List<String> values = extractBadgeValuesFromProfile(stats);
+        if ((values == null || values.isEmpty()) && schemaHint != null) {
+            values = schemaHint.getOptionValues();
+        }
+        return limitBadgeValues(values);
+    }
+
+    private List<String> extractBadgeValuesFromProfile(JsonNode stats) {
+        if (stats == null || !stats.isObject()) {
+            return List.of();
+        }
+        JsonNode topValues = stats.get("topValues");
+        if (topValues == null || !topValues.isArray()) {
+            return List.of();
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (JsonNode value : topValues) {
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            String text = value.asText();
+            if (text == null || text.isBlank()) {
+                continue;
+            }
+            unique.add(text.trim());
+            if (unique.size() >= BADGE_CARDINALITY_MAX) {
+                break;
+            }
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private List<String> limitBadgeValues(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            unique.add(value.trim());
+            if (unique.size() >= BADGE_CARDINALITY_MAX) {
+                break;
+            }
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private ObjectNode buildBadgeContextHints(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        ObjectNode hints = objectMapper.createObjectNode();
+        ArrayNode valuesNode = hints.putArray("values");
+        for (String value : values) {
+            valuesNode.add(value);
+        }
+        ArrayNode paletteNode = hints.putArray("palette");
+        for (String color : DEFAULT_BADGE_PALETTE) {
+            paletteNode.add(color);
+        }
+        ObjectNode mapNode = hints.putObject("valueColorMap");
+        Map<String, String> map = assignColors(values, DEFAULT_BADGE_PALETTE);
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            mapNode.put(entry.getKey(), entry.getValue());
+        }
+        return hints;
+    }
+
+    private JsonNode buildConditionalBadgePatch(String field, List<String> values, boolean quoteValues) {
+        Map<String, String> colorMap = assignColors(values, DEFAULT_BADGE_PALETTE);
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode columns = patch.putArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        ObjectNode renderer = column.putObject("renderer");
+        renderer.put("type", "badge");
+        ObjectNode badge = renderer.putObject("badge");
+        badge.put("textField", field);
+        badge.put("variant", "filled");
+
+        ArrayNode conditional = column.putArray("conditionalRenderers");
+        for (Map.Entry<String, String> entry : colorMap.entrySet()) {
+            ObjectNode rule = conditional.addObject();
+            rule.put("condition", buildEqualityCondition(field, entry.getKey(), quoteValues));
+            ObjectNode ruleRenderer = rule.putObject("renderer");
+            ruleRenderer.put("type", "badge");
+            ObjectNode ruleBadge = ruleRenderer.putObject("badge");
+            ruleBadge.put("textField", field);
+            ruleBadge.put("variant", "filled");
+            ruleBadge.put("color", entry.getValue());
+        }
+        return patch;
+    }
+
+    private Map<String, String> assignColors(List<String> values, List<String> palette) {
+        if (values == null || values.isEmpty() || palette == null || palette.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        int paletteSize = palette.size();
+        for (int i = 0; i < values.size(); i += 1) {
+            String value = values.get(i);
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            String color = palette.get(i % paletteSize);
+            out.put(value, color);
+        }
+        return out;
+    }
+
+    private String buildEqualityCondition(String field, String value, boolean quoteValue) {
+        String safeValue = escapeDslString(value);
+        if (!quoteValue) {
+            return field + " == " + safeValue;
+        }
+        return field + " == '" + safeValue + "'";
+    }
+
+    private String escapeDslString(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("'", "\\'");
+    }
+
+    private boolean looksLikeBooleanValues(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return false;
+        }
+        for (String value : values) {
+            if (value == null) {
+                return false;
+            }
+            String normalized = value.trim().toLowerCase(Locale.ROOT);
+            if (!"true".equals(normalized) && !"false".equals(normalized)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void addSuggestion(Map<String, AiSuggestion> out, AiSuggestion suggestion) {

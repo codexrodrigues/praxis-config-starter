@@ -59,6 +59,7 @@ public final class AiPromptTemplates {
 	COLUNAS DISPONÍVEIS (se houver tabela): {{COLUMNS_LIST}}
 	INPUTS DISPONÍVEIS: {{INPUTS_LIST}}
 	OUTPUTS DISPONÍVEIS: {{OUTPUTS_LIST}}
+	METADADOS (se houver): {{RUNTIME_METADATA}}
 
 	CATEGORIAS PARA CONFIG (derivadas das capabilities):
 	{{CONFIG_CATEGORIES}}
@@ -145,6 +146,9 @@ METADADOS DE TEMPLATE (variantes e contexto):
 
 SCHEMA (se disponível):
 {{SCHEMA_JSON}}
+
+METADADOS (somente leitura):
+{{RUNTIME_METADATA}}
 
 	CONTRATO TÉCNICO (Siga Rigorosamente):
 	{{CONTRACT_DSL}}

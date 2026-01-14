@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AiSuggestionsServiceTest {
@@ -185,6 +186,100 @@ class AiSuggestionsServiceTest {
 
         assertTrue(ids.contains("table.selection.enable"), "Should suggest selection");
         assertTrue(ids.contains("table.export.enable"), "Should suggest export");
+    }
+
+    @Test
+    void shouldIncludeStructuredBadgeSuggestionWhenValuesAvailable() {
+        // Given
+        ObjectNode config = objectMapper.createObjectNode();
+        ArrayNode columns = config.putArray("columns");
+        ObjectNode classeCol = columns.addObject();
+        classeCol.put("field", "classe");
+        classeCol.put("header", "Classe");
+
+        ObjectNode dataProfile = objectMapper.createObjectNode();
+        dataProfile.put("rowCount", 10);
+        ObjectNode profileColumns = dataProfile.putObject("columns");
+        ObjectNode classeStats = profileColumns.putObject("classe");
+        classeStats.put("inferredType", "string");
+        classeStats.put("cardinality", 3);
+        ArrayNode topValues = classeStats.putArray("topValues");
+        topValues.add("VILAO");
+        topValues.add("ENTIDADE");
+        topValues.add("ORGANIZACAO");
+
+        AiSuggestionsRequest request = new AiSuggestionsRequest();
+        request.setCurrentState(wrapConfig(config));
+        request.setDataProfile(dataProfile);
+        request.setComponentId("praxis-table");
+
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentDefinition(createDefinitionWithCapabilities(
+                        "columns[].renderer.type",
+                        "columns[].renderer.badge",
+                        "columns[].conditionalRenderers"))
+                .build();
+
+        // When
+        AiSuggestionsResponse response = service.suggest(request, context);
+
+        // Then
+        AiSuggestion suggestion = response.getSuggestions().stream()
+                .filter(s -> "table.renderer.badge.classe".equals(s.getId()))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(suggestion, "Badge suggestion should be present");
+        assertNotNull(suggestion.getPatch(), "Badge suggestion should include patch");
+        assertNotNull(suggestion.getContextHints(), "Badge suggestion should include context hints");
+        assertEquals("classe", suggestion.getPatch().at("/columns/0/field").asText());
+        assertTrue(suggestion.getContextHints().has("values"), "Context hints should include values");
+    }
+
+    @Test
+    void shouldAvoidQuotingBooleanBadgeValuesWhenExplicitTypeIsBoolean() {
+        ObjectNode config = objectMapper.createObjectNode();
+        ArrayNode columns = config.putArray("columns");
+        ObjectNode activeCol = columns.addObject();
+        activeCol.put("field", "active");
+        activeCol.put("header", "Ativo");
+        activeCol.put("type", "boolean");
+
+        ObjectNode dataProfile = objectMapper.createObjectNode();
+        dataProfile.put("rowCount", 5);
+        ObjectNode profileColumns = dataProfile.putObject("columns");
+        ObjectNode activeStats = profileColumns.putObject("active");
+        activeStats.put("cardinality", 2);
+        ArrayNode topValues = activeStats.putArray("topValues");
+        topValues.add("true");
+        topValues.add("false");
+
+        AiSuggestionsRequest request = new AiSuggestionsRequest();
+        request.setCurrentState(wrapConfig(config));
+        request.setDataProfile(dataProfile);
+        request.setComponentId("praxis-table");
+
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentDefinition(createDefinitionWithCapabilities(
+                        "columns[].renderer.type",
+                        "columns[].renderer.badge",
+                        "columns[].conditionalRenderers"))
+                .build();
+
+        AiSuggestionsResponse response = service.suggest(request, context);
+
+        AiSuggestion suggestion = response.getSuggestions().stream()
+                .filter(s -> "table.renderer.badge.active".equals(s.getId()))
+                .findFirst()
+                .orElse(null);
+
+        assertNotNull(suggestion, "Badge suggestion should be present");
+        assertNotNull(suggestion.getPatch(), "Badge suggestion should include patch");
+        String condition = suggestion.getPatch()
+                .at("/columns/0/conditionalRenderers/0/condition")
+                .asText();
+        assertEquals("active == true", condition);
     }
 
     private ObjectNode wrapConfig(ObjectNode config) {

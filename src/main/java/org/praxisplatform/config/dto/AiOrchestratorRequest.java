@@ -20,6 +20,11 @@ public class AiOrchestratorRequest {
     private String userPrompt;
 
     private JsonNode currentState;
+    private JsonNode dataProfile;
+    private JsonNode schemaFields;
+    private JsonNode runtimeState;
+    private JsonNode suggestedPatch;
+    private JsonNode contextHints;
     private String aiMode;
     private Boolean requireSchema;
     private String resourcePath;
