@@ -284,12 +284,13 @@ public class OpenAiService implements AiProvider {
             String model,
             double temperature,
             int maxTokens) {
+        int outputTokens = normalizeResponseMaxOutputTokens(maxTokens);
         var builder = ResponseCreateParams.builder()
                 .model(model)
                 .input(prompt)
                 .temperature(temperature);
-        if (maxTokens > 0) {
-            builder.maxOutputTokens(maxTokens);
+        if (outputTokens > 0) {
+            builder.maxOutputTokens(outputTokens);
         }
         Response response = client.responses().create(builder.build());
         return extractResponseText(response);
@@ -302,13 +303,14 @@ public class OpenAiService implements AiProvider {
             String model,
             double temperature,
             int maxTokens) {
+        int outputTokens = normalizeResponseMaxOutputTokens(maxTokens);
         var builder = StructuredResponseCreateParams.<T>builder()
                 .model(model)
                 .input(prompt)
                 .temperature(temperature)
                 .text(targetClass, com.openai.core.JsonSchemaLocalValidation.NO);
-        if (maxTokens > 0) {
-            builder.maxOutputTokens(maxTokens);
+        if (outputTokens > 0) {
+            builder.maxOutputTokens(outputTokens);
         }
         StructuredResponse<T> response = client.responses().create(builder.build());
         return extractStructuredResponsePayload(response);
@@ -381,6 +383,13 @@ public class OpenAiService implements AiProvider {
 
     private boolean usesResponsesApi(String model) {
         return requiresMaxCompletionTokens(model);
+    }
+
+    private int normalizeResponseMaxOutputTokens(int maxTokens) {
+        if (maxTokens <= 0) {
+            return 0;
+        }
+        return Math.max(16, maxTokens);
     }
 
     private void logResponseDiagnostics(Response response) {
