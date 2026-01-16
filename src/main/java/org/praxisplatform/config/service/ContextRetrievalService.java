@@ -1,18 +1,18 @@
 package org.praxisplatform.config.service;
 
+import java.util.List;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.dto.ComponentSearchResult;
 import org.praxisplatform.config.projection.ApiMetadataProjection;
-import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.projection.ComponentDefinitionProjection;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,7 +33,17 @@ public class ContextRetrievalService {
      * que o LLM gere configurações de UI precisas.
      */
     public List<ApiSearchResult> searchApiMetadata(String query, String method, String tags, int limit) {
-        String vectorLiteral = toVectorLiteral(embeddingService.embed(query));
+        return searchApiMetadata(query, method, tags, limit, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ApiSearchResult> searchApiMetadata(
+            String query,
+            String method,
+            String tags,
+            int limit,
+            EmbeddingCallConfig embeddingConfig) {
+        String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
         String methodFilter = method == null ? "" : method;
         String tagsFilter = tags == null ? "" : tags;
         List<ApiMetadataProjection> projections = apiMetadataRepository.findByVectorSimilarity(
@@ -51,7 +61,15 @@ public class ContextRetrievalService {
 
     @Transactional(readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(String query, int limit) {
-        String vectorLiteral = toVectorLiteral(embeddingService.embed(query));
+        return searchComponentDefinitions(query, limit, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ComponentSearchResult> searchComponentDefinitions(
+            String query,
+            int limit,
+            EmbeddingCallConfig embeddingConfig) {
+        String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
         List<ComponentDefinitionProjection> projections =
                 aiRegistryRepository.findComponentDefinitionsByVectorSimilarity(
                 REGISTRY_TYPE_COMPONENT_DEF, vectorLiteral, limit > 0 ? limit : DEFAULT_SEARCH_LIMIT);

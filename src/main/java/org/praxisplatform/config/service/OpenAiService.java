@@ -287,8 +287,10 @@ public class OpenAiService implements AiProvider {
         int outputTokens = normalizeResponseMaxOutputTokens(maxTokens);
         var builder = ResponseCreateParams.builder()
                 .model(model)
-                .input(prompt)
-                .temperature(temperature);
+                .input(prompt);
+        if (supportsTemperature(model)) {
+            builder.temperature(temperature);
+        }
         if (outputTokens > 0) {
             builder.maxOutputTokens(outputTokens);
         }
@@ -307,8 +309,10 @@ public class OpenAiService implements AiProvider {
         var builder = StructuredResponseCreateParams.<T>builder()
                 .model(model)
                 .input(prompt)
-                .temperature(temperature)
                 .text(targetClass, com.openai.core.JsonSchemaLocalValidation.NO);
+        if (supportsTemperature(model)) {
+            builder.temperature(temperature);
+        }
         if (outputTokens > 0) {
             builder.maxOutputTokens(outputTokens);
         }
@@ -422,6 +426,14 @@ public class OpenAiService implements AiProvider {
         return normalized.startsWith("gpt-5")
                 || normalized.startsWith("o1")
                 || normalized.startsWith("o3");
+    }
+
+    private boolean supportsTemperature(String model) {
+        if (model == null) {
+            return true;
+        }
+        String normalized = model.trim().toLowerCase();
+        return !normalized.startsWith("o1") && !normalized.startsWith("o3") && !normalized.startsWith("gpt-5");
     }
 
     private String sanitizeJsonText(String text) {

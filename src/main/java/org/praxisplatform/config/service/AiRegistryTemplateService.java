@@ -18,6 +18,7 @@ import org.praxisplatform.config.dto.AiRegistryTemplateSearchResult;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.projection.AiRegistryTemplateSearchProjection;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -67,7 +68,13 @@ public class AiRegistryTemplateService {
   @Transactional(readOnly = true)
   public List<AiRegistryTemplateSearchResult> searchTemplates(
       String query, String componentId, int limit) {
-    String vectorLiteral = toVectorLiteral(embeddingService.embed(query));
+    return searchTemplates(query, componentId, limit, null);
+  }
+
+  @Transactional(readOnly = true)
+  public List<AiRegistryTemplateSearchResult> searchTemplates(
+      String query, String componentId, int limit, EmbeddingCallConfig embeddingConfig) {
+    String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
     int effectiveLimit = limit > 0 ? limit : DEFAULT_SEARCH_LIMIT;
 
     List<AiRegistryTemplateSearchProjection> projections =
@@ -89,10 +96,16 @@ public class AiRegistryTemplateService {
   @Transactional(readOnly = true)
   public List<AiRegistryTemplateSearchResult> searchTemplatesByPrefix(
       String query, String registryKeyPrefix, int limit) {
+    return searchTemplatesByPrefix(query, registryKeyPrefix, limit, null);
+  }
+
+  @Transactional(readOnly = true)
+  public List<AiRegistryTemplateSearchResult> searchTemplatesByPrefix(
+      String query, String registryKeyPrefix, int limit, EmbeddingCallConfig embeddingConfig) {
     if (registryKeyPrefix == null || registryKeyPrefix.isBlank()) {
       return List.of();
     }
-    String vectorLiteral = toVectorLiteral(embeddingService.embed(query));
+    String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
     int effectiveLimit = limit > 0 ? limit : DEFAULT_SEARCH_LIMIT;
     String prefix = registryKeyPrefix.endsWith("%") ? registryKeyPrefix : registryKeyPrefix + "%";
 

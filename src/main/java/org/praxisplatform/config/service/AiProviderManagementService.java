@@ -29,6 +29,15 @@ public class AiProviderManagementService {
     @Value("${praxis.ai.provider:gemini}")
     private String defaultProvider;
 
+    @Value("${praxis.ai.openai.model:gpt-4o-mini}")
+    private String openaiModel;
+
+    @Value("${praxis.ai.gemini.model:gemini-2.0-flash}")
+    private String geminiModel;
+
+    @Value("${praxis.ai.xai.model:grok-2-latest}")
+    private String xaiModel;
+
     private final ObjectMapper objectMapper;
     private final UserConfigService userConfigService;
     private final AiApiKeyCryptoService apiKeyCryptoService;
@@ -57,6 +66,8 @@ public class AiProviderManagementService {
                 .build();
         try {
             List<AiProviderModel> models = listModelsByProvider(provider, config);
+            String preferredModel = resolvePreferredModel(provider, stored);
+            models = sortModelsByRelevance(models, provider, preferredModel);
             return AiProviderModelsResponse.builder()
                     .provider(provider)
                     .success(true)
@@ -132,7 +143,7 @@ public class AiProviderManagementService {
                 .defaultModel("gpt-4o-mini")
                 .requiresApiKey(true)
                 .supportsModels(true)
-                .supportsEmbeddings(false)
+                .supportsEmbeddings(true)
                 .iconKey("openai")
                 .build());
         providers.add(AiProviderCatalogItem.builder()
@@ -173,6 +184,136 @@ public class AiProviderManagementService {
             return mock.listModels(config);
         }
         return gemini.listModels(config);
+    }
+
+    private List<AiProviderModel> sortModelsByRelevance(
+            List<AiProviderModel> models,
+            String provider,
+            String preferredModel) {
+        if (models == null || models.isEmpty()) {
+            return models;
+        }
+        String normalized = normalizeProvider(provider);
+        if (preferredModel == null || preferredModel.isBlank()) {
+            return models;
+        }
+        if (!"openai".equals(normalized) && !"open-ai".equals(normalized)) {
+            return sortWithPreferred(models, preferredModel);
+        }
+        return sortOpenAiModels(models, preferredModel);
+    }
+
+    private List<AiProviderModel> sortWithPreferred(
+            List<AiProviderModel> models,
+            String preferredModel) {
+        String preferred = preferredModel.trim().toLowerCase();
+        List<AiProviderModel> copy = new ArrayList<>(models);
+        for (int i = 0; i < copy.size(); i++) {
+            copy.get(i).setVersion(String.valueOf(i));
+        }
+        copy.sort((a, b) -> {
+            int rankA = preferredRank(a.getName(), preferred);
+            int rankB = preferredRank(b.getName(), preferred);
+            if (rankA != rankB) {
+                return Integer.compare(rankA, rankB);
+            }
+            return Integer.compare(originalIndex(a), originalIndex(b));
+        });
+        clearSortMetadata(copy);
+        return copy;
+    }
+
+    private List<AiProviderModel> sortOpenAiModels(
+            List<AiProviderModel> models,
+            String preferredModel) {
+        String preferred = preferredModel.trim().toLowerCase();
+        List<AiProviderModel> copy = new ArrayList<>(models);
+        for (int i = 0; i < copy.size(); i++) {
+            copy.get(i).setVersion(String.valueOf(i));
+        }
+        copy.sort((a, b) -> {
+            int prefA = preferredRank(a.getName(), preferred);
+            int prefB = preferredRank(b.getName(), preferred);
+            if (prefA != prefB) {
+                return Integer.compare(prefA, prefB);
+            }
+            int famA = openAiFamilyRank(a.getName());
+            int famB = openAiFamilyRank(b.getName());
+            if (famA != famB) {
+                return Integer.compare(famA, famB);
+            }
+            return Integer.compare(originalIndex(a), originalIndex(b));
+        });
+        clearSortMetadata(copy);
+        return copy;
+    }
+
+    private int preferredRank(String name, String preferred) {
+        if (name == null || name.isBlank()) {
+            return 3;
+        }
+        String normalized = name.trim().toLowerCase();
+        if (normalized.equals(preferred)) {
+            return 0;
+        }
+        if (normalized.endsWith("/" + preferred)) {
+            return 1;
+        }
+        return 2;
+    }
+
+    private int openAiFamilyRank(String name) {
+        if (name == null || name.isBlank()) {
+            return 99;
+        }
+        String normalized = name.trim().toLowerCase();
+        String[] order = {
+                "gpt-5",
+                "o1",
+                "o3",
+                "gpt-4o",
+                "gpt-4.1",
+                "gpt-4",
+                "gpt-3.5"
+        };
+        for (int i = 0; i < order.length; i++) {
+            if (normalized.startsWith(order[i])) {
+                return i;
+            }
+        }
+        return 98;
+    }
+
+    private int originalIndex(AiProviderModel model) {
+        try {
+            return Integer.parseInt(model.getVersion());
+        } catch (Exception e) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    private void clearSortMetadata(List<AiProviderModel> models) {
+        for (AiProviderModel model : models) {
+            model.setVersion(null);
+        }
+    }
+
+    private String resolvePreferredModel(String provider, StoredAiConfig stored) {
+        String storedModel = stored != null ? trimToNull(stored.model()) : null;
+        if (storedModel != null) {
+            return storedModel;
+        }
+        String normalized = normalizeProvider(provider);
+        if ("openai".equals(normalized) || "open-ai".equals(normalized)) {
+            return trimToNull(openaiModel);
+        }
+        if ("xai".equals(normalized) || "grok".equals(normalized) || "grok-ai".equals(normalized)) {
+            return trimToNull(xaiModel);
+        }
+        if ("mock".equals(normalized)) {
+            return "mock-default";
+        }
+        return trimToNull(geminiModel);
     }
 
     private String resolveProviderName(String requested, String stored) {

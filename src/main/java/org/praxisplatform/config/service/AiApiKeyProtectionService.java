@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 public class AiApiKeyProtectionService {
 
     private static final String AI_NODE = "ai";
+    private static final String EMBEDDING_NODE = "embedding";
     private static final String API_KEY = "apiKey";
     private static final String API_KEY_ENCRYPTED = "apiKeyEncrypted";
     private static final String API_KEY_LAST4 = "apiKeyLast4";
@@ -50,7 +51,6 @@ public class AiApiKeyProtectionService {
             String encrypted = cryptoService.encrypt(rawApiKey);
             aiNode.put(API_KEY_ENCRYPTED, encrypted);
             aiNode.put(API_KEY_LAST4, last4(rawApiKey));
-            return root;
         }
 
         // No apiKey provided: keep existing secret if present
@@ -75,7 +75,6 @@ public class AiApiKeyProtectionService {
             if (migratedLast4 != null) {
                 aiNode.put(API_KEY_LAST4, migratedLast4);
             }
-            return root;
         }
 
         if (migratedEncrypted != null) {
@@ -91,6 +90,86 @@ public class AiApiKeyProtectionService {
             aiNode.remove(API_KEY);
             aiNode.remove(API_KEY_ENCRYPTED);
             aiNode.remove(API_KEY_LAST4);
+        }
+
+        ObjectNode embeddingNode = extractEmbeddingNode(aiNode);
+        ObjectNode existingEmbedding = extractEmbeddingNode(existingAi);
+
+        String rawEmbeddingKey = embeddingNode != null ? textOrNull(embeddingNode.get(API_KEY)) : null;
+        boolean embeddingKeyProvided = rawEmbeddingKey != null;
+        if (embeddingNode != null && !embeddingKeyProvided) {
+            embeddingNode.remove(API_KEY);
+            embeddingNode.remove(API_KEY_ENCRYPTED);
+            embeddingNode.remove(API_KEY_LAST4);
+        }
+        String existingEmbeddingEncrypted = existingEmbedding != null ? textOrNull(existingEmbedding.get(API_KEY_ENCRYPTED)) : null;
+        String existingEmbeddingPlain = existingEmbedding != null ? textOrNull(existingEmbedding.get(API_KEY)) : null;
+        String existingEmbeddingLast4 = existingEmbedding != null ? textOrNull(existingEmbedding.get(API_KEY_LAST4)) : null;
+
+        if (embeddingKeyProvided) {
+            if (!cryptoService.isEnabled()) {
+                throw new IllegalArgumentException("Encryption key not configured for apiKey storage.");
+            }
+            if (embeddingNode == null) {
+                if (aiNode == null) {
+                    aiNode = objectMapper.createObjectNode();
+                    root.set(AI_NODE, aiNode);
+                }
+                embeddingNode = objectMapper.createObjectNode();
+                aiNode.set(EMBEDDING_NODE, embeddingNode);
+            }
+            embeddingNode.remove(API_KEY);
+            embeddingNode.remove(API_KEY_ENCRYPTED);
+            embeddingNode.remove(API_KEY_LAST4);
+            String encrypted = cryptoService.encrypt(rawEmbeddingKey);
+            embeddingNode.put(API_KEY_ENCRYPTED, encrypted);
+            embeddingNode.put(API_KEY_LAST4, last4(rawEmbeddingKey));
+        } else {
+            String migratedEmbeddingEncrypted = existingEmbeddingEncrypted;
+            String migratedEmbeddingLast4 = existingEmbeddingLast4;
+            if (migratedEmbeddingEncrypted == null && existingEmbeddingPlain != null && cryptoService.isEnabled()) {
+                try {
+                    migratedEmbeddingEncrypted = cryptoService.encrypt(existingEmbeddingPlain);
+                    migratedEmbeddingLast4 = last4(existingEmbeddingPlain);
+                } catch (Exception ex) {
+                    log.warn("[AiApiKeyProtection] Failed to migrate plaintext embedding apiKey", ex);
+                }
+            }
+
+            if (migratedEmbeddingEncrypted == null && existingEmbeddingPlain != null && !cryptoService.isEnabled()) {
+                if (aiNode == null) {
+                    aiNode = objectMapper.createObjectNode();
+                    root.set(AI_NODE, aiNode);
+                }
+                if (embeddingNode == null) {
+                    embeddingNode = objectMapper.createObjectNode();
+                    aiNode.set(EMBEDDING_NODE, embeddingNode);
+                }
+                embeddingNode.put(API_KEY, existingEmbeddingPlain);
+                if (migratedEmbeddingLast4 != null) {
+                    embeddingNode.put(API_KEY_LAST4, migratedEmbeddingLast4);
+                }
+                return root;
+            }
+
+            if (migratedEmbeddingEncrypted != null) {
+                if (aiNode == null) {
+                    aiNode = objectMapper.createObjectNode();
+                    root.set(AI_NODE, aiNode);
+                }
+                if (embeddingNode == null) {
+                    embeddingNode = objectMapper.createObjectNode();
+                    aiNode.set(EMBEDDING_NODE, embeddingNode);
+                }
+                embeddingNode.put(API_KEY_ENCRYPTED, migratedEmbeddingEncrypted);
+                if (migratedEmbeddingLast4 != null) {
+                    embeddingNode.put(API_KEY_LAST4, migratedEmbeddingLast4);
+                }
+            } else if (embeddingNode != null) {
+                embeddingNode.remove(API_KEY);
+                embeddingNode.remove(API_KEY_ENCRYPTED);
+                embeddingNode.remove(API_KEY_LAST4);
+            }
         }
 
         return root;
@@ -113,6 +192,19 @@ public class AiApiKeyProtectionService {
         if ((hasEncrypted || hasPlain || hasLast4) && !aiNode.has(API_KEY_PRESENT)) {
             aiNode.put(API_KEY_PRESENT, true);
         }
+
+        ObjectNode embeddingNode = extractEmbeddingNode(aiNode);
+        if (embeddingNode == null) {
+            return root;
+        }
+        boolean embedHasEncrypted = embeddingNode.has(API_KEY_ENCRYPTED);
+        boolean embedHasPlain = embeddingNode.has(API_KEY);
+        boolean embedHasLast4 = embeddingNode.has(API_KEY_LAST4);
+        embeddingNode.remove(API_KEY);
+        embeddingNode.remove(API_KEY_ENCRYPTED);
+        if ((embedHasEncrypted || embedHasPlain || embedHasLast4) && !embeddingNode.has(API_KEY_PRESENT)) {
+            embeddingNode.put(API_KEY_PRESENT, true);
+        }
         return root;
     }
 
@@ -123,6 +215,17 @@ public class AiApiKeyProtectionService {
         JsonNode aiNode = payload.get(AI_NODE);
         if (aiNode != null && aiNode.isObject()) {
             return (ObjectNode) aiNode;
+        }
+        return null;
+    }
+
+    private ObjectNode extractEmbeddingNode(JsonNode payload) {
+        if (payload == null || !payload.isObject()) {
+            return null;
+        }
+        JsonNode embeddingNode = payload.get(EMBEDDING_NODE);
+        if (embeddingNode != null && embeddingNode.isObject()) {
+            return (ObjectNode) embeddingNode;
         }
         return null;
     }

@@ -124,9 +124,11 @@ public class AiOrchestratorService {
         }
 
         AiCallConfig frontendConfig = resolveFrontendCallConfig(tenantId, userId, environment);
+        EmbeddingService.EmbeddingCallConfig embeddingConfig =
+                resolveEmbeddingCallConfig(tenantId, userId, environment);
 
         List<String> warnings = new ArrayList<>();
-        TemplateSelection templateSelection = resolveTemplateVariant(request, context);
+        TemplateSelection templateSelection = resolveTemplateVariant(request, context, embeddingConfig);
         if (templateSelection.template != null) {
             context.setTemplate(templateSelection.template);
         }
@@ -146,7 +148,7 @@ public class AiOrchestratorService {
         JsonNode resolvedSchema = null;
 
         if (requireSchema) {
-            SchemaResolution schemaResolution = resolveSchema(request, context, requestBaseUrl);
+            SchemaResolution schemaResolution = resolveSchema(request, context, requestBaseUrl, embeddingConfig);
             if (schemaResolution.response != null) {
                 return schemaResolution.response;
             }
@@ -495,12 +497,12 @@ public class AiOrchestratorService {
 
     private AiJsonSchema buildIntentSchema() {
         ObjectNode schema = objectMapper.createObjectNode();
-        schema.put("type", "OBJECT");
+        schema.put("type", "object");
 
         ObjectNode properties = schema.putObject("properties");
 
         ObjectNode intent = properties.putObject("intent");
-        intent.put("type", "STRING");
+        intent.put("type", "string");
         intent.putArray("enum")
                 .add("update_column_rules")
                 .add("toggle_feature")
@@ -509,24 +511,24 @@ public class AiOrchestratorService {
                 .add("unknown");
 
         ObjectNode targetField = properties.putObject("targetField");
-        targetField.put("type", "STRING");
+        targetField.put("type", "string");
         targetField.put("nullable", true);
 
-        properties.putObject("category").put("type", "STRING");
+        properties.putObject("category").put("type", "string");
 
         ObjectNode scope = properties.putObject("scope");
-        scope.put("type", "STRING");
+        scope.put("type", "string");
         scope.putArray("enum").add("config").add("component").add("mixed");
 
-        properties.putObject("needsClarification").put("type", "BOOLEAN");
+        properties.putObject("needsClarification").put("type", "boolean");
 
         ObjectNode missingContext = properties.putObject("missingContext");
-        missingContext.put("type", "ARRAY");
-        missingContext.putObject("items").put("type", "STRING");
+        missingContext.put("type", "array");
+        missingContext.putObject("items").put("type", "string");
 
         ObjectNode options = properties.putObject("options");
-        options.put("type", "ARRAY");
-        options.putObject("items").put("type", "STRING");
+        options.put("type", "array");
+        options.putObject("items").put("type", "string");
 
         schema.putArray("required")
                 .add("intent")
@@ -766,6 +768,35 @@ public class AiOrchestratorService {
         return null;
     }
 
+    private EmbeddingService.EmbeddingCallConfig resolveEmbeddingCallConfig(
+            String tenantId,
+            String userId,
+            String environment) {
+        String resolvedTenant = trimToNull(tenantId);
+        if (resolvedTenant == null || userConfigService == null) {
+            return null;
+        }
+        String resolvedEnv = trimToNull(environment);
+        for (String componentId : buildGlobalConfigIds(resolvedTenant)) {
+            Optional<UserConfigService.ResolvedConfig> resolved =
+                    userConfigService.getResolved(
+                            resolvedTenant,
+                            userId,
+                            GLOBAL_CONFIG_COMPONENT_TYPE,
+                            componentId,
+                            resolvedEnv);
+            if (resolved.isEmpty()) {
+                continue;
+            }
+            JsonNode payload = parsePayload(resolved.get().config().getPayload());
+            EmbeddingService.EmbeddingCallConfig config = parseEmbeddingCallConfig(payload);
+            if (config != null) {
+                return config;
+            }
+        }
+        return null;
+    }
+
     private List<String> buildGlobalConfigIds(String tenantId) {
         List<String> ids = new ArrayList<>();
         if (tenantId != null && !tenantId.isBlank()) {
@@ -831,6 +862,55 @@ public class AiOrchestratorService {
         return hasValue ? builder.build() : null;
     }
 
+    private EmbeddingService.EmbeddingCallConfig parseEmbeddingCallConfig(JsonNode payload) {
+        if (payload == null || payload.isNull()) {
+            return null;
+        }
+        JsonNode aiNode = payload.get("ai");
+        if (aiNode == null || !aiNode.isObject()) {
+            return null;
+        }
+        JsonNode embeddingNode = aiNode.get("embedding");
+        boolean useSameAsLlm = embeddingNode != null
+                && embeddingNode.has("useSameAsLlm")
+                && embeddingNode.get("useSameAsLlm").asBoolean(false);
+
+        String provider = embeddingNode != null ? trimToNull(textOrNull(embeddingNode.get("provider"))) : null;
+        String apiKey = embeddingNode != null ? resolveApiKeyFromNode(embeddingNode) : null;
+        String model = embeddingNode != null ? trimToNull(textOrNull(embeddingNode.get("model"))) : null;
+        Integer dimensions = embeddingNode != null ? parseInteger(embeddingNode.get("dimensions")) : null;
+
+        if (useSameAsLlm) {
+            if (provider == null) {
+                provider = trimToNull(textOrNull(aiNode.get("provider")));
+            }
+            if (apiKey == null) {
+                apiKey = resolveApiKeyFromNode(aiNode);
+            }
+        }
+
+        if (provider == null && apiKey == null && model == null && dimensions == null) {
+            return null;
+        }
+        return new EmbeddingService.EmbeddingCallConfig(provider, apiKey, model, dimensions);
+    }
+
+    private String resolveApiKeyFromNode(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        String apiKey = trimToNull(textOrNull(node.get("apiKey")));
+        if (apiKey != null) {
+            return apiKey;
+        }
+        String encrypted = trimToNull(textOrNull(node.get("apiKeyEncrypted")));
+        if (encrypted == null) {
+            return null;
+        }
+        String decrypted = apiKeyCryptoService.decrypt(encrypted);
+        return trimToNull(decrypted);
+    }
+
     private Double parseDouble(JsonNode node) {
         if (node == null || node.isNull()) {
             return null;
@@ -875,40 +955,40 @@ public class AiOrchestratorService {
 
     private AiJsonSchema buildTableActionPlanSchema(List<ComponentAction> actionCatalog) {
         ObjectNode schema = objectMapper.createObjectNode();
-        schema.put("type", "OBJECT");
+        schema.put("type", "object");
 
         ObjectNode properties = schema.putObject("properties");
 
         ObjectNode actions = properties.putObject("actions");
-        actions.put("type", "ARRAY");
+        actions.put("type", "array");
         ObjectNode actionItem = actions.putObject("items");
-        actionItem.put("type", "OBJECT");
+        actionItem.put("type", "object");
         ObjectNode actionProps = actionItem.putObject("properties");
 
         ObjectNode type = actionProps.putObject("type");
-        type.put("type", "STRING");
+        type.put("type", "string");
         type.putArray("enum").addAll(buildActionEnumFromCatalog(actionCatalog));
 
         ObjectNode target = actionProps.putObject("target");
-        target.put("type", "STRING");
+        target.put("type", "string");
 
         ObjectNode value = actionProps.putObject("value");
-        value.put("type", "STRING");
+        value.put("type", "string");
         value.put("nullable", true);
 
         appendActionParamsSchema(actionProps, extractParamKeysFromCatalog(actionCatalog));
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
-        ambiguities.put("type", "ARRAY");
+        ambiguities.put("type", "array");
         ObjectNode ambiguityItem = ambiguities.putObject("items");
-        ambiguityItem.put("type", "OBJECT");
+        ambiguityItem.put("type", "object");
         ObjectNode ambiguityProps = ambiguityItem.putObject("properties");
 
-        ambiguityProps.putObject("alias").put("type", "STRING");
+        ambiguityProps.putObject("alias").put("type", "string");
         ObjectNode candidates = ambiguityProps.putObject("candidates");
-        candidates.put("type", "ARRAY");
-        candidates.putObject("items").put("type", "STRING");
-        ambiguityProps.putObject("reason").put("type", "STRING");
+        candidates.put("type", "array");
+        candidates.putObject("items").put("type", "string");
+        ambiguityProps.putObject("reason").put("type", "string");
 
         schema.putArray("required").add("actions").add("ambiguities");
         return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
@@ -916,40 +996,40 @@ public class AiOrchestratorService {
 
     private AiJsonSchema buildComponentActionPlanSchema(List<ComponentAction> actionCatalog) {
         ObjectNode schema = objectMapper.createObjectNode();
-        schema.put("type", "OBJECT");
+        schema.put("type", "object");
 
         ObjectNode properties = schema.putObject("properties");
 
         ObjectNode actions = properties.putObject("actions");
-        actions.put("type", "ARRAY");
+        actions.put("type", "array");
         ObjectNode actionItem = actions.putObject("items");
-        actionItem.put("type", "OBJECT");
+        actionItem.put("type", "object");
         ObjectNode actionProps = actionItem.putObject("properties");
 
         ObjectNode type = actionProps.putObject("type");
-        type.put("type", "STRING");
+        type.put("type", "string");
         type.putArray("enum").addAll(buildActionEnumFromCatalog(actionCatalog));
 
         ObjectNode target = actionProps.putObject("target");
-        target.put("type", "STRING");
+        target.put("type", "string");
 
         ObjectNode value = actionProps.putObject("value");
-        value.put("type", "STRING");
+        value.put("type", "string");
         value.put("nullable", true);
 
         appendActionParamsSchema(actionProps, extractParamKeysFromCatalog(actionCatalog));
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
-        ambiguities.put("type", "ARRAY");
+        ambiguities.put("type", "array");
         ObjectNode ambiguityItem = ambiguities.putObject("items");
-        ambiguityItem.put("type", "OBJECT");
+        ambiguityItem.put("type", "object");
         ObjectNode ambiguityProps = ambiguityItem.putObject("properties");
 
-        ambiguityProps.putObject("alias").put("type", "STRING");
+        ambiguityProps.putObject("alias").put("type", "string");
         ObjectNode candidates = ambiguityProps.putObject("candidates");
-        candidates.put("type", "ARRAY");
-        candidates.putObject("items").put("type", "STRING");
-        ambiguityProps.putObject("reason").put("type", "STRING");
+        candidates.put("type", "array");
+        candidates.putObject("items").put("type", "string");
+        ambiguityProps.putObject("reason").put("type", "string");
 
         schema.putArray("required").add("actions").add("ambiguities");
         return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
@@ -960,13 +1040,13 @@ public class AiOrchestratorService {
             return;
         }
         ObjectNode params = actionProps.putObject("params");
-        params.put("type", "OBJECT");
+        params.put("type", "object");
         params.put("nullable", true);
         ObjectNode properties = params.putObject("properties");
         for (String key : paramKeys) {
             if (key == null || key.isBlank()) continue;
             ObjectNode prop = properties.putObject(key);
-            prop.put("type", "STRING");
+            prop.put("type", "string");
         }
     }
 
@@ -3105,7 +3185,8 @@ public class AiOrchestratorService {
 
     private TemplateSelection resolveTemplateVariant(
             AiOrchestratorRequest request,
-            AiContextDTO context) {
+            AiContextDTO context,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
         List<String> warnings = new ArrayList<>();
         AiRegistryTemplateRecord baseTemplate = context.getTemplate();
         if (baseTemplate == null) {
@@ -3132,7 +3213,8 @@ public class AiOrchestratorService {
                     templateService.searchTemplatesByPrefix(
                             request.getUserPrompt(),
                             componentId + ":",
-                            limit);
+                            limit,
+                            embeddingConfig);
             AiRegistryTemplateSearchResult selected = selectVariantCandidate(results, variantKeys);
             if (selected != null && selected.getSimilarityScore() >= VARIANT_SIMILARITY_THRESHOLD) {
                 AiRegistryTemplateRecord variant = loadTemplateRecord(selected.getComponentId(), warnings);
@@ -3762,7 +3844,8 @@ public class AiOrchestratorService {
     private SchemaResolution resolveSchema(
             AiOrchestratorRequest request,
             AiContextDTO context,
-            String requestBaseUrl) {
+            String requestBaseUrl,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
         AiSchemaContext schemaContext = request.getSchemaContext();
         String resolvedResourcePath = request.getResourcePath() != null
                 ? request.getResourcePath()
@@ -3780,7 +3863,8 @@ public class AiOrchestratorService {
                     request.getUserPrompt(),
                     request.getApiMethod(),
                     request.getApiTags(),
-                    request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT);
+                    request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
+                    embeddingConfig);
 
             if (results.isEmpty()) {
                 return new SchemaResolution(error("Nenhum endpoint encontrado para o contexto solicitado."));
