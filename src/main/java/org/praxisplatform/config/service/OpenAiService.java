@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.core.JsonValue;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
@@ -12,7 +13,9 @@ import com.openai.models.chat.completions.StructuredChatCompletion;
 import com.openai.models.chat.completions.StructuredChatCompletionCreateParams;
 import com.openai.models.responses.Response;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseFormatTextJsonSchemaConfig;
 import com.openai.models.responses.ResponseStatus;
+import com.openai.models.responses.ResponseTextConfig;
 import com.openai.models.responses.StructuredResponse;
 import com.openai.models.responses.StructuredResponseCreateParams;
 import java.net.URI;
@@ -21,7 +24,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiProviderModel;
@@ -73,7 +79,26 @@ public class OpenAiService implements AiProvider {
 
     @Override
     public JsonNode generateJson(String prompt, AiJsonSchema schema, AiCallConfig config) {
-        if (schema != null && schema.hasTargetClass()) {
+        boolean skipTargetClass = false;
+        if (schema != null && schema.hasJsonSchema()) {
+            String resolvedModel = resolveModel(config);
+            if (usesResponsesApi(resolvedModel)) {
+                double resolvedTemperature = resolveTemperature(config);
+                int resolvedMaxTokens = resolveMaxTokens(config);
+                JsonNode json = generateJsonWithResponsesSchema(
+                        prompt,
+                        schema.jsonSchema(),
+                        resolvedModel,
+                        resolvedTemperature,
+                        resolvedMaxTokens,
+                        config);
+                if (json != null) {
+                    return json;
+                }
+                skipTargetClass = true;
+            }
+        }
+        if (!skipTargetClass && schema != null && schema.hasTargetClass()) {
             return generateStructured(prompt, schema.targetClass(), config);
         }
         String text = generateContent(prompt, config);
@@ -318,6 +343,95 @@ public class OpenAiService implements AiProvider {
         }
         StructuredResponse<T> response = client.responses().create(builder.build());
         return extractStructuredResponsePayload(response);
+    }
+
+    private JsonNode generateJsonWithResponsesSchema(
+            String prompt,
+            String schemaJson,
+            String model,
+            double temperature,
+            int maxTokens,
+            AiCallConfig config) {
+        if (schemaJson == null || schemaJson.isBlank()) {
+            return null;
+        }
+        ResponseFormatTextJsonSchemaConfig schemaConfig = buildResponsesJsonSchema(schemaJson, "ai-action-plan");
+        if (schemaConfig == null) {
+            return null;
+        }
+        OpenAIClient client = buildClient(config);
+        int outputTokens = normalizeResponseMaxOutputTokens(maxTokens);
+        ResponseTextConfig textConfig = ResponseTextConfig.builder()
+                .format(schemaConfig)
+                .build();
+        var builder = ResponseCreateParams.builder()
+                .model(model)
+                .input(prompt)
+                .text(textConfig);
+        if (supportsTemperature(model)) {
+            builder.temperature(temperature);
+        }
+        if (outputTokens > 0) {
+            builder.maxOutputTokens(outputTokens);
+        }
+        Response response;
+        try {
+            response = client.responses().create(builder.build());
+        } catch (Exception e) {
+            log.warn("[OpenAiService] Responses API json_schema call failed; falling back to text.", e);
+            return null;
+        }
+        String text = extractResponseText(response);
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String cleaned = sanitizeJsonText(text);
+        try {
+            return objectMapper.readTree(cleaned);
+        } catch (Exception e) {
+            log.warn("[OpenAiService] JSON parse failed for schema response, returning null.", e);
+            return null;
+        }
+    }
+
+    private ResponseFormatTextJsonSchemaConfig buildResponsesJsonSchema(String schemaJson, String name) {
+        try {
+            JsonNode schemaNode = objectMapper.readTree(schemaJson);
+            if (log.isDebugEnabled()) {
+                String addl = schemaNode != null && schemaNode.has("additionalProperties")
+                        ? schemaNode.get("additionalProperties").toString()
+                        : "missing";
+                log.debug("[OpenAiService] Responses json_schema name={} root.additionalProperties={} schema={}",
+                        name, addl, schemaJson);
+            }
+            if (schemaNode == null || !schemaNode.isObject()) {
+                log.warn("[OpenAiService] Response schema is not an object, skipping json_schema format.");
+                return null;
+            }
+            JsonNode propertiesNode = schemaNode.get("properties");
+            if (propertiesNode == null || !propertiesNode.isObject() || propertiesNode.isEmpty()) {
+                log.warn("[OpenAiService] Response schema missing properties; skipping json_schema format.");
+                return null;
+            }
+            Map<String, JsonValue> properties = new LinkedHashMap<>();
+            Iterator<Map.Entry<String, JsonNode>> fields = schemaNode.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                properties.put(entry.getKey(), JsonValue.fromJsonNode(entry.getValue()));
+            }
+            ResponseFormatTextJsonSchemaConfig.Schema schema =
+                    ResponseFormatTextJsonSchemaConfig.Schema.builder()
+                            .additionalProperties(properties)
+                            .build();
+            return ResponseFormatTextJsonSchemaConfig.builder()
+                    .name(name)
+                    .schema(schema)
+                    .strict(true)
+                    .build();
+        } catch (Exception e) {
+            log.warn("[OpenAiService] Failed to build json_schema response format.", e);
+            return null;
+        }
     }
 
     private String extractResponseText(Response response) {

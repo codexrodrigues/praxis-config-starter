@@ -51,9 +51,10 @@ public final class AiPromptTemplates {
     - Evite objetos vazios: Se usar renderer.badge, preencha suas propriedades.
     """;
 
-    public static final String PROMPT_INTENT_CLASSIFIER = """
+	public static final String PROMPT_INTENT_CLASSIFIER = """
 	Você é um especialista em UX e configuração de componentes de UI.
 	Sua tarefa é analisar o pedido do usuário e classificar a intenção para direcionar o fluxo de processamento.
+	Você faz parte de um fluxo maior de orquestração e deve respeitar o contexto fornecido.
 
 	ENTRADA DO USUÁRIO: "{{USER_INPUT}}"
 	COLUNAS DISPONÍVEIS (se houver tabela): {{COLUMNS_LIST}}
@@ -81,8 +82,9 @@ public final class AiPromptTemplates {
 	6. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
 	7. Se o pedido afetar ambos, use scope="mixed".
 	8. Se faltarem detalhes essenciais, marque "needsClarification": true e preencha "missingContext" (ex: "column", "endpoint", "resourcePath"). Use "options" quando possível.
-	9. Retorne APENAS um objeto JSON válido (NUNCA um array).
-	10. Não inclua texto fora do JSON (sem markdown, sem comentários).
+	9. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
+	10. Retorne APENAS um objeto JSON válido (NUNCA um array).
+	11. Não inclua texto fora do JSON (sem markdown, sem comentários).
 
 	SCHEMA DE RESPOSTA (JSON):
 	{
@@ -123,8 +125,9 @@ INSTRUÇÕES:
 RESPOSTA:
 """;
 
-    public static final String PROMPT_EXECUTION_ENRICHED = """
+	public static final String PROMPT_EXECUTION_ENRICHED = """
 	Você é um Engenheiro de Configuração de UI. Sua tarefa é gerar um JSON PATCH para atualizar um componente de UI.
+	Você faz parte de um fluxo maior de orquestração e deve respeitar estritamente o contexto fornecido.
 
 CONTEXTO ALVO:
 {{CONTEXT_DESCRIPTION}}
@@ -138,11 +141,27 @@ CONTEXTO ALVO:
 	CONFIGURAÇÃO ATUAL (Do Alvo):
 	{{TARGET_CONFIG}}
 
+	REGRAS CRITICAS:
+	- NÃO invente endpoints, resourcePath ou schemas. Use apenas valores fornecidos no contexto.
+	- Se faltar um detalhe essencial, não adivinhe; responda com o mínimo possível e preserve o resto.
+	- Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os códigos abaixo.
+
+	CODIGOS DE CONTEXTO DISPONIVEIS:
+	- 10: descricao/documentacao curta do componente
+	- 20: assinatura do componente (inputs/outputs)
+	- 30: campos do schema (lista)
+	- 40: exemplo de dados baseado no schema
+	- 50: candidatos de endpoint (path/summary)
+	- 60: chaves do estado atual
+
 TEMPLATE DE REFERÊNCIA (Use como base quando fizer sentido):
 {{TEMPLATE_CONFIG}}
 
 METADADOS DE TEMPLATE (variantes e contexto):
 {{TEMPLATE_META}}
+
+RAG HINTS (trechos relevantes):
+{{RAG_HINTS}}
 
 SCHEMA (se disponível):
 {{SCHEMA_JSON}}
@@ -175,6 +194,12 @@ SAÍDA ESPERADA (JSON):
   "patch": { ... },
   "explanation": "Resumo curto do que foi feito."
 }
+
+OU (QUANDO PRECISAR DE CONTEXTO):
+{
+  "contextRequest": [10, 30],
+  "message": "Preciso de exemplos e campos do schema para continuar."
+}
 """;
 
     public static final String PROMPT_TABLE_ACTION_PLAN = """
@@ -182,6 +207,12 @@ Você e um especialista em configuracao de tabelas. Gere um plano de acoes atomi
 
 CATALOGO DE ACOES (JSON):
 {{ACTION_CATALOG}}
+
+RAG HINTS (trechos relevantes):
+{{RAG_HINTS}}
+
+CONTEXTO ADICIONAL (se houver):
+{{CONTEXT_HINTS}}
 
 COLUNAS DISPONIVEIS: {{COLUMNS_LIST}}
 FORMATOS DISPONIVEIS (use apenas o valor entre parenteses): {{FORMAT_OPTIONS}}
@@ -194,7 +225,10 @@ REGRAS:
 3. Para acoes que exigem um valor direto (ex.: SET_FORMAT, RENAME_COLUMN), informe value. Use null se nao souber.
 4. Para acoes com detalhes adicionais (ex.: COLUMN.RENDERER.BUTTON.STYLE.SET), use params (ex.: params.variant, params.color). params eh um objeto com as chaves usadas no patchTemplate do actionCatalog.
 5. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
-6. Retorne APENAS um objeto JSON valido (sem markdown).
+6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
+7. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
+   10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
+8. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):
 {
@@ -213,6 +247,12 @@ Voce e um especialista em configuracao de componentes de UI. Gere um plano de ac
 CATALOGO DE ACOES (JSON):
 {{ACTION_CATALOG}}
 
+RAG HINTS (trechos relevantes):
+{{RAG_HINTS}}
+
+CONTEXTO ADICIONAL (se houver):
+{{CONTEXT_HINTS}}
+
 CANDIDATOS DE ALVO (se houver):
 {{TARGET_CANDIDATES}}
 
@@ -224,7 +264,10 @@ REGRAS:
 3. Preencha "value" quando a acao exigir um valor direto.
 4. Use "params" para valores adicionais exigidos pelo patchTemplate (ex.: params.color).
 5. Se houver ambiguidade de alvo, preencha "ambiguities" com alias e candidates.
-6. Retorne APENAS um objeto JSON valido (sem markdown).
+6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
+7. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
+   10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
+8. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):
 {

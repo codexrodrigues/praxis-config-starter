@@ -20,6 +20,7 @@ public class AiOrchestratorResponse {
     private String message;
     private List<String> options;
     private List<AiOption> optionPayloads;
+    private List<Integer> contextRequest;
     private String componentId;
     private String componentType;
     private String path;

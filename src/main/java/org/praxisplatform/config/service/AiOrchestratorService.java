@@ -57,6 +57,19 @@ public class AiOrchestratorService {
     private static final String MISSING_BADGE_VALUES = "badge.values";
     private static final String GLOBAL_CONFIG_COMPONENT_TYPE = "praxis-global-config-editor";
     private static final String GLOBAL_CONFIG_KEY = "praxis:global-config";
+    private static final int CONTEXT_CODE_COMPONENT_DESCRIPTION = 10;
+    private static final int CONTEXT_CODE_COMPONENT_SIGNATURE = 20;
+    private static final int CONTEXT_CODE_SCHEMA_FIELDS = 30;
+    private static final int CONTEXT_CODE_SCHEMA_SAMPLE = 40;
+    private static final int CONTEXT_CODE_ENDPOINT_CANDIDATES = 50;
+    private static final int CONTEXT_CODE_CURRENT_STATE = 60;
+    private static final Set<String> RESOURCE_MISSING_KEYS = Set.of(
+            "resourcepath",
+            "endpoint",
+            "resource",
+            "schema",
+            "dataset"
+    );
 
     @Value("${praxis.ai.prompt.max-chars.config:12000}")
     private int maxConfigChars;
@@ -79,6 +92,9 @@ public class AiOrchestratorService {
     @Value("${praxis.ai.prompt.max-chars.runtime-metadata:4000}")
     private int maxRuntimeMetadataChars;
 
+    @Value("${praxis.ai.prompt.max-chars.rag-hints:2000}")
+    private int maxRagHintsChars;
+
     @Value("${praxis.ai.action-plan.provider:#{null}}")
     private String actionPlanProvider;
 
@@ -100,6 +116,7 @@ public class AiOrchestratorService {
     private final ContextRetrievalService retrievalService;
     private final SchemaRetrievalService schemaRetrievalService;
     private final AiRegistryTemplateService templateService;
+    private final AiRagContextService ragContextService;
     private final UserConfigService userConfigService;
     private final ObjectMapper objectMapper;
     private final AiApiKeyCryptoService apiKeyCryptoService;
@@ -174,6 +191,15 @@ public class AiOrchestratorService {
         List<AiCapability> configCapabilities = extractCapabilities(context.getComponentDefinition());
         List<AiCapability> componentCapabilities = extractComponentCapabilities(context.getComponentDefinition());
         JsonNode componentContext = extractComponentContextPack(context.getComponentDefinition());
+        String ragHints = ragContextService.buildRagHints(
+                request.getUserPrompt(),
+                componentContext,
+                context.getTemplate() != null ? context.getTemplate().getTemplateMeta() : null,
+                embeddingConfig);
+        String ragHintsBlock = truncateBlock(
+                "rag_hints",
+                safeMetadata(ragHints),
+                maxRagHintsChars);
         List<ComponentAction> componentActions = extractComponentActions(componentContext);
         boolean isTable = COMPONENT_ID_TABLE.equals(request.getComponentId());
         Set<String> allowedActionTypes = resolveAllowedActionTypes(componentActions, isTable);
@@ -230,7 +256,15 @@ public class AiOrchestratorService {
             return error("Falha ao classificar a intenção do usuário.");
         }
         intent = normalizeIntent(intent, columnNames, configCategories, componentCategories, warnings);
+        adjustPageBuilderCreateIntent(intent, request, context);
         List<String> missingContext = intent.getMissingContext();
+        if (shouldIgnoreColumnClarification(isTable, columnNames, missingContext)) {
+            missingContext = removeMissingContext(missingContext, "column");
+            intent.setMissingContext(missingContext == null || missingContext.isEmpty() ? null : missingContext);
+            if (intent.getMissingContext() == null) {
+                intent.setNeedsClarification(false);
+            }
+        }
         if (Boolean.TRUE.equals(intent.getNeedsClarification())
                 || (missingContext != null && !missingContext.isEmpty())) {
             AiOrchestratorResponse badgeResolution = tryResolveBadgeMissingContext(
@@ -244,7 +278,16 @@ public class AiOrchestratorService {
             if (badgeResolution != null) {
                 return badgeResolution;
             }
-            return clarification(buildClarificationMessage(intent), intent.getOptions());
+            AiOrchestratorResponse resourceClarification = resolveResourceClarification(
+                    request, intent, embeddingConfig);
+            if (resourceClarification != null) {
+                return resourceClarification;
+            }
+            missingContext = intent.getMissingContext();
+            if (Boolean.TRUE.equals(intent.getNeedsClarification())
+                    || (missingContext != null && !missingContext.isEmpty())) {
+                return clarification(buildClarificationMessage(intent, request), intent.getOptions());
+            }
         }
         if ("ask_about_config".equalsIgnoreCase(intent.getIntent())) {
             String answer = answerQuestion(request.getUserPrompt(), currentState, request, frontendConfig);
@@ -259,8 +302,12 @@ public class AiOrchestratorService {
                     columnDescriptors,
                     formatOptions,
                     componentActions,
+                    ragHintsBlock,
+                    context,
                     request,
-                    frontendConfig);
+                    frontendConfig,
+                    resolvedSchema,
+                    embeddingConfig);
             actionPlan = applySingleActionTargetFallback(
                     actionPlan,
                     intent,
@@ -331,8 +378,12 @@ public class AiOrchestratorService {
                     request.getUserPrompt(),
                     componentActions,
                     targetCandidates,
+                    ragHintsBlock,
+                    context,
                     request,
-                    frontendConfig);
+                    frontendConfig,
+                    resolvedSchema,
+                    embeddingConfig);
             ActionPlanClarification clarification = resolveActionPlanClarification(
                     actionPlan,
                     componentActions,
@@ -395,9 +446,61 @@ public class AiOrchestratorService {
                 combinedNotes,
                 schemaContext,
                 resolvedSchema,
-                runtimeMetadata);
+                runtimeMetadata,
+                ragHintsBlock);
 
         JsonNode result = callAiJson("patch_generation", prompt, null, frontendConfig, request, 1);
+        ContextRequest contextRequest = parseContextRequest(result);
+        if (contextRequest != null && contextRequest.hasCodes()) {
+            log.info("[AiOrchestratorService] contextRequest codes={} message={}",
+                    contextRequest.codes,
+                    contextRequest.message);
+            JsonNode resolvedHints = buildContextHintsFromRequest(
+                    context,
+                    request,
+                    resolvedSchema,
+                    embeddingConfig,
+                    contextRequest.codes);
+            if (resolvedHints != null && !resolvedHints.isNull() && resolvedHints.size() > 0) {
+                log.info("[AiOrchestratorService] contextRequest resolved hints keys={}",
+                        resolvedHints.isObject()
+                                ? resolveContextHintKeys(resolvedHints)
+                                : List.of("non-object"));
+                JsonNode mergedHints = mergeContextHints(request.getContextHints(), resolvedHints);
+                String retryRuntimeMetadata = truncateBlock(
+                        "runtime_metadata",
+                        safeMetadata(formatRuntimeMetadata(
+                                request.getDataProfile(),
+                                request.getSchemaFields(),
+                                request.getRuntimeState(),
+                                mergedHints)),
+                        maxRuntimeMetadataChars);
+                String retryPrompt = buildExecutionPrompt(
+                        request.getUserPrompt(),
+                        context,
+                        contextConfig,
+                        filteredCaps,
+                        combinedNotes,
+                        schemaContext,
+                        resolvedSchema,
+                        retryRuntimeMetadata,
+                        ragHintsBlock);
+                JsonNode retryResult = callAiJson("patch_generation", retryPrompt, null, frontendConfig, request, 2);
+                ContextRequest retryContextRequest = parseContextRequest(retryResult);
+                if (retryContextRequest != null && retryContextRequest.hasCodes()) {
+                    log.info("[AiOrchestratorService] contextRequest retry requested codes={} message={}",
+                            retryContextRequest.codes,
+                            retryContextRequest.message);
+                    return clarificationWithContextRequest(
+                            retryContextRequest.message,
+                            retryContextRequest.codes);
+                }
+                result = retryResult;
+            } else {
+                log.info("[AiOrchestratorService] contextRequest could not be resolved");
+                return clarificationWithContextRequest(contextRequest.message, contextRequest.codes);
+            }
+        }
         if (result == null || result.get("patch") == null) {
             return error("Nenhum patch gerado.");
         }
@@ -498,6 +601,7 @@ public class AiOrchestratorService {
     private AiJsonSchema buildIntentSchema() {
         ObjectNode schema = objectMapper.createObjectNode();
         schema.put("type", "object");
+        schema.put("additionalProperties", false);
 
         ObjectNode properties = schema.putObject("properties");
 
@@ -546,8 +650,12 @@ public class AiOrchestratorService {
             List<ColumnDescriptor> columns,
             List<ContextOption> formatOptions,
             List<ComponentAction> actionCatalog,
+            String ragHints,
+            AiContextDTO context,
             AiOrchestratorRequest request,
-            AiCallConfig callConfig) {
+            AiCallConfig callConfig,
+            JsonNode resolvedSchema,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
         ArrayNode columnsNode = objectMapper.createArrayNode();
         if (columns != null) {
             for (ColumnDescriptor col : columns) {
@@ -568,10 +676,37 @@ public class AiOrchestratorService {
                         "USER_INPUT", safe(userPrompt),
                         "COLUMNS_LIST", columnsNode.toString(),
                         "ACTION_CATALOG", actionsNode.toString(),
-                        "FORMAT_OPTIONS", formatChoices));
-        AiJsonSchema schema = buildTableActionPlanSchema(actionCatalog);
-        JsonNode json = generateActionPlanJson("table_action_plan", prompt, schema, request, callConfig);
+                        "RAG_HINTS", safe(ragHints),
+                        "FORMAT_OPTIONS", formatChoices,
+                        "CONTEXT_HINTS", formatContextHints(request != null ? request.getContextHints() : null)));
+        AiJsonSchema planSchema = buildTableActionPlanSchema(actionCatalog);
+        JsonNode json = generateActionPlanJson("table_action_plan", prompt, planSchema, request, callConfig);
+        ContextRequest contextRequest = parseContextRequest(json);
+        if (contextRequest != null && contextRequest.hasCodes()) {
+            JsonNode resolvedHints = buildContextHintsFromRequest(
+                    context,
+                    request,
+                    resolvedSchema,
+                    embeddingConfig,
+                    contextRequest.codes);
+            JsonNode merged = mergeContextHints(
+                    request != null ? request.getContextHints() : null,
+                    resolvedHints);
+            String retryPrompt = AiPromptTemplates.buildPrompt(
+                    AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN,
+                    Map.of(
+                            "USER_INPUT", safe(userPrompt),
+                            "COLUMNS_LIST", columnsNode.toString(),
+                            "ACTION_CATALOG", actionsNode.toString(),
+                            "RAG_HINTS", safe(ragHints),
+                            "FORMAT_OPTIONS", formatChoices,
+                            "CONTEXT_HINTS", formatContextHints(merged)));
+            json = generateActionPlanJson("table_action_plan", retryPrompt, planSchema, request, callConfig);
+        }
         if (json == null) {
+            return null;
+        }
+        if (parseContextRequest(json) != null) {
             return null;
         }
         return objectMapper.convertValue(json, AiActionPlan.class);
@@ -581,8 +716,12 @@ public class AiOrchestratorService {
             String userPrompt,
             List<ComponentAction> actionCatalog,
             ArrayNode targetCandidates,
+            String ragHints,
+            AiContextDTO context,
             AiOrchestratorRequest request,
-            AiCallConfig callConfig) {
+            AiCallConfig callConfig,
+            JsonNode resolvedSchema,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
         ArrayNode actionsNode = buildActionCatalogNode(actionCatalog);
         String candidates = targetCandidates != null ? targetCandidates.toString() : "[]";
         String prompt = AiPromptTemplates.buildPrompt(
@@ -590,10 +729,36 @@ public class AiOrchestratorService {
                 Map.of(
                         "USER_INPUT", safe(userPrompt),
                         "ACTION_CATALOG", actionsNode.toString(),
-                        "TARGET_CANDIDATES", candidates));
-        AiJsonSchema schema = buildComponentActionPlanSchema(actionCatalog);
-        JsonNode json = generateActionPlanJson("component_action_plan", prompt, schema, request, callConfig);
+                        "TARGET_CANDIDATES", candidates,
+                        "RAG_HINTS", safe(ragHints),
+                        "CONTEXT_HINTS", formatContextHints(request != null ? request.getContextHints() : null)));
+        AiJsonSchema planSchema = buildComponentActionPlanSchema(actionCatalog);
+        JsonNode json = generateActionPlanJson("component_action_plan", prompt, planSchema, request, callConfig);
+        ContextRequest contextRequest = parseContextRequest(json);
+        if (contextRequest != null && contextRequest.hasCodes()) {
+            JsonNode resolvedHints = buildContextHintsFromRequest(
+                    context,
+                    request,
+                    resolvedSchema,
+                    embeddingConfig,
+                    contextRequest.codes);
+            JsonNode merged = mergeContextHints(
+                    request != null ? request.getContextHints() : null,
+                    resolvedHints);
+            String retryPrompt = AiPromptTemplates.buildPrompt(
+                    AiPromptTemplates.PROMPT_COMPONENT_ACTION_PLAN,
+                    Map.of(
+                            "USER_INPUT", safe(userPrompt),
+                            "ACTION_CATALOG", actionsNode.toString(),
+                            "TARGET_CANDIDATES", candidates,
+                            "RAG_HINTS", safe(ragHints),
+                            "CONTEXT_HINTS", formatContextHints(merged)));
+            json = generateActionPlanJson("component_action_plan", retryPrompt, planSchema, request, callConfig);
+        }
         if (json == null) {
+            return null;
+        }
+        if (parseContextRequest(json) != null) {
             return null;
         }
         return objectMapper.convertValue(json, AiActionPlan.class);
@@ -956,6 +1121,7 @@ public class AiOrchestratorService {
     private AiJsonSchema buildTableActionPlanSchema(List<ComponentAction> actionCatalog) {
         ObjectNode schema = objectMapper.createObjectNode();
         schema.put("type", "object");
+        schema.put("additionalProperties", false);
 
         ObjectNode properties = schema.putObject("properties");
 
@@ -963,6 +1129,7 @@ public class AiOrchestratorService {
         actions.put("type", "array");
         ObjectNode actionItem = actions.putObject("items");
         actionItem.put("type", "object");
+        actionItem.put("additionalProperties", false);
         ObjectNode actionProps = actionItem.putObject("properties");
 
         ObjectNode type = actionProps.putObject("type");
@@ -982,6 +1149,7 @@ public class AiOrchestratorService {
         ambiguities.put("type", "array");
         ObjectNode ambiguityItem = ambiguities.putObject("items");
         ambiguityItem.put("type", "object");
+        ambiguityItem.put("additionalProperties", false);
         ObjectNode ambiguityProps = ambiguityItem.putObject("properties");
 
         ambiguityProps.putObject("alias").put("type", "string");
@@ -990,13 +1158,30 @@ public class AiOrchestratorService {
         candidates.putObject("items").put("type", "string");
         ambiguityProps.putObject("reason").put("type", "string");
 
-        schema.putArray("required").add("actions").add("ambiguities");
+        ObjectNode contextRequest = properties.putObject("contextRequest");
+        contextRequest.put("type", "array");
+        contextRequest.putObject("items").put("type", "integer");
+        properties.putObject("message").put("type", "string");
+
+        ArrayNode anyOf = schema.putArray("anyOf");
+        anyOf.add(objectMapper.createObjectNode()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .putArray("required")
+                .add("actions")
+                .add("ambiguities"));
+        anyOf.add(objectMapper.createObjectNode()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .putArray("required")
+                .add("contextRequest"));
         return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
     }
 
     private AiJsonSchema buildComponentActionPlanSchema(List<ComponentAction> actionCatalog) {
         ObjectNode schema = objectMapper.createObjectNode();
         schema.put("type", "object");
+        schema.put("additionalProperties", false);
 
         ObjectNode properties = schema.putObject("properties");
 
@@ -1004,6 +1189,7 @@ public class AiOrchestratorService {
         actions.put("type", "array");
         ObjectNode actionItem = actions.putObject("items");
         actionItem.put("type", "object");
+        actionItem.put("additionalProperties", false);
         ObjectNode actionProps = actionItem.putObject("properties");
 
         ObjectNode type = actionProps.putObject("type");
@@ -1023,6 +1209,7 @@ public class AiOrchestratorService {
         ambiguities.put("type", "array");
         ObjectNode ambiguityItem = ambiguities.putObject("items");
         ambiguityItem.put("type", "object");
+        ambiguityItem.put("additionalProperties", false);
         ObjectNode ambiguityProps = ambiguityItem.putObject("properties");
 
         ambiguityProps.putObject("alias").put("type", "string");
@@ -1031,7 +1218,23 @@ public class AiOrchestratorService {
         candidates.putObject("items").put("type", "string");
         ambiguityProps.putObject("reason").put("type", "string");
 
-        schema.putArray("required").add("actions").add("ambiguities");
+        ObjectNode contextRequest = properties.putObject("contextRequest");
+        contextRequest.put("type", "array");
+        contextRequest.putObject("items").put("type", "integer");
+        properties.putObject("message").put("type", "string");
+
+        ArrayNode anyOf = schema.putArray("anyOf");
+        anyOf.add(objectMapper.createObjectNode()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .putArray("required")
+                .add("actions")
+                .add("ambiguities"));
+        anyOf.add(objectMapper.createObjectNode()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .putArray("required")
+                .add("contextRequest"));
         return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
     }
 
@@ -1042,6 +1245,7 @@ public class AiOrchestratorService {
         ObjectNode params = actionProps.putObject("params");
         params.put("type", "object");
         params.put("nullable", true);
+        params.put("additionalProperties", false);
         ObjectNode properties = params.putObject("properties");
         for (String key : paramKeys) {
             if (key == null || key.isBlank()) continue;
@@ -3008,15 +3212,544 @@ public class AiOrchestratorService {
         return configCategories != null ? configCategories : List.of();
     }
 
-    private String buildClarificationMessage(AiIntentClassification intent) {
+    private String buildClarificationMessage(AiIntentClassification intent, AiOrchestratorRequest request) {
         if (intent == null) {
             return "Preciso de mais detalhes para continuar.";
         }
         List<String> missing = intent.getMissingContext();
         if (missing != null && !missing.isEmpty()) {
+            if (hasMissingResourceContext(missing)) {
+                return buildResourceClarificationMessage(
+                        request != null ? request.getComponentId() : null);
+            }
             return "Preciso de mais contexto para continuar: " + String.join(", ", missing) + ".";
         }
         return "Preciso de mais detalhes para continuar.";
+    }
+
+    private void adjustPageBuilderCreateIntent(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            AiContextDTO context) {
+        if (intent == null || request == null) {
+            return;
+        }
+        if (!isPageBuilder(request.getComponentId())) {
+            return;
+        }
+        if (!isCreateTableRequest(request)) {
+            return;
+        }
+        String resourcePath = request.getResourcePath();
+        if ((resourcePath == null || resourcePath.isBlank()) && context != null) {
+            resourcePath = context.getResourcePath();
+        }
+        if (resourcePath != null && !resourcePath.isBlank()) {
+            intent.setNeedsClarification(false);
+            intent.setMissingContext(null);
+            intent.setOptions(null);
+            return;
+        }
+        List<String> missing = new ArrayList<>();
+        missing.add("resourcePath");
+        intent.setMissingContext(missing);
+        intent.setNeedsClarification(true);
+        intent.setOptions(null);
+    }
+
+    private boolean isPageBuilder(String componentId) {
+        if (componentId == null || componentId.isBlank()) {
+            return false;
+        }
+        String normalized = componentId.trim().toLowerCase(Locale.ROOT);
+        return normalized.contains("gridster-page") || normalized.contains("dynamic-gridster-page");
+    }
+
+    private boolean isCreateTableRequest(AiOrchestratorRequest request) {
+        if (request == null || request.getUserPrompt() == null) {
+            return false;
+        }
+        String prompt = request.getUserPrompt().toLowerCase(Locale.ROOT);
+        boolean mentionsTable = prompt.contains("tabela") || prompt.contains("table");
+        if (!mentionsTable) {
+            return false;
+        }
+        JsonNode runtime = request.getRuntimeState();
+        if (runtime != null && runtime.has("widgetsCount") && runtime.get("widgetsCount").isInt()) {
+            return runtime.get("widgetsCount").asInt() == 0;
+        }
+        return true;
+    }
+
+    private boolean shouldIgnoreColumnClarification(
+            boolean isTable,
+            List<String> columnNames,
+            List<String> missingContext) {
+        if (!isTable || missingContext == null || missingContext.isEmpty()) {
+            return false;
+        }
+        if (columnNames != null && !columnNames.isEmpty()) {
+            return false;
+        }
+        return missingContext.stream()
+                .map(this::normalizeMissingKey)
+                .anyMatch(key -> key.contains("column"));
+    }
+
+    private List<String> removeMissingContext(List<String> missingContext, String key) {
+        if (missingContext == null || missingContext.isEmpty()) {
+            return null;
+        }
+        String normalizedKey = normalizeMissingKey(key);
+        List<String> filtered = missingContext.stream()
+                .filter(item -> !normalizeMissingKey(item).contains(normalizedKey))
+                .collect(Collectors.toList());
+        return filtered.isEmpty() ? null : filtered;
+    }
+
+    private AiOrchestratorResponse resolveResourceClarification(
+            AiOrchestratorRequest request,
+            AiIntentClassification intent,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+        if (request == null || intent == null) {
+            return null;
+        }
+        List<String> missing = intent.getMissingContext();
+        if (!hasMissingResourceContext(missing)) {
+            return null;
+        }
+
+        List<ApiSearchResult> results = retrievalService.searchApiMetadata(
+                request.getUserPrompt(),
+                request.getApiMethod(),
+                request.getApiTags(),
+                request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
+                embeddingConfig);
+
+        if (results.isEmpty()) {
+            return clarification(buildResourceClarificationMessage(request.getComponentId()), List.of());
+        }
+        if (results.size() == 1) {
+            ApiSearchResult picked = results.get(0);
+            if (picked != null && picked.getPath() != null && !picked.getPath().isBlank()) {
+                request.setResourcePath(picked.getPath());
+                intent.setMissingContext(removeMissingResourceContext(missing));
+                if (intent.getMissingContext() == null) {
+                    intent.setNeedsClarification(false);
+                }
+            }
+            return null;
+        }
+
+        List<AiOption> optionPayloads = buildApiOptionPayloads(results);
+        List<String> labels = optionPayloads.stream()
+                .map(AiOption::getLabel)
+                .filter(label -> label != null && !label.isBlank())
+                .collect(Collectors.toList());
+        return clarification(
+                buildResourceClarificationMessage(request.getComponentId()),
+                labels,
+                optionPayloads);
+    }
+
+    private boolean hasMissingResourceContext(List<String> missingContext) {
+        if (missingContext == null || missingContext.isEmpty()) {
+            return false;
+        }
+        return missingContext.stream()
+                .map(this::normalizeMissingKey)
+                .anyMatch(key -> RESOURCE_MISSING_KEYS.stream().anyMatch(key::contains));
+    }
+
+    private List<String> removeMissingResourceContext(List<String> missingContext) {
+        if (missingContext == null || missingContext.isEmpty()) {
+            return null;
+        }
+        List<String> filtered = missingContext.stream()
+                .filter(item -> !RESOURCE_MISSING_KEYS.stream()
+                        .anyMatch(key -> normalizeMissingKey(item).contains(key)))
+                .collect(Collectors.toList());
+        return filtered.isEmpty() ? null : filtered;
+    }
+
+    private String buildResourceClarificationMessage(String componentId) {
+        if (componentId == null) {
+            return "Qual conjunto de dados devo usar?";
+        }
+        String normalized = componentId.trim().toLowerCase(Locale.ROOT);
+        if (normalized.contains("table")) {
+            return "Qual conjunto de dados voce quer listar?";
+        }
+        if (normalized.contains("crud")) {
+            return "Qual conjunto de dados devo usar nesse CRUD?";
+        }
+        if (normalized.contains("form")) {
+            return "Qual conjunto de dados devo usar nesse formulario?";
+        }
+        if (normalized.contains("list")) {
+            return "Qual conjunto de dados voce quer exibir?";
+        }
+        return "Qual conjunto de dados devo usar?";
+    }
+
+    private String normalizeMissingKey(String key) {
+        if (key == null) {
+            return "";
+        }
+        return key.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    private List<AiOption> buildApiOptionPayloads(List<ApiSearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return List.of();
+        }
+        List<AiOption> payloads = new ArrayList<>();
+        for (ApiSearchResult result : results) {
+            if (result == null || result.getPath() == null || result.getPath().isBlank()) {
+                continue;
+            }
+            String label = buildApiOptionLabel(result);
+            String example = buildApiOptionExample(result);
+            payloads.add(AiOption.builder()
+                    .value(result.getPath().trim())
+                    .label(label)
+                    .example(example)
+                    .build());
+        }
+        return payloads;
+    }
+
+    private String buildApiOptionLabel(ApiSearchResult result) {
+        String summaryLabel = normalizeSummaryLabel(result != null ? result.getSummary() : null);
+        if (summaryLabel != null && !summaryLabel.isBlank()) {
+            return summaryLabel;
+        }
+        String path = result != null ? result.getPath() : null;
+        if (path != null && !path.isBlank()) {
+            return path.trim();
+        }
+        return "Endpoint";
+    }
+
+    private String buildApiOptionExample(ApiSearchResult result) {
+        if (result == null) {
+            return null;
+        }
+        String summary = result.getSummary();
+        if (summary != null && !summary.isBlank()) {
+            return summary.trim();
+        }
+        String method = result.getMethod();
+        String path = result.getPath();
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+        if (method == null || method.isBlank()) {
+            return path.trim();
+        }
+        return method.trim().toUpperCase(Locale.ROOT) + " " + path.trim();
+    }
+
+    private String normalizeSummaryLabel(String summary) {
+        if (summary == null || summary.isBlank()) {
+            return null;
+        }
+        String cleaned = summary.trim();
+        if (cleaned.length() > 80) {
+            return null;
+        }
+        String[] split = cleaned.split("[\\.;-]");
+        String candidate = split.length > 0 ? split[0].trim() : cleaned;
+        if (candidate.isBlank()) {
+            candidate = cleaned;
+        }
+        if (candidate.length() > 60) {
+            return null;
+        }
+        return candidate;
+    }
+
+    private ContextRequest parseContextRequest(JsonNode result) {
+        if (result == null || result.isNull()) {
+            return null;
+        }
+        JsonNode node = result.get("contextRequest");
+        if (node == null || node.isNull() || !node.isArray()) {
+            return null;
+        }
+        List<Integer> codes = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (item == null || item.isNull()) continue;
+            Integer code = parseContextCode(item);
+            if (code != null) {
+                codes.add(code);
+            }
+        }
+        if (codes.isEmpty()) {
+            return null;
+        }
+        String message = textOrNull(result.get("message"));
+        return new ContextRequest(codes, message);
+    }
+
+    private Integer parseContextCode(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (node.isInt() || node.isLong()) {
+            return node.asInt();
+        }
+        if (node.isTextual()) {
+            String raw = node.asText().trim();
+            if (raw.isBlank()) return null;
+            try {
+                return Integer.parseInt(raw);
+            } catch (NumberFormatException ignore) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode buildContextHintsFromRequest(
+            AiContextDTO context,
+            AiOrchestratorRequest request,
+            JsonNode schema,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            List<Integer> codes) {
+        if (codes == null || codes.isEmpty()) {
+            return null;
+        }
+        ObjectNode hints = objectMapper.createObjectNode();
+        ObjectNode pack = objectMapper.createObjectNode();
+        for (Integer code : codes) {
+            if (code == null) continue;
+            switch (code) {
+                case CONTEXT_CODE_COMPONENT_DESCRIPTION -> {
+                    if (context != null
+                            && context.getDescription() != null
+                            && !context.getDescription().isBlank()) {
+                        pack.put("componentDescription", context.getDescription());
+                    }
+                }
+                case CONTEXT_CODE_COMPONENT_SIGNATURE -> {
+                    JsonNode signature = buildComponentSignature(context, request);
+                    if (signature != null && !signature.isNull() && signature.size() > 0) {
+                        pack.set("componentSignature", signature);
+                    }
+                }
+                case CONTEXT_CODE_SCHEMA_FIELDS -> {
+                    ArrayNode fields = buildSchemaFieldList(
+                            request != null ? request.getSchemaFields() : null,
+                            schema);
+                    if (fields != null && fields.size() > 0) {
+                        pack.set("schemaFields", fields);
+                    }
+                }
+                case CONTEXT_CODE_SCHEMA_SAMPLE -> {
+                    JsonNode example = buildSchemaSample(
+                            request != null ? request.getSchemaFields() : null,
+                            schema);
+                    if (example != null && !example.isNull() && example.size() > 0) {
+                        pack.set("schemaSample", example);
+                    }
+                }
+                case CONTEXT_CODE_ENDPOINT_CANDIDATES -> {
+                    ArrayNode endpoints = buildEndpointCandidates(request, embeddingConfig);
+                    if (endpoints != null && endpoints.size() > 0) {
+                        pack.set("endpointCandidates", endpoints);
+                    }
+                }
+                case CONTEXT_CODE_CURRENT_STATE -> {
+                    ArrayNode keys = buildCurrentStateKeys(
+                            request != null ? request.getCurrentState() : null);
+                    if (keys != null && keys.size() > 0) {
+                        pack.set("currentStateKeys", keys);
+                    }
+                }
+                default -> {
+                }
+            }
+        }
+        if (pack.size() == 0) {
+            return null;
+        }
+        hints.set("contextPack", pack);
+        return hints;
+    }
+
+    private JsonNode buildComponentSignature(AiContextDTO context, AiOrchestratorRequest request) {
+        ObjectNode signature = objectMapper.createObjectNode();
+        JsonNode def = context != null ? context.getComponentDefinition() : null;
+        if (def != null && def.isObject()) {
+            JsonNode inputs = def.get("inputs");
+            JsonNode outputs = def.get("outputs");
+            if (inputs != null && !inputs.isNull()) {
+                signature.set("inputs", inputs);
+            }
+            if (outputs != null && !outputs.isNull()) {
+                signature.set("outputs", outputs);
+            }
+        }
+        if (signature.size() == 0 && request != null && request.getCurrentState() != null) {
+            List<String> inputs = extractObjectKeys(request.getCurrentState(), "inputs");
+            List<String> outputs = extractObjectKeys(request.getCurrentState(), "outputs");
+            if (inputs != null && !inputs.isEmpty()) {
+                ArrayNode inputArr = objectMapper.createArrayNode();
+                inputs.forEach(inputArr::add);
+                signature.set("inputs", inputArr);
+            }
+            if (outputs != null && !outputs.isEmpty()) {
+                ArrayNode outputArr = objectMapper.createArrayNode();
+                outputs.forEach(outputArr::add);
+                signature.set("outputs", outputArr);
+            }
+        }
+        return signature;
+    }
+
+    private ArrayNode buildSchemaFieldList(JsonNode schemaFields, JsonNode schema) {
+        ArrayNode out = objectMapper.createArrayNode();
+        List<String> names = new ArrayList<>();
+        if (schemaFields != null && schemaFields.isArray()) {
+            for (JsonNode field : schemaFields) {
+                String name = extractFieldName(field);
+                if (name != null && !name.isBlank()) {
+                    names.add(name);
+                }
+            }
+        } else if (schema != null && schema.isObject()) {
+            JsonNode props = schema.get("properties");
+            if (props != null && props.isObject()) {
+                props.fieldNames().forEachRemaining(names::add);
+            }
+        }
+        names.stream().distinct().forEach(out::add);
+        return out;
+    }
+
+    private JsonNode buildSchemaSample(JsonNode schemaFields, JsonNode schema) {
+        ObjectNode sample = objectMapper.createObjectNode();
+        if (schema != null && schema.isObject()) {
+            JsonNode props = schema.get("properties");
+            if (props != null && props.isObject()) {
+                props.fields().forEachRemaining(entry -> {
+                    JsonNode value = buildSampleValue(entry.getValue());
+                    if (value != null) {
+                        sample.set(entry.getKey(), value);
+                    }
+                });
+            }
+        }
+        if (sample.size() == 0 && schemaFields != null && schemaFields.isArray()) {
+            for (JsonNode field : schemaFields) {
+                String name = extractFieldName(field);
+                if (name != null && !name.isBlank()) {
+                    sample.set(name, objectMapper.getNodeFactory().textNode("<value>"));
+                }
+            }
+        }
+        return sample;
+    }
+
+    private JsonNode buildSampleValue(JsonNode schemaNode) {
+        if (schemaNode == null || schemaNode.isNull()) {
+            return null;
+        }
+        String type = schemaNode.has("type") ? schemaNode.get("type").asText() : null;
+        if (type == null && schemaNode.has("format")) {
+            type = schemaNode.get("format").asText();
+        }
+        if (type == null || type.isBlank()) {
+            return objectMapper.getNodeFactory().textNode("<value>");
+        }
+        return switch (type) {
+            case "string", "date", "date-time", "uuid" -> objectMapper.getNodeFactory().textNode("<text>");
+            case "integer", "int", "int32", "int64" -> objectMapper.getNodeFactory().numberNode(0);
+            case "number", "float", "double", "decimal" -> objectMapper.getNodeFactory().numberNode(0.0d);
+            case "boolean" -> objectMapper.getNodeFactory().booleanNode(false);
+            case "array" -> objectMapper.createArrayNode();
+            case "object" -> objectMapper.createObjectNode();
+            default -> objectMapper.getNodeFactory().textNode("<value>");
+        };
+    }
+
+    private ArrayNode buildEndpointCandidates(
+            AiOrchestratorRequest request,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+        if (request == null) {
+            return objectMapper.createArrayNode();
+        }
+        List<ApiSearchResult> results = retrievalService.searchApiMetadata(
+                request.getUserPrompt(),
+                request.getApiMethod(),
+                request.getApiTags(),
+                request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
+                embeddingConfig);
+        ArrayNode out = objectMapper.createArrayNode();
+        if (results == null || results.isEmpty()) {
+            return out;
+        }
+        for (ApiSearchResult result : results) {
+            if (result == null || result.getPath() == null || result.getPath().isBlank()) {
+                continue;
+            }
+            ObjectNode node = objectMapper.createObjectNode();
+            if (result.getMethod() != null && !result.getMethod().isBlank()) {
+                node.put("method", result.getMethod());
+            }
+            node.put("path", result.getPath());
+            if (result.getSummary() != null && !result.getSummary().isBlank()) {
+                node.put("summary", result.getSummary());
+            }
+            out.add(node);
+        }
+        return out;
+    }
+
+    private ArrayNode buildCurrentStateKeys(JsonNode currentState) {
+        ArrayNode out = objectMapper.createArrayNode();
+        if (currentState == null || !currentState.isObject()) {
+            return out;
+        }
+        currentState.fieldNames().forEachRemaining(out::add);
+        return out;
+    }
+
+    private String extractFieldName(JsonNode field) {
+        if (field == null || field.isNull()) {
+            return null;
+        }
+        if (field.has("name")) {
+            return textOrNull(field.get("name"));
+        }
+        if (field.has("field")) {
+            return textOrNull(field.get("field"));
+        }
+        if (field.has("id")) {
+            return textOrNull(field.get("id"));
+        }
+        return null;
+    }
+
+    private JsonNode mergeContextHints(JsonNode existing, JsonNode incoming) {
+        ObjectNode merged = objectMapper.createObjectNode();
+        if (existing != null && existing.isObject()) {
+            merged.setAll((ObjectNode) existing);
+        }
+        if (incoming != null && incoming.isObject()) {
+            incoming.fields().forEachRemaining(entry -> merged.set(entry.getKey(), entry.getValue()));
+        }
+        return merged;
+    }
+
+    private List<String> resolveContextHintKeys(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return List.of();
+        }
+        List<String> keys = new ArrayList<>();
+        contextHints.fieldNames().forEachRemaining(keys::add);
+        return keys;
     }
 
     private String normalizeScope(String scope) {
@@ -3049,7 +3782,8 @@ public class AiOrchestratorService {
             String capabilityNotes,
             AiSchemaContext schemaContext,
             JsonNode schema,
-            String runtimeMetadata) {
+            String runtimeMetadata,
+            String ragHints) {
         String contextDesc = buildContextDescription(context, schemaContext);
         String caps = truncateBlock("capabilities",
                 formatCapabilities(capabilities),
@@ -3064,6 +3798,9 @@ public class AiOrchestratorService {
                 schema != null ? schema.toPrettyString() : "N/A",
                 maxSchemaChars);
         String metadataJson = safeMetadata(runtimeMetadata);
+        String ragBlock = truncateBlock("rag_hints",
+                safeMetadata(ragHints),
+                maxRagHintsChars);
         String templateConfig = truncateBlock("template_config",
                 context.getTemplate() != null && context.getTemplate().getConfigJson() != null
                 ? context.getTemplate().getConfigJson().toPrettyString()
@@ -3088,6 +3825,7 @@ public class AiOrchestratorService {
                         Map.entry("TARGET_CONFIG", configJson),
                         Map.entry("TEMPLATE_CONFIG", templateConfig),
                         Map.entry("TEMPLATE_META", templateMeta),
+                        Map.entry("RAG_HINTS", ragBlock),
                         Map.entry("SCHEMA_JSON", schemaJson),
                         Map.entry("RUNTIME_METADATA", metadataJson),
                         Map.entry("CONTRACT_DSL", AiPromptTemplates.CONTRACT_DSL),
@@ -3119,6 +3857,17 @@ public class AiOrchestratorService {
             return "N/A";
         }
         return metadata.toPrettyString();
+    }
+
+    private String formatContextHints(JsonNode contextHints) {
+        if (contextHints == null || contextHints.isNull()) {
+            return "N/A";
+        }
+        if (contextHints.isTextual()) {
+            String text = contextHints.asText();
+            return text == null || text.isBlank() ? "N/A" : text;
+        }
+        return contextHints.toPrettyString();
     }
 
     private String safeMetadata(String metadata) {
@@ -3870,11 +4619,15 @@ public class AiOrchestratorService {
                 return new SchemaResolution(error("Nenhum endpoint encontrado para o contexto solicitado."));
             }
             if (results.size() > 1) {
-                List<String> options = results.stream()
-                        .map(r -> String.format("%s %s - %s", r.getMethod(), r.getPath(), r.getSummary()))
+                List<AiOption> optionPayloads = buildApiOptionPayloads(results);
+                List<String> labels = optionPayloads.stream()
+                        .map(AiOption::getLabel)
+                        .filter(label -> label != null && !label.isBlank())
                         .collect(Collectors.toList());
                 return new SchemaResolution(clarification(
-                        "Selecione o endpoint correto para continuar.", options));
+                        buildResourceClarificationMessage(request.getComponentId()),
+                        labels,
+                        optionPayloads));
             }
             ApiSearchResult picked = results.get(0);
             schemaContext = AiSchemaContext.builder()
@@ -3882,6 +4635,9 @@ public class AiOrchestratorService {
                     .operation(picked.getMethod())
                     .schemaType(defaultSchemaType(request.getComponentId()))
                     .build();
+            if (request.getResourcePath() == null || request.getResourcePath().isBlank()) {
+                request.setResourcePath(picked.getPath());
+            }
         }
 
         JsonNode schema = schemaRetrievalService.fetchSchema(schemaContext, requestBaseUrl);
@@ -4607,6 +5363,18 @@ public class AiOrchestratorService {
                 .message(message)
                 .options(options)
                 .optionPayloads(optionPayloads)
+                .build();
+    }
+
+    private AiOrchestratorResponse clarificationWithContextRequest(
+            String message,
+            List<Integer> contextRequest) {
+        return AiOrchestratorResponse.builder()
+                .type("clarification")
+                .message(message != null && !message.isBlank()
+                        ? message
+                        : "Preciso de mais contexto para continuar.")
+                .contextRequest(contextRequest)
                 .build();
     }
 
@@ -5414,6 +6182,20 @@ public class AiOrchestratorService {
             this.schemaContext = null;
             this.schema = null;
             this.response = response;
+        }
+    }
+
+    private static class ContextRequest {
+        private final List<Integer> codes;
+        private final String message;
+
+        private ContextRequest(List<Integer> codes, String message) {
+            this.codes = codes != null ? codes : List.of();
+            this.message = message;
+        }
+
+        private boolean hasCodes() {
+            return codes != null && !codes.isEmpty();
         }
     }
 
