@@ -14,8 +14,23 @@
         </encoder>
     </appender>
 
+    <appender name="API_INGEST" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>D:/Developer/praxis-plataform/praxis-api-quickstart/logs/api-metadata-ingest.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>D:/Developer/praxis-plataform/praxis-api-quickstart/logs/api-metadata-ingest.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} %level %msg%n</pattern>
+        </encoder>
+    </appender>
+
     <logger name="ai-interactions" level="INFO" additivity="false">
         <appender-ref ref="AI_INTERACTIONS"/>
+    </logger>
+
+    <logger name="api-metadata-ingest" level="INFO" additivity="false">
+        <appender-ref ref="API_INGEST"/>
     </logger>
 
     <root level="INFO">

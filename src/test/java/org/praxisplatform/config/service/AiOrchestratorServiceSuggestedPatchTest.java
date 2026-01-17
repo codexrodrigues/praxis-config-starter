@@ -29,6 +29,7 @@ class AiOrchestratorServiceSuggestedPatchTest {
                 null,
                 null,
                 null,
+                null,
                 objectMapper,
                 null);
     }

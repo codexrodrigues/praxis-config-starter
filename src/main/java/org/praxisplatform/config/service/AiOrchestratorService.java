@@ -144,6 +144,11 @@ public class AiOrchestratorService {
         EmbeddingService.EmbeddingCallConfig embeddingConfig =
                 resolveEmbeddingCallConfig(tenantId, userId, environment);
 
+        AiOrchestratorResponse createFlowResponse = tryHandleCreateFlow(request, context, embeddingConfig);
+        if (createFlowResponse != null) {
+            return createFlowResponse;
+        }
+
         List<String> warnings = new ArrayList<>();
         TemplateSelection templateSelection = resolveTemplateVariant(request, context, embeddingConfig);
         if (templateSelection.template != null) {
@@ -3227,6 +3232,344 @@ public class AiOrchestratorService {
         return "Preciso de mais detalhes para continuar.";
     }
 
+    private AiOrchestratorResponse tryHandleCreateFlow(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+        if (request == null || !isPageBuilder(request.getComponentId())) {
+            return null;
+        }
+        boolean isCreatePrompt = promptMentionsTable(request.getUserPrompt());
+        JsonNode createFlowNode = extractCreateFlow(request.getContextHints());
+        if (createFlowNode == null && !isCreatePrompt) {
+            return null;
+        }
+        CreateFlowState state = parseCreateFlow(createFlowNode);
+        if (state.invalid) {
+            return clarification("Escolha uma opção válida para continuar.", List.of());
+        }
+        String step = state.step;
+        if (step == null) {
+            step = isCreatePrompt ? "endpoint" : "widget";
+        }
+
+        if ("widget".equals(step)) {
+            List<AiOption> widgets = resolveWidgetOptions(request, context);
+            if (widgets.isEmpty()) {
+                return clarification("Nenhum widget disponível para seleção.", List.of());
+            }
+            List<AiOption> payloads = widgets.stream()
+                    .map(opt -> AiOption.builder()
+                            .value(opt.getValue())
+                            .label(opt.getLabel())
+                            .example(opt.getExample())
+                            .contextHints(buildCreateFlowHints("endpoint", opt.getValue(), null))
+                            .build())
+                    .collect(Collectors.toList());
+            return clarification("Qual componente deseja adicionar?",
+                    buildAiOptionLabels(payloads),
+                    payloads);
+        }
+
+        if ("endpoint".equals(step)) {
+            String widgetId = state.widgetId;
+            if (isCreatePrompt && isBlank(widgetId)) {
+                widgetId = "praxis-table";
+            }
+            if (isBlank(widgetId) || !isValidWidgetId(widgetId, request, context)) {
+                return buildWidgetStepResponse(request, context);
+            }
+            List<ApiSearchResult> results = searchEndpoints(request, embeddingConfig);
+            if (results.isEmpty()) {
+                return clarification("nenhum endpoint encontrado", List.of());
+            }
+            if (isCreatePrompt) {
+                results = filterTableEndpoints(results);
+                if (results.isEmpty()) {
+                    return clarification("nenhum endpoint de listagem (POST filter) encontrado", List.of());
+                }
+            }
+            if (!isBlank(state.resourcePath)
+                    && isValidResourcePath(state.resourcePath, results)) {
+                JsonNode patch = buildPageWidgetPatch(widgetId, state.resourcePath);
+                return AiOrchestratorResponse.builder()
+                        .type("patch")
+                        .patch(patch)
+                        .build();
+            }
+
+            final String finalWidgetId = widgetId;
+            List<AiOption> payloads = buildApiOptionPayloads(results).stream()
+                    .map(opt -> AiOption.builder()
+                            .value(opt.getValue())
+                            .label(opt.getLabel())
+                            .example(opt.getExample())
+                            .contextHints(buildCreateFlowHints("finalize", finalWidgetId, opt.getValue()))
+                            .build())
+                    .collect(Collectors.toList());
+            return clarification("Qual endpoint devo usar?",
+                    buildAiOptionLabels(payloads),
+                    payloads);
+        }
+
+        if ("finalize".equals(step)) {
+            String widgetId = state.widgetId;
+            if (isCreatePrompt && isBlank(widgetId)) {
+                widgetId = "praxis-table";
+            }
+            if (isBlank(widgetId) || !isValidWidgetId(widgetId, request, context)) {
+                return buildWidgetStepResponse(request, context);
+            }
+            if (isBlank(state.resourcePath)) {
+                return clarification("Escolha um endpoint válido.", List.of());
+            }
+            JsonNode patch = buildPageWidgetPatch(widgetId, state.resourcePath);
+            return AiOrchestratorResponse.builder()
+                    .type("patch")
+                    .patch(patch)
+                    .build();
+        }
+
+        return clarification("Escolha uma opção válida para continuar.", List.of());
+    }
+
+    private AiOrchestratorResponse buildWidgetStepResponse(
+            AiOrchestratorRequest request,
+            AiContextDTO context) {
+        List<AiOption> widgets = resolveWidgetOptions(request, context);
+        if (widgets.isEmpty()) {
+            return clarification("Nenhum widget disponível para seleção.", List.of());
+        }
+        List<AiOption> payloads = widgets.stream()
+                .map(opt -> AiOption.builder()
+                        .value(opt.getValue())
+                        .label(opt.getLabel())
+                        .example(opt.getExample())
+                        .contextHints(buildCreateFlowHints("endpoint", opt.getValue(), null))
+                        .build())
+                .collect(Collectors.toList());
+        return clarification("Qual componente deseja adicionar?",
+                buildAiOptionLabels(payloads),
+                payloads);
+    }
+
+    private JsonNode extractCreateFlow(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode node = contextHints.get("createFlow");
+        return node != null && node.isObject() ? node : null;
+    }
+
+    private CreateFlowState parseCreateFlow(JsonNode createFlow) {
+        if (createFlow == null || !createFlow.isObject()) {
+            return new CreateFlowState(null, null, null, false);
+        }
+        String step = textOrNull(createFlow.get("step"));
+        if (step != null) {
+            String normalized = step.trim().toLowerCase(Locale.ROOT);
+            if (!List.of("widget", "endpoint", "finalize").contains(normalized)) {
+                return CreateFlowState.invalid();
+            }
+            step = normalized;
+        }
+        String widgetId = textOrNull(createFlow.get("widgetId"));
+        String resourcePath = textOrNull(createFlow.get("resourcePath"));
+        return new CreateFlowState(step, widgetId, resourcePath, false);
+    }
+
+    private JsonNode buildCreateFlowHints(String step, String widgetId, String resourcePath) {
+        ObjectNode root = objectMapper.createObjectNode();
+        ObjectNode flow = root.putObject("createFlow");
+        flow.put("version", "v1");
+        flow.put("step", step);
+        if (!isBlank(widgetId)) {
+            flow.put("widgetId", widgetId);
+        }
+        if (!isBlank(resourcePath)) {
+            flow.put("resourcePath", resourcePath);
+        }
+        return root;
+    }
+
+    private List<AiOption> resolveWidgetOptions(
+            AiOrchestratorRequest request,
+            AiContextDTO context) {
+        List<AiOption> out = new ArrayList<>();
+        JsonNode runtime = request != null ? request.getRuntimeState() : null;
+        JsonNode catalog = runtime != null ? runtime.get("componentCatalog") : null;
+        if (catalog != null && catalog.isArray()) {
+            for (JsonNode item : catalog) {
+                String id = textOrNull(item.get("id"));
+                if (isBlank(id)) continue;
+                String label = textOrNull(item.get("friendlyName"));
+                out.add(AiOption.builder()
+                        .value(id)
+                        .label(!isBlank(label) ? label : id)
+                        .build());
+            }
+        }
+        if (!out.isEmpty()) {
+            return out;
+        }
+
+        JsonNode contextPack = extractComponentContextPack(
+                context != null ? context.getComponentDefinition() : null);
+        JsonNode options = contextPack != null
+                ? contextPack.path("optionsByPath").path("page.widgets[].definition.id").path("options")
+                : null;
+        if (options != null && options.isArray()) {
+            for (JsonNode opt : options) {
+                String value = textOrNull(opt.get("value"));
+                String label = textOrNull(opt.get("label"));
+                if (isBlank(value) && isBlank(label)) continue;
+                String id = !isBlank(value) ? value : label;
+                out.add(AiOption.builder()
+                        .value(id)
+                        .label(!isBlank(label) ? label : id)
+                        .build());
+            }
+        }
+        return out;
+    }
+
+    private List<ApiSearchResult> searchEndpoints(
+            AiOrchestratorRequest request,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+        return retrievalService.searchApiMetadata(
+                request.getUserPrompt(),
+                request.getApiMethod(),
+                request.getApiTags(),
+                request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
+                embeddingConfig);
+    }
+
+    private List<ApiSearchResult> filterTableEndpoints(List<ApiSearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return List.of();
+        }
+        List<ApiSearchResult> filtered = new ArrayList<>();
+        for (ApiSearchResult result : results) {
+            if (result == null) {
+                continue;
+            }
+            String method = result.getMethod();
+            if (method == null || !method.equalsIgnoreCase("POST")) {
+                continue;
+            }
+            String path = result.getPath();
+            String summary = result.getSummary();
+            if (containsFilterKeyword(path) || containsFilterKeyword(summary)) {
+                filtered.add(result);
+            }
+        }
+        return filtered;
+    }
+
+    private boolean containsFilterKeyword(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return normalized.contains("filter");
+    }
+
+    private boolean isValidWidgetId(
+            String widgetId,
+            AiOrchestratorRequest request,
+            AiContextDTO context) {
+        if (isBlank(widgetId)) {
+            return false;
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        JsonNode runtime = request != null ? request.getRuntimeState() : null;
+        JsonNode catalog = runtime != null ? runtime.get("componentCatalog") : null;
+        if (catalog != null && catalog.isArray()) {
+            for (JsonNode item : catalog) {
+                String id = textOrNull(item.get("id"));
+                if (!isBlank(id)) {
+                    ids.add(id);
+                }
+            }
+        }
+        if (ids.isEmpty()) {
+            JsonNode contextPack = extractComponentContextPack(
+                    context != null ? context.getComponentDefinition() : null);
+            JsonNode options = contextPack != null
+                    ? contextPack.path("optionsByPath").path("page.widgets[].definition.id").path("options")
+                    : null;
+            if (options != null && options.isArray()) {
+                for (JsonNode opt : options) {
+                    String id = textOrNull(opt.get("value"));
+                    if (isBlank(id)) {
+                        id = textOrNull(opt.get("label"));
+                    }
+                    if (!isBlank(id)) {
+                        ids.add(id);
+                    }
+                }
+            }
+        }
+        return ids.contains(widgetId);
+    }
+
+    private boolean isValidResourcePath(String resourcePath, List<ApiSearchResult> results) {
+        if (isBlank(resourcePath) || results == null || results.isEmpty()) {
+            return false;
+        }
+        for (ApiSearchResult result : results) {
+            if (result != null && resourcePath.equalsIgnoreCase(result.getPath())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private JsonNode buildPageWidgetPatch(String widgetId, String resourcePath) {
+        ObjectNode patch = objectMapper.createObjectNode();
+        ObjectNode page = patch.putObject("page");
+        ArrayNode widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", widgetId);
+        ObjectNode inputs = definition.putObject("inputs");
+        inputs.put("resourcePath", resourcePath);
+        ObjectNode layout = widget.putObject("layout");
+        layout.put("col", 1);
+        layout.put("row", 1);
+        layout.put("colSpan", 3);
+        layout.put("rowSpan", 3);
+        return patch;
+    }
+
+    private List<String> buildAiOptionLabels(List<AiOption> options) {
+        if (options == null || options.isEmpty()) {
+            return List.of();
+        }
+        List<String> labels = new ArrayList<>();
+        for (AiOption option : options) {
+            if (option == null) continue;
+            String label = option.getLabel();
+            if (label != null && !label.isBlank()) {
+                labels.add(label);
+                continue;
+            }
+            String value = option.getValue();
+            if (value != null && !value.isBlank()) {
+                labels.add(value);
+            }
+        }
+        return labels;
+    }
+
+    private boolean promptMentionsTable(String prompt) {
+        if (prompt == null) {
+            return false;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        return normalized.contains("tabela") || normalized.contains("table");
+    }
+
     private void adjustPageBuilderCreateIntent(
             AiIntentClassification intent,
             AiOrchestratorRequest request,
@@ -5985,6 +6328,24 @@ public class AiOrchestratorService {
             out.put(String.valueOf(entry.getKey()), entry.getValue());
         }
         return out;
+    }
+
+    private static final class CreateFlowState {
+        private final String step;
+        private final String widgetId;
+        private final String resourcePath;
+        private final boolean invalid;
+
+        private CreateFlowState(String step, String widgetId, String resourcePath, boolean invalid) {
+            this.step = step;
+            this.widgetId = widgetId;
+            this.resourcePath = resourcePath;
+            this.invalid = invalid;
+        }
+
+        private static CreateFlowState invalid() {
+            return new CreateFlowState(null, null, null, true);
+        }
     }
 
     private static final class BadgeValuesContext {

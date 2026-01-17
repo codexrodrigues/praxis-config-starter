@@ -100,13 +100,14 @@ public class ContextRetrievalService {
     }
 
     private ApiSearchResult mapToApiSearchResult(ApiMetadataProjection projection) {
+        double score = safeSimilarityScore(projection != null ? projection.getSimilarityScore() : null);
         return ApiSearchResult.builder()
                 .id(projection.getId())
                 .method(projection.getMethod())
                 .path(projection.getPath())
                 .summary(projection.getSummary())
                 .tags(projection.getTags())
-                .similarityScore(projection.getSimilarityScore())
+                .similarityScore(score)
                 .requestSchemaSnippet(projection.getRequestSchemaSnippet())
                 .responseSchemaSnippet(projection.getResponseSchemaSnippet())
                 .requestSchema(projection.getRequestSchema())
@@ -116,11 +117,12 @@ public class ContextRetrievalService {
     }
 
     private ComponentSearchResult mapToComponentSearchResult(ComponentDefinitionProjection projection) {
+        double score = safeSimilarityScore(projection != null ? projection.getSimilarityScore() : null);
         return ComponentSearchResult.builder()
                 .id(projection.getId())
                 .description(projection.getDescription())
                 .jsonSchema(projection.getJsonSchemaSnippet()) // Usa o snippet já configurado
-                .similarityScore(projection.getSimilarityScore())
+                .similarityScore(score)
                 .build();
     }
 
@@ -155,5 +157,9 @@ public class ContextRetrievalService {
             return query;
         }
         return query.substring(0, 120) + "...";
+    }
+
+    private double safeSimilarityScore(Double score) {
+        return score != null ? score : 0.0d;
     }
 }

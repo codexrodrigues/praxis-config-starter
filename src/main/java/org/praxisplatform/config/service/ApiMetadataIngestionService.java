@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.dto.ApiCatalogRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
@@ -25,6 +27,7 @@ public class ApiMetadataIngestionService {
     private final ApiMetadataRepository repository;
     private final ObjectMapper objectMapper;
     private final EmbeddingService embeddingService;
+    private static final Logger ingestLog = LoggerFactory.getLogger("api-metadata-ingest");
 
     @Transactional
     public void ingestCatalog(ApiCatalogRequest request) {
@@ -49,15 +52,39 @@ public class ApiMetadataIngestionService {
                 String rawJson = safeWrite(ep);
 
                 String embeddingSummary = buildSummary(path, method, tags, summary, description, operationId, ep);
+                ingestLog.info(
+                        "Ingest start: method={} path={} tags={} summaryLen={} descLen={} reqSchemaLen={} resSchemaLen={} paramsLen={}",
+                        method,
+                        path,
+                        safeLen(tags),
+                        safeLen(summary),
+                        safeLen(description),
+                        safeLen(requestSchema),
+                        safeLen(responseSchema),
+                        safeLen(parameters));
+                ingestLog.info("Embedding input size={} sample='{}'",
+                        safeLen(embeddingSummary),
+                        safeSnippet(embeddingSummary));
                 List<Float> embedding = embeddingService.embed(embeddingSummary);
+                if (embedding == null || embedding.isEmpty()) {
+                    ingestLog.warn("Embedding empty for {} {}", method, path);
+                } else {
+                    ingestLog.info("Embedding size={} for {} {}", embedding.size(), method, path);
+                }
 
                 ApiMetadata meta = upsert(path, method, tags, summary, description, operationId,
                         requestSchema, responseSchema, parameters, rawJson, embedding);
 
                 log.info("Ingested api metadata: {} {}", meta.getMethod(), meta.getPath());
+                ingestLog.info("Ingest saved: id={} method={} path={} embeddingSize={}",
+                        meta.getId(),
+                        meta.getMethod(),
+                        meta.getPath(),
+                        embedding != null ? embedding.size() : 0);
             } catch (Exception e) {
                 String msg = "Error ingesting endpoint: " + ep.getMethod() + " " + ep.getPath();
                 log.error(msg, e);
+                ingestLog.error(msg, e);
                 throw new ConfigurationIngestionException(msg, e);
             }
         }
@@ -94,6 +121,18 @@ public class ApiMetadataIngestionService {
     private String toCommaSeparated(List<String> tags) {
         if (tags == null || tags.isEmpty()) return null;
         return String.join(",", tags);
+    }
+
+    private int safeLen(String value) {
+        return value == null ? 0 : value.length();
+    }
+
+    private String safeSnippet(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        int limit = Math.min(160, value.length());
+        return value.substring(0, limit).replaceAll("\\s+", " ").trim();
     }
     
     private String safeWrite(Object node) {

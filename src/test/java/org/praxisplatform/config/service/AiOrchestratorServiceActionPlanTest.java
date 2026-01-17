@@ -29,6 +29,7 @@ class AiOrchestratorServiceActionPlanTest {
             null,
             null,
             null,
+            null,
             objectMapper,
             null);
   }
