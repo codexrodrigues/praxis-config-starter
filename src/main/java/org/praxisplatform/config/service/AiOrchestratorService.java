@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -5634,7 +5635,7 @@ public class AiOrchestratorService {
     private SanitizeResult sanitizePatch(JsonNode patch, List<AiCapability> caps) {
         if (patch == null) return new SanitizeResult(null, List.of());
         if (caps == null || caps.isEmpty()) {
-            return new SanitizeResult(patch, List.of("Capabilities não encontradas; patch não sanitizado."));
+            return new SanitizeResult(null, List.of("Capabilities ausentes; patch bloqueado."));
         }
         List<String> allowedPaths = caps.stream()
                 .map(AiCapability::getPath)
@@ -5652,7 +5653,8 @@ public class AiOrchestratorService {
                     && (allowedPaths.contains(currentPath + "[]")
                     || allowedPaths.stream().anyMatch(p -> p.startsWith(currentPath + "[].")));
             if (!isRootArray) {
-                return node;
+                warnings.add("Array ignorado: " + currentPath);
+                return MissingNode.getInstance();
             }
             ArrayNode arr = objectMapper.createArrayNode();
             for (JsonNode item : node) {
@@ -5676,9 +5678,10 @@ public class AiOrchestratorService {
 
             if (exactMatch || prefixMatch) {
                 JsonNode sanitizedChild = sanitizeNode(value, newPath, allowedPaths, warnings);
-                if (sanitizedChild != null
-                        && sanitizedChild.isObject()
-                        && sanitizedChild.size() == 0) {
+                if (sanitizedChild == null
+                        || sanitizedChild.isMissingNode()
+                        || sanitizedChild.isNull()
+                        || (sanitizedChild.isObject() && sanitizedChild.size() == 0)) {
                     return;
                 }
                 clean.set(key, sanitizedChild);

@@ -98,6 +98,54 @@ class AiOrchestratorServiceSuggestedPatchTest {
         assertThat(response.getCode()).isEqualTo("INVALID_ENUM_VALUE");
     }
 
+    @Test
+    void shouldRejectSuggestedPatchWhenCapabilitiesMissing() {
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.put("title", "Novo titulo");
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "applySuggestedPatch",
+                patch,
+                objectMapper.createObjectNode(),
+                "praxis-card",
+                new ArrayList<>(),
+                List.of(),
+                List.of(),
+                null);
+
+        assertThat(response.getType()).isEqualTo("error");
+        assertThat(response.getWarnings())
+                .isNotNull()
+                .anySatisfy(w -> assertThat(w).contains("Capabilities ausentes"));
+    }
+
+    @Test
+    void shouldDropArraysWhenPathDoesNotAllowArray() {
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode filters = patch.putArray("filters");
+        filters.addObject().put("field", "status").put("value", "active");
+
+        List<AiCapability> caps = List.of(
+                AiCapability.builder()
+                        .path("filters")
+                        .build());
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "applySuggestedPatch",
+                patch,
+                objectMapper.createObjectNode(),
+                "praxis-card",
+                new ArrayList<>(),
+                caps,
+                List.of(),
+                null);
+
+        assertThat(response.getType()).isEqualTo("error");
+        assertThat(response.getMessage()).contains("patch sugerido");
+    }
+
     private ObjectNode buildCurrentState(String field) {
         ObjectNode currentState = objectMapper.createObjectNode();
         ArrayNode columns = currentState.putArray("columns");
