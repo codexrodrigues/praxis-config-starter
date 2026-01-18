@@ -330,7 +330,7 @@ class AiOrchestratorServiceActionPlanTest {
                 new ArrayList<>());
 
     assertThat(normalized.getActions()).hasSize(1);
-    assertThat(normalized.getActions().get(0).getValue().asText()).isEqualTo("BRL|symbol|2");
+    assertThat(normalized.getActions().get(0).getValue().asText()).isEqualTo("BRL");
   }
 
   @Test

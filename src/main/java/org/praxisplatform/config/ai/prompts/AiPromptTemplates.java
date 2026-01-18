@@ -180,9 +180,9 @@ PEDIDO DO USUÁRIO: "{{USER_INPUT}}"
 
 INSTRUÇÕES:
 1. Analise a Configuração Atual e o Pedido.
-2. Gere um JSON Patch parcial que satisfaça o pedido, usando SOMENTE chaves listadas em CAPABILITIES PERMITIDAS.
+2. Gere um merge patch (objeto parcial) que satisfaça o pedido, usando SOMENTE chaves listadas em CAPABILITIES PERMITIDAS.
    - PROIBIDO: JSON Patch (RFC6902), JSON Pointer, índices numéricos ou ops/path.
-   - Use patch semântico (objeto parcial) com identidade (ex.: columns[].field).
+   - Use patch semântico com identidade (ex.: columns[].field).
 3. O patch será aplicado via "Smart Merge".
    - Para arrays com identidade conhecida (ex.: columns[].field, fieldMetadata[].name), use a chave para atualizar itens existentes.
    - Se a identidade do array não estiver clara, peça confirmação.

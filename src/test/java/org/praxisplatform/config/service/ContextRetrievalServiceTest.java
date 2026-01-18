@@ -50,7 +50,7 @@ class ContextRetrievalServiceTest {
         assertTrue(longSchema.length() > 500, "Schema should be longer than 500 chars for valid test");
 
         // Mock embedding service
-        when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        when(embeddingService.embed(anyString(), any())).thenReturn(List.of(0.1f, 0.2f));
 
         // Mock repository to return a projection
         ApiMetadataProjection projectionMock = mock(ApiMetadataProjection.class);

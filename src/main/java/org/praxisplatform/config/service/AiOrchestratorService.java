@@ -5395,20 +5395,9 @@ public class AiOrchestratorService {
             return SemanticPatchCheck.invalid("Patch ausente ou invalido.", false, List.of(), patchNode);
         }
         JsonNode working = patchNode;
-        if (working.isArray()) {
-            JsonNode converted = convertJsonPatchToSemantic(working, currentState);
-            if (converted == null) {
-                return SemanticPatchCheck.invalid(
-                        "Patch invalido: JSON Patch nao e suportado. Gere um patch semantico por identidade (ex.: columns[].field).",
-                        false,
-                        List.of(),
-                        patchNode);
-            }
-            warnings.add("JSON Patch convertido para patch semantico usando field da coluna.");
-            working = converted;
-        } else if (looksLikeJsonPatchObject(working)) {
+        if (working.isArray() || looksLikeJsonPatchObject(working)) {
             return SemanticPatchCheck.invalid(
-                    "Patch invalido: JSON Patch nao e suportado. Gere um patch semantico por identidade (ex.: columns[].field).",
+                    "Patch invalido: JSON Patch nao e suportado. Use merge patch (objeto parcial) com identidade (ex.: columns[].field).",
                     false,
                     List.of(),
                     patchNode);
