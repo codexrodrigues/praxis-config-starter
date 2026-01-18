@@ -17,8 +17,10 @@ import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.AiCapability;
 import org.praxisplatform.config.dto.AiContextDTO;
 import org.praxisplatform.config.dto.AiSuggestion;
+import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
 import org.praxisplatform.config.dto.AiSuggestionsRequest;
 import org.praxisplatform.config.dto.AiSuggestionsResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -32,6 +34,7 @@ public class AiSuggestionsService {
     private static final int DENSITY_COLUMNS_THRESHOLD = 8;
     private static final int MAX_COLUMN_SUGGESTIONS = 3;
     private static final int BADGE_CARDINALITY_MAX = 6;
+    private static final int DEFAULT_MAX_PAGE_WIDGET_SUGGESTIONS = 4;
     private static final List<String> DEFAULT_BADGE_PALETTE = List.of(
             "primary",
             "accent",
@@ -79,6 +82,10 @@ public class AiSuggestionsService {
     }
 
     private final ObjectMapper objectMapper;
+    private final AiProvider aiProvider;
+
+    @Value("${praxis.ai.suggestions.llm-enabled:false}")
+    private boolean llmEnabled;
 
     public AiSuggestionsResponse suggest(AiSuggestionsRequest request, AiContextDTO context) {
         JsonNode currentState = safeObject(request != null ? request.getCurrentState() : null);
@@ -91,17 +98,46 @@ public class AiSuggestionsService {
         Set<String> runtimePaths = extractRuntimeCapabilities(currentState);
         Set<String> allowedPaths = resolveAllowedPaths(registryPaths, runtimePaths);
 
-        List<AiSuggestion> suggestions = List.of();
+        List<AiSuggestion> suggestions = new ArrayList<>();
+        boolean usedLlm = false;
+        List<String> warnings = new ArrayList<>();
+
         if (isTable(context, request)) {
-            suggestions = buildTableSuggestions(config, dataProfile, allowedPaths, request != null ? request.getLocale() : null, schemaFieldHints);
+            suggestions.addAll(buildTableSuggestions(
+                    config,
+                    dataProfile,
+                    allowedPaths,
+                    request != null ? request.getLocale() : null,
+                    schemaFieldHints));
         } else if (isForm(context, request)) {
-            suggestions = buildFormSuggestions(config, allowedPaths);
+            suggestions.addAll(buildFormSuggestions(config, allowedPaths));
+        } else if (isPageBuilder(context, request)) {
+            JsonNode runtimeState = currentState.get("runtimeState");
+            suggestions.addAll(buildPageBuilderSuggestions(config, runtimeState, allowedPaths, context));
         }
 
-        List<AiSuggestion> ordered = sortAndLimit(suggestions, request != null ? request.getMaxSuggestions() : null);
+        suggestions.addAll(buildTemplatePromptSuggestions(context != null ? context.getTemplate() : null));
+
+        if (llmEnabled && !isMockProvider() && suggestions.isEmpty()) {
+            List<AiSuggestion> llmSuggestions = buildLlmSuggestions(
+                    request,
+                    context,
+                    config,
+                    currentState.get("runtimeState"),
+                    allowedPaths);
+            if (!llmSuggestions.isEmpty()) {
+                suggestions.addAll(llmSuggestions);
+                usedLlm = true;
+            } else {
+                warnings.add("llm_suggestions_empty");
+            }
+        }
+
+        List<AiSuggestion> ordered = sortAndLimit(dedupeSuggestions(suggestions), request != null ? request.getMaxSuggestions() : null);
         return AiSuggestionsResponse.builder()
                 .suggestions(ordered)
-                .source("heuristic")
+                .source(usedLlm ? "llm" : "heuristic")
+                .warnings(warnings.isEmpty() ? null : warnings)
                 .build();
     }
 
@@ -125,6 +161,383 @@ public class AiSuggestionsService {
         return equalsIgnoreCase(componentId, COMPONENT_FORM)
                 || equalsIgnoreCase(componentType, "form")
                 || equalsIgnoreCase(componentType, "dynamic-form");
+    }
+
+    private boolean isPageBuilder(AiContextDTO context, AiSuggestionsRequest request) {
+        String componentId = context != null ? context.getComponentId() : null;
+        String componentType = context != null ? context.getComponentType() : null;
+        if (request != null) {
+            componentId = componentId != null ? componentId : request.getComponentId();
+            componentType = componentType != null ? componentType : request.getComponentType();
+        }
+        if (componentId != null && !componentId.isBlank()) {
+            String normalized = componentId.trim().toLowerCase(Locale.ROOT);
+            if (normalized.contains("gridster-page") || normalized.contains("dynamic-gridster-page")) {
+                return true;
+            }
+        }
+        return equalsIgnoreCase(componentType, "page");
+    }
+
+    private List<AiSuggestion> buildPageBuilderSuggestions(
+            JsonNode config,
+            JsonNode runtimeState,
+            Set<String> allowedPaths,
+            AiContextDTO context) {
+        List<AiSuggestion> out = new ArrayList<>();
+        int widgetsCount = intAt(runtimeState, "/widgetsCount");
+        if (widgetsCount > 0) {
+            return out;
+        }
+        if (!hasCapability(allowedPaths, "page.widgets")
+                && !hasCapability(allowedPaths, "page.widgets[].definition.id")) {
+            return out;
+        }
+
+        List<ComponentCatalogItem> candidates = extractComponentCatalog(runtimeState);
+        candidates = rankPageBuilderCatalog(candidates);
+        int count = 0;
+        for (ComponentCatalogItem item : candidates) {
+            if (count >= DEFAULT_MAX_PAGE_WIDGET_SUGGESTIONS) break;
+            String label = item.friendlyName != null ? item.friendlyName : item.id;
+            String description = item.description != null ? item.description : "Adicionar componente.";
+            JsonNode patch = buildAddWidgetPatch(item.id);
+            if (patch == null) {
+                continue;
+            }
+            out.add(AiSuggestion.builder()
+                    .id("page.add." + item.id)
+                    .label("Adicionar " + label)
+                    .description(description)
+                    .icon(item.icon)
+                    .group("Componentes")
+                    .intent("Adicionar " + label + " na pagina")
+                    .score(0.86)
+                    .patch(patch)
+                    .build());
+            count++;
+        }
+
+        if (out.isEmpty() && context != null && context.getDescription() != null) {
+            out.add(AiSuggestion.builder()
+                    .id("page.intro")
+                    .label("Explorar configuracoes da pagina")
+                    .description(context.getDescription())
+                    .icon("lightbulb")
+                    .group("Ajuda")
+                    .intent("Quais configuracoes posso ajustar nesta pagina?")
+                    .score(0.6)
+                    .build());
+        }
+
+        return out;
+    }
+
+    private JsonNode buildAddWidgetPatch(String widgetId) {
+        if (widgetId == null || widgetId.isBlank()) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ObjectNode page = patch.putObject("page");
+        ArrayNode widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", widgetId.trim());
+        definition.putObject("inputs");
+        ObjectNode layout = widget.putObject("layout");
+        layout.put("col", 1);
+        layout.put("row", 1);
+        layout.put("colSpan", 3);
+        layout.put("rowSpan", 3);
+        return patch;
+    }
+
+    private List<ComponentCatalogItem> extractComponentCatalog(JsonNode runtimeState) {
+        List<ComponentCatalogItem> out = new ArrayList<>();
+        if (runtimeState == null || runtimeState.isNull()) {
+            return out;
+        }
+        JsonNode catalog = runtimeState.get("componentCatalog");
+        if (catalog == null || !catalog.isArray()) {
+            return out;
+        }
+        for (JsonNode node : catalog) {
+            if (node == null || node.isNull()) continue;
+            String id = textOrNull(node.get("id"));
+            if (id == null || id.isBlank()) continue;
+            String friendly = textOrNull(node.get("friendlyName"));
+            String description = textOrNull(node.get("description"));
+            String icon = textOrNull(node.get("icon"));
+            List<String> tags = textList(node.get("tags"), 8);
+            out.add(new ComponentCatalogItem(id.trim(), friendly, description, icon, tags));
+        }
+        return out;
+    }
+
+    private List<ComponentCatalogItem> rankPageBuilderCatalog(List<ComponentCatalogItem> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        List<ComponentCatalogItem> copy = new ArrayList<>(items);
+        copy.sort(Comparator.comparingInt(this::scoreCatalogItem).reversed());
+        return copy;
+    }
+
+    private int scoreCatalogItem(ComponentCatalogItem item) {
+        if (item == null) return 0;
+        int score = 0;
+        if (hasTag(item, "table")) score += 5;
+        if (hasTag(item, "crud")) score += 4;
+        if (hasTag(item, "form")) score += 3;
+        if (hasTag(item, "tabs")) score += 2;
+        if (hasTag(item, "widget")) score += 1;
+        if (hasTag(item, "stable")) score += 1;
+        return score;
+    }
+
+    private boolean hasTag(ComponentCatalogItem item, String tag) {
+        if (item == null || item.tags == null || item.tags.isEmpty() || tag == null) {
+            return false;
+        }
+        for (String existing : item.tags) {
+            if (existing != null && existing.equalsIgnoreCase(tag)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<AiSuggestion> buildTemplatePromptSuggestions(AiRegistryTemplateRecord template) {
+        if (template == null || template.getTemplateMeta() == null) {
+            return List.of();
+        }
+        List<String> prompts = extractExamplePrompts(template.getTemplateMeta());
+        if (prompts.isEmpty()) {
+            return List.of();
+        }
+        List<AiSuggestion> out = new ArrayList<>();
+        int i = 0;
+        for (String prompt : prompts) {
+            if (prompt == null || prompt.isBlank()) continue;
+            out.add(AiSuggestion.builder()
+                    .id("template.prompt." + i++)
+                    .label(prompt)
+                    .description("Sugestao baseada no template do componente.")
+                    .icon("auto_awesome")
+                    .group("Sugestoes")
+                    .intent(prompt)
+                    .score(0.55)
+                    .build());
+            if (i >= DEFAULT_MAX_SUGGESTIONS) break;
+        }
+        return out;
+    }
+
+    private List<String> extractExamplePrompts(JsonNode templateMeta) {
+        List<String> out = new ArrayList<>();
+        if (templateMeta == null || templateMeta.isNull()) {
+            return out;
+        }
+        JsonNode base = templateMeta.get("examplePrompts");
+        if (base != null && base.isArray()) {
+            base.forEach(node -> {
+                String text = textOrNull(node);
+                if (text != null && !text.isBlank()) {
+                    out.add(text);
+                }
+            });
+        }
+        JsonNode variants = templateMeta.get("variants");
+        if (variants != null && variants.isArray()) {
+            for (JsonNode variant : variants) {
+                if (variant == null || variant.isNull()) continue;
+                JsonNode prompts = variant.get("examplePrompts");
+                if (prompts != null && prompts.isArray()) {
+                    for (JsonNode node : prompts) {
+                        String text = textOrNull(node);
+                        if (text != null && !text.isBlank()) {
+                            out.add(text);
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private List<AiSuggestion> buildLlmSuggestions(
+            AiSuggestionsRequest request,
+            AiContextDTO context,
+            JsonNode config,
+            JsonNode runtimeState,
+            Set<String> allowedPaths) {
+        if (request == null || context == null) {
+            return List.of();
+        }
+        String prompt = buildSuggestionsPrompt(request, context, config, runtimeState, allowedPaths);
+        AiJsonSchema schema = AiJsonSchema.ofSchema(buildSuggestionsSchema());
+        JsonNode response = aiProvider.generateJson(prompt, schema);
+        if (response == null || response.isNull()) {
+            return List.of();
+        }
+        JsonNode suggestionsNode = response.get("suggestions");
+        if (suggestionsNode == null || !suggestionsNode.isArray()) {
+            return List.of();
+        }
+        try {
+            List<AiSuggestion> suggestions =
+                    objectMapper.convertValue(suggestionsNode, new TypeReference<List<AiSuggestion>>() {});
+            return suggestions != null ? suggestions : List.of();
+        } catch (IllegalArgumentException e) {
+            return List.of();
+        }
+    }
+
+    private boolean isMockProvider() {
+        try {
+            String name = aiProvider.getProviderName();
+            return name != null && name.toLowerCase(Locale.ROOT).contains("mock");
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private String buildSuggestionsPrompt(
+            AiSuggestionsRequest request,
+            AiContextDTO context,
+            JsonNode config,
+            JsonNode runtimeState,
+            Set<String> allowedPaths) {
+        String componentId = context.getComponentId();
+        String componentType = context.getComponentType();
+        String description = context.getDescription();
+        String locale = request.getLocale();
+        return """
+            Você é um especialista em componentes de UI. Gere sugestões curtas e úteis para o usuário.
+
+            COMPONENTE: %s (%s)
+            DESCRICAO: %s
+            LOCALE: %s
+
+            ESTADO ATUAL:
+            %s
+
+            ESTADO DE RUNTIME:
+            %s
+
+            CAPABILITIES PERMITIDAS:
+            %s
+
+            METADADOS DO TEMPLATE:
+            %s
+
+            REGRAS:
+            - Gere até 5 sugestões.
+            - Cada sugestão deve ter label e intent claros.
+            - Evite repetir algo já ativo no estado atual.
+            - Use intents executáveis pelo assistente (ex.: "Adicionar tabela", "Habilitar paginacao").
+            - Responda APENAS JSON no formato:
+              {"suggestions":[{"id":"...", "label":"...", "description":"...", "intent":"...", "group":"...", "icon":"...", "score":0.0}]}
+            """.formatted(
+                safeText(componentId),
+                safeText(componentType),
+                safeText(description),
+                safeText(locale),
+                safeJson(config),
+                safeJson(runtimeState),
+                allowedPaths != null ? allowedPaths.toString() : "[]",
+                safeJson(context.getTemplate() != null ? context.getTemplate().getTemplateMeta() : null)
+            );
+    }
+
+    private String buildSuggestionsSchema() {
+        return """
+            {
+              "type": "object",
+              "properties": {
+                "suggestions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string" },
+                      "label": { "type": "string" },
+                      "description": { "type": "string" },
+                      "intent": { "type": "string" },
+                      "group": { "type": "string" },
+                      "icon": { "type": "string" },
+                      "score": { "type": "number" }
+                    },
+                    "required": ["label", "intent"]
+                  }
+                }
+              },
+              "required": ["suggestions"]
+            }
+            """;
+    }
+
+    private List<AiSuggestion> dedupeSuggestions(List<AiSuggestion> suggestions) {
+        if (suggestions == null || suggestions.isEmpty()) {
+            return List.of();
+        }
+        Map<String, AiSuggestion> ordered = new LinkedHashMap<>();
+        for (AiSuggestion suggestion : suggestions) {
+            if (suggestion == null) continue;
+            String key = suggestion.getId();
+            if (key == null || key.isBlank()) {
+                String label = suggestion.getLabel();
+                String intent = suggestion.getIntent();
+                key = (label != null ? label : "") + "::" + (intent != null ? intent : "");
+            }
+            if (key.isBlank()) continue;
+            ordered.putIfAbsent(key, suggestion);
+        }
+        return new ArrayList<>(ordered.values());
+    }
+
+    private String safeText(String value) {
+        return value != null ? value : "";
+    }
+
+    private String safeJson(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return "{}";
+        }
+        return node.toString();
+    }
+
+    private List<String> textList(JsonNode node, int maxItems) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        int count = 0;
+        for (JsonNode entry : node) {
+            if (count >= maxItems) break;
+            String text = textOrNull(entry);
+            if (text != null && !text.isBlank()) {
+                out.add(text);
+                count++;
+            }
+        }
+        return out;
+    }
+
+    private static final class ComponentCatalogItem {
+        private final String id;
+        private final String friendlyName;
+        private final String description;
+        private final String icon;
+        private final List<String> tags;
+
+        private ComponentCatalogItem(String id, String friendlyName, String description, String icon, List<String> tags) {
+            this.id = id;
+            this.friendlyName = friendlyName;
+            this.description = description;
+            this.icon = icon;
+            this.tags = tags;
+        }
     }
 
     private List<AiSuggestion> buildTableSuggestions(
@@ -742,6 +1155,14 @@ public class AiSuggestionsService {
         }
         JsonNode value = node.at(pointer);
         return value != null && value.isBoolean() && value.asBoolean(false);
+    }
+
+    private int intAt(JsonNode node, String pointer) {
+        if (node == null || pointer == null) {
+            return 0;
+        }
+        JsonNode value = node.at(pointer);
+        return intOrDefault(value, 0);
     }
 
     private String textAt(JsonNode node, String pointer) {

@@ -28,7 +28,7 @@ class AiSuggestionsServiceTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        service = new AiSuggestionsService(objectMapper);
+        service = new AiSuggestionsService(objectMapper, new StubAiProvider());
     }
 
     @Test
@@ -342,5 +342,22 @@ class AiSuggestionsServiceTest {
         boolean found = response.getSuggestions().stream()
                 .anyMatch(s -> "table.format.currency.amount".equals(s.getId()));
         assertTrue(!found, "Should not suggest currency format when runtime lacks columns[].format capability");
+    }
+
+    private static final class StubAiProvider implements AiProvider {
+        @Override
+        public JsonNode generateJson(String prompt) {
+            return null;
+        }
+
+        @Override
+        public String generateText(String prompt) {
+            return "";
+        }
+
+        @Override
+        public String getProviderName() {
+            return "stub";
+        }
     }
 }
