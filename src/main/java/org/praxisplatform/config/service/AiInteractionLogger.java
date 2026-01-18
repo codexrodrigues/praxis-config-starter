@@ -88,6 +88,19 @@ public class AiInteractionLogger {
         LOG.info(sb.toString());
     }
 
+    public void logDiagnostic(AiOrchestratorRequest request, String label, JsonNode payload) {
+        if (!enabled || !LOG.isInfoEnabled()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("[DIAGNOSTIC]");
+        appendRequestContext(sb, request);
+        appendValue(sb, "label", label);
+        sb.append("\nPAYLOAD (formatted):\n")
+                .append(truncate(formatJsonSafe(payload)));
+        LOG.info(sb.toString());
+    }
+
     private void appendRequestContext(StringBuilder sb, AiOrchestratorRequest request) {
         appendValue(sb, "requestId", resolveRequestId());
         if (request == null) {

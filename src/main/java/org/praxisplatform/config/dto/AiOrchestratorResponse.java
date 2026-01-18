@@ -15,6 +15,7 @@ public class AiOrchestratorResponse {
     private String code;
     private String type;
     private JsonNode patch;
+    private List<AiPatchDiff> diff;
     private String explanation;
     private List<String> warnings;
     private String message;

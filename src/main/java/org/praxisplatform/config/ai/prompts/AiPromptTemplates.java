@@ -109,6 +109,36 @@ public final class AiPromptTemplates {
 	}
 	""";
 
+    public static final String PROMPT_INTENT_PLAN = """
+    INTENT_PLAN
+
+    Você é um classificador/planejador. Gere um JSON IntentPlan para o usuário.
+    Você faz parte de um fluxo maior de orquestração e deve respeitar o contexto fornecido.
+
+    ENTRADA:
+    - componentType: "{{COMPONENT_TYPE}}"
+    - userPrompt: "{{USER_INPUT}}"
+    - capabilities (paths permitidos): {{CAPABILITIES_RESTRICTION}}
+    - currentState summary: {{CURRENT_STATE_SUMMARY}}
+    - optionsByPath (se houver): {{OPTIONS_BY_PATH}}
+
+    REGRAS:
+    - Produza APENAS JSON válido.
+    - Crie ações atômicas; uma ação por mudança lógica.
+    - Para cada ação, gere checks determinísticos usando paths do componente.
+    - Use SOMENTE paths permitidos pelas capabilities fornecidas.
+    - Se faltar informação, gere uma action com checks vazios e inclua uma pergunta em "questions".
+
+    SAÍDA JSON:
+    {
+      "intent": "update|create_flow|ask_how_to_configure|ask_about_config",
+      "actions": [
+        { "id": "string", "checks": [ { "type": "pathChanged|pathEquals|contains", "path": "string", "value": "any" } ] }
+      ],
+      "questions": []
+    }
+    """;
+
     public static final String PROMPT_QA = """
 	Você é um especialista em componentes de UI. Responda à pergunta do usuário com base na configuração fornecida.
 
@@ -168,6 +198,12 @@ SCHEMA (se disponível):
 
 METADADOS (somente leitura):
 {{RUNTIME_METADATA}}
+
+INTENT PLAN (se fornecido):
+{{INTENT_PLAN}}
+
+COMPLETENESS HINTS (se fornecido):
+{{COMPLETENESS_HINTS}}
 
 	CONTRATO TÉCNICO (Siga Rigorosamente):
 	{{CONTRACT_DSL}}

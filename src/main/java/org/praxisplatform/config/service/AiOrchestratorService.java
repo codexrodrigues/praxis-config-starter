@@ -29,10 +29,14 @@ import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOption;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
+import org.praxisplatform.config.dto.AiPatchDiff;
 import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
 import org.praxisplatform.config.dto.AiRegistryTemplateSearchResult;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.dto.ApiSearchResult;
+import org.praxisplatform.config.dto.ActionCheck;
+import org.praxisplatform.config.dto.IntentAction;
+import org.praxisplatform.config.dto.IntentPlan;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -435,6 +439,18 @@ public class AiOrchestratorService {
                     filteredCaps != null ? filteredCaps.size() : 0,
                     summarizeCapabilityPaths(filteredCaps, 12));
         }
+        IntentPlan intentPlan = generateIntentPlan(
+                request,
+                context,
+                filteredCaps,
+                currentState,
+                componentContext,
+                frontendConfig);
+        List<String> planQuestions = intentPlan != null ? intentPlan.getQuestions() : null;
+        if (planQuestions != null && !planQuestions.isEmpty()) {
+            return clarification(buildQuestionsMessage(planQuestions), null);
+        }
+        String intentPlanJson = formatIntentPlan(intentPlan);
         String capabilityNotes = formatCapabilityNotes(
                 "component".equals(scope) || "mixed".equals(scope)
                         ? extractComponentCapabilityNotes(context.getComponentDefinition())
@@ -453,7 +469,9 @@ public class AiOrchestratorService {
                 schemaContext,
                 resolvedSchema,
                 runtimeMetadata,
-                ragHintsBlock);
+                ragHintsBlock,
+                intentPlanJson,
+                null);
 
         JsonNode result = callAiJson("patch_generation", prompt, null, frontendConfig, request, 1);
         ContextRequest contextRequest = parseContextRequest(result);
@@ -490,7 +508,9 @@ public class AiOrchestratorService {
                         schemaContext,
                         resolvedSchema,
                         retryRuntimeMetadata,
-                        ragHintsBlock);
+                        ragHintsBlock,
+                        intentPlanJson,
+                        null);
                 JsonNode retryResult = callAiJson("patch_generation", retryPrompt, null, frontendConfig, request, 2);
                 ContextRequest retryContextRequest = parseContextRequest(retryResult);
                 if (retryContextRequest != null && retryContextRequest.hasCodes()) {
@@ -567,12 +587,146 @@ public class AiOrchestratorService {
             return invalidEnumValue(enumValidation, warnings);
         }
 
+        List<AiPatchDiff> initialDiff = buildPatchDiff(currentState, sanitizeResult.sanitized);
+        CompletenessResult completeness = evaluateCompleteness(
+                intentPlan,
+                initialDiff,
+                currentState,
+                componentContext,
+                filteredCaps);
+        logPatchDiagnostics(
+                request,
+                "initial",
+                patchNode,
+                normalizedPatch,
+                sanitizeResult.sanitized,
+                initialDiff,
+                completeness);
+        if (completeness != null && !completeness.complete) {
+            List<IntentAction> missingActions = completeness.missingActions;
+            String completenessHints = buildCompletenessHints(intentPlan, initialDiff, missingActions);
+            String retryPrompt = buildExecutionPrompt(
+                    request.getUserPrompt(),
+                    context,
+                    contextConfig,
+                    filteredCaps,
+                    combinedNotes,
+                    schemaContext,
+                    resolvedSchema,
+                    runtimeMetadata,
+                    ragHintsBlock,
+                    intentPlanJson,
+                    completenessHints);
+            JsonNode retryResult = callAiJson("patch_generation_retry", retryPrompt, null, frontendConfig, request, 2);
+            ContextRequest retryContextRequest = parseContextRequest(retryResult);
+            if (retryContextRequest != null && retryContextRequest.hasCodes()) {
+                return clarificationWithContextRequest(
+                        retryContextRequest.message,
+                        retryContextRequest.codes);
+            }
+            JsonNode retryPatch = retryResult != null ? retryResult.get("patch") : null;
+            if (retryPatch != null && !retryPatch.isNull()) {
+                SemanticPatchCheck retryCheck = validateSemanticPatch(retryPatch, currentState, warnings);
+                if (retryCheck.valid && retryCheck.patch != null) {
+                    JsonNode normalizedRetry = normalizePatch(request.getComponentId(), retryCheck.patch);
+                    SanitizeResult retrySanitized = sanitizePatch(normalizedRetry, filteredCaps);
+                    if (retrySanitized.warnings != null && !retrySanitized.warnings.isEmpty()) {
+                        warnings.addAll(retrySanitized.warnings);
+                    }
+                    if (retrySanitized.sanitized != null && !isEmptyObject(retrySanitized.sanitized)) {
+                        JsonNode mergedPatch = mergePatchNodes(sanitizeResult.sanitized, retrySanitized.sanitized);
+                        EnumValidationResult retryEnumValidation = validateEnumValues(
+                                mergedPatch,
+                                componentContext,
+                                filteredCaps);
+                        if (retryEnumValidation.valid) {
+                            List<AiPatchDiff> mergedDiff = buildPatchDiff(currentState, mergedPatch);
+                            CompletenessResult retryCompleteness = evaluateCompleteness(
+                                    intentPlan,
+                                    mergedDiff,
+                                    currentState,
+                                    componentContext,
+                                    filteredCaps);
+                            logPatchDiagnostics(
+                                    request,
+                                    "retry",
+                                    retryPatch,
+                                    normalizedRetry,
+                                    mergedPatch,
+                                    mergedDiff,
+                                    retryCompleteness);
+                            if (retryCompleteness != null && retryCompleteness.complete) {
+                                warnings.add("Patch complementado apos retry de completeness.");
+                                return AiOrchestratorResponse.builder()
+                                        .type("patch")
+                                        .patch(mergedPatch)
+                                        .diff(mergedDiff)
+                                        .explanation(explanation)
+                                        .warnings(warnings.isEmpty() ? null : warnings)
+                                        .build();
+                            }
+                            completeness = retryCompleteness;
+                            sanitizeResult = new SanitizeResult(mergedPatch, warnings);
+                            initialDiff = mergedDiff;
+                        }
+                    }
+                }
+            }
+            List<String> questions = completeness != null ? completeness.questions : null;
+            if (questions != null && !questions.isEmpty()) {
+                return clarification(buildQuestionsMessage(questions), null);
+            }
+            return clarification("Preciso de mais detalhes para completar o ajuste.", null);
+        }
+
         return AiOrchestratorResponse.builder()
                 .type("patch")
                 .patch(sanitizeResult.sanitized)
+                .diff(initialDiff)
                 .explanation(explanation)
                 .warnings(warnings.isEmpty() ? null : warnings)
                 .build();
+    }
+
+    private void logPatchDiagnostics(
+            AiOrchestratorRequest request,
+            String stage,
+            JsonNode rawPatch,
+            JsonNode normalizedPatch,
+            JsonNode sanitizedPatch,
+            List<AiPatchDiff> diff,
+            CompletenessResult completeness) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("stage", stage);
+        if (rawPatch != null) {
+            payload.set("patchRaw", rawPatch);
+        } else {
+            payload.putNull("patchRaw");
+        }
+        if (normalizedPatch != null) {
+            payload.set("patchNormalized", normalizedPatch);
+        } else {
+            payload.putNull("patchNormalized");
+        }
+        if (sanitizedPatch != null) {
+            payload.set("patchSanitized", sanitizedPatch);
+        } else {
+            payload.putNull("patchSanitized");
+        }
+        if (diff != null) {
+            payload.set("diff", objectMapper.valueToTree(diff));
+        } else {
+            payload.putNull("diff");
+        }
+        if (completeness != null) {
+            ObjectNode completenessNode = payload.putObject("completeness");
+            completenessNode.put("complete", completeness.complete);
+            completenessNode.set("missingActions", objectMapper.valueToTree(completeness.missingActions));
+            completenessNode.set("questions", objectMapper.valueToTree(completeness.questions));
+        } else {
+            payload.putNull("completeness");
+        }
+        interactionLogger.logDiagnostic(request, "patch_diagnostics", payload);
     }
 
     private AiIntentClassification classifyIntent(
@@ -649,6 +803,45 @@ public class AiOrchestratorService {
                 .add("missingContext")
                 .add("options");
         return AiJsonSchema.of(schema.toString(), AiIntentClassification.class);
+    }
+
+    private AiJsonSchema buildIntentPlanSchema() {
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.put("type", "object");
+        schema.put("additionalProperties", false);
+
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("intent").put("type", "string");
+
+        ObjectNode actions = properties.putObject("actions");
+        actions.put("type", "array");
+        ObjectNode actionItem = actions.putObject("items");
+        actionItem.put("type", "object");
+        actionItem.put("additionalProperties", false);
+        ObjectNode actionProps = actionItem.putObject("properties");
+        actionProps.putObject("id").put("type", "string");
+        ObjectNode checks = actionProps.putObject("checks");
+        checks.put("type", "array");
+        ObjectNode checkItem = checks.putObject("items");
+        checkItem.put("type", "object");
+        checkItem.put("additionalProperties", false);
+        ObjectNode checkProps = checkItem.putObject("properties");
+        checkProps.putObject("type").put("type", "string");
+        checkProps.putObject("path").put("type", "string");
+        ObjectNode value = checkProps.putObject("value");
+        ArrayNode valueTypes = value.putArray("type");
+        valueTypes.add("string")
+                .add("number")
+                .add("boolean")
+                .add("object")
+                .add("array")
+                .add("null");
+
+        ObjectNode questions = properties.putObject("questions");
+        questions.put("type", "array");
+        questions.putObject("items").put("type", "string");
+
+        return AiJsonSchema.of(schema.toString(), IntentPlan.class);
     }
 
     private AiActionPlan extractTableActionPlan(
@@ -2816,6 +3009,151 @@ public class AiOrchestratorService {
         return extra;
     }
 
+    private List<AiPatchDiff> buildPatchDiff(JsonNode currentState, JsonNode patch) {
+        if (patch == null || patch.isNull()) {
+            return null;
+        }
+        JsonNode before = currentState != null ? currentState : objectMapper.createObjectNode();
+        JsonNode after = mergePatchNodes(before, patch);
+        List<AiPatchDiff> diffs = new ArrayList<>();
+        collectDiffs(before, after, "", diffs);
+        return diffs.isEmpty() ? null : diffs;
+    }
+
+    private void collectDiffs(JsonNode before, JsonNode after, String path, List<AiPatchDiff> diffs) {
+        JsonNode left = before != null ? before : MissingNode.getInstance();
+        JsonNode right = after != null ? after : MissingNode.getInstance();
+        if (nodesEquivalent(left, right)) {
+            return;
+        }
+        if (left.isObject() && right.isObject()) {
+            Set<String> keys = new LinkedHashSet<>();
+            left.fieldNames().forEachRemaining(keys::add);
+            right.fieldNames().forEachRemaining(keys::add);
+            for (String key : keys) {
+                collectDiffs(left.get(key), right.get(key), joinPath(path, key), diffs);
+            }
+            return;
+        }
+        if (left.isArray() && right.isArray()) {
+            collectArrayDiffs((ArrayNode) left, (ArrayNode) right, path, diffs);
+            return;
+        }
+        diffs.add(AiPatchDiff.builder()
+                .path(formatRootPath(path))
+                .before(normalizeDiffNode(left))
+                .after(normalizeDiffNode(right))
+                .build());
+    }
+
+    private void collectArrayDiffs(ArrayNode before, ArrayNode after, String path, List<AiPatchDiff> diffs) {
+        String identityKey = detectIdentityKey(before);
+        if (identityKey == null) {
+            identityKey = detectIdentityKey(after);
+        }
+        if (identityKey == null) {
+            if (!before.equals(after)) {
+                diffs.add(AiPatchDiff.builder()
+                        .path(formatRootPath(path))
+                        .before(normalizeDiffNode(before))
+                        .after(normalizeDiffNode(after))
+                        .build());
+            }
+            return;
+        }
+        if (arrayHasNonIdentityItems(before, identityKey) || arrayHasNonIdentityItems(after, identityKey)) {
+            if (!before.equals(after)) {
+                diffs.add(AiPatchDiff.builder()
+                        .path(formatRootPath(path))
+                        .before(normalizeDiffNode(before))
+                        .after(normalizeDiffNode(after))
+                        .build());
+            }
+            return;
+        }
+        Map<String, JsonNode> beforeById = indexArrayById(before, identityKey);
+        Map<String, JsonNode> afterById = indexArrayById(after, identityKey);
+        List<String> orderedIds = new ArrayList<>(beforeById.keySet());
+        for (String id : afterById.keySet()) {
+            if (!beforeById.containsKey(id)) {
+                orderedIds.add(id);
+            }
+        }
+        for (String id : orderedIds) {
+            collectDiffs(
+                    beforeById.get(id),
+                    afterById.get(id),
+                    joinArrayPath(path, identityKey, id),
+                    diffs);
+        }
+    }
+
+    private Map<String, JsonNode> indexArrayById(ArrayNode array, String identityKey) {
+        Map<String, JsonNode> byId = new LinkedHashMap<>();
+        for (JsonNode item : array) {
+            if (item == null || item.isNull() || !item.isObject()) {
+                continue;
+            }
+            String id = textOrNull(item.get(identityKey));
+            if (id != null) {
+                byId.put(id, item);
+            }
+        }
+        return byId;
+    }
+
+    private boolean arrayHasNonIdentityItems(ArrayNode array, String identityKey) {
+        for (JsonNode item : array) {
+            if (item == null || item.isNull() || !item.isObject()) {
+                return true;
+            }
+            String id = textOrNull(item.get(identityKey));
+            if (id == null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String joinPath(String base, String key) {
+        if (base == null || base.isBlank()) {
+            return key;
+        }
+        return base + "." + key;
+    }
+
+    private String joinArrayPath(String base, String identityKey, String id) {
+        String suffix = "[" + identityKey + "=" + id + "]";
+        if (base == null || base.isBlank()) {
+            return suffix;
+        }
+        return base + suffix;
+    }
+
+    private String formatRootPath(String path) {
+        return (path == null || path.isBlank()) ? "$" : path;
+    }
+
+    private JsonNode normalizeDiffNode(JsonNode node) {
+        if (node == null || node.isMissingNode()) {
+            return objectMapper.getNodeFactory().nullNode();
+        }
+        return node;
+    }
+
+    private boolean nodesEquivalent(JsonNode left, JsonNode right) {
+        if (left == null || left.isMissingNode()) {
+            return right == null || right.isMissingNode();
+        }
+        if (right == null || right.isMissingNode()) {
+            return false;
+        }
+        if (left.isNull() && right.isNull()) {
+            return true;
+        }
+        return left.equals(right);
+    }
+
     private ArrayNode mergeArrayNodes(ArrayNode base, ArrayNode extra) {
         ArrayNode merged = objectMapper.createArrayNode();
         String identityKey = detectIdentityKey(base);
@@ -3240,6 +3578,7 @@ public class AiOrchestratorService {
         if (request == null || !isPageBuilder(request.getComponentId())) {
             return null;
         }
+        JsonNode currentState = context.getCurrentState();
         boolean isCreatePrompt = promptMentionsTable(request.getUserPrompt());
         JsonNode createFlowNode = extractCreateFlow(request.getContextHints());
         if (createFlowNode == null && !isCreatePrompt) {
@@ -3296,6 +3635,7 @@ public class AiOrchestratorService {
                 return AiOrchestratorResponse.builder()
                         .type("patch")
                         .patch(patch)
+                        .diff(buildPatchDiff(currentState, patch))
                         .build();
             }
 
@@ -3328,6 +3668,7 @@ public class AiOrchestratorService {
             return AiOrchestratorResponse.builder()
                     .type("patch")
                     .patch(patch)
+                    .diff(buildPatchDiff(currentState, patch))
                     .build();
         }
 
@@ -4127,7 +4468,9 @@ public class AiOrchestratorService {
             AiSchemaContext schemaContext,
             JsonNode schema,
             String runtimeMetadata,
-            String ragHints) {
+            String ragHints,
+            String intentPlan,
+            String completenessHints) {
         String contextDesc = buildContextDescription(context, schemaContext);
         String caps = truncateBlock("capabilities",
                 formatCapabilities(capabilities),
@@ -4158,6 +4501,14 @@ public class AiOrchestratorService {
         boolean isTable = "praxis-table".equals(context.getComponentId());
         String contractFormatting = isTable ? AiPromptTemplates.CONTRACT_FORMATTING : "";
         String contractRenderers = isTable ? AiPromptTemplates.CONTRACT_RENDERER_PAYLOADS : "";
+        String intentPlanBlock = truncateBlock(
+                "intent_plan",
+                intentPlan != null ? intentPlan : "N/A",
+                maxCapabilityNotesChars);
+        String completenessBlock = truncateBlock(
+                "completeness_hints",
+                completenessHints != null ? completenessHints : "N/A",
+                maxCapabilityNotesChars);
 
         return AiPromptTemplates.buildPrompt(
                 AiPromptTemplates.PROMPT_EXECUTION_ENRICHED,
@@ -4172,11 +4523,349 @@ public class AiOrchestratorService {
                         Map.entry("RAG_HINTS", ragBlock),
                         Map.entry("SCHEMA_JSON", schemaJson),
                         Map.entry("RUNTIME_METADATA", metadataJson),
+                        Map.entry("INTENT_PLAN", intentPlanBlock),
+                        Map.entry("COMPLETENESS_HINTS", completenessBlock),
                         Map.entry("CONTRACT_DSL", AiPromptTemplates.CONTRACT_DSL),
                         Map.entry("CONTRACT_ICONS", AiPromptTemplates.CONTRACT_ICONS),
                         Map.entry("CONTRACT_SAFETY", AiPromptTemplates.CONTRACT_SAFETY),
                         Map.entry("CONTRACT_FORMATTING", contractFormatting),
                         Map.entry("CONTRACT_RENDERER_PAYLOADS", contractRenderers)));
+    }
+
+    private IntentPlan generateIntentPlan(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            List<AiCapability> capabilities,
+            JsonNode currentState,
+            JsonNode componentContext,
+            AiCallConfig callConfig) {
+        String prompt = buildIntentPlanPrompt(
+                request != null ? request.getComponentType() : null,
+                request != null ? request.getUserPrompt() : null,
+                capabilities,
+                currentState,
+                componentContext);
+        AiJsonSchema schema = buildIntentPlanSchema();
+        JsonNode json = generateIntentPlanJson(prompt, schema, request, callConfig);
+        if (json == null) {
+            return null;
+        }
+        return objectMapper.convertValue(json, IntentPlan.class);
+    }
+
+    private JsonNode generateIntentPlanJson(
+            String prompt,
+            AiJsonSchema schema,
+            AiOrchestratorRequest request,
+            AiCallConfig callConfig) {
+        AiCallConfig baseConfig = buildActionPlanConfig(callConfig);
+        JsonNode json = callAiJson("intent_plan", prompt, schema, baseConfig != null ? baseConfig : callConfig, request, 1);
+        if (json != null) {
+            return json;
+        }
+        AiCallConfig retryConfig = buildActionPlanRetryConfig(baseConfig);
+        if (retryConfig == null) {
+            return null;
+        }
+        return callAiJson("intent_plan", prompt, schema, retryConfig, request, 2);
+    }
+
+    private String buildIntentPlanPrompt(
+            String componentType,
+            String userPrompt,
+            List<AiCapability> capabilities,
+            JsonNode currentState,
+            JsonNode componentContext) {
+        String caps = truncateBlock(
+                "capabilities",
+                formatCapabilities(capabilities),
+                maxCapabilitiesChars);
+        String stateSummary = truncateBlock(
+                "current_state_summary",
+                buildCurrentStateSummary(currentState),
+                maxRuntimeMetadataChars);
+        String optionsSummary = truncateBlock(
+                "options_by_path",
+                buildOptionsByPathSummary(componentContext),
+                maxCapabilityNotesChars);
+        return AiPromptTemplates.buildPrompt(
+                AiPromptTemplates.PROMPT_INTENT_PLAN,
+                Map.of(
+                        "COMPONENT_TYPE", safe(componentType),
+                        "USER_INPUT", safe(userPrompt),
+                        "CAPABILITIES_RESTRICTION", caps,
+                        "CURRENT_STATE_SUMMARY", stateSummary,
+                        "OPTIONS_BY_PATH", optionsSummary));
+    }
+
+    private String buildCurrentStateSummary(JsonNode currentState) {
+        ObjectNode summary = objectMapper.createObjectNode();
+        ArrayNode keys = buildCurrentStateKeys(currentState);
+        if (keys != null && keys.size() > 0) {
+            summary.set("keys", keys);
+        }
+        List<String> columns = extractColumnNames(currentState);
+        if (!columns.isEmpty()) {
+            summary.set("columns", objectMapper.valueToTree(columns));
+        }
+        List<String> inputs = extractObjectKeys(currentState, "inputs");
+        if (!inputs.isEmpty()) {
+            summary.set("inputs", objectMapper.valueToTree(inputs));
+        }
+        List<String> outputs = extractObjectKeys(currentState, "outputs");
+        if (!outputs.isEmpty()) {
+            summary.set("outputs", objectMapper.valueToTree(outputs));
+        }
+        return summary.size() > 0 ? summary.toPrettyString() : "{}";
+    }
+
+    private String buildOptionsByPathSummary(JsonNode componentContext) {
+        if (componentContext == null || !componentContext.isObject()) {
+            return "N/A";
+        }
+        JsonNode optionsByPath = componentContext.get("optionsByPath");
+        if (optionsByPath == null || !optionsByPath.isObject()) {
+            return "N/A";
+        }
+        ArrayNode keys = objectMapper.createArrayNode();
+        optionsByPath.fieldNames().forEachRemaining(keys::add);
+        return keys.size() > 0 ? keys.toPrettyString() : "N/A";
+    }
+
+    private String formatIntentPlan(IntentPlan plan) {
+        if (plan == null) {
+            return "N/A";
+        }
+        return objectMapper.valueToTree(plan).toPrettyString();
+    }
+
+    private String buildCompletenessHints(
+            IntentPlan plan,
+            List<AiPatchDiff> diff,
+            List<IntentAction> missingActions) {
+        String missing = missingActions != null
+                ? objectMapper.valueToTree(missingActions).toPrettyString()
+                : "[]";
+        String diffJson = diff != null
+                ? objectMapper.valueToTree(diff).toPrettyString()
+                : "[]";
+        String planJson = plan != null
+                ? objectMapper.valueToTree(plan).toPrettyString()
+                : "N/A";
+        return "INTENT_PLAN:\n" + planJson
+                + "\nMISSING_ACTIONS:\n" + missing
+                + "\nCURRENT_DIFF:\n" + diffJson
+                + "\nREGRAS: nao mude o que ja esta correto; apenas complete o que falta.";
+    }
+
+    private CompletenessResult evaluateCompleteness(
+            IntentPlan plan,
+            List<AiPatchDiff> diffs,
+            JsonNode currentState,
+            JsonNode componentContext,
+            List<AiCapability> capabilities) {
+        if (plan == null || plan.getActions() == null || plan.getActions().isEmpty()) {
+            return CompletenessResult.complete();
+        }
+        List<String> planQuestions = plan.getQuestions();
+        if (planQuestions != null && !planQuestions.isEmpty()) {
+            return CompletenessResult.incomplete(List.of(), planQuestions);
+        }
+        List<IntentAction> missingActions = new ArrayList<>();
+        for (IntentAction action : plan.getActions()) {
+            if (!isActionComplete(action, diffs)) {
+                missingActions.add(action);
+            }
+        }
+        if (missingActions.isEmpty()) {
+            return CompletenessResult.complete();
+        }
+        List<String> questions = buildMissingActionQuestions(
+                missingActions,
+                currentState,
+                componentContext,
+                capabilities);
+        return CompletenessResult.incomplete(missingActions, questions);
+    }
+
+    private boolean isActionComplete(IntentAction action, List<AiPatchDiff> diffs) {
+        if (action == null || action.getChecks() == null || action.getChecks().isEmpty()) {
+            return false;
+        }
+        for (ActionCheck check : action.getChecks()) {
+            if (!isCheckSatisfied(check, diffs)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isCheckSatisfied(ActionCheck check, List<AiPatchDiff> diffs) {
+        if (check == null || diffs == null || diffs.isEmpty()) {
+            return false;
+        }
+        String type = check.getType() != null ? check.getType().trim() : "";
+        String checkPath = normalizePath(check.getPath());
+        JsonNode expected = check.getValue();
+        for (AiPatchDiff diff : diffs) {
+            if (diff == null) continue;
+            String diffPath = normalizePath(diff.getPath());
+            if ("pathchanged".equalsIgnoreCase(type)) {
+                if (diffPath.equals(checkPath) || diffPath.startsWith(checkPath + ".")) {
+                    return true;
+                }
+                if (checkPath.isBlank() && !diffPath.isBlank()) {
+                    return true;
+                }
+            } else if ("pathequals".equalsIgnoreCase(type)) {
+                if (diffPath.equals(checkPath) && expected != null && diff.getAfter() != null
+                        && diff.getAfter().equals(expected)) {
+                    return true;
+                }
+            } else if ("contains".equalsIgnoreCase(type)) {
+                if (diffPath.equals(checkPath) && containsValue(diff.getAfter(), expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean containsValue(JsonNode actual, JsonNode expected) {
+        if (actual == null || actual.isNull() || expected == null || expected.isNull()) {
+            return false;
+        }
+        if (actual.isArray()) {
+            for (JsonNode item : actual) {
+                if (item != null && item.equals(expected)) {
+                    return true;
+                }
+                if (patchContainsExpected(item, expected)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return patchContainsExpected(actual, expected);
+    }
+
+    private String normalizePath(String path) {
+        if (path == null) {
+            return "";
+        }
+        String trimmed = path.trim();
+        if ("$".equals(trimmed)) {
+            return "";
+        }
+        if (trimmed.startsWith("$.")) {
+            return trimmed.substring(2);
+        }
+        if (trimmed.startsWith("$")) {
+            return trimmed.substring(1);
+        }
+        return trimmed;
+    }
+
+    private String normalizeOptionsPath(String path) {
+        String normalized = normalizePath(path);
+        return normalized.replaceAll("\\[[^\\]]+\\]", "[]");
+    }
+
+    private List<String> buildMissingActionQuestions(
+            List<IntentAction> actions,
+            JsonNode currentState,
+            JsonNode componentContext,
+            List<AiCapability> capabilities) {
+        if (actions == null || actions.isEmpty()) {
+            return List.of();
+        }
+        java.util.LinkedHashSet<String> questions = new java.util.LinkedHashSet<>();
+        List<String> columns = extractColumnNames(currentState);
+        for (IntentAction action : actions) {
+            if (action == null) continue;
+            String actionId = action.getId() != null ? action.getId() : "acao solicitada";
+            List<ActionCheck> checks = action.getChecks();
+            if (checks == null || checks.isEmpty()) {
+                questions.add("Preciso de mais detalhes para completar \"" + actionId + "\".");
+                continue;
+            }
+            for (ActionCheck check : checks) {
+                if (check == null) continue;
+                String path = normalizePath(check.getPath());
+                if (path.startsWith("columns[") && !columns.isEmpty()) {
+                    ColumnIdentity identity = parseColumnIdentity(path);
+                    if (identity != null && identity.value != null
+                            && !hasColumnIdentity(currentState, identity.key, identity.value)) {
+                        String available = String.join(", ", columns);
+                        questions.add("Qual coluna devo usar? Colunas disponiveis: " + available + ".");
+                        continue;
+                    }
+                }
+                if ("pathequals".equalsIgnoreCase(check.getType())
+                        || "contains".equalsIgnoreCase(check.getType())) {
+                    String optionPath = normalizeOptionsPath(check.getPath());
+                    List<ContextOption> options = resolveOptionsForPath(
+                            componentContext,
+                            capabilities,
+                            optionPath);
+                    if (!options.isEmpty()) {
+                        List<String> labels = buildOptionLabels(options);
+                        if (!labels.isEmpty()) {
+                            questions.add("Qual valor devo usar em \"" + optionPath
+                                    + "\"? Opcoes: " + String.join(", ", labels) + ".");
+                            continue;
+                        }
+                    }
+                }
+                questions.add("Preciso de mais detalhes para completar \"" + actionId + "\".");
+            }
+        }
+        return new ArrayList<>(questions);
+    }
+
+    private ColumnIdentity parseColumnIdentity(String path) {
+        if (path == null) return null;
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("columns\\[([^=]+)=([^\\]]+)\\]").matcher(path);
+        if (!matcher.find()) {
+            return null;
+        }
+        String key = matcher.group(1);
+        String value = matcher.group(2);
+        if (key == null || value == null) {
+            return null;
+        }
+        return new ColumnIdentity(key.trim(), value.trim());
+    }
+
+    private boolean hasColumnIdentity(JsonNode currentState, String key, String value) {
+        if (currentState == null || !currentState.has("columns")) {
+            return false;
+        }
+        JsonNode columns = currentState.get("columns");
+        if (columns == null || !columns.isArray()) {
+            return false;
+        }
+        for (JsonNode column : columns) {
+            if (column == null || !column.isObject()) continue;
+            String found = textOrNull(column.get(key));
+            if (value.equals(found)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String buildQuestionsMessage(List<String> questions) {
+        if (questions == null || questions.isEmpty()) {
+            return "Preciso de mais detalhes para continuar.";
+        }
+        StringBuilder message = new StringBuilder("Preciso de alguns detalhes para continuar:");
+        for (String question : questions) {
+            if (question == null || question.isBlank()) continue;
+            message.append("\n- ").append(question.trim());
+        }
+        return message.toString();
     }
 
     private String formatRuntimeMetadata(
@@ -5226,6 +5915,7 @@ public class AiOrchestratorService {
         return AiOrchestratorResponse.builder()
                 .type("patch")
                 .patch(sanitizeResult.sanitized)
+                .diff(buildPatchDiff(currentState, sanitizeResult.sanitized))
                 .warnings(outWarnings.isEmpty() ? null : outWarnings)
                 .build();
     }
@@ -6484,6 +7174,36 @@ public class AiOrchestratorService {
         private SanitizeResult(JsonNode sanitized, List<String> warnings) {
             this.sanitized = sanitized;
             this.warnings = warnings;
+        }
+    }
+
+    private static class CompletenessResult {
+        private final boolean complete;
+        private final List<IntentAction> missingActions;
+        private final List<String> questions;
+
+        private CompletenessResult(boolean complete, List<IntentAction> missingActions, List<String> questions) {
+            this.complete = complete;
+            this.missingActions = missingActions != null ? missingActions : List.of();
+            this.questions = questions != null ? questions : List.of();
+        }
+
+        private static CompletenessResult complete() {
+            return new CompletenessResult(true, List.of(), List.of());
+        }
+
+        private static CompletenessResult incomplete(List<IntentAction> missingActions, List<String> questions) {
+            return new CompletenessResult(false, missingActions, questions);
+        }
+    }
+
+    private static class ColumnIdentity {
+        private final String key;
+        private final String value;
+
+        private ColumnIdentity(String key, String value) {
+            this.key = key;
+            this.value = value;
         }
     }
 

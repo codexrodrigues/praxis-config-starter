@@ -6,6 +6,7 @@ POST `/api/praxis/config/ai/suggestions`
 ## Purpose
 Return deterministic, capability-aware suggestions for the AI assistant based on
 the runtime `currentState`. This endpoint does **not** fetch schema or API metadata.
+When enabled, it can optionally call the LLM to generate richer suggestions.
 
 ## Request
 ```json
@@ -30,6 +31,8 @@ Notes:
 - `currentState` is the only runtime source used by the backend.
 - `dataProfile` is optional and can be produced by frontend profilers.
 - `variantId` is accepted for future use but not required.
+- For page builders, `runtimeState.componentCatalog` can be used to suggest inserting widgets.
+- LLM-based suggestions are disabled by default. Enable with `praxis.ai.suggestions.llm-enabled=true`.
 
 ## Response
 ```json
@@ -60,3 +63,4 @@ Notes:
 Initial coverage:
 - `praxis-table`
 - `praxis-dynamic-form`
+- `praxis-dynamic-gridster-page` (page builder)

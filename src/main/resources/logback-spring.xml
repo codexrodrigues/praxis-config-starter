@@ -4,9 +4,9 @@
     <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
 
     <appender name="AI_INTERACTIONS" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>logs/ai-interactions.log</file>
+        <file>D:/Developer/praxis-plataform/praxis-api-quickstart/logs/ai-interactions.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>logs/ai-interactions.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <fileNamePattern>D:/Developer/praxis-plataform/praxis-api-quickstart/logs/ai-interactions.%d{yyyy-MM-dd}.log</fileNamePattern>
             <maxHistory>14</maxHistory>
         </rollingPolicy>
         <encoder>
