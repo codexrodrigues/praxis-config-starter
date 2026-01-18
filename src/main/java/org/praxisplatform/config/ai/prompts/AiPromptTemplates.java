@@ -127,6 +127,7 @@ public final class AiPromptTemplates {
     - Crie ações atômicas; uma ação por mudança lógica.
     - Para cada ação, gere checks determinísticos usando paths do componente.
     - Use SOMENTE paths permitidos pelas capabilities fornecidas.
+    - Em checks.value use apenas tipos simples (string, number, boolean, array ou null). Nao use objetos.
     - Se faltar informação, gere uma action com checks vazios e inclua uma pergunta em "questions".
 
     SAÍDA JSON:

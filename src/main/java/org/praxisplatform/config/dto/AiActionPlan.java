@@ -14,6 +14,8 @@ import lombok.NoArgsConstructor;
 public class AiActionPlan {
     private List<Action> actions;
     private List<Ambiguity> ambiguities;
+    private List<Integer> contextRequest;
+    private String message;
 
     @Data
     @NoArgsConstructor

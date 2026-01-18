@@ -446,6 +446,14 @@ public class AiOrchestratorService {
                 currentState,
                 componentContext,
                 frontendConfig);
+        intentPlan = applyDeterministicIntentChecks(
+                intentPlan,
+                actionPlan,
+                componentActions,
+                currentState,
+                isTable,
+                columnDescriptors,
+                columnResolverKeys);
         List<String> planQuestions = intentPlan != null ? intentPlan.getQuestions() : null;
         if (planQuestions != null && !planQuestions.isEmpty()) {
             return clarification(buildQuestionsMessage(planQuestions), null);
@@ -569,8 +577,12 @@ public class AiOrchestratorService {
         JsonNode normalizedPatch = normalizePatch(
                 request.getComponentId(), patchNode);
         SanitizeResult sanitizeResult = sanitizePatch(normalizedPatch, filteredCaps);
-        if (sanitizeResult.warnings != null && !sanitizeResult.warnings.isEmpty()) {
-            warnings.addAll(sanitizeResult.warnings);
+        List<String> sanitizeWarnings = filterInternalWarnings(
+                sanitizeResult.warnings,
+                patchNode,
+                request.getComponentId());
+        if (sanitizeWarnings != null && !sanitizeWarnings.isEmpty()) {
+            warnings.addAll(sanitizeWarnings);
         }
 
         if (sanitizeResult.sanitized == null || isEmptyObject(sanitizeResult.sanitized)) {
@@ -630,8 +642,12 @@ public class AiOrchestratorService {
                 if (retryCheck.valid && retryCheck.patch != null) {
                     JsonNode normalizedRetry = normalizePatch(request.getComponentId(), retryCheck.patch);
                     SanitizeResult retrySanitized = sanitizePatch(normalizedRetry, filteredCaps);
-                    if (retrySanitized.warnings != null && !retrySanitized.warnings.isEmpty()) {
-                        warnings.addAll(retrySanitized.warnings);
+                    List<String> retryWarnings = filterInternalWarnings(
+                            retrySanitized.warnings,
+                            retryPatch,
+                            request.getComponentId());
+                    if (retryWarnings != null && !retryWarnings.isEmpty()) {
+                        warnings.addAll(retryWarnings);
                     }
                     if (retrySanitized.sanitized != null && !isEmptyObject(retrySanitized.sanitized)) {
                         JsonNode mergedPatch = mergePatchNodes(sanitizeResult.sanitized, retrySanitized.sanitized);
@@ -809,37 +825,53 @@ public class AiOrchestratorService {
         ObjectNode schema = objectMapper.createObjectNode();
         schema.put("type", "object");
         schema.put("additionalProperties", false);
+        ArrayNode required = schema.putArray("required");
 
         ObjectNode properties = schema.putObject("properties");
         properties.putObject("intent").put("type", "string");
+        required.add("intent");
 
         ObjectNode actions = properties.putObject("actions");
         actions.put("type", "array");
+        required.add("actions");
         ObjectNode actionItem = actions.putObject("items");
         actionItem.put("type", "object");
         actionItem.put("additionalProperties", false);
         ObjectNode actionProps = actionItem.putObject("properties");
+        ArrayNode actionRequired = actionItem.putArray("required");
         actionProps.putObject("id").put("type", "string");
+        actionRequired.add("id");
         ObjectNode checks = actionProps.putObject("checks");
         checks.put("type", "array");
+        actionRequired.add("checks");
         ObjectNode checkItem = checks.putObject("items");
         checkItem.put("type", "object");
         checkItem.put("additionalProperties", false);
         ObjectNode checkProps = checkItem.putObject("properties");
+        ArrayNode checkRequired = checkItem.putArray("required");
         checkProps.putObject("type").put("type", "string");
+        checkRequired.add("type");
         checkProps.putObject("path").put("type", "string");
+        checkRequired.add("path");
         ObjectNode value = checkProps.putObject("value");
-        ArrayNode valueTypes = value.putArray("type");
-        valueTypes.add("string")
-                .add("number")
-                .add("boolean")
-                .add("object")
-                .add("array")
-                .add("null");
+        checkRequired.add("value");
+        ArrayNode valueAnyOf = value.putArray("anyOf");
+        valueAnyOf.addObject().put("type", "string");
+        valueAnyOf.addObject().put("type", "number");
+        valueAnyOf.addObject().put("type", "boolean");
+        ObjectNode arrayType = valueAnyOf.addObject();
+        arrayType.put("type", "array");
+        ArrayNode arrayItemsAnyOf = arrayType.putObject("items").putArray("anyOf");
+        arrayItemsAnyOf.addObject().put("type", "string");
+        arrayItemsAnyOf.addObject().put("type", "number");
+        arrayItemsAnyOf.addObject().put("type", "boolean");
+        arrayItemsAnyOf.addObject().put("type", "null");
+        valueAnyOf.addObject().put("type", "null");
 
         ObjectNode questions = properties.putObject("questions");
         questions.put("type", "array");
         questions.putObject("items").put("type", "string");
+        required.add("questions");
 
         return AiJsonSchema.of(schema.toString(), IntentPlan.class);
     }
@@ -1321,59 +1353,61 @@ public class AiOrchestratorService {
         ObjectNode schema = objectMapper.createObjectNode();
         schema.put("type", "object");
         schema.put("additionalProperties", false);
+        ArrayNode required = schema.putArray("required");
 
         ObjectNode properties = schema.putObject("properties");
 
         ObjectNode actions = properties.putObject("actions");
         actions.put("type", "array");
+        required.add("actions");
         ObjectNode actionItem = actions.putObject("items");
         actionItem.put("type", "object");
         actionItem.put("additionalProperties", false);
         ObjectNode actionProps = actionItem.putObject("properties");
+        ArrayNode actionRequired = actionItem.putArray("required");
 
         ObjectNode type = actionProps.putObject("type");
         type.put("type", "string");
         type.putArray("enum").addAll(buildActionEnumFromCatalog(actionCatalog));
+        actionRequired.add("type");
 
         ObjectNode target = actionProps.putObject("target");
         target.put("type", "string");
+        actionRequired.add("target");
 
         ObjectNode value = actionProps.putObject("value");
         value.put("type", "string");
         value.put("nullable", true);
+        actionRequired.add("value");
 
         appendActionParamsSchema(actionProps, extractParamKeysFromCatalog(actionCatalog));
+        actionRequired.add("params");
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
         ambiguities.put("type", "array");
+        required.add("ambiguities");
         ObjectNode ambiguityItem = ambiguities.putObject("items");
         ambiguityItem.put("type", "object");
         ambiguityItem.put("additionalProperties", false);
         ObjectNode ambiguityProps = ambiguityItem.putObject("properties");
+        ArrayNode ambiguityRequired = ambiguityItem.putArray("required");
 
         ambiguityProps.putObject("alias").put("type", "string");
+        ambiguityRequired.add("alias");
         ObjectNode candidates = ambiguityProps.putObject("candidates");
         candidates.put("type", "array");
         candidates.putObject("items").put("type", "string");
+        ambiguityRequired.add("candidates");
         ambiguityProps.putObject("reason").put("type", "string");
+        ambiguityRequired.add("reason");
 
         ObjectNode contextRequest = properties.putObject("contextRequest");
         contextRequest.put("type", "array");
         contextRequest.putObject("items").put("type", "integer");
+        required.add("contextRequest");
         properties.putObject("message").put("type", "string");
+        required.add("message");
 
-        ArrayNode anyOf = schema.putArray("anyOf");
-        anyOf.add(objectMapper.createObjectNode()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .putArray("required")
-                .add("actions")
-                .add("ambiguities"));
-        anyOf.add(objectMapper.createObjectNode()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .putArray("required")
-                .add("contextRequest"));
         return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
     }
 
@@ -1381,59 +1415,61 @@ public class AiOrchestratorService {
         ObjectNode schema = objectMapper.createObjectNode();
         schema.put("type", "object");
         schema.put("additionalProperties", false);
+        ArrayNode required = schema.putArray("required");
 
         ObjectNode properties = schema.putObject("properties");
 
         ObjectNode actions = properties.putObject("actions");
         actions.put("type", "array");
+        required.add("actions");
         ObjectNode actionItem = actions.putObject("items");
         actionItem.put("type", "object");
         actionItem.put("additionalProperties", false);
         ObjectNode actionProps = actionItem.putObject("properties");
+        ArrayNode actionRequired = actionItem.putArray("required");
 
         ObjectNode type = actionProps.putObject("type");
         type.put("type", "string");
         type.putArray("enum").addAll(buildActionEnumFromCatalog(actionCatalog));
+        actionRequired.add("type");
 
         ObjectNode target = actionProps.putObject("target");
         target.put("type", "string");
+        actionRequired.add("target");
 
         ObjectNode value = actionProps.putObject("value");
         value.put("type", "string");
         value.put("nullable", true);
+        actionRequired.add("value");
 
         appendActionParamsSchema(actionProps, extractParamKeysFromCatalog(actionCatalog));
+        actionRequired.add("params");
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
         ambiguities.put("type", "array");
+        required.add("ambiguities");
         ObjectNode ambiguityItem = ambiguities.putObject("items");
         ambiguityItem.put("type", "object");
         ambiguityItem.put("additionalProperties", false);
         ObjectNode ambiguityProps = ambiguityItem.putObject("properties");
+        ArrayNode ambiguityRequired = ambiguityItem.putArray("required");
 
         ambiguityProps.putObject("alias").put("type", "string");
+        ambiguityRequired.add("alias");
         ObjectNode candidates = ambiguityProps.putObject("candidates");
         candidates.put("type", "array");
         candidates.putObject("items").put("type", "string");
+        ambiguityRequired.add("candidates");
         ambiguityProps.putObject("reason").put("type", "string");
+        ambiguityRequired.add("reason");
 
         ObjectNode contextRequest = properties.putObject("contextRequest");
         contextRequest.put("type", "array");
         contextRequest.putObject("items").put("type", "integer");
+        required.add("contextRequest");
         properties.putObject("message").put("type", "string");
+        required.add("message");
 
-        ArrayNode anyOf = schema.putArray("anyOf");
-        anyOf.add(objectMapper.createObjectNode()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .putArray("required")
-                .add("actions")
-                .add("ambiguities"));
-        anyOf.add(objectMapper.createObjectNode()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .putArray("required")
-                .add("contextRequest"));
         return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
     }
 
@@ -1446,10 +1482,12 @@ public class AiOrchestratorService {
         params.put("nullable", true);
         params.put("additionalProperties", false);
         ObjectNode properties = params.putObject("properties");
+        ArrayNode required = params.putArray("required");
         for (String key : paramKeys) {
             if (key == null || key.isBlank()) continue;
             ObjectNode prop = properties.putObject(key);
             prop.put("type", "string");
+            required.add(key);
         }
     }
 
@@ -4639,6 +4677,79 @@ public class AiOrchestratorService {
         return objectMapper.valueToTree(plan).toPrettyString();
     }
 
+    private IntentPlan applyDeterministicIntentChecks(
+            IntentPlan plan,
+            AiActionPlan actionPlan,
+            List<ComponentAction> actionCatalog,
+            JsonNode currentState,
+            boolean isTable,
+            List<ColumnDescriptor> columnDescriptors,
+            List<String> columnResolverKeys) {
+        if (plan == null || actionPlan == null || actionPlan.getActions() == null || actionPlan.getActions().isEmpty()) {
+            return plan;
+        }
+        if (actionCatalog == null || actionCatalog.isEmpty()) {
+            return plan;
+        }
+        AiActionPlan resolvedPlan = isTable
+                ? resolveTableActionPlanTargets(actionPlan, columnDescriptors, columnResolverKeys)
+                : actionPlan;
+        Map<String, ComponentAction> actionById = indexActionCatalog(actionCatalog);
+        List<IntentAction> derivedActions = new ArrayList<>();
+        int expectedActions = 0;
+        for (AiActionPlan.Action action : resolvedPlan.getActions()) {
+            if (action == null || action.getType() == null || action.getType().isBlank()) {
+                continue;
+            }
+            expectedActions++;
+            ComponentAction def = actionById.get(normalizeActionKey(action.getType()));
+            RenderedActionPatch rendered = renderActionPatch(def, action);
+            if (rendered == null || rendered.patch == null || !rendered.missingTokens.isEmpty()) {
+                continue;
+            }
+            List<AiPatchDiff> diffs = buildPatchDiff(currentState, rendered.patch);
+            if (diffs == null || diffs.isEmpty()) {
+                continue;
+            }
+            List<ActionCheck> checks = new ArrayList<>();
+            for (AiPatchDiff diff : diffs) {
+                if (diff == null || diff.getPath() == null || diff.getPath().isBlank()) {
+                    continue;
+                }
+                checks.add(ActionCheck.builder()
+                        .type("pathEquals")
+                        .path(diff.getPath())
+                        .value(diff.getAfter())
+                        .build());
+            }
+            if (!checks.isEmpty()) {
+                derivedActions.add(IntentAction.builder()
+                        .id(formatActionCheckId(action))
+                        .checks(checks)
+                        .build());
+            }
+        }
+        if (expectedActions > 0 && derivedActions.size() == expectedActions) {
+            plan.setActions(derivedActions);
+        }
+        return plan;
+    }
+
+    private String formatActionCheckId(AiActionPlan.Action action) {
+        if (action == null) {
+            return "action";
+        }
+        String type = action.getType();
+        if (type == null || type.isBlank()) {
+            return "action";
+        }
+        String target = action.getTarget();
+        if (target == null || target.isBlank()) {
+            return type;
+        }
+        return type + "[" + target + "]";
+    }
+
     private String buildCompletenessHints(
             IntentPlan plan,
             List<AiPatchDiff> diff,
@@ -5897,8 +6008,12 @@ public class AiOrchestratorService {
         JsonNode normalizedPatch = normalizePatch(componentId, semanticCheck.patch);
         List<AiCapability> allowedCaps = mergeCapabilities(configCapabilities, componentCapabilities);
         SanitizeResult sanitizeResult = sanitizePatch(normalizedPatch, allowedCaps);
-        if (sanitizeResult.warnings != null && !sanitizeResult.warnings.isEmpty()) {
-            outWarnings.addAll(sanitizeResult.warnings);
+        List<String> sanitizeWarnings = filterInternalWarnings(
+                sanitizeResult.warnings,
+                suggestedPatch,
+                componentId);
+        if (sanitizeWarnings != null && !sanitizeWarnings.isEmpty()) {
+            outWarnings.addAll(sanitizeWarnings);
         }
         if (sanitizeResult.sanitized == null || isEmptyObject(sanitizeResult.sanitized)) {
             return errorWithWarnings(
@@ -6323,6 +6438,49 @@ public class AiOrchestratorService {
         List<String> warnings = new ArrayList<>();
         JsonNode sanitized = sanitizeNode(patch, "", allowedPaths, warnings);
         return new SanitizeResult(sanitized, warnings);
+    }
+
+    private List<String> filterInternalWarnings(
+            List<String> warnings,
+            JsonNode rawPatch,
+            String componentId) {
+        if (warnings == null || warnings.isEmpty()) {
+            return warnings;
+        }
+        List<String> filtered = new ArrayList<>();
+        for (String warning : warnings) {
+            if (shouldSuppressWarning(warning, rawPatch, componentId)) {
+                continue;
+            }
+            filtered.add(warning);
+        }
+        return filtered;
+    }
+
+    private boolean shouldSuppressWarning(String warning, JsonNode rawPatch, String componentId) {
+        if (!"praxis-table".equals(componentId)) {
+            return false;
+        }
+        if (!"Campo ignorado: columns[].type".equals(warning)) {
+            return false;
+        }
+        return !patchHasColumnType(rawPatch);
+    }
+
+    private boolean patchHasColumnType(JsonNode patch) {
+        if (patch == null || !patch.isObject()) {
+            return false;
+        }
+        JsonNode columns = patch.get("columns");
+        if (columns == null || !columns.isArray()) {
+            return false;
+        }
+        for (JsonNode column : columns) {
+            if (column != null && column.isObject() && column.has("type")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JsonNode sanitizeNode(JsonNode node, String currentPath, List<String> allowedPaths, List<String> warnings) {
