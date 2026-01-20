@@ -169,6 +169,9 @@ CONTEXTO ALVO:
 	NOTAS IMPORTANTES (se houver):
 	{{CAPABILITY_NOTES}}
 
+	CONCEITOS RELEVANTES (se houver):
+	{{RELEVANT_CONCEPTS}}
+
 	CONFIGURAÇÃO ATUAL (Do Alvo):
 	{{TARGET_CONFIG}}
 
@@ -176,6 +179,9 @@ CONTEXTO ALVO:
 	- NÃO invente endpoints, resourcePath ou schemas. Use apenas valores fornecidos no contexto.
 	- Se faltar um detalhe essencial, não adivinhe; responda com o mínimo possível e preserve o resto.
 	- Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os códigos abaixo.
+	- Se o INTENT PLAN ou action plan indicar criação (ex.: ADD_COLUMN_COMPUTED), NÃO peça coluna existente.
+	- Para ações de criação, derive params obrigatórios do pedido (ex.: field e expression) e gere o patch.
+	- Evite respostas de clarificação quando houver informação mínima no pedido; gere o patch com suposições seguras.
 
 	CODIGOS DE CONTEXTO DISPONIVEIS:
 	- 10: descricao/documentacao curta do componente
