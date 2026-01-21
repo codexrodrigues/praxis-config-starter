@@ -7578,6 +7578,11 @@ public class AiOrchestratorService {
         String format = null;
 
         if ("custom_expression".equals(computedFormat)) {
+            if (!promptHasExplicitExpression(request.getUserPrompt())) {
+                computedFormat = null;
+            }
+        }
+        if ("custom_expression".equals(computedFormat)) {
             expression = intent.getExpression();
             if (isBlank(expression)) {
                 computedFormat = null;
@@ -7674,6 +7679,22 @@ public class AiOrchestratorService {
             case "years_months", "months_total", "decimal_years", "custom_expression", "years" -> normalized;
             default -> null;
         };
+    }
+
+    private boolean promptHasExplicitExpression(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return false;
+        }
+        String lower = prompt.toLowerCase(Locale.ROOT);
+        if (lower.contains("expressão") || lower.contains("expression") || lower.contains("formula")) {
+            return true;
+        }
+        if (prompt.contains("=")) {
+            return true;
+        }
+        return java.util.regex.Pattern.compile("[A-Za-z_][A-Za-z0-9_]*\\s*\\(")
+                .matcher(prompt)
+                .find();
     }
 
     private List<String> extractDateFieldOptions(JsonNode dataProfile, List<String> fallback) {
