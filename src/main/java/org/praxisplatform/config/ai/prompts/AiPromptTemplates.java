@@ -76,24 +76,32 @@ public final class AiPromptTemplates {
 
 	REGRAS:
 	1. Escolha "category" a partir das listas de categorias disponíveis. Se não houver correspondência, use "unknown".
-	2. Identifique o "targetField" (nome técnico) se a intenção for específica de uma coluna. Use fuzzy match se necessário.
-	3. Se o usuário for ambíguo (ex: "muda a cor" e houver ambiguidade), marque "needsClarification": true.
-	4. Se o usuário fizer uma PERGUNTA sobre o estado atual, use "intent": "ask_about_config".
-	5. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
-	6. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
-	7. Se o pedido afetar ambos, use scope="mixed".
-	7.1. Se o componente for agregador (ex.: CRUD combina tabela + formulário), siga o contrato do componente interno (TableConfig/FormConfig) para regras de colunas/renderers.
-	8. Se faltarem detalhes essenciais, marque "needsClarification": true e preencha "missingContext" (ex: "column", "endpoint", "resourcePath"). Use "options" quando possível.
-	9. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
-	10. Retorne APENAS um objeto JSON válido (NUNCA um array).
-	11. Não inclua texto fora do JSON (sem markdown, sem comentários).
+	2. Se o usuário pedir criar/adicionar/incluir coluna, use intent="add_column" ou "add_column_computed" (quando mencionar calculada/computed/cálculo).
+	3. Para add_column_computed: preencha newField e baseFields quando possível; computedFormat quando explícito (years_months, years, months_total, decimal_years).
+	4. Para update/remove: preencha targetField com coluna existente (fuzzy match permitido).
+	5. Se o usuário for ambíguo (ex: "muda a cor" e houver ambiguidade), marque "needsClarification": true.
+	6. Se o usuário fizer uma PERGUNTA sobre o estado atual, use "intent": "ask_about_config".
+	7. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
+	8. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
+	9. Se o pedido afetar ambos, use scope="mixed".
+	9.1. Se o componente for agregador (ex.: CRUD combina tabela + formulário), siga o contrato do componente interno (TableConfig/FormConfig) para regras de colunas/renderers.
+	10. Só marque needsClarification=true quando faltar dado ESSENCIAL:
+	   - add_column_computed: faltar newField OU baseFields[0] OU baseFields fora das colunas disponíveis.
+	   - custom_expression: faltar expression.
+	11. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
+	12. Retorne APENAS um objeto JSON válido (NUNCA um array).
+	13. Não inclua texto fora do JSON (sem markdown, sem comentários).
 
 	SCHEMA DE RESPOSTA (JSON):
 	{
-	  "intent": "update_column_rules" | "toggle_feature" | "global_style" | "ask_about_config" | "unknown",
-	  "targetField": "string" | null,
-	  "category": "string",
+	  "intent": "add_column_computed" | "add_column" | "update_column" | "remove_column" | "toggle_feature" | "global_style" | "ask_about_config" | "unknown",
 	  "scope": "config" | "component" | "mixed",
+	  "category": "string",
+	  "targetField": "string" | null,
+	  "newField": "string" | null,
+	  "baseFields": ["string"],
+	  "computedFormat": "years" | "years_months" | "months_total" | "decimal_years" | "custom_expression" | null,
+	  "expression": "string" | null,
 	  "needsClarification": boolean,
 	  "missingContext": ["string"],
 	  "options": ["string"]
@@ -103,6 +111,10 @@ public final class AiPromptTemplates {
 	{
 	  "intent": "toggle_feature",
 	  "targetField": null,
+	  "newField": null,
+	  "baseFields": [],
+	  "computedFormat": null,
+	  "expression": null,
 	  "category": "inputs",
 	  "scope": "component",
 	  "needsClarification": false,

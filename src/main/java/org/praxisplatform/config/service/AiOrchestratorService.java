@@ -996,11 +996,36 @@ public class AiOrchestratorService {
         ObjectNode intent = properties.putObject("intent");
         intent.put("type", "string");
         intent.putArray("enum")
-                .add("update_column_rules")
+                .add("add_column_computed")
+                .add("add_column")
+                .add("update_column")
+                .add("remove_column")
                 .add("toggle_feature")
                 .add("global_style")
                 .add("ask_about_config")
                 .add("unknown");
+
+        ObjectNode newField = properties.putObject("newField");
+        newField.put("type", "string");
+        newField.put("nullable", true);
+
+        ObjectNode baseFields = properties.putObject("baseFields");
+        baseFields.put("type", "array");
+        baseFields.putObject("items").put("type", "string");
+
+        ObjectNode computedFormat = properties.putObject("computedFormat");
+        computedFormat.put("type", "string");
+        computedFormat.put("nullable", true);
+        computedFormat.putArray("enum")
+                .add("years")
+                .add("years_months")
+                .add("months_total")
+                .add("decimal_years")
+                .add("custom_expression");
+
+        ObjectNode expression = properties.putObject("expression");
+        expression.put("type", "string");
+        expression.put("nullable", true);
 
         ObjectNode targetField = properties.putObject("targetField");
         targetField.put("type", "string");
@@ -1025,6 +1050,10 @@ public class AiOrchestratorService {
         schema.putArray("required")
                 .add("intent")
                 .add("targetField")
+                .add("newField")
+                .add("baseFields")
+                .add("computedFormat")
+                .add("expression")
                 .add("category")
                 .add("scope")
                 .add("needsClarification")
