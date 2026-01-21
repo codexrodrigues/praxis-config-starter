@@ -531,7 +531,8 @@ public class AiOrchestratorService {
                 filteredCaps,
                 currentState,
                 componentContext,
-                frontendConfig);
+                frontendConfig,
+                intent != null ? intent.getCategory() : null);
         intentPlan = applyDeterministicIntentChecks(
                 intentPlan,
                 actionPlan,
@@ -546,27 +547,27 @@ public class AiOrchestratorService {
                 intentPlan.setQuestions(List.of());
                 warnings.add("Perguntas do intent_plan ignoradas para toggle simples; aplicando defaults.");
             } else {
-            AiOrchestratorResponse deterministicFallback = tryResolveComputedFallback(
-                    request,
-                    currentState,
-                    warnings,
-                    configCapabilities,
-                    componentCapabilities,
-                    componentContext);
-            if (deterministicFallback != null) {
-                return deterministicFallback;
-            }
-            deterministicFallback = tryResolveRendererRuleFallback(
-                    request,
-                    currentState,
-                    warnings,
-                    configCapabilities,
-                    componentCapabilities,
-                    componentContext);
-            if (deterministicFallback != null) {
-                return deterministicFallback;
-            }
-            return clarification(buildQuestionsMessage(planQuestions), null);
+                AiOrchestratorResponse deterministicFallback = tryResolveComputedFallback(
+                        request,
+                        currentState,
+                        warnings,
+                        configCapabilities,
+                        componentCapabilities,
+                        componentContext);
+                if (deterministicFallback != null) {
+                    return deterministicFallback;
+                }
+                deterministicFallback = tryResolveRendererRuleFallback(
+                        request,
+                        currentState,
+                        warnings,
+                        configCapabilities,
+                        componentCapabilities,
+                        componentContext);
+                if (deterministicFallback != null) {
+                    return deterministicFallback;
+                }
+                return clarification(buildQuestionsMessage(planQuestions), null);
             }
         }
         String intentPlanJson = formatIntentPlan(intentPlan);
@@ -5410,7 +5411,8 @@ public class AiOrchestratorService {
             List<AiCapability> capabilities,
             JsonNode currentState,
             JsonNode componentContext,
-            AiCallConfig callConfig) {
+            AiCallConfig callConfig,
+            String category) {
         JsonNode definition = context != null ? context.getComponentDefinition() : null;
         String prompt = buildIntentPlanPrompt(
                 request != null ? request.getComponentType() : null,
@@ -5418,7 +5420,8 @@ public class AiOrchestratorService {
                 capabilities,
                 currentState,
                 componentContext,
-                definition);
+                definition,
+                category);
         AiJsonSchema schema = buildIntentPlanSchema();
         JsonNode json = generateIntentPlanJson(prompt, schema, request, callConfig);
         if (json == null) {
@@ -5450,10 +5453,12 @@ public class AiOrchestratorService {
             List<AiCapability> capabilities,
             JsonNode currentState,
             JsonNode componentContext,
-            JsonNode componentDefinition) {
+            JsonNode componentDefinition,
+            String category) {
+        List<AiCapability> reducedCaps = reduceCapabilitiesForIntentPlan(capabilities, category);
         String caps = truncateBlock(
                 "capabilities",
-                formatCapabilities(capabilities),
+                formatCapabilities(reducedCaps),
                 maxCapabilitiesChars);
         String stateSummary = truncateBlock(
                 "current_state_summary",
@@ -5461,7 +5466,7 @@ public class AiOrchestratorService {
                 maxRuntimeMetadataChars);
         
         String concepts = buildConceptsBlock(componentDefinition);
-        String options = buildOptionsByPathSummary(componentContext);
+        String options = buildOptionsByPathSummary(componentContext, category);
         
         String optionsSummary = truncateBlock(
                 "options_by_path_and_concepts",
@@ -5528,7 +5533,7 @@ public class AiOrchestratorService {
         return sb.toString();
     }
 
-    private String buildOptionsByPathSummary(JsonNode componentContext) {
+    private String buildOptionsByPathSummary(JsonNode componentContext, String category) {
         if (componentContext == null || !componentContext.isObject()) {
             return "N/A";
         }
@@ -5537,8 +5542,106 @@ public class AiOrchestratorService {
             return "N/A";
         }
         ArrayNode keys = objectMapper.createArrayNode();
-        optionsByPath.fieldNames().forEachRemaining(keys::add);
+        List<String> prefixes = resolveIntentPlanPrefixes(category);
+        optionsByPath.fieldNames().forEachRemaining(key -> {
+            if (prefixes.isEmpty() || matchesPrefix(key, prefixes)) {
+                keys.add(key);
+            }
+        });
         return keys.size() > 0 ? keys.toPrettyString() : "N/A";
+    }
+
+    private List<AiCapability> reduceCapabilitiesForIntentPlan(
+            List<AiCapability> capabilities,
+            String category) {
+        if (capabilities == null || capabilities.isEmpty()) {
+            return List.of();
+        }
+        List<String> prefixes = resolveIntentPlanPrefixes(category);
+        List<AiCapability> filtered = new ArrayList<>();
+        if (prefixes.isEmpty()) {
+            filtered.addAll(capabilities);
+        } else {
+            for (AiCapability cap : capabilities) {
+                if (cap == null || cap.getPath() == null) continue;
+                if (matchesPrefix(cap.getPath(), prefixes)) {
+                    filtered.add(cap);
+                }
+            }
+        }
+        int limit = 40;
+        if (filtered.size() > limit) {
+            return new ArrayList<>(filtered.subList(0, limit));
+        }
+        return filtered;
+    }
+
+    private List<String> resolveIntentPlanPrefixes(String category) {
+        if (category == null || category.isBlank()) {
+            return List.of();
+        }
+        String normalized = category.trim().toLowerCase(Locale.ROOT);
+        List<String> prefixes = new ArrayList<>();
+        prefixes.add("columns[].field");
+        prefixes.add("columns[].header");
+        switch (normalized) {
+            case "renderer" -> {
+                prefixes.add("columns[].renderer");
+                prefixes.add("columns[].conditionalRenderers[].renderer");
+            }
+            case "conditional" -> {
+                prefixes.add("columns[].conditionalRenderers");
+                prefixes.add("columns[].conditionalStyles");
+                prefixes.add("rowConditionalStyles");
+            }
+            case "format" -> {
+                prefixes.add("columns[].format");
+                prefixes.add("columns[].type");
+                prefixes.add("columns[].computed.format");
+                prefixes.add("columns[].computed.outputType");
+            }
+            case "columns" -> prefixes.add("columns[]");
+            case "selection" -> prefixes.add("behavior.selection");
+            case "sorting" -> {
+                prefixes.add("behavior.sorting");
+                prefixes.add("columns[].sortable");
+            }
+            case "filtering" -> {
+                prefixes.add("behavior.filtering");
+                prefixes.add("columns[].filterable");
+            }
+            case "pagination" -> prefixes.add("behavior.pagination");
+            case "toolbar" -> prefixes.add("toolbar");
+            case "appearance" -> prefixes.add("appearance");
+            case "actions" -> prefixes.add("actions");
+            case "export" -> prefixes.add("export");
+            case "messages" -> prefixes.add("messages");
+            case "localization" -> prefixes.add("localization");
+            case "behavior" -> prefixes.add("behavior");
+            case "performance" -> prefixes.add("performance");
+            case "interaction" -> prefixes.add("interaction");
+            case "data" -> prefixes.add("data");
+            case "accessibility" -> prefixes.add("accessibility");
+            case "mapping" -> prefixes.add("mapping");
+            case "meta" -> prefixes.add("meta");
+            default -> {
+                // keep only core column identifiers by default
+            }
+        }
+        return prefixes;
+    }
+
+    private boolean matchesPrefix(String path, List<String> prefixes) {
+        if (path == null || prefixes == null || prefixes.isEmpty()) {
+            return false;
+        }
+        for (String prefix : prefixes) {
+            if (prefix == null || prefix.isBlank()) continue;
+            if (path.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String formatIntentPlan(IntentPlan plan) {
