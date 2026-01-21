@@ -332,36 +332,54 @@ public class AiOrchestratorService {
                 }
                 warnings.add("Clarificacao ignorada para toggle simples; aplicando defaults.");
             } else {
-            AiOrchestratorResponse badgeResolution = tryResolveBadgeMissingContext(
-                    intent,
-                    request,
-                    currentState,
-                    warnings,
-                    configCapabilities,
-                    componentCapabilities,
-                    componentContext);
-            if (badgeResolution != null) {
-                return badgeResolution;
-            }
-            AiOrchestratorResponse resourceClarification = resolveResourceClarification(
-                    request, intent, embeddingConfig);
-            if (resourceClarification != null) {
-                return resourceClarification;
-            }
-            missingContext = intent.getMissingContext();
-            if (Boolean.TRUE.equals(intent.getNeedsClarification())
-                    || (missingContext != null && !missingContext.isEmpty())) {
-                if (isTable
-                        && "format".equalsIgnoreCase(intent.getCategory())
-                        && isSensitiveMaskField(intent.getTargetField())) {
-                    ClarificationPayload payload = buildFormatClarificationPayload(intent, formatOptions);
-                    return clarification(
-                            buildClarificationMessage(intent, request),
-                            payload.options,
-                            payload.payloads);
+                ComputedDefaultResolution computedDefaults = resolveComputedDefaultsForClarification(
+                        intent,
+                        request,
+                        currentState,
+                        configCapabilities,
+                        componentCapabilities,
+                        componentContext);
+                if (computedDefaults != null) {
+                    warnings.add("Clarificacao ignorada; defaults aplicados para coluna calculada.");
+                    return applySuggestedPatch(
+                            computedDefaults.patch,
+                            currentState,
+                            request.getComponentId(),
+                            warnings,
+                            configCapabilities,
+                            componentCapabilities,
+                            componentContext);
                 }
-                return clarification(buildClarificationMessage(intent, request), intent.getOptions());
-            }
+                AiOrchestratorResponse badgeResolution = tryResolveBadgeMissingContext(
+                        intent,
+                        request,
+                        currentState,
+                        warnings,
+                        configCapabilities,
+                        componentCapabilities,
+                        componentContext);
+                if (badgeResolution != null) {
+                    return badgeResolution;
+                }
+                AiOrchestratorResponse resourceClarification = resolveResourceClarification(
+                        request, intent, embeddingConfig);
+                if (resourceClarification != null) {
+                    return resourceClarification;
+                }
+                missingContext = intent.getMissingContext();
+                if (Boolean.TRUE.equals(intent.getNeedsClarification())
+                        || (missingContext != null && !missingContext.isEmpty())) {
+                    if (isTable
+                            && "format".equalsIgnoreCase(intent.getCategory())
+                            && isSensitiveMaskField(intent.getTargetField())) {
+                        ClarificationPayload payload = buildFormatClarificationPayload(intent, formatOptions);
+                        return clarification(
+                                buildClarificationMessage(intent, request),
+                                payload.options,
+                                payload.payloads);
+                    }
+                    return clarification(buildClarificationMessage(intent, request), intent.getOptions());
+                }
             }
         }
         if ("ask_about_config".equalsIgnoreCase(intent.getIntent())) {
@@ -7274,7 +7292,7 @@ public class AiOrchestratorService {
         if (!promptLower.contains("calculad") && !promptLower.contains("=")) {
             return null;
         }
-        ComputedSpec spec = parseComputedSpec(prompt, currentState);
+        ComputedSpec spec = parseComputedSpec(prompt, currentState, request.getSchemaFields());
         if (spec == null || isBlank(spec.field) || isBlank(spec.expression)) {
             return null;
         }
@@ -7292,6 +7310,8 @@ public class AiOrchestratorService {
         }
         if (!isBlank(spec.format)) {
             computed.put("format", spec.format);
+        } else if (isBlank(spec.outputType) || "number".equalsIgnoreCase(spec.outputType)) {
+            computed.put("format", "1.0-0");
         }
         if (spec.dependencies != null && !spec.dependencies.isEmpty()) {
             ArrayNode deps = computed.putArray("dependencies");
@@ -7312,7 +7332,7 @@ public class AiOrchestratorService {
                 componentContext);
     }
 
-    private ComputedSpec parseComputedSpec(String prompt, JsonNode currentState) {
+    private ComputedSpec parseComputedSpec(String prompt, JsonNode currentState, JsonNode schemaFields) {
         if (prompt == null) {
             return null;
         }
@@ -7351,6 +7371,24 @@ public class AiOrchestratorService {
                 expression = exprMatcher.group(0).trim();
             }
         }
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+        if (isBlank(expression)) {
+            if (mentionsAgeComputation(promptLower)) {
+                String baseField = inferDateFieldForAge(promptLower, currentState, schemaFields);
+                if (!isBlank(baseField)) {
+                    expression = "floor(yearsSince(" + baseField + "))";
+                    if (field == null) {
+                        field = "idade";
+                    }
+                    if (header == null) {
+                        header = "Idade";
+                    }
+                    deps.add(baseField);
+                    outputType = "number";
+                    format = "1.0-0";
+                }
+            }
+        }
         if (isBlank(expression)) {
             return null;
         }
@@ -7369,6 +7407,132 @@ public class AiOrchestratorService {
             outputType = "number";
         }
         return new ComputedSpec(field, header, expression, outputType, format, deps);
+    }
+
+    private ComputedDefaultResolution resolveComputedDefaultsForClarification(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (intent == null || request == null || request.getUserPrompt() == null) {
+            return null;
+        }
+        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+        if (!mentionsComputed(promptLower)) {
+            return null;
+        }
+        if (mentionsComputedPresentationOverride(promptLower)) {
+            return null;
+        }
+        ComputedSpec spec = parseComputedSpec(prompt, currentState, request.getSchemaFields());
+        if (spec == null || isBlank(spec.field) || isBlank(spec.expression)) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode columns = patch.putArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", spec.field);
+        column.put("header", isBlank(spec.header) ? titleCase(spec.field) : spec.header);
+        ObjectNode computed = column.putObject("computed");
+        computed.put("expression", spec.expression);
+        String outputType = !isBlank(spec.outputType) ? spec.outputType : "number";
+        computed.put("outputType", outputType);
+        String format = !isBlank(spec.format) ? spec.format : "1.0-0";
+        if (!isBlank(format)) {
+            computed.put("format", format);
+        }
+        if (spec.dependencies != null && !spec.dependencies.isEmpty()) {
+            ArrayNode deps = computed.putArray("dependencies");
+            for (String dep : spec.dependencies) {
+                if (!isBlank(dep)) {
+                    deps.add(dep);
+                }
+            }
+        }
+        intent.setNeedsClarification(false);
+        intent.setMissingContext(null);
+        if (intent.getOptions() != null && !intent.getOptions().isEmpty()) {
+            intent.setOptions(null);
+        }
+        return new ComputedDefaultResolution(patch);
+    }
+
+    private boolean mentionsComputed(String promptLower) {
+        if (promptLower == null) return false;
+        return promptLower.contains("calculad")
+                || promptLower.contains("computed")
+                || promptLower.contains("formula")
+                || promptLower.contains("express");
+    }
+
+    private boolean mentionsAgeComputation(String promptLower) {
+        if (promptLower == null) return false;
+        return promptLower.contains("idade") || promptLower.contains("age");
+    }
+
+    private boolean mentionsComputedPresentationOverride(String promptLower) {
+        if (promptLower == null) return false;
+        return promptLower.contains("badge")
+                || promptLower.contains("chip")
+                || promptLower.contains("renderer")
+                || promptLower.contains("render")
+                || promptLower.contains("sufixo")
+                || promptLower.contains("suffix")
+                || promptLower.contains("anos'");
+    }
+
+    private String inferDateFieldForAge(String promptLower, JsonNode currentState, JsonNode schemaFields) {
+        if (promptLower == null) {
+            return null;
+        }
+        List<String> columns = extractColumnNames(currentState);
+        for (String col : columns) {
+            if (!isBlank(col) && promptLower.contains(col.toLowerCase(Locale.ROOT))) {
+                return col;
+            }
+        }
+        for (String col : columns) {
+            if (!isBlank(col)) {
+                String lower = col.toLowerCase(Locale.ROOT);
+                if ((lower.contains("nascimento") || lower.contains("birth")) && promptLower.contains("nasc")) {
+                    return col;
+                }
+            }
+        }
+        if (schemaFields != null && schemaFields.isArray()) {
+            for (JsonNode field : schemaFields) {
+                if (field == null || !field.isObject()) {
+                    continue;
+                }
+                String name = textOrNull(field.get("name"));
+                if (isBlank(name)) {
+                    name = textOrNull(field.get("field"));
+                }
+                String label = textOrNull(field.get("label"));
+                if (!isBlank(name) && promptLower.contains(name.toLowerCase(Locale.ROOT))) {
+                    return name;
+                }
+                if (!isBlank(label) && label.toLowerCase(Locale.ROOT).contains("nascimento")) {
+                    return !isBlank(name) ? name : null;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String titleCase(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) return trimmed;
+        String first = trimmed.substring(0, 1).toUpperCase(Locale.ROOT);
+        String rest = trimmed.length() > 1 ? trimmed.substring(1).toLowerCase(Locale.ROOT) : "";
+        return first + rest;
     }
 
     private String normalizeFieldName(String raw) {
@@ -7404,6 +7568,14 @@ public class AiOrchestratorService {
             this.outputType = outputType;
             this.format = format;
             this.dependencies = dependencies != null ? dependencies : List.of();
+        }
+    }
+
+    private static final class ComputedDefaultResolution {
+        private final JsonNode patch;
+
+        private ComputedDefaultResolution(JsonNode patch) {
+            this.patch = patch;
         }
     }
 
