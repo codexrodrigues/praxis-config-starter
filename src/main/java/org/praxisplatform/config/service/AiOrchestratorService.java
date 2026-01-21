@@ -219,8 +219,15 @@ public class AiOrchestratorService {
         List<String> columnResolverKeys = isTable
                 ? resolveFieldResolverKeys(componentContext, "columns[].field")
                 : List.of();
-        List<ContextOption> formatOptions = isTable
+        List<ContextOption> baseFormatOptions = isTable
                 ? resolveOptionsForPath(componentContext, configCapabilities, "columns[].format")
+                : List.of();
+        SelectedFormatSelection selectedFormat = extractSelectedFormatFromHints(request.getContextHints());
+        List<ContextOption> formatOptions = isTable
+                ? augmentFormatOptionsForPrompt(
+                        baseFormatOptions,
+                        request.getUserPrompt(),
+                        selectedFormat != null ? selectedFormat.targetField : null)
                 : List.of();
         ArrayNode targetCandidates = !isTable
                 ? buildTargetCandidates(componentContext, currentState)
@@ -317,6 +324,14 @@ public class AiOrchestratorService {
         }
         if (Boolean.TRUE.equals(intent.getNeedsClarification())
                 || (missingContext != null && !missingContext.isEmpty())) {
+            if (canBypassClarification(intent, componentActions)) {
+                intent.setNeedsClarification(false);
+                intent.setMissingContext(null);
+                if (intent.getOptions() != null && !intent.getOptions().isEmpty()) {
+                    intent.setOptions(null);
+                }
+                warnings.add("Clarificacao ignorada para toggle simples; aplicando defaults.");
+            } else {
             AiOrchestratorResponse badgeResolution = tryResolveBadgeMissingContext(
                     intent,
                     request,
@@ -336,7 +351,17 @@ public class AiOrchestratorService {
             missingContext = intent.getMissingContext();
             if (Boolean.TRUE.equals(intent.getNeedsClarification())
                     || (missingContext != null && !missingContext.isEmpty())) {
+                if (isTable
+                        && "format".equalsIgnoreCase(intent.getCategory())
+                        && isSensitiveMaskField(intent.getTargetField())) {
+                    ClarificationPayload payload = buildFormatClarificationPayload(intent, formatOptions);
+                    return clarification(
+                            buildClarificationMessage(intent, request),
+                            payload.options,
+                            payload.payloads);
+                }
                 return clarification(buildClarificationMessage(intent, request), intent.getOptions());
+            }
             }
         }
         if ("ask_about_config".equalsIgnoreCase(intent.getIntent())) {
@@ -391,6 +416,13 @@ public class AiOrchestratorService {
                     columnDescriptors,
                     allowedActionTypes,
                     columnResolverKeys);
+            expectedActions = applySelectedFormatOverride(
+                    expectedActions,
+                    selectedFormat,
+                    intent,
+                    columnDescriptors,
+                    columnResolverKeys,
+                    warnings);
 
             List<String> ambiguityOptions = collectAmbiguityOptions(actionPlan);
             boolean hasAmbiguity = actionPlan != null
@@ -417,8 +449,16 @@ public class AiOrchestratorService {
                 String label = target != null
                         ? displayColumnLabel(target, countHeaders(columnDescriptors))
                         : missingFormat.getField();
-                List<String> formatChoices = buildOptionLabels(formatOptions);
-                List<AiOption> formatPayloads = buildOptionPayloads(formatOptions);
+                List<ContextOption> choices = formatOptions;
+                List<AiOption> formatPayloads = null;
+                if (isSensitiveMaskField(missingFormat.getField())) {
+                    choices = buildMaskOptionsForField(missingFormat.getField());
+                    formatPayloads = buildMaskOptionPayloads(missingFormat.getField(), choices);
+                }
+                List<String> formatChoices = buildOptionLabels(choices);
+                if (formatPayloads == null || formatPayloads.isEmpty()) {
+                    formatPayloads = buildOptionPayloads(choices);
+                }
                 String message = formatChoices.isEmpty()
                         ? "Informe o formato desejado para a coluna " + label + "."
                         : "Qual formato deseja aplicar na coluna " + label + "?";
@@ -502,6 +542,10 @@ public class AiOrchestratorService {
                 columnResolverKeys);
         List<String> planQuestions = intentPlan != null ? intentPlan.getQuestions() : null;
         if (planQuestions != null && !planQuestions.isEmpty()) {
+            if (shouldIgnoreIntentPlanQuestions(intent, intentPlan, componentActions)) {
+                intentPlan.setQuestions(List.of());
+                warnings.add("Perguntas do intent_plan ignoradas para toggle simples; aplicando defaults.");
+            } else {
             AiOrchestratorResponse deterministicFallback = tryResolveComputedFallback(
                     request,
                     currentState,
@@ -523,6 +567,7 @@ public class AiOrchestratorService {
                 return deterministicFallback;
             }
             return clarification(buildQuestionsMessage(planQuestions), null);
+            }
         }
         String intentPlanJson = formatIntentPlan(intentPlan);
         String capabilityNotes = formatCapabilityNotes(
@@ -1528,7 +1573,9 @@ public class AiOrchestratorService {
         value.put("nullable", true);
         actionRequired.add("value");
 
-        appendActionParamsSchema(actionProps, extractParamKeysFromCatalog(actionCatalog));
+        ObjectNode params = actionProps.putObject("params");
+        params.put("type", "string");
+        params.put("nullable", true);
         actionRequired.add("params");
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
@@ -1590,7 +1637,9 @@ public class AiOrchestratorService {
         value.put("nullable", true);
         actionRequired.add("value");
 
-        appendActionParamsSchema(actionProps, extractParamKeysFromCatalog(actionCatalog));
+        ObjectNode params = actionProps.putObject("params");
+        params.put("type", "string");
+        params.put("nullable", true);
         actionRequired.add("params");
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
@@ -1630,12 +1679,20 @@ public class AiOrchestratorService {
         params.put("nullable", true);
         params.put("additionalProperties", false);
         ObjectNode properties = params.putObject("properties");
-        ArrayNode required = params.putArray("required");
         for (String key : paramKeys) {
             if (key == null || key.isBlank()) continue;
             ObjectNode prop = properties.putObject(key);
-            prop.put("type", "string");
-            required.add(key);
+            ArrayNode anyOf = prop.putArray("anyOf");
+            anyOf.addObject().put("type", "string");
+            anyOf.addObject().put("type", "number");
+            anyOf.addObject().put("type", "boolean");
+            ObjectNode obj = anyOf.addObject();
+            obj.put("type", "object");
+            obj.put("additionalProperties", true);
+            ObjectNode arr = anyOf.addObject();
+            arr.put("type", "array");
+            arr.putObject("items");
+            anyOf.addObject().put("type", "null");
         }
     }
 
@@ -2114,10 +2171,27 @@ public class AiOrchestratorService {
             if (action == null || action.getType() == null) {
                 continue;
             }
+            if (action.getParams() != null && action.getParams().isTextual()) {
+                JsonNode parsed = tryParseJson(action.getParams().asText());
+                if (parsed != null) {
+                    action.setParams(parsed);
+                }
+            }
             String key = normalizeActionKey(action.getType());
             ComponentAction def = actionById.get(key);
             if (def == null) {
                 continue;
+            }
+            if (action.getValue() == null || action.getValue().isNull() || isBlankTextNode(action.getValue())) {
+                JsonNode defaultValue = def.defaultValue;
+                if (defaultValue != null && !defaultValue.isNull()) {
+                    action.setValue(defaultValue.deepCopy());
+                } else if (isBooleanAction(def)) {
+                    Boolean inferred = inferBooleanDefault(key);
+                    if (inferred != null) {
+                        action.setValue(objectMapper.getNodeFactory().booleanNode(inferred));
+                    }
+                }
             }
             if ("set_renderer_badge".equals(key)) {
                 ObjectNode params = ensureParamsObject(action.getParams());
@@ -2146,6 +2220,54 @@ public class AiOrchestratorService {
             }
         }
         return actionPlan;
+    }
+
+    private JsonNode tryParseJson(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty() || !(trimmed.startsWith("{") || trimmed.startsWith("["))) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(trimmed);
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    private boolean isBlankTextNode(JsonNode node) {
+        return node != null && node.isTextual() && node.asText().isBlank();
+    }
+
+    private boolean isBooleanAction(ComponentAction action) {
+        if (action == null || action.valueType == null) {
+            return false;
+        }
+        return "BOOLEAN".equalsIgnoreCase(action.valueType);
+    }
+
+    private Boolean inferBooleanDefault(String actionKey) {
+        if (actionKey == null || actionKey.isBlank()) {
+            return null;
+        }
+        String key = actionKey.trim().toLowerCase(Locale.ROOT);
+        if (key.startsWith("enable_")
+                || key.startsWith("show_")
+                || key.startsWith("activate_")
+                || key.startsWith("turn_on")
+                || key.startsWith("allow_")) {
+            return Boolean.TRUE;
+        }
+        if (key.startsWith("disable_")
+                || key.startsWith("hide_")
+                || key.startsWith("deactivate_")
+                || key.startsWith("turn_off")
+                || key.startsWith("disallow_")) {
+            return Boolean.FALSE;
+        }
+        return null;
     }
 
     private ObjectNode ensureParamsObject(JsonNode params) {
@@ -2193,10 +2315,65 @@ public class AiOrchestratorService {
         }
         java.util.LinkedHashSet<String> missingTokens = new java.util.LinkedHashSet<>();
         JsonNode patch = renderTemplateNode(actionDef.patchTemplate, action, missingTokens);
+        normalizeRendererTextConflicts(patch);
         return new RenderedActionPatch(
                 action != null ? action.getType() : null,
                 patch,
                 new ArrayList<>(missingTokens));
+    }
+
+    private void normalizeRendererTextConflicts(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                normalizeRendererTextConflicts(item);
+            }
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        ObjectNode obj = (ObjectNode) node;
+        JsonNode badgeNode = obj.get("badge");
+        if (badgeNode != null && badgeNode.isObject()) {
+            normalizeDynamicTextPair((ObjectNode) badgeNode, "text", "textField");
+        }
+        JsonNode chipNode = obj.get("chip");
+        if (chipNode != null && chipNode.isObject()) {
+            normalizeDynamicTextPair((ObjectNode) chipNode, "text", "textField");
+        }
+        JsonNode linkNode = obj.get("link");
+        if (linkNode != null && linkNode.isObject()) {
+            normalizeDynamicTextPair((ObjectNode) linkNode, "text", "textField");
+        }
+        JsonNode buttonNode = obj.get("button");
+        if (buttonNode != null && buttonNode.isObject()) {
+            normalizeDynamicTextPair((ObjectNode) buttonNode, "label", "labelField");
+        }
+        JsonNode iconNode = obj.get("icon");
+        if (iconNode != null && iconNode.isObject()) {
+            normalizeDynamicTextPair((ObjectNode) iconNode, "name", "nameField");
+        }
+        JsonNode avatarNode = obj.get("avatar");
+        if (avatarNode != null && avatarNode.isObject()) {
+            normalizeDynamicTextPair((ObjectNode) avatarNode, "alt", "altField");
+        }
+        obj.fields().forEachRemaining(entry -> normalizeRendererTextConflicts(entry.getValue()));
+    }
+
+    private void normalizeDynamicTextPair(ObjectNode node, String staticKey, String fieldKey) {
+        if (node == null || staticKey == null || fieldKey == null) {
+            return;
+        }
+        JsonNode fieldValue = node.get(fieldKey);
+        JsonNode staticValue = node.get(staticKey);
+        if (fieldValue != null && fieldValue.isTextual()
+                && staticValue != null && staticValue.isTextual()
+                && fieldValue.asText().equals(staticValue.asText())) {
+            node.remove(staticKey);
+        }
     }
 
     private JsonNode renderTemplateNode(
@@ -2398,8 +2575,9 @@ public class AiOrchestratorService {
         }
         for (AiActionItem action : actions) {
             if (action == null) continue;
+            String value = action.getValue();
             if ("SET_FORMAT".equals(action.getType())
-                    && (action.getValue() == null || action.getValue().isBlank())) {
+                    && (value == null || value.isBlank() || isNullToken(value))) {
                 return action;
             }
         }
@@ -2465,9 +2643,13 @@ public class AiOrchestratorService {
                 if (actionType == null) {
                     continue;
                 }
-                String selectedFormat = "SET_FORMAT".equals(actionType)
-                        ? detectOptionSelection(clause, formatOptions)
-                        : null;
+                String selectedFormat = null;
+                if ("SET_FORMAT".equals(actionType)) {
+                    selectedFormat = detectOptionSelection(clause, formatOptions);
+                    if (selectedFormat == null) {
+                        selectedFormat = detectMaskFromPrompt(clause);
+                    }
+                }
                 for (ColumnDescriptor column : clauseColumns) {
                     actions.add(AiActionItem.builder()
                             .type(actionType)
@@ -2712,6 +2894,9 @@ public class AiOrchestratorService {
             return null;
         }
         String trimmed = rawValue.trim();
+        if (isNullToken(trimmed)) {
+            return null;
+        }
         String selection = detectOptionSelection(trimmed, formatOptions);
         if (selection != null && !selection.isBlank()) {
             return selection;
@@ -2722,6 +2907,9 @@ public class AiOrchestratorService {
         }
         String extracted = extractFieldFromLabel(trimmed);
         if (extracted != null && !extracted.isBlank()) {
+            if (looksLikeMaskFormat(extracted)) {
+                return extracted.trim();
+            }
             String extractedSelection = detectOptionSelection(extracted, formatOptions);
             if (extractedSelection != null && !extractedSelection.isBlank()) {
                 return extractedSelection;
@@ -2733,6 +2921,9 @@ public class AiOrchestratorService {
             if (looksLikeFormatToken(extracted)) {
                 return extracted.trim();
             }
+        }
+        if (looksLikeMaskFormat(trimmed)) {
+            return trimmed;
         }
         if (looksLikeFormatToken(trimmed)) {
             return trimmed;
@@ -2761,6 +2952,10 @@ public class AiOrchestratorService {
         }
         String lowered = prompt.toLowerCase(Locale.ROOT);
         String normalized = normalizeText(lowered);
+        String mask = detectMaskFromPrompt(prompt);
+        if (mask != null) {
+            return mask;
+        }
 
         String explicit = extractExplicitFormatToken(prompt);
         if (explicit != null) {
@@ -3077,7 +3272,219 @@ public class AiOrchestratorService {
                 || looksLikeDateFormat(format)
                 || looksLikeNumberFormat(format)
                 || looksLikeBooleanFormat(format)
-                || looksLikeStringFormat(format);
+                || looksLikeStringFormat(format)
+                || looksLikeMaskFormat(format);
+    }
+
+    private boolean looksLikeMaskFormat(String format) {
+        if (format == null || format.isBlank()) {
+            return false;
+        }
+        String fmt = format.trim();
+        if (fmt.matches("0{8,14}")) {
+            return true;
+        }
+        return fmt.matches("0{3}\\.0{3}\\.0{3}-0{2}")
+                || fmt.matches("0{2}\\.0{3}\\.0{3}/0{4}-0{2}")
+                || fmt.matches("0{5}-0{3}")
+                || fmt.matches("\\(0{2}\\)\\s*0{4,5}-0{4}");
+    }
+
+    private String detectMaskFromPrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
+                "(0{3}\\.0{3}\\.0{3}-0{2}|0{2}\\.0{3}\\.0{3}/0{4}-0{2}|0{5}-0{3}|\\(0{2}\\)\\s*0{4,5}-0{4}|0{8,14})")
+                .matcher(prompt);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+    private boolean isNullToken(String value) {
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim().toLowerCase(Locale.ROOT);
+        return "null".equals(trimmed) || "undefined".equals(trimmed);
+    }
+
+    private boolean isSensitiveMaskField(String field) {
+        if (field == null || field.isBlank()) {
+            return false;
+        }
+        String normalized = field.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return normalized.contains("cpf")
+                || normalized.contains("cnpj")
+                || normalized.contains("cep")
+                || normalized.contains("telefone")
+                || normalized.contains("phone")
+                || normalized.contains("celular");
+    }
+
+    private List<ContextOption> buildMaskOptionsForField(String field) {
+        String normalized = field != null
+                ? field.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "")
+                : "";
+        List<ContextOption> out = new ArrayList<>();
+        if (normalized.contains("cpf")) {
+            out.add(new ContextOption("000.000.000-00", "CPF (padrão)", "123.456.789-00"));
+            out.add(new ContextOption("00000000000", "CPF (apenas dígitos)", "12345678900"));
+        } else if (normalized.contains("cnpj")) {
+            out.add(new ContextOption("00.000.000/0000-00", "CNPJ (padrão)", "12.345.678/0001-99"));
+            out.add(new ContextOption("00000000000000", "CNPJ (apenas dígitos)", "12345678000199"));
+        } else if (normalized.contains("cep")) {
+            out.add(new ContextOption("00000-000", "CEP (padrão)", "01001-000"));
+        } else {
+            out.add(new ContextOption("(00) 0000-0000", "Telefone fixo", "(11) 4000-0000"));
+            out.add(new ContextOption("(00) 00000-0000", "Telefone celular", "(11) 90000-0000"));
+        }
+        return out;
+    }
+
+    private List<AiOption> buildMaskOptionPayloads(String field, List<ContextOption> options) {
+        if (options == null || options.isEmpty()) {
+            return List.of();
+        }
+        List<AiOption> out = new ArrayList<>();
+        for (ContextOption option : options) {
+            if (option == null || option.value == null || option.value.isBlank()) continue;
+            ObjectNode hints = objectMapper.createObjectNode();
+            ObjectNode selection = hints.putObject("optionSelected");
+            selection.put("targetField", field);
+            ObjectNode selectionValue = selection.putObject("selection");
+            selectionValue.put("value", option.value);
+            selectionValue.put("mode", "mask");
+            out.add(AiOption.builder()
+                    .value(option.value)
+                    .label(option.label != null && !option.label.isBlank() ? option.label : option.value)
+                    .example(option.example)
+                    .contextHints(hints)
+                    .build());
+        }
+        return out;
+    }
+
+    private ClarificationPayload buildFormatClarificationPayload(
+            AiIntentClassification intent,
+            List<ContextOption> formatOptions) {
+        if (intent == null) {
+            return new ClarificationPayload(List.of(), List.of());
+        }
+        String targetField = intent.getTargetField();
+        List<ContextOption> choices = formatOptions != null ? formatOptions : List.of();
+        if (isSensitiveMaskField(targetField)) {
+            choices = buildMaskOptionsForField(targetField);
+            List<String> labels = buildOptionLabels(choices);
+            List<AiOption> payloads = buildMaskOptionPayloads(targetField, choices);
+            return new ClarificationPayload(labels, payloads);
+        }
+        List<String> labels = intent.getOptions() != null
+                ? intent.getOptions()
+                : buildOptionLabels(choices);
+        List<AiOption> payloads = buildOptionPayloads(choices);
+        return new ClarificationPayload(labels, payloads);
+    }
+
+    private SelectedFormatSelection extractSelectedFormatFromHints(JsonNode contextHints) {
+        if (contextHints == null || contextHints.isNull()) {
+            return null;
+        }
+        JsonNode selected = contextHints.get("optionSelected");
+        if (selected == null || selected.isNull() || !selected.isObject()) {
+            return null;
+        }
+        String targetField = textOrNull(selected.get("targetField"));
+        JsonNode selection = selected.get("selection");
+        if (selection == null || selection.isNull()) {
+            return null;
+        }
+        String value = textOrNull(selection.get("value"));
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String mode = textOrNull(selection.get("mode"));
+        return new SelectedFormatSelection(targetField, value, mode);
+    }
+
+    private List<ContextOption> augmentFormatOptionsForPrompt(
+            List<ContextOption> formatOptions,
+            String userPrompt,
+            String targetField) {
+        List<ContextOption> base = formatOptions != null ? new ArrayList<>(formatOptions) : new ArrayList<>();
+        String mask = detectMaskFromPrompt(userPrompt);
+        if (mask != null) {
+            base.add(0, new ContextOption(mask, "Máscara (selecionada)", null));
+            return base;
+        }
+        if (isSensitiveMaskField(targetField) || (userPrompt != null && containsSensitiveFieldToken(userPrompt))) {
+            base.addAll(0, buildMaskOptionsForField(targetField != null ? targetField : "cpf"));
+        }
+        return base;
+    }
+
+    private boolean containsSensitiveFieldToken(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String normalized = text.toLowerCase(Locale.ROOT);
+        return normalized.contains("cpf")
+                || normalized.contains("cnpj")
+                || normalized.contains("cep")
+                || normalized.contains("telefone")
+                || normalized.contains("phone")
+                || normalized.contains("celular");
+    }
+
+    private List<AiActionItem> applySelectedFormatOverride(
+            List<AiActionItem> actions,
+            SelectedFormatSelection selection,
+            AiIntentClassification intent,
+            List<ColumnDescriptor> columns,
+            List<String> columnResolverKeys,
+            List<String> warnings) {
+        if (selection == null || selection.value == null || selection.value.isBlank()) {
+            return actions;
+        }
+        String targetField = selection.targetField != null ? selection.targetField : (intent != null ? intent.getTargetField() : null);
+        String resolvedField = targetField != null
+                ? resolveActionField(targetField, columns, columnResolverKeys)
+                : null;
+        String field = resolvedField != null ? resolvedField : targetField;
+        if (field == null || field.isBlank()) {
+            return actions;
+        }
+        List<AiActionItem> next = actions != null ? new ArrayList<>(actions) : new ArrayList<>();
+        boolean applied = false;
+        for (int i = 0; i < next.size(); i++) {
+            AiActionItem item = next.get(i);
+            if (item == null) continue;
+            if (!"SET_FORMAT".equals(item.getType())) {
+                continue;
+            }
+            if (item.getField() != null && !item.getField().equals(field)) {
+                continue;
+            }
+            next.set(i, AiActionItem.builder()
+                    .type(item.getType())
+                    .field(field)
+                    .value(selection.value)
+                    .build());
+            applied = true;
+        }
+        if (!applied) {
+            next.add(AiActionItem.builder()
+                    .type("SET_FORMAT")
+                    .field(field)
+                    .value(selection.value)
+                    .build());
+        }
+        if (warnings != null) {
+            warnings.add("Formato selecionado aplicado: '" + selection.value + "'.");
+        }
+        return next;
     }
 
     private boolean looksLikeNumberFormat(String format) {
@@ -3127,6 +3534,52 @@ public class AiOrchestratorService {
         if (text == null || word == null || word.isBlank()) return false;
         String pattern = "\\b" + java.util.regex.Pattern.quote(word) + "\\b";
         return java.util.regex.Pattern.compile(pattern).matcher(text).find();
+    }
+
+    private boolean canBypassClarification(AiIntentClassification intent, List<ComponentAction> actionCatalog) {
+        if (intent == null || actionCatalog == null || actionCatalog.isEmpty()) {
+            return false;
+        }
+        if (!"toggle_feature".equalsIgnoreCase(intent.getIntent())) {
+            return false;
+        }
+        String category = intent.getCategory() != null ? intent.getCategory().toLowerCase(Locale.ROOT) : "";
+        if (!Set.of("selection", "pagination", "sorting", "filtering", "export", "toolbar", "appearance", "behavior")
+                .contains(category)) {
+            return false;
+        }
+        Set<String> ids = new java.util.HashSet<>();
+        for (ComponentAction action : actionCatalog) {
+            if (action == null || action.id == null || action.id.isBlank()) continue;
+            ids.add(action.id.trim().toUpperCase(Locale.ROOT));
+        }
+        return ids.contains("ENABLE_SELECTION")
+                || ids.contains("DISABLE_PAGINATION")
+                || ids.contains("ENABLE_PAGINATION")
+                || ids.contains("ENABLE_FILTERING")
+                || ids.contains("DISABLE_FILTERING")
+                || ids.contains("ENABLE_SORTING")
+                || ids.contains("DISABLE_SORTING")
+                || ids.contains("ENABLE_EXPORT")
+                || ids.contains("DISABLE_EXPORT")
+                || ids.contains("SHOW_TOOLBAR")
+                || ids.contains("HIDE_TOOLBAR");
+    }
+
+    private boolean shouldIgnoreIntentPlanQuestions(
+            AiIntentClassification intent,
+            IntentPlan plan,
+            List<ComponentAction> actionCatalog) {
+        if (plan == null || plan.getQuestions() == null || plan.getQuestions().isEmpty()) {
+            return false;
+        }
+        if (intent == null || !"toggle_feature".equalsIgnoreCase(intent.getIntent())) {
+            return false;
+        }
+        if (!canBypassClarification(intent, actionCatalog)) {
+            return false;
+        }
+        return plan.getActions() != null && !plan.getActions().isEmpty();
     }
 
     private String detectOptionSelection(String text, List<ContextOption> options) {
@@ -4902,13 +5355,17 @@ public class AiOrchestratorService {
         String ragBlock = truncateBlock("rag_hints",
                 safeMetadata(ragHints),
                 maxRagHintsChars);
+        boolean hasTargetConfig = contextConfig != null
+                && !contextConfig.isNull()
+                && !contextConfig.isMissingNode()
+                && !(contextConfig.isObject() && contextConfig.size() == 0);
         String templateConfig = truncateBlock("template_config",
-                context.getTemplate() != null && context.getTemplate().getConfigJson() != null
+                !hasTargetConfig && context.getTemplate() != null && context.getTemplate().getConfigJson() != null
                 ? context.getTemplate().getConfigJson().toPrettyString()
                 : "N/A",
                 maxTemplateConfigChars);
         String templateMeta = truncateBlock("template_meta",
-                context.getTemplate() != null && context.getTemplate().getTemplateMeta() != null
+                !hasTargetConfig && context.getTemplate() != null && context.getTemplate().getTemplateMeta() != null
                 ? context.getTemplate().getTemplateMeta().toPrettyString()
                 : "N/A",
                 maxTemplateMetaChars);
@@ -5130,11 +5587,22 @@ public class AiOrchestratorService {
                 if (diff == null || diff.getPath() == null || diff.getPath().isBlank()) {
                     continue;
                 }
-                checks.add(ActionCheck.builder()
-                        .type("pathEquals")
-                        .path(diff.getPath())
-                        .value(diff.getAfter())
-                        .build());
+                JsonNode after = diff.getAfter();
+                if (after != null && after.isArray() && isConditionalRenderersPath(diff.getPath())) {
+                    for (JsonNode item : after) {
+                        checks.add(ActionCheck.builder()
+                                .type("contains")
+                                .path(diff.getPath())
+                                .value(item)
+                                .build());
+                    }
+                } else {
+                    checks.add(ActionCheck.builder()
+                            .type("pathEquals")
+                            .path(diff.getPath())
+                            .value(after)
+                            .build());
+                }
             }
             if (!checks.isEmpty()) {
                 derivedActions.add(IntentAction.builder()
@@ -5245,13 +5713,28 @@ public class AiOrchestratorService {
                     return true;
                 }
             } else if ("pathequals".equalsIgnoreCase(type)) {
-                if (diffPath.equals(checkPath) && expected != null && diff.getAfter() != null
-                        && diff.getAfter().equals(expected)) {
-                    return true;
+                if (diffPath.equals(checkPath) && expected != null && diff.getAfter() != null) {
+                    JsonNode actual = diff.getAfter();
+                    JsonNode exp = expected;
+                    if (isConditionalRenderersPath(checkPath)) {
+                        actual = stripConditionalRendererDescription(actual);
+                        exp = stripConditionalRendererDescription(exp);
+                    }
+                    if (actual != null && exp != null && actual.equals(exp)) {
+                        return true;
+                    }
                 }
             } else if ("contains".equalsIgnoreCase(type)) {
-                if (diffPath.equals(checkPath) && containsValue(diff.getAfter(), expected)) {
-                    return true;
+                if (diffPath.equals(checkPath)) {
+                    JsonNode actual = diff.getAfter();
+                    JsonNode exp = expected;
+                    if (isConditionalRenderersPath(checkPath)) {
+                        actual = stripConditionalRendererDescription(actual);
+                        exp = stripConditionalRendererDescription(exp);
+                    }
+                    if (containsValue(actual, exp)) {
+                        return true;
+                    }
                 }
             }
         }
@@ -5274,6 +5757,34 @@ public class AiOrchestratorService {
             return false;
         }
         return patchContainsExpected(actual, expected);
+    }
+
+    private boolean isConditionalRenderersPath(String path) {
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        return path.endsWith("conditionalRenderers");
+    }
+
+    private JsonNode stripConditionalRendererDescription(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return node;
+        }
+        if (node.isObject()) {
+            ObjectNode copy = ((ObjectNode) node).deepCopy();
+            copy.remove("description");
+            return copy;
+        }
+        if (!node.isArray()) {
+            return node;
+        }
+        ArrayNode copy = ((ArrayNode) node).deepCopy();
+        for (JsonNode item : copy) {
+            if (item != null && item.isObject()) {
+                ((ObjectNode) item).remove("description");
+            }
+        }
+        return copy;
     }
 
     private String normalizePath(String path) {
@@ -6555,6 +7066,12 @@ public class AiOrchestratorService {
                 if (values == null || values.isEmpty()) {
                     values = extractValuesFromPrompt(prompt);
                 }
+                if ((values == null || values.isEmpty()) && "status".equalsIgnoreCase(field)) {
+                    values = List.of("ERROR", "SUCCESS", "PENDING");
+                }
+                if ((values == null || values.isEmpty()) && "priority".equalsIgnoreCase(field)) {
+                    values = List.of("HIGH", "MEDIUM", "LOW");
+                }
                 values = limitBadgeValues(values);
                 Map<String, String> colorMap = buildDefaultColorMap(values, promptLower);
                 boolean quoteValues = true;
@@ -6613,10 +7130,12 @@ public class AiOrchestratorService {
                 Map<String, String> style = extractStyleFromPrompt(promptLower);
                 JsonNode patch = null;
                 if (promptLower.contains("linha") || promptLower.contains("row")) {
-                    patch = buildConditionalRowStylePatch(condition, style);
+                    Map<String, String> rowStyle = coerceRowStyleDefaults(style);
+                    patch = buildConditionalRowStylePatch(condition, rowStyle);
                 }
                 if (patch == null) {
-                    patch = buildConditionalStylePatch(field, condition, style);
+                    Map<String, String> colStyle = coerceColumnStyleDefaults(style);
+                    patch = buildConditionalStylePatch(field, condition, colStyle);
                 }
                 if (patch != null) {
                     warnings.add("Patch deterministico aplicado para estilo condicional de coluna.");
@@ -6857,6 +7376,8 @@ public class AiOrchestratorService {
                 out.put(value, "warn");
             } else if ("SUCCESS".equals(normalized) || "OK".equals(normalized)) {
                 out.put(value, "success");
+            } else if ("PENDING".equals(normalized)) {
+                out.put(value, "accent");
             } else if ("HIGH".equals(normalized)) {
                 out.put(value, "warn");
             } else if ("MEDIUM".equals(normalized)) {
@@ -6972,6 +7493,36 @@ public class AiOrchestratorService {
             styleNode.put(entry.getKey(), entry.getValue());
         }
         return patch;
+    }
+
+    private Map<String, String> coerceRowStyleDefaults(Map<String, String> style) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (style != null) {
+            out.putAll(style);
+        }
+        if (!out.containsKey("backgroundColor")) {
+            String color = out.remove("color");
+            if (!isBlank(color)) {
+                out.put("backgroundColor", color);
+            }
+        }
+        if (out.isEmpty()) {
+            out.put("backgroundColor", "#ffebee");
+        }
+        return out;
+    }
+
+    private Map<String, String> coerceColumnStyleDefaults(Map<String, String> style) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (style != null) {
+            out.putAll(style);
+        }
+        boolean hasColor = out.containsKey("color") && !isBlank(out.get("color"));
+        boolean hasBackground = out.containsKey("backgroundColor") && !isBlank(out.get("backgroundColor"));
+        if (!hasColor && !hasBackground) {
+            out.put("color", "#2e7d32");
+        }
+        return out;
     }
 
     private String extractNumericCondition(String promptLower, String field) {
@@ -7257,9 +7808,15 @@ public class AiOrchestratorService {
         Map<String, Object> out = new LinkedHashMap<>(computed);
         Object outputTypeObj = out.get("outputType");
         Object formatObj = out.get("format");
+        Object expressionObj = out.get("expression");
         String outputType = outputTypeObj instanceof String ? ((String) outputTypeObj).trim() : null;
         String format = formatObj instanceof String ? ((String) formatObj).trim() : null;
+        String expression = expressionObj instanceof String ? ((String) expressionObj).trim() : null;
 
+        if (outputTypeObj instanceof String && outputType != null && outputType.isBlank()) {
+            out.remove("outputType");
+            outputType = null;
+        }
         if (outputType != null && !outputType.isBlank()) {
             String normalized = normalizeOutputType(outputType);
             if (normalized != null) {
@@ -7272,6 +7829,12 @@ public class AiOrchestratorService {
                 } else if (looksLikeCurrencyFormat(outputType)) {
                     out.put("format", outputType);
                 }
+            }
+        }
+        if ((outputType == null || outputType.isBlank())) {
+            String inferred = inferComputedOutputType(format, expression);
+            if (!isBlank(inferred)) {
+                out.put("outputType", inferred);
             }
         }
         return out;
@@ -7333,6 +7896,28 @@ public class AiOrchestratorService {
         return null;
     }
 
+    private String inferComputedOutputType(String format, String expression) {
+        if (!isBlank(format)) {
+            if (looksLikeCurrencyFormat(format)) {
+                return "currency";
+            }
+            String fmtLower = format.toLowerCase(Locale.ROOT);
+            if (fmtLower.contains("%")) {
+                return "percentage";
+            }
+            if (looksLikeDateFormat(format)) {
+                return "date";
+            }
+        }
+        if (!isBlank(expression)) {
+            if (expression.contains("+") || expression.contains("-")
+                    || expression.contains("*") || expression.contains("/")) {
+                return "number";
+            }
+        }
+        return "number";
+    }
+
     private boolean looksLikeCurrencyFormat(String format) {
         return format != null && format.trim().matches("^[A-Z]{3}(\\|.*)?$");
     }
@@ -7340,6 +7925,9 @@ public class AiOrchestratorService {
     private boolean looksLikeDateFormat(String format) {
         if (format == null) return false;
         String fmt = format.trim();
+        if (looksLikeMaskFormat(fmt)) {
+            return false;
+        }
         return fmt.matches(".*(d|M|y){2,}.*") || fmt.contains("/") || fmt.contains("-");
     }
 
@@ -7590,8 +8178,16 @@ public class AiOrchestratorService {
                 .map(AiCapability::getPath)
                 .filter(p -> p != null && !p.isBlank())
                 .collect(Collectors.toList());
+        List<String> objectPaths = caps.stream()
+                .filter(c -> c != null
+                        && c.getPath() != null
+                        && !c.getPath().isBlank()
+                        && c.getValueKind() != null
+                        && "object".equalsIgnoreCase(c.getValueKind()))
+                .map(AiCapability::getPath)
+                .collect(Collectors.toList());
         List<String> warnings = new ArrayList<>();
-        JsonNode sanitized = sanitizeNode(patch, "", allowedPaths, warnings);
+        JsonNode sanitized = sanitizeNode(patch, "", allowedPaths, objectPaths, warnings);
         return new SanitizeResult(sanitized, warnings);
     }
 
@@ -7638,7 +8234,12 @@ public class AiOrchestratorService {
         return false;
     }
 
-    private JsonNode sanitizeNode(JsonNode node, String currentPath, List<String> allowedPaths, List<String> warnings) {
+    private JsonNode sanitizeNode(
+            JsonNode node,
+            String currentPath,
+            List<String> allowedPaths,
+            List<String> objectPaths,
+            List<String> warnings) {
         if (node == null) return null;
         if (node.isArray()) {
             boolean isRootArray = !currentPath.isBlank()
@@ -7650,7 +8251,7 @@ public class AiOrchestratorService {
             }
             ArrayNode arr = objectMapper.createArrayNode();
             for (JsonNode item : node) {
-                arr.add(sanitizeNode(item, currentPath + "[]", allowedPaths, warnings));
+                arr.add(sanitizeNode(item, currentPath + "[]", allowedPaths, objectPaths, warnings));
             }
             return arr;
         }
@@ -7667,9 +8268,11 @@ public class AiOrchestratorService {
             boolean exactMatch = allowedPaths.contains(newPath) || isIdentityField;
             boolean prefixMatch = allowedPaths.stream().anyMatch(
                     p -> p.startsWith(newPath + ".") || p.startsWith(newPath + "["));
+            boolean objectPrefix = objectPaths != null && !objectPaths.isEmpty()
+                    && objectPaths.stream().anyMatch(p -> newPath.startsWith(p + ".") || newPath.startsWith(p + "["));
 
-            if (exactMatch || prefixMatch) {
-                JsonNode sanitizedChild = sanitizeNode(value, newPath, allowedPaths, warnings);
+            if (exactMatch || prefixMatch || objectPrefix) {
+                JsonNode sanitizedChild = sanitizeNode(value, newPath, allowedPaths, objectPaths, warnings);
                 if (sanitizedChild == null
                         || sanitizedChild.isMissingNode()
                         || sanitizedChild.isNull()
@@ -7784,7 +8387,67 @@ public class AiOrchestratorService {
         if (enumOptions.isEmpty()) {
             return EnumValidationResult.ok();
         }
+        normalizeEnumValues(patch, "", enumOptions);
         return validateEnumNode(patch, "", enumOptions);
+    }
+
+    private void normalizeEnumValues(
+            JsonNode node,
+            String path,
+            Map<String, List<String>> enumOptions) {
+        if (node == null || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            String nextPath = path == null || path.isBlank() ? "[]" : path + "[]";
+            for (JsonNode item : node) {
+                normalizeEnumValues(item, nextPath, enumOptions);
+            }
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        ObjectNode obj = (ObjectNode) node;
+        java.util.Iterator<Map.Entry<String, JsonNode>> fields = obj.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            String nextPath = path == null || path.isBlank()
+                    ? entry.getKey()
+                    : path + "." + entry.getKey();
+            JsonNode value = entry.getValue();
+            if (value != null && value.isValueNode()) {
+                EnumAllowed allowed = resolveEnumAllowed(nextPath, enumOptions);
+                if (allowed != null && allowed.values != null && !allowed.values.isEmpty()) {
+                    String provided = value.asText();
+                    String normalized = normalizeEnumAlias(nextPath, provided, allowed.values);
+                    if (normalized != null && !normalized.equals(provided)) {
+                        obj.put(entry.getKey(), normalized);
+                    }
+                }
+                continue;
+            }
+            normalizeEnumValues(value, nextPath, enumOptions);
+        }
+    }
+
+    private String normalizeEnumAlias(String path, String provided, List<String> allowed) {
+        if (provided == null || provided.isBlank() || allowed == null || allowed.isEmpty()) {
+            return null;
+        }
+        String normalized = provided.trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        boolean isBadgeVariant = path != null && path.endsWith("badge.variant");
+        boolean isChipVariant = path != null && path.endsWith("chip.variant");
+        if (isBadgeVariant || isChipVariant) {
+            if (lower.equals("solid") || lower.equals("pill") || lower.equals("rounded")) {
+                return allowed.contains("filled") ? "filled" : null;
+            }
+            if (lower.equals("outline")) {
+                return allowed.contains("outlined") ? "outlined" : null;
+            }
+        }
+        return null;
     }
 
     private EnumValidationResult validateEnumNode(
@@ -8374,6 +9037,28 @@ public class AiOrchestratorService {
             this.value = value;
             this.label = label;
             this.example = example;
+        }
+    }
+
+    private static final class SelectedFormatSelection {
+        private final String targetField;
+        private final String value;
+        private final String mode;
+
+        private SelectedFormatSelection(String targetField, String value, String mode) {
+            this.targetField = targetField;
+            this.value = value;
+            this.mode = mode;
+        }
+    }
+
+    private static final class ClarificationPayload {
+        private final List<String> options;
+        private final List<AiOption> payloads;
+
+        private ClarificationPayload(List<String> options, List<AiOption> payloads) {
+            this.options = options != null ? options : List.of();
+            this.payloads = payloads != null ? payloads : List.of();
         }
     }
 

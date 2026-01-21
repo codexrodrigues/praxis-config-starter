@@ -21,10 +21,11 @@ public final class AiPromptTemplates {
 
     public static final String CONTRACT_FORMATTING = """
     - Datas: Use { "type": "date", "format": "dd/MM/yyyy" } (ou similar).
-    - Moeda: Use "BRL|symbol|2" (currencyCode|display|decimals) ou "USD|code|0". Formato aceito é string.
+    - Moeda: Use "BRL|symbol|2" (currencyCode|display|decimals) ou "USD|code|0". Opcional: sufixo "|nosep".
     - Número: Use padrões do DecimalPipe, ex.: "1.2-2" (mínimo 2, máximo 2 decimais).
     - Percentual: Use padrões do PercentPipe, ex.: "1.0-0|x100" para converter 0.1 -> 10%.
-    - Boolean: Use { "type": "boolean" } e, opcionalmente, format strings como "true-false", "yes-no", "active-inactive".
+    - Boolean: Use { "type": "boolean" } e, opcionalmente, format strings como "true-false", "yes-no", "active-inactive" ou "custom|Sim|Nao".
+    - String: Use "uppercase|truncate|50|..." quando precisar truncar (transformação + limite + sufixo).
     """;
 
     public static final String CONTRACT_SAFETY = """
@@ -81,6 +82,7 @@ public final class AiPromptTemplates {
 	5. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
 	6. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
 	7. Se o pedido afetar ambos, use scope="mixed".
+	7.1. Se o componente for agregador (ex.: CRUD combina tabela + formulário), siga o contrato do componente interno (TableConfig/FormConfig) para regras de colunas/renderers.
 	8. Se faltarem detalhes essenciais, marque "needsClarification": true e preencha "missingContext" (ex: "column", "endpoint", "resourcePath"). Use "options" quando possível.
 	9. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
 	10. Retorne APENAS um objeto JSON válido (NUNCA um array).
@@ -266,7 +268,7 @@ REGRAS:
 1. Use apenas os IDs do catalogo de acoes.
 2. target deve ser o field da coluna. Se o usuario citar o header, converta para o field correspondente.
 3. Para acoes que exigem um valor direto (ex.: SET_FORMAT, RENAME_COLUMN), informe value. Use null se nao souber.
-4. Para acoes com detalhes adicionais (ex.: COLUMN.RENDERER.BUTTON.STYLE.SET), use params (ex.: params.variant, params.color). params eh um objeto com as chaves usadas no patchTemplate do actionCatalog.
+4. Para acoes com detalhes adicionais (ex.: COLUMN.RENDERER.BUTTON.STYLE.SET), use params. Se params for complexo (ex.: renderer completo), envie params como string JSON (ex.: "{\\"renderer\\":{\\"type\\":\\"badge\\",...},\\"condition\\":\\"valor > 0\\"}").
 5. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
 6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
 7. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
@@ -305,7 +307,7 @@ REGRAS:
 1. Use apenas os IDs do catalogo de acoes.
 2. Preencha "target" quando a acao exigir um alvo (ex.: campo/aba/seccao).
 3. Preencha "value" quando a acao exigir um valor direto.
-4. Use "params" para valores adicionais exigidos pelo patchTemplate (ex.: params.color).
+4. Use "params" para valores adicionais exigidos pelo patchTemplate. Se params for complexo, envie params como string JSON.
 5. Se houver ambiguidade de alvo, preencha "ambiguities" com alias e candidates.
 6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
 7. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
