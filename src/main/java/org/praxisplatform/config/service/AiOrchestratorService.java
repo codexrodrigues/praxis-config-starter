@@ -4395,6 +4395,24 @@ public class AiOrchestratorService {
         return intent;
     }
 
+    private String normalizeIntentType(String intentType) {
+        if (intentType == null || intentType.isBlank()) {
+            return intentType;
+        }
+        String normalized = intentType.trim().toLowerCase(Locale.ROOT);
+        if ("update_column".equals(normalized) || "remove_column".equals(normalized)) {
+            return "update_column_rules";
+        }
+        return intentType;
+    }
+
+    private boolean requiresExistingColumnTarget(String intentType) {
+        if (intentType == null) {
+            return false;
+        }
+        return "update_column_rules".equalsIgnoreCase(intentType);
+    }
+
     private void addMissing(List<String> missing, String value) {
         if (missing == null || value == null || value.isBlank()) return;
         if (!missing.contains(value)) {
@@ -5781,6 +5799,10 @@ public class AiOrchestratorService {
             ComponentAction def = actionById.get(normalizeActionKey(action.getType()));
             RenderedActionPatch rendered = renderActionPatch(def, action);
             if (rendered == null || rendered.patch == null || !rendered.missingTokens.isEmpty()) {
+                IntentAction fallback = buildCreateColumnFallbackChecks(action);
+                if (fallback != null) {
+                    derivedActions.add(fallback);
+                }
                 continue;
             }
             List<AiPatchDiff> diffs = buildPatchDiff(currentState, rendered.patch);
@@ -5820,6 +5842,49 @@ public class AiOrchestratorService {
             plan.setActions(derivedActions);
         }
         return plan;
+    }
+
+    private IntentAction buildCreateColumnFallbackChecks(AiActionPlan.Action action) {
+        if (action == null || action.getType() == null) {
+            return null;
+        }
+        String type = normalizeActionKey(action.getType());
+        if (!"add_column".equals(type) && !"add_column_computed".equals(type)) {
+            return null;
+        }
+        String field = null;
+        JsonNode params = action.getParams();
+        if (params != null && params.isObject()) {
+            String paramField = textOrNull(params.get("field"));
+            if (!isBlank(paramField)) {
+                field = paramField;
+            }
+        }
+        if (isBlank(field)) {
+            field = action.getTarget();
+        }
+        if (isBlank(field)) {
+            return null;
+        }
+        List<ActionCheck> checks = new ArrayList<>();
+        checks.add(ActionCheck.builder()
+                .type("pathChanged")
+                .path("columns[field=" + field + "]")
+                .build());
+        if (params != null && params.isObject()) {
+            String expression = textOrNull(params.get("expression"));
+            if (!isBlank(expression)) {
+                checks.add(ActionCheck.builder()
+                        .type("pathEquals")
+                        .path("columns[field=" + field + "].computed.expression")
+                        .value(objectMapper.convertValue(expression, JsonNode.class))
+                        .build());
+            }
+        }
+        return IntentAction.builder()
+                .id(formatActionCheckId(action))
+                .checks(checks)
+                .build();
     }
 
     private String formatActionCheckId(AiActionPlan.Action action) {
