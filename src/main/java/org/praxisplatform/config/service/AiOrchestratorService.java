@@ -7314,14 +7314,7 @@ public class AiOrchestratorService {
         } else if (isBlank(spec.outputType) || "number".equalsIgnoreCase(spec.outputType)) {
             computed.put("format", "1.0-0");
         }
-        if (spec.dependencies != null && !spec.dependencies.isEmpty()) {
-            ArrayNode deps = computed.putArray("dependencies");
-            for (String dep : spec.dependencies) {
-                if (!isBlank(dep)) {
-                    deps.add(dep);
-                }
-            }
-        }
+        addComputedDependencies(computed, spec.dependencies);
         warnings.add("Patch deterministico aplicado para coluna calculada.");
         return applySuggestedPatch(
                 patch,
@@ -7448,14 +7441,7 @@ public class AiOrchestratorService {
         if (!isBlank(format)) {
             computed.put("format", format);
         }
-        if (spec.dependencies != null && !spec.dependencies.isEmpty()) {
-            ArrayNode deps = computed.putArray("dependencies");
-            for (String dep : spec.dependencies) {
-                if (!isBlank(dep)) {
-                    deps.add(dep);
-                }
-            }
-        }
+        addComputedDependencies(computed, spec.dependencies);
         intent.setNeedsClarification(false);
         intent.setMissingContext(null);
         if (intent.getOptions() != null && !intent.getOptions().isEmpty()) {
@@ -7544,6 +7530,22 @@ public class AiOrchestratorService {
             return titleCase(spec.field);
         }
         return spec.header;
+    }
+
+    private void addComputedDependencies(ObjectNode computed, List<String> dependencies) {
+        if (computed == null || dependencies == null || dependencies.isEmpty()) {
+            return;
+        }
+        ArrayNode deps = computed.putArray("dependencies");
+        java.util.Set<String> unique = new java.util.LinkedHashSet<>();
+        for (String dep : dependencies) {
+            if (!isBlank(dep)) {
+                unique.add(dep);
+            }
+        }
+        for (String dep : unique) {
+            deps.add(dep);
+        }
     }
 
     private String normalizeFieldName(String raw) {
