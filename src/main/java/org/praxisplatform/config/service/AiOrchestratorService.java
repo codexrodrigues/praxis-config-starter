@@ -7569,43 +7569,53 @@ public class AiOrchestratorService {
             return clarification("Qual campo de data devo usar para o cálculo?", options);
         }
 
-        String computedFormat = normalizeComputedFormat(intent.getComputedFormat());
+        String promptLower = request.getUserPrompt() != null
+                ? request.getUserPrompt().toLowerCase(Locale.ROOT)
+                : "";
+        String computedFormat = normalizeComputedFormatOrNull(intent.getComputedFormat());
         String expression = null;
         String outputType = null;
         String format = null;
 
-        switch (computedFormat) {
-            case "years_months" -> {
-                outputType = "string";
-                expression = buildTenureYearsMonthsExpression(baseField);
-            }
-            case "months_total" -> {
-                outputType = "number";
-                format = "1.0-0";
-                expression = "floor(monthsSince(" + baseField + "))";
-            }
-            case "decimal_years" -> {
-                outputType = "number";
-                format = "1.2-2";
-                expression = "monthsSince(" + baseField + ") / 12";
-            }
-            case "custom_expression" -> {
-                expression = intent.getExpression();
-                if (isBlank(expression)) {
-                    return clarification("Qual expressão devo usar para a coluna calculada?", List.of());
-                }
-                if (containsDisallowedExpressionTokens(expression)) {
-                    return clarification("A expressão contém tokens não permitidos. Informe uma expressão DSL válida.", List.of());
-                }
+        if ("custom_expression".equals(computedFormat)) {
+            expression = intent.getExpression();
+            if (isBlank(expression)) {
+                computedFormat = null;
+            } else if (containsDisallowedExpressionTokens(expression)) {
+                return clarification("A expressão contém tokens não permitidos. Informe uma expressão DSL válida.", List.of());
+            } else {
                 outputType = inferOutputTypeFromExpression(expression);
                 if ("number".equalsIgnoreCase(outputType)) {
                     format = "1.0-0";
                 }
             }
-            default -> {
-                outputType = "number";
-                format = "1.0-0";
-                expression = "floor(yearsSince(" + baseField + "))";
+        }
+
+        if (computedFormat == null) {
+            computedFormat = mentionsTenure(promptLower) ? "years_months" : "years";
+        }
+
+        if (!"custom_expression".equals(computedFormat)) {
+            switch (computedFormat) {
+                case "years_months" -> {
+                    outputType = "string";
+                    expression = buildTenureYearsMonthsExpression(baseField);
+                }
+                case "months_total" -> {
+                    outputType = "number";
+                    format = "1.0-0";
+                    expression = "floor(monthsSince(" + baseField + "))";
+                }
+                case "decimal_years" -> {
+                    outputType = "number";
+                    format = "1.2-2";
+                    expression = "monthsSince(" + baseField + ") / 12";
+                }
+                default -> {
+                    outputType = "number";
+                    format = "1.0-0";
+                    expression = "floor(yearsSince(" + baseField + "))";
+                }
             }
         }
 
@@ -7652,6 +7662,17 @@ public class AiOrchestratorService {
         return switch (normalized) {
             case "years_months", "months_total", "decimal_years", "custom_expression", "years" -> normalized;
             default -> "years";
+        };
+    }
+
+    private String normalizeComputedFormatOrNull(String computedFormat) {
+        if (computedFormat == null || computedFormat.isBlank()) {
+            return null;
+        }
+        String normalized = computedFormat.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "years_months", "months_total", "decimal_years", "custom_expression", "years" -> normalized;
+            default -> null;
         };
     }
 
