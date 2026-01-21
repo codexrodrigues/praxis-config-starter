@@ -7300,8 +7300,9 @@ public class AiOrchestratorService {
         ArrayNode columns = patch.putArray("columns");
         ObjectNode column = columns.addObject();
         column.put("field", spec.field);
-        if (!isBlank(spec.header)) {
-            column.put("header", spec.header);
+        String computedHeader = resolveComputedHeader(spec);
+        if (!isBlank(computedHeader)) {
+            column.put("header", computedHeader);
         }
         ObjectNode computed = column.putObject("computed");
         computed.put("expression", spec.expression);
@@ -7438,7 +7439,7 @@ public class AiOrchestratorService {
         ArrayNode columns = patch.putArray("columns");
         ObjectNode column = columns.addObject();
         column.put("field", spec.field);
-        column.put("header", isBlank(spec.header) ? titleCase(spec.field) : spec.header);
+        column.put("header", resolveComputedHeader(spec));
         ObjectNode computed = column.putObject("computed");
         computed.put("expression", spec.expression);
         String outputType = !isBlank(spec.outputType) ? spec.outputType : "number";
@@ -7533,6 +7534,16 @@ public class AiOrchestratorService {
         String first = trimmed.substring(0, 1).toUpperCase(Locale.ROOT);
         String rest = trimmed.length() > 1 ? trimmed.substring(1).toLowerCase(Locale.ROOT) : "";
         return first + rest;
+    }
+
+    private String resolveComputedHeader(ComputedSpec spec) {
+        if (spec == null) {
+            return null;
+        }
+        if (isBlank(spec.header) || (!isBlank(spec.field) && spec.header.equalsIgnoreCase(spec.field))) {
+            return titleCase(spec.field);
+        }
+        return spec.header;
     }
 
     private String normalizeFieldName(String raw) {
