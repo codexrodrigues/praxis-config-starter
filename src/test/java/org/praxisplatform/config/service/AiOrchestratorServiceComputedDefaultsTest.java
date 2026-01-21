@@ -107,4 +107,83 @@ class AiOrchestratorServiceComputedDefaultsTest {
         assertThat(resolution).isNull();
         assertThat(intent.getNeedsClarification()).isTrue();
     }
+
+    @Test
+    void shouldApplyDefaultsForTenureYears() {
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .intent("update_column_rules")
+                .category("columns")
+                .needsClarification(true)
+                .missingContext(List.of("dataType", "headerLabel", "renderer/format"))
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .userPrompt("Crie coluna calculada tempoEmpresa usando dataAdmissao")
+                .build();
+        ObjectNode currentState = objectMapper.createObjectNode();
+        ArrayNode columns = currentState.putArray("columns");
+        columns.addObject().put("field", "dataAdmissao");
+
+        Object resolution = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveComputedDefaultsForClarification",
+                intent,
+                request,
+                currentState,
+                List.<AiCapability>of(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(resolution).isNotNull();
+        JsonNode patch = (JsonNode) ReflectionTestUtils.getField(resolution, "patch");
+        JsonNode column = patch.path("columns").get(0);
+        assertThat(column.path("field").asText()).isEqualTo("tempoEmpresa");
+        assertThat(column.path("header").asText()).isEqualTo("Tempo de Empresa");
+        assertThat(column.path("computed").path("expression").asText())
+                .isEqualTo("floor(yearsSince(dataAdmissao))");
+        assertThat(column.path("computed").path("outputType").asText())
+                .isEqualTo("number");
+        assertThat(column.path("computed").path("format").asText())
+                .isEqualTo("1.0-0");
+    }
+
+    @Test
+    void shouldApplyDefaultsForTenureYearsMonths() {
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .intent("update_column_rules")
+                .category("columns")
+                .needsClarification(true)
+                .missingContext(List.of("dataType", "headerLabel", "renderer/format"))
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .userPrompt("Crie coluna calculada tempoEmpresa usando dataAdmissao (years_months)")
+                .build();
+        ObjectNode currentState = objectMapper.createObjectNode();
+        ArrayNode columns = currentState.putArray("columns");
+        columns.addObject().put("field", "dataAdmissao");
+
+        Object resolution = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveComputedDefaultsForClarification",
+                intent,
+                request,
+                currentState,
+                List.<AiCapability>of(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(resolution).isNotNull();
+        JsonNode patch = (JsonNode) ReflectionTestUtils.getField(resolution, "patch");
+        JsonNode column = patch.path("columns").get(0);
+        assertThat(column.path("field").asText()).isEqualTo("tempoEmpresa");
+        assertThat(column.path("header").asText()).isEqualTo("Tempo de Empresa");
+        assertThat(column.path("computed").path("expression").asText())
+                .isEqualTo("toString(yearsSince(dataAdmissao)) + ' anos ' + "
+                        + "toString(monthsSince(dataAdmissao) - yearsSince(dataAdmissao) * 12) + ' meses'");
+        assertThat(column.path("computed").path("outputType").asText())
+                .isEqualTo("string");
+    }
 }

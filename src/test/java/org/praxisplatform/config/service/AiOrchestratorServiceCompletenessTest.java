@@ -3,11 +3,13 @@ package org.praxisplatform.config.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.ActionCheck;
 import org.praxisplatform.config.dto.AiPatchDiff;
+import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.IntentAction;
 import org.praxisplatform.config.dto.IntentPlan;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -93,5 +95,51 @@ class AiOrchestratorServiceCompletenessTest {
                 false);
 
         assertThat(ReflectionTestUtils.getField(result, "complete")).isEqualTo(false);
+    }
+
+    @Test
+    void shouldCompleteCreateColumnFallbackChecks() throws Exception {
+        ObjectNode params = objectMapper.createObjectNode();
+        params.put("field", "tempoEmpresa");
+        params.put("expression", "floor(yearsSince(dataAdmissao))");
+        AiActionPlan.Action action = AiActionPlan.Action.builder()
+                .type("ADD_COLUMN_COMPUTED")
+                .target("tempoEmpresa")
+                .params(params)
+                .build();
+
+        IntentAction fallback = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildCreateColumnFallbackChecks",
+                action);
+
+        IntentPlan plan = IntentPlan.builder()
+                .intent("update")
+                .actions(List.of(fallback))
+                .build();
+
+        List<AiPatchDiff> diffs = List.of(
+                AiPatchDiff.builder()
+                        .path("columns[field=tempoEmpresa]")
+                        .before(objectMapper.getNodeFactory().nullNode())
+                        .after(objectMapper.readTree("{\"field\":\"tempoEmpresa\"}"))
+                        .build(),
+                AiPatchDiff.builder()
+                        .path("columns[field=tempoEmpresa].computed.expression")
+                        .before(objectMapper.getNodeFactory().nullNode())
+                        .after(objectMapper.convertValue("floor(yearsSince(dataAdmissao))", com.fasterxml.jackson.databind.JsonNode.class))
+                        .build());
+
+        Object result = ReflectionTestUtils.invokeMethod(
+                service,
+                "evaluateCompleteness",
+                plan,
+                diffs,
+                null,
+                null,
+                null,
+                false);
+
+        assertThat(ReflectionTestUtils.getField(result, "complete")).isEqualTo(true);
     }
 }

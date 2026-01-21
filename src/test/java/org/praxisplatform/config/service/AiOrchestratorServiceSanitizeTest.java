@@ -61,4 +61,80 @@ class AiOrchestratorServiceSanitizeTest {
         assertThat(warnings)
                 .doesNotContain("Array ignorado: columns[].computed.dependencies");
     }
+
+    @Test
+    void shouldNotDuplicatePrimitiveArraysWhenMergingPatches() throws Exception {
+        JsonNode base = objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "idade",
+                      "computed": {
+                        "dependencies": ["dataNascimento"]
+                      }
+                    }
+                  ]
+                }
+                """);
+        JsonNode extra = objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "idade",
+                      "computed": {
+                        "dependencies": ["dataNascimento"]
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        JsonNode merged = ReflectionTestUtils.invokeMethod(service, "mergePatchNodes", base, extra);
+
+        List<String> deps = new java.util.ArrayList<>();
+        for (JsonNode item : merged.at("/columns/0/computed/dependencies")) {
+            deps.add(item.asText());
+        }
+        assertThat(deps).containsExactly("dataNascimento");
+    }
+
+    @Test
+    void shouldDeduplicateMixedPrimitiveArraysWhenMergingPatches() throws Exception {
+        JsonNode base = objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "idade",
+                      "computed": {
+                        "dependencies": ["dataNascimento", "dataAdmissao", "dataNascimento", null]
+                      }
+                    }
+                  ]
+                }
+                """);
+        JsonNode extra = objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "idade",
+                      "computed": {
+                        "dependencies": [null, "dataNascimento", "dataDemissao"]
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        JsonNode merged = ReflectionTestUtils.invokeMethod(service, "mergePatchNodes", base, extra);
+
+        List<String> deps = new java.util.ArrayList<>();
+        for (JsonNode item : merged.at("/columns/0/computed/dependencies")) {
+            if (item == null || item.isNull()) {
+                deps.add("null");
+            } else {
+                deps.add(item.asText());
+            }
+        }
+        assertThat(deps).containsExactly("dataNascimento", "dataAdmissao", "null", "dataDemissao");
+    }
 }
