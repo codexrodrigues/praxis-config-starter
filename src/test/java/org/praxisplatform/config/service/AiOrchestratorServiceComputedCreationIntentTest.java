@@ -145,6 +145,18 @@ class AiOrchestratorServiceComputedCreationIntentTest {
             AiIntentClassification intent,
             AiOrchestratorRequest request,
             JsonNode currentState) {
+        List<AiCapability> caps = List.of(
+                AiCapability.builder().path("columns").valueKind("array").build(),
+                AiCapability.builder().path("columns[].field").valueKind("string").build(),
+                AiCapability.builder().path("columns[].header").valueKind("string").build(),
+                AiCapability.builder().path("columns[].visible").valueKind("boolean").build(),
+                AiCapability.builder().path("columns[].type").valueKind("string").build(),
+                AiCapability.builder().path("columns[].computed").valueKind("object").build(),
+                AiCapability.builder().path("columns[].computed.expression").valueKind("string").build(),
+                AiCapability.builder().path("columns[].computed.outputType").valueKind("string").build(),
+                AiCapability.builder().path("columns[].computed.format").valueKind("string").build(),
+                AiCapability.builder().path("columns[].computed.dependencies").valueKind("array").build()
+        );
         Object response = ReflectionTestUtils.invokeMethod(
                 service,
                 "handleComputedCreationIntent",
@@ -152,7 +164,7 @@ class AiOrchestratorServiceComputedCreationIntentTest {
                 request,
                 currentState,
                 new ArrayList<String>(),
-                List.<AiCapability>of(),
+                caps,
                 List.<AiCapability>of(),
                 null);
         return (AiOrchestratorResponse) response;
