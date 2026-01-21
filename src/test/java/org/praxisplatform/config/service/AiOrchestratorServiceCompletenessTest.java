@@ -57,7 +57,8 @@ class AiOrchestratorServiceCompletenessTest {
                 diffs,
                 null,
                 null,
-                null);
+                null,
+                false);
 
         assertThat(ReflectionTestUtils.getField(result, "complete")).isEqualTo(true);
     }
@@ -88,7 +89,8 @@ class AiOrchestratorServiceCompletenessTest {
                 diffs,
                 null,
                 null,
-                null);
+                null,
+                false);
 
         assertThat(ReflectionTestUtils.getField(result, "complete")).isEqualTo(false);
     }
