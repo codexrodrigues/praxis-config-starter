@@ -7632,7 +7632,11 @@ public class AiOrchestratorService {
         ArrayNode columns = patch.putArray("columns");
         ObjectNode column = columns.addObject();
         column.put("field", newField);
-        column.put("header", titleCase(newField));
+        String header = titleCase(newField);
+        if ("tempoempresa".equalsIgnoreCase(newField) || mentionsTenure(promptLower)) {
+            header = "Tempo de Empresa";
+        }
+        column.put("header", header);
         column.put("visible", true);
         if (!isBlank(outputType)) {
             column.put("type", outputType);
