@@ -8277,10 +8277,7 @@ public class AiOrchestratorService {
         if (caps == null || caps.isEmpty()) {
             return new SanitizeResult(null, List.of("Capabilities ausentes; patch bloqueado."));
         }
-        List<String> allowedPaths = caps.stream()
-                .map(AiCapability::getPath)
-                .filter(p -> p != null && !p.isBlank())
-                .collect(Collectors.toList());
+        List<String> allowedPaths = buildAllowedPaths(caps);
         List<String> objectPaths = caps.stream()
                 .filter(c -> c != null
                         && c.getPath() != null
@@ -8292,6 +8289,24 @@ public class AiOrchestratorService {
         List<String> warnings = new ArrayList<>();
         JsonNode sanitized = sanitizeNode(patch, "", allowedPaths, objectPaths, warnings);
         return new SanitizeResult(sanitized, warnings);
+    }
+
+    private List<String> buildAllowedPaths(List<AiCapability> caps) {
+        if (caps == null || caps.isEmpty()) {
+            return List.of();
+        }
+        java.util.Set<String> paths = new java.util.LinkedHashSet<>();
+        for (AiCapability cap : caps) {
+            if (cap == null) continue;
+            String path = cap.getPath();
+            if (path == null || path.isBlank()) continue;
+            paths.add(path);
+            String valueKind = cap.getValueKind();
+            if (valueKind != null && "array".equalsIgnoreCase(valueKind)) {
+                paths.add(path + "[]");
+            }
+        }
+        return new java.util.ArrayList<>(paths);
     }
 
     private List<String> filterInternalWarnings(
