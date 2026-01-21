@@ -277,6 +277,28 @@ public class AiOrchestratorService {
         }
         intent = normalizeIntent(intent, columnNames, configCategories, componentCategories, warnings);
         adjustPageBuilderCreateIntent(intent, request, context);
+        AiOrchestratorResponse creationResponse = handleComputedCreationIntent(
+                intent,
+                request,
+                currentState,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (creationResponse != null) {
+            return creationResponse;
+        }
+        AiOrchestratorResponse computedFastPath = tryResolveComputedFastPath(
+                intent,
+                request,
+                currentState,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (computedFastPath != null) {
+            return computedFastPath;
+        }
         AiActionPlan actionPlan = null;
         List<AiActionItem> expectedActions = List.of();
         boolean createOnlyPlan = false;
@@ -348,7 +370,8 @@ public class AiOrchestratorService {
                             warnings,
                             configCapabilities,
                             componentCapabilities,
-                            componentContext);
+                            componentContext,
+                            true);
                 }
                 AiOrchestratorResponse badgeResolution = tryResolveBadgeMissingContext(
                         intent,
@@ -3976,6 +3999,22 @@ public class AiOrchestratorService {
 
     private ArrayNode mergeArrayNodes(ArrayNode base, ArrayNode extra) {
         ArrayNode merged = objectMapper.createArrayNode();
+        if (isPrimitiveArray(base) && isPrimitiveArray(extra)) {
+            java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+            for (JsonNode item : base) {
+                String key = item == null || item.isNull() ? "null" : item.toString();
+                if (seen.add(key)) {
+                    merged.add(item);
+                }
+            }
+            for (JsonNode item : extra) {
+                String key = item == null || item.isNull() ? "null" : item.toString();
+                if (seen.add(key)) {
+                    merged.add(item);
+                }
+            }
+            return merged;
+        }
         String identityKey = detectIdentityKey(base);
         if (identityKey == null) {
             identityKey = detectIdentityKey(extra);
@@ -4020,6 +4059,18 @@ public class AiOrchestratorService {
             merged.add(node);
         }
         return merged;
+    }
+
+    private boolean isPrimitiveArray(ArrayNode array) {
+        if (array == null) {
+            return false;
+        }
+        for (JsonNode item : array) {
+            if (item != null && !item.isNull() && !item.isValueNode()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String detectIdentityKey(JsonNode node) {
@@ -4288,6 +4339,8 @@ public class AiOrchestratorService {
         String category = normalizeCategory(intent.getCategory());
         intent.setCategory(category);
         String scope = normalizeScope(intent.getScope());
+        String intentType = normalizeIntentType(intent.getIntent());
+        intent.setIntent(intentType);
 
         boolean inConfig = category != null && configCategories.contains(category);
         boolean inComponent = category != null && componentCategories.contains(category);
@@ -4325,14 +4378,16 @@ public class AiOrchestratorService {
             intent.setNeedsClarification(true);
         }
 
-        String targetField = intent.getTargetField();
-        if (targetField != null && !targetField.isBlank()
-                && columnNames != null && !columnNames.isEmpty()
-                && !columnNames.contains(targetField)) {
-            addMissing(missing, "column");
-            intent.setNeedsClarification(true);
-            if (intent.getOptions() == null || intent.getOptions().isEmpty()) {
-                intent.setOptions(columnNames);
+        if (requiresExistingColumnTarget(intentType)) {
+            String targetField = intent.getTargetField();
+            if (targetField != null && !targetField.isBlank()
+                    && columnNames != null && !columnNames.isEmpty()
+                    && !columnNames.contains(targetField)) {
+                addMissing(missing, "column");
+                intent.setNeedsClarification(true);
+                if (intent.getOptions() == null || intent.getOptions().isEmpty()) {
+                    intent.setOptions(columnNames);
+                }
             }
         }
 
@@ -7352,7 +7407,251 @@ public class AiOrchestratorService {
                 warnings,
                 configCapabilities,
                 componentCapabilities,
-                componentContext);
+                componentContext,
+                true);
+    }
+
+    private AiOrchestratorResponse tryResolveComputedFastPath(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (intent == null || request == null || request.getUserPrompt() == null) {
+            return null;
+        }
+        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        if (!"update_column_rules".equalsIgnoreCase(intent.getIntent())) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+        if (!mentionsComputed(promptLower) && !mentionsTenure(promptLower) && !mentionsAgeComputation(promptLower)) {
+            return null;
+        }
+        if (mentionsComputedPresentationOverride(promptLower)) {
+            return null;
+        }
+        ComputedSpec spec = parseComputedSpec(prompt, currentState, request.getSchemaFields());
+        if (spec == null || isBlank(spec.field) || isBlank(spec.expression)) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode columns = patch.putArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", spec.field);
+        column.put("header", resolveComputedHeader(spec));
+        ObjectNode computed = column.putObject("computed");
+        computed.put("expression", spec.expression);
+        String outputType = !isBlank(spec.outputType) ? spec.outputType : "number";
+        computed.put("outputType", outputType);
+        String format = !isBlank(spec.format) ? spec.format : "1.0-0";
+        if (!isBlank(format) && !"string".equalsIgnoreCase(outputType)) {
+            computed.put("format", format);
+        }
+        addComputedDependencies(computed, spec.dependencies);
+        warnings.add("Patch deterministico aplicado para coluna calculada.");
+        return applySuggestedPatch(
+                patch,
+                currentState,
+                request.getComponentId(),
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext,
+                true);
+    }
+
+    private AiOrchestratorResponse handleComputedCreationIntent(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (intent == null || request == null) {
+            return null;
+        }
+        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        if (!"add_column_computed".equalsIgnoreCase(intent.getIntent())) {
+            return null;
+        }
+
+        String newField = normalizeFieldName(intent.getNewField());
+        List<String> baseFields = intent.getBaseFields() != null
+                ? intent.getBaseFields()
+                : List.of();
+        String baseField = baseFields.stream()
+                .filter(v -> v != null && !v.isBlank())
+                .findFirst()
+                .orElse(null);
+        List<String> columnNames = extractColumnNames(currentState);
+
+        if (isBlank(newField)) {
+            List<String> options = suggestNewFieldOptions(request.getUserPrompt());
+            return clarification("Qual o nome do novo campo da coluna?", options);
+        }
+
+        if (isBlank(baseField) || (columnNames != null && !columnNames.isEmpty() && !columnNames.contains(baseField))) {
+            List<String> options = extractDateFieldOptions(request.getDataProfile(), columnNames);
+            return clarification("Qual campo de data devo usar para o cálculo?", options);
+        }
+
+        String computedFormat = normalizeComputedFormat(intent.getComputedFormat());
+        String expression = null;
+        String outputType = null;
+        String format = null;
+
+        switch (computedFormat) {
+            case "years_months" -> {
+                outputType = "string";
+                expression = buildTenureYearsMonthsExpression(baseField);
+            }
+            case "months_total" -> {
+                outputType = "number";
+                format = "1.0-0";
+                expression = "floor(monthsSince(" + baseField + "))";
+            }
+            case "decimal_years" -> {
+                outputType = "number";
+                format = "1.2-2";
+                expression = "monthsSince(" + baseField + ") / 12";
+            }
+            case "custom_expression" -> {
+                expression = intent.getExpression();
+                if (isBlank(expression)) {
+                    return clarification("Qual expressão devo usar para a coluna calculada?", List.of());
+                }
+                if (containsDisallowedExpressionTokens(expression)) {
+                    return clarification("A expressão contém tokens não permitidos. Informe uma expressão DSL válida.", List.of());
+                }
+                outputType = inferOutputTypeFromExpression(expression);
+                if ("number".equalsIgnoreCase(outputType)) {
+                    format = "1.0-0";
+                }
+            }
+            default -> {
+                outputType = "number";
+                format = "1.0-0";
+                expression = "floor(yearsSince(" + baseField + "))";
+            }
+        }
+
+        if (isBlank(expression)) {
+            return clarification("Não consegui montar a expressão da coluna calculada.", List.of());
+        }
+
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode columns = patch.putArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", newField);
+        column.put("header", titleCase(newField));
+        column.put("visible", true);
+        if (!isBlank(outputType)) {
+            column.put("type", outputType);
+        }
+        ObjectNode computed = column.putObject("computed");
+        computed.put("expression", expression);
+        if (!isBlank(outputType)) {
+            computed.put("outputType", outputType);
+        }
+        if (!isBlank(format) && !"string".equalsIgnoreCase(outputType)) {
+            computed.put("format", format);
+        }
+        addComputedDependencies(computed, List.of(baseField));
+
+        warnings.add("Patch deterministico aplicado para coluna calculada.");
+        return applySuggestedPatch(
+                patch,
+                currentState,
+                request.getComponentId(),
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext,
+                true);
+    }
+
+    private String normalizeComputedFormat(String computedFormat) {
+        if (computedFormat == null || computedFormat.isBlank()) {
+            return "years";
+        }
+        String normalized = computedFormat.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "years_months", "months_total", "decimal_years", "custom_expression", "years" -> normalized;
+            default -> "years";
+        };
+    }
+
+    private List<String> extractDateFieldOptions(JsonNode dataProfile, List<String> fallback) {
+        List<String> options = new ArrayList<>();
+        if (dataProfile != null && dataProfile.isObject()) {
+            JsonNode columns = dataProfile.get("columns");
+            if (columns != null && columns.isObject()) {
+                columns.fieldNames().forEachRemaining(field -> {
+                    String inferredType = extractInferredType(dataProfile, field);
+                    if (inferredType != null && inferredType.toLowerCase(Locale.ROOT).contains("date")) {
+                        options.add(field);
+                    }
+                });
+            }
+        }
+        if (options.isEmpty() && fallback != null) {
+            for (String field : fallback) {
+                if (!isBlank(field)) {
+                    options.add(field);
+                }
+            }
+        }
+        return options;
+    }
+
+    private List<String> suggestNewFieldOptions(String prompt) {
+        List<String> options = new ArrayList<>();
+        String lower = prompt != null ? prompt.toLowerCase(Locale.ROOT) : "";
+        if (lower.contains("idade")) {
+            options.add("idade");
+        }
+        if (lower.contains("tempo")) {
+            options.add("tempoEmpresa");
+        }
+        if (lower.contains("tenure")) {
+            options.add("tenure");
+        }
+        if (options.isEmpty()) {
+            options.add("novaColuna");
+            options.add("colunaCalculada");
+            options.add("resultado");
+        }
+        return options;
+    }
+
+    private boolean containsDisallowedExpressionTokens(String expression) {
+        String lower = expression != null ? expression.toLowerCase(Locale.ROOT) : "";
+        return lower.contains("new date")
+                || lower.contains("date(")
+                || lower.contains("math.")
+                || lower.contains("window")
+                || lower.contains("document")
+                || lower.contains("row.")
+                || lower.contains("rowdata.")
+                || lower.contains("function")
+                || lower.contains("=>");
+    }
+
+    private String inferOutputTypeFromExpression(String expression) {
+        String lower = expression != null ? expression.toLowerCase(Locale.ROOT) : "";
+        if (lower.contains("tostring(") || lower.contains("'")) {
+            return "string";
+        }
+        return "number";
     }
 
     private ComputedSpec parseComputedSpec(String prompt, JsonNode currentState, JsonNode schemaFields) {
@@ -7409,6 +7708,30 @@ public class AiOrchestratorService {
                     deps.add(baseField);
                     outputType = "number";
                     format = "1.0-0";
+                }
+            }
+        }
+        if (isBlank(expression)) {
+            if (mentionsTenure(promptLower)) {
+                String baseField = inferDateFieldForTenure(promptLower, currentState, schemaFields);
+                if (!isBlank(baseField)) {
+                    boolean yearsMonths = mentionsYearsMonths(promptLower);
+                    expression = yearsMonths
+                            ? buildTenureYearsMonthsExpression(baseField)
+                            : "floor(yearsSince(" + baseField + "))";
+                    if (field == null) {
+                        field = "tempoEmpresa";
+                    }
+                    if (header == null || (field != null && header.equalsIgnoreCase(field))) {
+                        header = "Tempo de Empresa";
+                    }
+                    deps.add(baseField);
+                    if (yearsMonths) {
+                        outputType = "string";
+                    } else {
+                        outputType = "number";
+                        format = "1.0-0";
+                    }
                 }
             }
         }
@@ -7492,6 +7815,25 @@ public class AiOrchestratorService {
         return promptLower.contains("idade") || promptLower.contains("age");
     }
 
+    private boolean mentionsTenure(String promptLower) {
+        if (promptLower == null) return false;
+        return promptLower.contains("tempoempresa")
+                || promptLower.contains("tempo de empresa")
+                || promptLower.contains("tempo na empresa")
+                || promptLower.contains("tenure");
+    }
+
+    private boolean mentionsYearsMonths(String promptLower) {
+        if (promptLower == null) return false;
+        return promptLower.contains("years_months")
+                || promptLower.contains("year_months")
+                || promptLower.contains("anos_meses")
+                || promptLower.contains("anos e meses")
+                || promptLower.contains("anos meses")
+                || promptLower.contains("years and months")
+                || promptLower.contains("years months");
+    }
+
     private boolean mentionsComputedPresentationOverride(String promptLower) {
         if (promptLower == null) return false;
         return promptLower.contains("badge")
@@ -7542,13 +7884,76 @@ public class AiOrchestratorService {
         return null;
     }
 
+    private String inferDateFieldForTenure(String promptLower, JsonNode currentState, JsonNode schemaFields) {
+        if (promptLower == null) {
+            return null;
+        }
+        List<String> columns = extractColumnNames(currentState);
+        for (String col : columns) {
+            if (!isBlank(col) && promptLower.contains(col.toLowerCase(Locale.ROOT))) {
+                return col;
+            }
+        }
+        for (String col : columns) {
+            if (!isBlank(col)) {
+                String lower = col.toLowerCase(Locale.ROOT);
+                if (lower.contains("admissao") || lower.contains("admission") || lower.contains("hire")) {
+                    return col;
+                }
+            }
+        }
+        if (schemaFields != null && schemaFields.isArray()) {
+            for (JsonNode field : schemaFields) {
+                if (field == null || !field.isObject()) {
+                    continue;
+                }
+                String name = textOrNull(field.get("name"));
+                if (isBlank(name)) {
+                    name = textOrNull(field.get("field"));
+                }
+                String label = textOrNull(field.get("label"));
+                if (!isBlank(name) && promptLower.contains(name.toLowerCase(Locale.ROOT))) {
+                    return name;
+                }
+                if (!isBlank(label)) {
+                    String labelLower = label.toLowerCase(Locale.ROOT);
+                    if (labelLower.contains("admissao") || labelLower.contains("admission")) {
+                        return !isBlank(name) ? name : null;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private String buildTenureYearsMonthsExpression(String baseField) {
+        return "toString(yearsSince(" + baseField + ")) + ' anos ' + "
+                + "toString(monthsSince(" + baseField + ") - yearsSince(" + baseField + ") * 12) + ' meses'";
+    }
+
     private String titleCase(String value) {
         if (value == null) return null;
         String trimmed = value.trim();
         if (trimmed.isEmpty()) return trimmed;
-        String first = trimmed.substring(0, 1).toUpperCase(Locale.ROOT);
-        String rest = trimmed.length() > 1 ? trimmed.substring(1).toLowerCase(Locale.ROOT) : "";
-        return first + rest;
+        String spaced = trimmed.replaceAll("([a-z])([A-Z])", "$1 $2");
+        spaced = spaced.replace('_', ' ').trim();
+        if (spaced.isEmpty()) {
+            return spaced;
+        }
+        String[] parts = spaced.split("\\s+");
+        StringBuilder out = new StringBuilder();
+        for (String part : parts) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            String first = part.substring(0, 1).toUpperCase(Locale.ROOT);
+            String rest = part.length() > 1 ? part.substring(1).toLowerCase(Locale.ROOT) : "";
+            if (out.length() > 0) {
+                out.append(' ');
+            }
+            out.append(first).append(rest);
+        }
+        return out.toString();
     }
 
     private String resolveComputedHeader(ComputedSpec spec) {
@@ -7586,6 +7991,22 @@ public class AiOrchestratorService {
             return null;
         }
         String normalized = trimmed.replaceAll("[^A-Za-z0-9_]", "_");
+        boolean hasUpper = false;
+        boolean hasLower = false;
+        for (int i = 0; i < normalized.length(); i++) {
+            char ch = normalized.charAt(i);
+            if (ch >= 'A' && ch <= 'Z') {
+                hasUpper = true;
+            } else if (ch >= 'a' && ch <= 'z') {
+                hasLower = true;
+            }
+        }
+        if (normalized.matches("^[A-Z][a-z0-9_]*$")) {
+            return normalized.toLowerCase(Locale.ROOT);
+        }
+        if (hasUpper && hasLower) {
+            return normalized;
+        }
         return normalized.toLowerCase(Locale.ROOT);
     }
 
@@ -7926,12 +8347,32 @@ public class AiOrchestratorService {
             List<AiCapability> configCapabilities,
             List<AiCapability> componentCapabilities,
             JsonNode componentContext) {
+        return applySuggestedPatch(
+                suggestedPatch,
+                currentState,
+                componentId,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext,
+                false);
+    }
+
+    private AiOrchestratorResponse applySuggestedPatch(
+            JsonNode suggestedPatch,
+            JsonNode currentState,
+            String componentId,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext,
+            boolean allowUnknownColumns) {
         if (suggestedPatch == null || suggestedPatch.isNull()) {
             return error("Nenhum patch sugerido.");
         }
         List<String> outWarnings = warnings != null ? warnings : new ArrayList<>();
         SemanticPatchCheck semanticCheck = validateSemanticPatch(
-                suggestedPatch, currentState, outWarnings, false);
+                suggestedPatch, currentState, outWarnings, allowUnknownColumns);
         if (!semanticCheck.valid) {
             if (semanticCheck.needsClarification) {
                 return clarification(semanticCheck.message, semanticCheck.options);
