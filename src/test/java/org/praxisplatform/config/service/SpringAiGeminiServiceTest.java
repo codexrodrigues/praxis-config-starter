@@ -17,6 +17,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,7 +30,7 @@ class SpringAiGeminiServiceTest {
 
     @Test
     void generateTextReturnsContent() {
-        SpringAiGeminiService service = new SpringAiGeminiService(chatClient, objectMapper);
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
         ReflectionTestUtils.setField(service, "model", "gemini-2.0-flash");
         ReflectionTestUtils.setField(service, "temperature", 0.1d);
         ReflectionTestUtils.setField(service, "maxTokens", 128);
@@ -43,7 +44,7 @@ class SpringAiGeminiServiceTest {
 
     @Test
     void generateJsonParsesSchema() {
-        SpringAiGeminiService service = new SpringAiGeminiService(chatClient, objectMapper);
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
         ReflectionTestUtils.setField(service, "model", "gemini-2.0-flash");
         ReflectionTestUtils.setField(service, "temperature", 0.1d);
         ReflectionTestUtils.setField(service, "maxTokens", 128);
@@ -56,5 +57,29 @@ class SpringAiGeminiServiceTest {
 
         assertNotNull(node);
         assertEquals(321, node.get("value").asInt());
+    }
+
+    private static ObjectProvider<GoogleGenAiChatModel> provider(GoogleGenAiChatModel client) {
+        return new ObjectProvider<>() {
+            @Override
+            public GoogleGenAiChatModel getObject(Object... args) {
+                return client;
+            }
+
+            @Override
+            public GoogleGenAiChatModel getIfAvailable() {
+                return client;
+            }
+
+            @Override
+            public GoogleGenAiChatModel getIfUnique() {
+                return client;
+            }
+
+            @Override
+            public java.util.Iterator<GoogleGenAiChatModel> iterator() {
+                return List.of(client).iterator();
+            }
+        };
     }
 }

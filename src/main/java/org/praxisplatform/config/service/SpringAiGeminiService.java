@@ -49,7 +49,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class SpringAiGeminiService implements AiProvider {
 
-    private final GoogleGenAiChatModel chatClient;
+    private final ObjectProvider<GoogleGenAiChatModel> chatClientProvider;
     private final ObjectMapper objectMapper;
 
     private static final String DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
@@ -323,6 +323,7 @@ public class SpringAiGeminiService implements AiProvider {
             GoogleGenAiChatOptions options,
             AiCallConfig config,
             List<Advisor> advisors) {
+        GoogleGenAiChatModel chatClient = resolveChatClient();
         ChatClient client = ChatClient.create(chatClient);
         Filter.Expression filterExpression = RagFilters.buildTenantEnvironmentExpression(
                 config != null ? config.getTenantId() : null,
@@ -411,6 +412,7 @@ public class SpringAiGeminiService implements AiProvider {
             AiCallConfig config,
             boolean jsonMode,
             List<String> models) {
+        GoogleGenAiChatModel chatClient = resolveChatClient();
         List<Advisor> advisors = resolveRagAdvisors();
         RuntimeException lastError = null;
         for (int i = 0; i < models.size(); i++) {
@@ -461,6 +463,15 @@ public class SpringAiGeminiService implements AiProvider {
             throw lastError;
         }
         return null;
+    }
+
+    private GoogleGenAiChatModel resolveChatClient() {
+        GoogleGenAiChatModel chatClient = chatClientProvider.getIfAvailable();
+        if (chatClient == null) {
+            throw new IllegalStateException(
+                    "Google GenAI chat client not configured. Enable spring-ai-starter-model-google-genai or keep PRAXIS_AI_GEMINI_PREFER_GENAI_API=true with an API key.");
+        }
+        return chatClient;
     }
 
     private String callWithApiKeyFallback(

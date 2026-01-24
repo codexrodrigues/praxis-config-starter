@@ -15,6 +15,7 @@ import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 class EmbeddingServiceTest {
 
@@ -25,7 +26,7 @@ class EmbeddingServiceTest {
                 List.of(new Embedding(new float[] {1.0f, 2.0f, 3.0f}, 0)));
         when(client.call(any(EmbeddingRequest.class))).thenReturn(response);
 
-        EmbeddingService service = new EmbeddingService(provider(client), emptyGoogleGenAiProvider());
+        EmbeddingService service = new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
         ReflectionTestUtils.setField(service, "provider", "openai");
         ReflectionTestUtils.setField(service, "openaiApiKey", "key");
         ReflectionTestUtils.setField(service, "openaiBaseUrl", "https://api.openai.com");
@@ -46,7 +47,7 @@ class EmbeddingServiceTest {
                 List.of(new Embedding(new float[] {0.5f, 0.25f}, 0)));
         when(client.call(any(EmbeddingRequest.class))).thenReturn(response);
 
-        EmbeddingService service = new EmbeddingService(emptyOpenAiProvider(), provider(client));
+        EmbeddingService service = new EmbeddingService(emptyOpenAiProvider(), provider(client), new ObjectMapper());
         ReflectionTestUtils.setField(service, "provider", "gemini");
         ReflectionTestUtils.setField(service, "geminiApiKey", "gemini-key");
         ReflectionTestUtils.setField(service, "geminiModel", "text-embedding-004");

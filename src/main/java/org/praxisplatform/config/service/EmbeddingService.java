@@ -1,5 +1,14 @@
 package org.praxisplatform.config.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,6 +33,7 @@ public class EmbeddingService {
 
     private final ObjectProvider<OpenAiEmbeddingModel> openAiEmbeddingClientProvider;
     private final ObjectProvider<GoogleGenAiTextEmbeddingModel> googleGenAiEmbeddingClientProvider;
+    private final ObjectMapper objectMapper;
 
     private final AtomicBoolean loggedConfig = new AtomicBoolean(false);
     private static final String PROVIDER_GEMINI = "gemini";
@@ -53,6 +63,9 @@ public class EmbeddingService {
 
     @Value("${spring.ai.google.genai.embedding.text.options.model:text-embedding-004}")
     private String geminiModel;
+
+    @Value("${praxis.ai.timeout-seconds:30}")
+    private int timeoutSeconds;
 
     public List<Float> embed(String text) {
         return embed(text, null);
@@ -153,23 +166,28 @@ public class EmbeddingService {
             String text,
             EmbeddingCallConfig override,
             String apiKey) throws Exception {
-        GoogleGenAiTextEmbeddingModel client = resolveGoogleGenAiClient(override, apiKey);
         Integer dimensions = override != null ? override.dimensions() : null;
         if (dimensions == null || dimensions <= 0) {
             dimensions = geminiDimensions > 0 ? geminiDimensions : null;
         }
-        GoogleGenAiTextEmbeddingOptions.Builder optionsBuilder = GoogleGenAiTextEmbeddingOptions.builder()
-                .model(resolveModel(override, geminiModel));
-        if (dimensions != null && dimensions > 0) {
-            optionsBuilder.dimensions(dimensions);
+        GoogleGenAiTextEmbeddingModel client = googleGenAiEmbeddingClientProvider.getIfAvailable();
+        if (client != null) {
+            GoogleGenAiTextEmbeddingOptions.Builder optionsBuilder = GoogleGenAiTextEmbeddingOptions.builder()
+                    .model(resolveModel(override, geminiModel));
+            if (dimensions != null && dimensions > 0) {
+                optionsBuilder.dimensions(dimensions);
+            }
+            GoogleGenAiTextEmbeddingOptions options = optionsBuilder.build();
+            EmbeddingRequest request = new EmbeddingRequest(List.of(text), options);
+            EmbeddingResponse response = client.call(request);
+            if (response == null || response.getResult() == null) {
+                throw new IllegalStateException("Gemini embedding returned empty response.");
+            }
+            List<Float> vector = toFloatList(response.getResult().getOutput());
+            validateDimensions("gemini", vector, dimensions);
+            return vector;
         }
-        GoogleGenAiTextEmbeddingOptions options = optionsBuilder.build();
-        EmbeddingRequest request = new EmbeddingRequest(List.of(text), options);
-        EmbeddingResponse response = client.call(request);
-        if (response == null || response.getResult() == null) {
-            throw new IllegalStateException("Gemini embedding returned empty response.");
-        }
-        List<Float> vector = toFloatList(response.getResult().getOutput());
+        List<Float> vector = embedWithGoogleGenAiRest(text, apiKey);
         validateDimensions("gemini", vector, dimensions);
         return vector;
     }
@@ -225,18 +243,43 @@ public class EmbeddingService {
         return client;
     }
 
-    private GoogleGenAiTextEmbeddingModel resolveGoogleGenAiClient(EmbeddingCallConfig override, String apiKey) {
-        String overrideKey = override != null ? trimToNull(override.apiKey()) : null;
-        if (overrideKey != null && !overrideKey.equals(apiKey)) {
-            log.warn(
-                    "Embedding override apiKey provided for gemini; using configured spring.ai.google.genai.embedding.api-key.");
+    private List<Float> embedWithGoogleGenAiRest(String text, String apiKey) throws Exception {
+        String resolvedModel = trimToNull(geminiModel);
+        if (resolvedModel == null) {
+            resolvedModel = "text-embedding-004";
         }
-        GoogleGenAiTextEmbeddingModel client = googleGenAiEmbeddingClientProvider.getIfAvailable();
-        if (client == null) {
-            throw new IllegalStateException(
-                    "Google GenAI embedding client not configured. Add spring-ai-starter-model-google-genai-embedding and configure spring.ai.google.genai.*.");
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/"
+                + resolvedModel
+                + ":embedContent?key="
+                + URLEncoder.encode(apiKey, StandardCharsets.UTF_8);
+        JsonNode payload = objectMapper.createObjectNode()
+                .set("content",
+                        objectMapper.createObjectNode()
+                                .putArray("parts")
+                                .add(objectMapper.createObjectNode().put("text", text)));
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                .build();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 400) {
+            throw new IllegalStateException("Gemini embedding HTTP " + response.statusCode() + ": " + response.body());
         }
-        return client;
+        JsonNode root = objectMapper.readTree(response.body());
+        JsonNode values = root.path("embedding").path("values");
+        if (!values.isArray()) {
+            throw new IllegalStateException("Gemini embedding response missing 'embedding.values'.");
+        }
+        List<Float> vector = new ArrayList<>(values.size());
+        for (JsonNode value : values) {
+            vector.add((float) value.asDouble());
+        }
+        return vector;
     }
 
     private int resolveDefaultDimensions(String selected) {

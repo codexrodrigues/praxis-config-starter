@@ -91,6 +91,7 @@ public final class AiPromptTemplates {
 	11. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
 	12. Retorne APENAS um objeto JSON válido (NUNCA um array).
 	13. Não inclua texto fora do JSON (sem markdown, sem comentários).
+	14. Se needsClarification=true: A) Preencha "options" com os valores possíveis. B) Defina "message" como uma PERGUNTA ESPECÍFICA que as opções respondem (ex: "Qual coluna deseja formatar?", "Qual o formato desejado?"). NUNCA use mensagens genéricas.
 
 	SCHEMA DE RESPOSTA (JSON):
 	{
