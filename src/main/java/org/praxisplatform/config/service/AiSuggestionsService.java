@@ -87,7 +87,11 @@ public class AiSuggestionsService {
     @Value("${praxis.ai.suggestions.llm-enabled:false}")
     private boolean llmEnabled;
 
-    public AiSuggestionsResponse suggest(AiSuggestionsRequest request, AiContextDTO context) {
+    public AiSuggestionsResponse suggest(
+            AiSuggestionsRequest request,
+            AiContextDTO context,
+            String tenantId,
+            String environment) {
         JsonNode currentState = safeObject(request != null ? request.getCurrentState() : null);
         JsonNode config = resolveConfig(currentState);
         JsonNode dataProfile = request != null ? request.getDataProfile() : null;
@@ -124,7 +128,9 @@ public class AiSuggestionsService {
                     context,
                     config,
                     currentState.get("runtimeState"),
-                    allowedPaths);
+                    allowedPaths,
+                    tenantId,
+                    environment);
             if (!llmSuggestions.isEmpty()) {
                 suggestions.addAll(llmSuggestions);
                 usedLlm = true;
@@ -370,13 +376,19 @@ public class AiSuggestionsService {
             AiContextDTO context,
             JsonNode config,
             JsonNode runtimeState,
-            Set<String> allowedPaths) {
+            Set<String> allowedPaths,
+            String tenantId,
+            String environment) {
         if (request == null || context == null) {
             return List.of();
         }
         String prompt = buildSuggestionsPrompt(request, context, config, runtimeState, allowedPaths);
         AiJsonSchema schema = AiJsonSchema.ofSchema(buildSuggestionsSchema());
-        JsonNode response = aiProvider.generateJson(prompt, schema);
+        AiCallConfig callConfig = AiCallConfig.builder()
+                .tenantId(normalize(tenantId))
+                .environment(normalize(environment))
+                .build();
+        JsonNode response = aiProvider.generateJson(prompt, schema, callConfig);
         if (response == null || response.isNull()) {
             return List.of();
         }
@@ -391,6 +403,14 @@ public class AiSuggestionsService {
         } catch (IllegalArgumentException e) {
             return List.of();
         }
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private boolean isMockProvider() {

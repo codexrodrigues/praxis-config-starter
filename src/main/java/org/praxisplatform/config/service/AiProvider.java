@@ -1,6 +1,8 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
+import org.praxisplatform.config.dto.AiProviderModel;
 
 public interface AiProvider {
     JsonNode generateJson(String prompt);
@@ -18,6 +20,8 @@ public interface AiProvider {
     default String generateText(String prompt, AiCallConfig config) {
         return generateText(prompt);
     }
+
+    List<AiProviderModel> listModels(AiCallConfig config);
 
     String getProviderName();
 }

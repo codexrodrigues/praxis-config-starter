@@ -1,11 +1,14 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
+import org.praxisplatform.config.dto.AiProviderModel;
 
 @Service
 @Primary
@@ -13,10 +16,10 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class AiProviderRouter implements AiProvider {
 
-    private final GeminiAiService gemini;
-    private final OpenAiService openai;
-    private final XaiAiService xai;
-    private final MockAiService mock;
+    private final ObjectProvider<SpringAiGeminiService> geminiProvider;
+    private final ObjectProvider<SpringAiOpenAiService> openaiProvider;
+    private final ObjectProvider<SpringAiXaiService> xaiProvider;
+    private final ObjectProvider<MockAiService> mockProvider;
 
     @Value("${praxis.ai.provider:gemini}")
     private String provider;
@@ -47,6 +50,11 @@ public class AiProviderRouter implements AiProvider {
     }
 
     @Override
+    public List<AiProviderModel> listModels(AiCallConfig config) {
+        return resolve(config).listModels(config);
+    }
+
+    @Override
     public String getProviderName() {
         return resolve().getProviderName();
     }
@@ -62,18 +70,18 @@ public class AiProviderRouter implements AiProvider {
             selected = "gemini";
         }
         if ("openai".equals(selected) || "open-ai".equals(selected)) {
-            return openai;
+            return openaiProvider.getIfAvailable(() -> { throw new IllegalStateException("OpenAI provider not active"); });
         }
         if ("xai".equals(selected) || "grok".equals(selected) || "grok-ai".equals(selected)) {
-            return xai;
+            return xaiProvider.getIfAvailable(() -> { throw new IllegalStateException("xAI provider not active"); });
         }
         if ("mock".equals(selected)) {
-            return mock;
+            return mockProvider.getIfAvailable(() -> { throw new IllegalStateException("Mock provider not active"); });
         }
         if (!"gemini".equals(selected)) {
             log.warn("[AiProviderRouter] Unknown provider '{}', defaulting to gemini.", selected);
         }
-        return gemini;
+        return geminiProvider.getIfAvailable(() -> { throw new IllegalStateException("Gemini provider not active (check configuration/api-key)"); });
     }
 
     private String normalizeProvider(String value) {

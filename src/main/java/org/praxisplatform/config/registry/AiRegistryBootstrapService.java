@@ -58,7 +58,7 @@ public class AiRegistryBootstrapService {
 
         try (InputStream input = resolvedSnapshot.resource.getInputStream()) {
             RegistryIngestionRequest request = objectMapper.readValue(input, RegistryIngestionRequest.class);
-            ingestionService.ingestRegistry(request);
+            ingestionService.ingestRegistry(request, null, null);
             bootstrapState.setSucceeded(true);
             log.info("AI registry bootstrap completed from {} (components={}).",
                     resolvedSnapshot.location,

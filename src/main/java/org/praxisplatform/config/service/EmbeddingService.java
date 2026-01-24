@@ -1,52 +1,58 @@
 package org.praxisplatform.config.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.stereotype.Service;
-
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.ai.embedding.EmbeddingRequest;
+import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingModel;
+import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingOptions;
+import org.springframework.ai.openai.OpenAiEmbeddingModel;
+import org.springframework.ai.openai.OpenAiEmbeddingOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class EmbeddingService {
 
-    private final ObjectMapper objectMapper;
+    private final ObjectProvider<OpenAiEmbeddingModel> openAiEmbeddingClientProvider;
+    private final ObjectProvider<GoogleGenAiTextEmbeddingModel> googleGenAiEmbeddingClientProvider;
 
     private final AtomicBoolean loggedConfig = new AtomicBoolean(false);
     private static final String PROVIDER_GEMINI = "gemini";
     private static final String PROVIDER_OPENAI = "openai";
     private static final String PROVIDER_MOCK = "mock";
 
-    @Value("${embedding.provider:gemini}")
+    @Value("${spring.ai.embedding.provider:gemini}")
     private String provider;
 
-    @Value("${embedding.dimensions:768}")
-    private int dimensions;
+    @Value("${spring.ai.openai.embedding.options.dimensions:768}")
+    private int openaiDimensions;
 
-    @Value("${embedding.gemini.api-key:#{null}}")
+    @Value("${spring.ai.google.genai.embedding.text.options.dimensions:768}")
+    private int geminiDimensions;
+
+    @Value("${spring.ai.google.genai.embedding.api-key:${spring.ai.google.genai.api-key:#{null}}}")
     private String geminiApiKey;
 
-    @Value("${embedding.openai.api-key:#{null}}")
+    @Value("${spring.ai.openai.api-key:#{null}}")
     private String openaiApiKey;
 
-    @Value("${embedding.openai.model:text-embedding-3-small}")
+    @Value("${spring.ai.openai.base-url:https://api.openai.com}")
+    private String openaiBaseUrl;
+
+    @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-large}")
     private String openaiModel;
 
-    private static final String GEMINI_EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent";
-    private static final String OPENAI_EMBED_URL = "https://api.openai.com/v1/embeddings";
+    @Value("${spring.ai.google.genai.embedding.text.options.model:text-embedding-004}")
+    private String geminiModel;
 
     public List<Float> embed(String text) {
         return embed(text, null);
@@ -63,17 +69,17 @@ public class EmbeddingService {
         }
         Integer overrideDimensions = override != null ? override.dimensions() : null;
         if (PROVIDER_MOCK.equals(selected)) {
-            int mockDimensions = overrideDimensions != null ? overrideDimensions : dimensions;
+            int mockDimensions = overrideDimensions != null ? overrideDimensions : resolveDefaultDimensions(selected);
             return mockEmbedding(mockDimensions);
         }
         if (PROVIDER_GEMINI.equals(selected)) {
             String effectiveApiKey = resolveApiKey(override, geminiApiKey);
             if (effectiveApiKey == null || effectiveApiKey.isBlank()) {
                 throw new IllegalStateException(
-                        "embedding.gemini.api-key is required when embedding.provider=gemini.");
+                        "spring.ai.google.genai.embedding.api-key is required when spring.ai.embedding.provider=gemini.");
             }
             try {
-                return embedWithGemini(text, effectiveApiKey);
+                return embedWithGoogleGenAi(text, override, effectiveApiKey);
             } catch (Exception e) {
                 throw new IllegalStateException("Gemini embedding failed.", e);
             }
@@ -82,18 +88,18 @@ public class EmbeddingService {
             String effectiveApiKey = resolveApiKey(override, openaiApiKey);
             if (effectiveApiKey == null || effectiveApiKey.isBlank()) {
                 throw new IllegalStateException(
-                        "embedding.openai.api-key is required when embedding.provider=openai.");
+                        "spring.ai.openai.api-key is required when spring.ai.embedding.provider=openai.");
             }
             try {
                 String effectiveModel = resolveModel(override, openaiModel);
-                Integer effectiveDimensions = overrideDimensions != null ? overrideDimensions : dimensions;
-                return embedWithOpenAi(text, effectiveApiKey, effectiveModel, effectiveDimensions);
+                Integer effectiveDimensions = overrideDimensions != null ? overrideDimensions : resolveDefaultDimensions(selected);
+                return embedWithOpenAi(text, override, effectiveApiKey, effectiveModel, effectiveDimensions);
             } catch (Exception e) {
                 throw new IllegalStateException("OpenAI embedding failed.", e);
             }
         }
         throw new IllegalStateException(
-                "Unsupported embedding.provider '" + provider + "'. Supported values: gemini, openai, mock.");
+                "Unsupported spring.ai.embedding.provider '" + provider + "'. Supported values: gemini, openai, mock.");
     }
 
     private void logEmbeddingConfigIfNeeded() {
@@ -103,98 +109,68 @@ public class EmbeddingService {
         boolean geminiKeyPresent = geminiApiKey != null && !geminiApiKey.isBlank();
         boolean openaiKeyPresent = openaiApiKey != null && !openaiApiKey.isBlank();
         String selected = normalizeProvider(provider);
+        int defaultDimensions = resolveDefaultDimensions(selected);
         log.info(
                 "Embedding config: provider={}, dimensions={}, geminiKeyPresent={}, openaiKeyPresent={}",
                 selected != null ? selected : provider,
-                dimensions,
+                defaultDimensions,
                 geminiKeyPresent,
                 openaiKeyPresent);
         if (PROVIDER_GEMINI.equals(selected) && !geminiKeyPresent) {
-            log.error("Embedding provider=gemini but geminiApiKey missing; embeddings will fail.");
+            log.error("Embedding provider=gemini but spring.ai.google.genai.embedding.api-key missing; embeddings will fail.");
         } else if (PROVIDER_OPENAI.equals(selected) && !openaiKeyPresent) {
-            log.error("Embedding provider=openai but openaiApiKey missing; embeddings will fail.");
+            log.error("Embedding provider=openai but spring.ai.openai.api-key missing; embeddings will fail.");
         } else if (selected == null) {
             log.error(
                     "Embedding provider is blank or invalid; supported values are gemini, openai, mock.");
         }
     }
 
-    private List<Float> embedWithGemini(String text, String apiKey) throws Exception {
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
-
-        String payload = objectMapper.writeValueAsString(objectMapper.createObjectNode()
-                .put("model", "text-embedding-004")
-                .set("content", objectMapper.createObjectNode()
-                        .set("parts", objectMapper.createArrayNode()
-                                .add(objectMapper.createObjectNode().put("text", text)))));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(GEMINI_EMBED_URL + "?key=" + apiKey))
-                .timeout(Duration.ofSeconds(15))
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .POST(HttpRequest.BodyPublishers.ofString(payload))
-                .build();
-
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 400) {
-            throw new IllegalStateException("Gemini embedding HTTP " + response.statusCode() + ": " + response.body());
-        }
-
-        JsonNode root = objectMapper.readTree(response.body());
-        JsonNode values = root.path("embedding").path("values");
-        if (!values.isArray()) {
-            throw new IllegalStateException("Unexpected Gemini embedding response: " + response.body());
-        }
-
-        List<Float> vector = new ArrayList<>();
-        values.forEach(v -> vector.add(v.floatValue()));
-        return vector;
-    }
-
     private List<Float> embedWithOpenAi(
             String text,
+            EmbeddingCallConfig override,
             String apiKey,
             String model,
             Integer dimensionsOverride) throws Exception {
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
-
-        var payloadNode = objectMapper.createObjectNode()
-                .put("model", model)
-                .put("input", text);
+        OpenAiEmbeddingModel client = resolveOpenAiClient(override, apiKey);
+        OpenAiEmbeddingOptions.Builder optionsBuilder = OpenAiEmbeddingOptions.builder()
+                .model(model);
         if (dimensionsOverride != null && dimensionsOverride > 0) {
-            payloadNode.put("dimensions", dimensionsOverride);
+            optionsBuilder.dimensions(dimensionsOverride);
         }
-        String payload = objectMapper.writeValueAsString(payloadNode);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(OPENAI_EMBED_URL))
-                .timeout(Duration.ofSeconds(15))
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(payload))
-                .build();
-
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 400) {
-            throw new IllegalStateException("OpenAI embedding HTTP " + response.statusCode() + ": " + response.body());
+        OpenAiEmbeddingOptions options = optionsBuilder.build();
+        EmbeddingRequest request = new EmbeddingRequest(List.of(text), options);
+        EmbeddingResponse response = client.call(request);
+        if (response == null || response.getResult() == null) {
+            throw new IllegalStateException("OpenAI embedding returned empty response.");
         }
+        List<Float> vector = toFloatList(response.getResult().getOutput());
+        validateDimensions("openai", vector, dimensionsOverride);
+        return vector;
+    }
 
-        JsonNode root = objectMapper.readTree(response.body());
-        JsonNode data = root.path("data");
-        if (!data.isArray() || data.isEmpty()) {
-            throw new IllegalStateException("Unexpected OpenAI embedding response: " + response.body());
+    private List<Float> embedWithGoogleGenAi(
+            String text,
+            EmbeddingCallConfig override,
+            String apiKey) throws Exception {
+        GoogleGenAiTextEmbeddingModel client = resolveGoogleGenAiClient(override, apiKey);
+        Integer dimensions = override != null ? override.dimensions() : null;
+        if (dimensions == null || dimensions <= 0) {
+            dimensions = geminiDimensions > 0 ? geminiDimensions : null;
         }
-        JsonNode values = data.get(0).path("embedding");
-        if (!values.isArray()) {
-            throw new IllegalStateException("Unexpected OpenAI embedding response: " + response.body());
+        GoogleGenAiTextEmbeddingOptions.Builder optionsBuilder = GoogleGenAiTextEmbeddingOptions.builder()
+                .model(resolveModel(override, geminiModel));
+        if (dimensions != null && dimensions > 0) {
+            optionsBuilder.dimensions(dimensions);
         }
-
-        List<Float> vector = new ArrayList<>();
-        values.forEach(v -> vector.add(v.floatValue()));
+        GoogleGenAiTextEmbeddingOptions options = optionsBuilder.build();
+        EmbeddingRequest request = new EmbeddingRequest(List.of(text), options);
+        EmbeddingResponse response = client.call(request);
+        if (response == null || response.getResult() == null) {
+            throw new IllegalStateException("Gemini embedding returned empty response.");
+        }
+        List<Float> vector = toFloatList(response.getResult().getOutput());
+        validateDimensions("gemini", vector, dimensions);
         return vector;
     }
 
@@ -231,5 +207,86 @@ public class EmbeddingService {
             return override.model();
         }
         return fallback;
+    }
+
+    private OpenAiEmbeddingModel resolveOpenAiClient(EmbeddingCallConfig override, String apiKey) {
+        String overrideKey = override != null ? trimToNull(override.apiKey()) : null;
+        if (overrideKey != null && !overrideKey.equals(apiKey)) {
+            OpenAiApi api = OpenAiApi.builder()
+                    .apiKey(overrideKey)
+                    .baseUrl(resolveBaseUrl(openaiBaseUrl))
+                    .build();
+            return new OpenAiEmbeddingModel(api);
+        }
+        OpenAiEmbeddingModel client = openAiEmbeddingClientProvider.getIfAvailable();
+        if (client == null) {
+            throw new IllegalStateException("OpenAI EmbeddingClient not configured.");
+        }
+        return client;
+    }
+
+    private GoogleGenAiTextEmbeddingModel resolveGoogleGenAiClient(EmbeddingCallConfig override, String apiKey) {
+        String overrideKey = override != null ? trimToNull(override.apiKey()) : null;
+        if (overrideKey != null && !overrideKey.equals(apiKey)) {
+            log.warn(
+                    "Embedding override apiKey provided for gemini; using configured spring.ai.google.genai.embedding.api-key.");
+        }
+        GoogleGenAiTextEmbeddingModel client = googleGenAiEmbeddingClientProvider.getIfAvailable();
+        if (client == null) {
+            throw new IllegalStateException(
+                    "Google GenAI embedding client not configured. Add spring-ai-starter-model-google-genai-embedding and configure spring.ai.google.genai.*.");
+        }
+        return client;
+    }
+
+    private int resolveDefaultDimensions(String selected) {
+        if (PROVIDER_GEMINI.equals(selected)) {
+            return geminiDimensions;
+        }
+        return openaiDimensions;
+    }
+
+    private void validateDimensions(String provider, List<Float> vector, Integer expected) {
+        if (expected == null || expected <= 0) {
+            return;
+        }
+        if (vector == null) {
+            return;
+        }
+        if (vector.size() != expected) {
+            log.warn(
+                    "Embedding size mismatch for {} (expected={}, actual={}).",
+                    provider,
+                    expected,
+                    vector.size());
+        }
+    }
+
+    private List<Float> toFloatList(float[] values) {
+        if (values == null) {
+            return List.of();
+        }
+        List<Float> result = new ArrayList<>(values.length);
+        for (float value : values) {
+            result.add(value);
+        }
+        return result;
+    }
+
+    private String resolveBaseUrl(String value) {
+        String resolved = trimToNull(value);
+        if (resolved == null) {
+            resolved = "https://api.openai.com";
+        }
+        if (resolved.endsWith("/")) {
+            return resolved.substring(0, resolved.length() - 1);
+        }
+        return resolved;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

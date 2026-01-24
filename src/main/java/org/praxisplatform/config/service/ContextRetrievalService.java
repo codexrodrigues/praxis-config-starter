@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,9 +9,15 @@ import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.dto.ComponentSearchResult;
 import org.praxisplatform.config.projection.ApiMetadataProjection;
 import org.praxisplatform.config.projection.ComponentDefinitionProjection;
+import org.praxisplatform.config.rag.RagMetadataKeys;
+import org.praxisplatform.config.rag.RagResourceTypes;
+import org.praxisplatform.config.rag.RagVectorStoreService;
+import org.praxisplatform.config.rag.RagFilters;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +29,7 @@ public class ContextRetrievalService {
     private final EmbeddingService embeddingService;
     private final ApiMetadataRepository apiMetadataRepository;
     private final AiRegistryRepository aiRegistryRepository;
+    private final RagVectorStoreService ragVectorStoreService;
 
     private static final int DEFAULT_SEARCH_LIMIT = 5; // Limite padrão para buscas
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
@@ -33,7 +41,7 @@ public class ContextRetrievalService {
      * que o LLM gere configurações de UI precisas.
      */
     public List<ApiSearchResult> searchApiMetadata(String query, String method, String tags, int limit) {
-        return searchApiMetadata(query, method, tags, limit, null);
+        return searchApiMetadata(query, method, tags, limit, null, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -43,6 +51,30 @@ public class ContextRetrievalService {
             String tags,
             int limit,
             EmbeddingCallConfig embeddingConfig) {
+        return searchApiMetadata(query, method, tags, limit, embeddingConfig, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ApiSearchResult> searchApiMetadata(
+            String query,
+            String method,
+            String tags,
+            int limit,
+            EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
+        List<ApiSearchResult> ragResults =
+                searchApiMetadataWithVectorStore(query, method, tags, limit, tenantId, environment);
+        if (!ragResults.isEmpty()) {
+            return ragResults;
+        }
+        if (hasTenantScope(tenantId, environment)) {
+            log.warn(
+                    "[ContextRetrievalService] Skipping legacy fallback for tenant-scoped search (tenantId={}, env={}).",
+                    safeQuery(tenantId),
+                    safeQuery(environment));
+            return List.of();
+        }
         String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
         String methodFilter = method == null ? "" : method;
         String tagsFilter = tags == null ? "" : tags;
@@ -61,7 +93,7 @@ public class ContextRetrievalService {
 
     @Transactional(readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(String query, int limit) {
-        return searchComponentDefinitions(query, limit, null);
+        return searchComponentDefinitions(query, limit, null, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -69,6 +101,28 @@ public class ContextRetrievalService {
             String query,
             int limit,
             EmbeddingCallConfig embeddingConfig) {
+        return searchComponentDefinitions(query, limit, embeddingConfig, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ComponentSearchResult> searchComponentDefinitions(
+            String query,
+            int limit,
+            EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
+        List<ComponentSearchResult> ragResults =
+                searchComponentDefinitionsWithVectorStore(query, limit, tenantId, environment);
+        if (!ragResults.isEmpty()) {
+            return ragResults;
+        }
+        if (hasTenantScope(tenantId, environment)) {
+            log.warn(
+                    "[ContextRetrievalService] Skipping legacy fallback for tenant-scoped search (tenantId={}, env={}).",
+                    safeQuery(tenantId),
+                    safeQuery(environment));
+            return List.of();
+        }
         String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
         List<ComponentDefinitionProjection> projections =
                 aiRegistryRepository.findComponentDefinitionsByVectorSimilarity(
@@ -99,6 +153,10 @@ public class ContextRetrievalService {
         return sb.toString();
     }
 
+    private boolean hasTenantScope(String tenantId, String environment) {
+        return (tenantId != null && !tenantId.isBlank()) || (environment != null && !environment.isBlank());
+    }
+
     private ApiSearchResult mapToApiSearchResult(ApiMetadataProjection projection) {
         double score = safeSimilarityScore(projection != null ? projection.getSimilarityScore() : null);
         return ApiSearchResult.builder()
@@ -123,6 +181,101 @@ public class ContextRetrievalService {
                 .description(projection.getDescription())
                 .jsonSchema(projection.getJsonSchemaSnippet()) // Usa o snippet já configurado
                 .similarityScore(score)
+                .build();
+    }
+
+    private List<ApiSearchResult> searchApiMetadataWithVectorStore(
+            String query,
+            String method,
+            String tags,
+            int limit,
+            String tenantId,
+            String environment) {
+        if (!ragVectorStoreService.isAvailable()) {
+            return List.of();
+        }
+        if (tags != null && !tags.isBlank()) {
+            return List.of();
+        }
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        FilterExpressionBuilder.Op filter = builder.eq(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.API_METADATA);
+        FilterExpressionBuilder.Op tenantFilter =
+                RagFilters.buildTenantEnvironmentFilter(builder, tenantId, environment);
+        if (tenantFilter != null) {
+            filter = builder.and(filter, tenantFilter);
+        }
+        String normalizedMethod = normalizeMethod(method);
+        if (normalizedMethod != null) {
+            filter = builder.and(filter, builder.eq(RagMetadataKeys.METHOD, normalizedMethod));
+        }
+        List<Document> documents = ragVectorStoreService.search(
+                query,
+                limit > 0 ? limit : DEFAULT_SEARCH_LIMIT,
+                filter.build());
+        if (documents.isEmpty()) {
+            return List.of();
+        }
+        return documents.stream()
+                .map(this::mapToApiSearchResult)
+                .collect(Collectors.toList());
+    }
+
+    private List<ComponentSearchResult> searchComponentDefinitionsWithVectorStore(
+            String query,
+            int limit,
+            String tenantId,
+            String environment) {
+        if (!ragVectorStoreService.isAvailable()) {
+            return List.of();
+        }
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        FilterExpressionBuilder.Op filter = builder.eq(
+                RagMetadataKeys.RESOURCE_TYPE,
+                RagResourceTypes.COMPONENT_DEFINITION);
+        FilterExpressionBuilder.Op tenantFilter =
+                RagFilters.buildTenantEnvironmentFilter(builder, tenantId, environment);
+        if (tenantFilter != null) {
+            filter = builder.and(filter, tenantFilter);
+        }
+        List<Document> documents = ragVectorStoreService.search(
+                query,
+                limit > 0 ? limit : DEFAULT_SEARCH_LIMIT,
+                filter.build());
+        if (documents.isEmpty()) {
+            return List.of();
+        }
+        return documents.stream()
+                .map(this::mapToComponentSearchResult)
+                .collect(Collectors.toList());
+    }
+
+    private ApiSearchResult mapToApiSearchResult(Document document) {
+        Map<String, Object> metadata = document != null ? document.getMetadata() : Map.of();
+        Long id = toLong(metadata.get(RagMetadataKeys.DB_ID));
+        String requestSchema = toString(metadata.get(RagMetadataKeys.REQUEST_SCHEMA));
+        String responseSchema = toString(metadata.get(RagMetadataKeys.RESPONSE_SCHEMA));
+        return ApiSearchResult.builder()
+                .id(id)
+                .method(toString(metadata.get(RagMetadataKeys.METHOD)))
+                .path(toString(metadata.get(RagMetadataKeys.PATH)))
+                .summary(toString(metadata.get(RagMetadataKeys.SUMMARY)))
+                .tags(toString(metadata.get(RagMetadataKeys.TAGS)))
+                .similarityScore(document != null && document.getScore() != null ? document.getScore() : 0.0d)
+                .requestSchemaSnippet(toSnippet(requestSchema))
+                .responseSchemaSnippet(toSnippet(responseSchema))
+                .requestSchema(requestSchema)
+                .responseSchema(responseSchema)
+                .parameters(toString(metadata.get(RagMetadataKeys.PARAMETERS)))
+                .build();
+    }
+
+    private ComponentSearchResult mapToComponentSearchResult(Document document) {
+        Map<String, Object> metadata = document != null ? document.getMetadata() : Map.of();
+        return ComponentSearchResult.builder()
+                .id(toString(metadata.get(RagMetadataKeys.RESOURCE_ID)))
+                .description(toString(metadata.get(RagMetadataKeys.DESCRIPTION)))
+                .jsonSchema(toString(metadata.get(RagMetadataKeys.JSON_SCHEMA)))
+                .similarityScore(document != null && document.getScore() != null ? document.getScore() : 0.0d)
                 .build();
     }
 
@@ -161,5 +314,46 @@ public class ContextRetrievalService {
 
     private double safeSimilarityScore(Double score) {
         return score != null ? score : 0.0d;
+    }
+
+    private String normalizeMethod(String method) {
+        if (method == null || method.isBlank()) {
+            return null;
+        }
+        return method.trim().toUpperCase();
+    }
+
+    private String toSnippet(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.length() <= 500) {
+            return value;
+        }
+        return value.substring(0, 497) + "...";
+    }
+
+    private String toString(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof String text) {
+            return text;
+        }
+        return String.valueOf(value);
+    }
+
+    private Long toLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 }

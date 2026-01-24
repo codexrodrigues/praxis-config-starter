@@ -22,6 +22,7 @@ public class AiOrchestratorResponse {
     private List<String> options;
     private List<AiOption> optionPayloads;
     private List<Integer> contextRequest;
+    private AiClarificationUi clarification;
     private String componentId;
     private String componentType;
     private String path;

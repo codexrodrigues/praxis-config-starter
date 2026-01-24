@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -25,7 +26,9 @@ public class AiSuggestionsController {
 
     @PostMapping("/suggestions")
     public ResponseEntity<AiSuggestionsResponse> getSuggestions(
-            @Valid @RequestBody AiSuggestionsRequest request) {
+            @Valid @RequestBody AiSuggestionsRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
         AiContextDTO context = contextService.buildContext(
                 request.getComponentId(),
                 request.getComponentType(),
@@ -43,6 +46,6 @@ public class AiSuggestionsController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
         }
 
-        return ResponseEntity.ok(suggestionsService.suggest(request, context));
+        return ResponseEntity.ok(suggestionsService.suggest(request, context, tenantId, environment));
     }
 }

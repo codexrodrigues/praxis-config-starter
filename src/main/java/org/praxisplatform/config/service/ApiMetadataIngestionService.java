@@ -2,6 +2,12 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.StringJoiner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
@@ -9,15 +15,13 @@ import org.slf4j.LoggerFactory;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.dto.ApiCatalogRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
+import org.praxisplatform.config.rag.RagMetadataKeys;
+import org.praxisplatform.config.rag.RagResourceTypes;
+import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.StringJoiner;
 
 @Service
 @RequiredArgsConstructor
@@ -27,15 +31,18 @@ public class ApiMetadataIngestionService {
     private final ApiMetadataRepository repository;
     private final ObjectMapper objectMapper;
     private final EmbeddingService embeddingService;
+    private final RagVectorStoreService ragVectorStoreService;
     private static final Logger ingestLog = LoggerFactory.getLogger("api-metadata-ingest");
 
     @Transactional
-    public void ingestCatalog(ApiCatalogRequest request) {
+    public void ingestCatalog(ApiCatalogRequest request, String tenantId, String environment) {
         if (request.getEndpoints() == null || request.getEndpoints().isEmpty()) {
             log.warn("No endpoints found in catalog request");
             return;
         }
 
+        String resolvedTenant = normalize(tenantId);
+        String resolvedEnv = normalize(environment);
         for (ApiCatalogRequest.ApiEndpointEntry ep : request.getEndpoints()) {
             try {
                 String path = ep.getPath();
@@ -81,6 +88,17 @@ public class ApiMetadataIngestionService {
                         meta.getMethod(),
                         meta.getPath(),
                         embedding != null ? embedding.size() : 0);
+
+                Document ragDocument = toRagDocument(
+                        meta,
+                        embeddingSummary,
+                        tags,
+                        requestSchema,
+                        responseSchema,
+                        parameters,
+                        resolvedTenant,
+                        resolvedEnv);
+                ragVectorStoreService.upsertDocuments(List.of(ragDocument));
             } catch (Exception e) {
                 String msg = "Error ingesting endpoint: " + ep.getMethod() + " " + ep.getPath();
                 log.error(msg, e);
@@ -225,5 +243,49 @@ public class ApiMetadataIngestionService {
         meta.setRawJson(rawJson);
         meta.setEmbedding(embedding);
         return repository.save(meta);
+    }
+
+    private Document toRagDocument(
+            ApiMetadata meta,
+            String content,
+            String tags,
+            String requestSchema,
+            String responseSchema,
+            String parameters,
+            String tenantId,
+            String environment) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.API_METADATA);
+        metadata.put(RagMetadataKeys.RESOURCE_ID, meta.getMethod() + " " + meta.getPath());
+        metadata.put(RagMetadataKeys.DB_ID, meta.getId());
+        metadata.put(RagMetadataKeys.PATH, meta.getPath());
+        metadata.put(RagMetadataKeys.METHOD, meta.getMethod());
+        metadata.put(RagMetadataKeys.TAGS, tags);
+        metadata.put(RagMetadataKeys.SUMMARY, meta.getSummary());
+        metadata.put(RagMetadataKeys.DESCRIPTION, meta.getDescription());
+        metadata.put(RagMetadataKeys.OPERATION_ID, meta.getOperationId());
+        metadata.put(RagMetadataKeys.REQUEST_SCHEMA, requestSchema);
+        metadata.put(RagMetadataKeys.RESPONSE_SCHEMA, responseSchema);
+        metadata.put(RagMetadataKeys.PARAMETERS, parameters);
+        if (tenantId != null) {
+            metadata.put(RagMetadataKeys.TENANT_ID, tenantId);
+        }
+        if (environment != null) {
+            metadata.put(RagMetadataKeys.ENVIRONMENT, environment);
+        }
+        metadata.put(RagMetadataKeys.VERSION, 1);
+        return Document.builder()
+                .id("api_metadata:" + meta.getId())
+                .text(content)
+                .metadata(metadata)
+                .build();
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

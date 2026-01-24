@@ -7,6 +7,7 @@ import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -18,8 +19,11 @@ public class RegistryIngestionController {
     private final RegistryIngestionService registryIngestionService;
 
     @PostMapping("/component-definitions")
-    public ResponseEntity<Void> ingestRegistry(@RequestBody @Valid RegistryIngestionRequest request) {
-        registryIngestionService.ingestRegistry(request);
+    public ResponseEntity<Void> ingestRegistry(
+            @RequestBody @Valid RegistryIngestionRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        registryIngestionService.ingestRegistry(request, tenantId, environment);
         return ResponseEntity.accepted().build();
     }
 }

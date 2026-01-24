@@ -11,7 +11,9 @@ import org.praxisplatform.config.dto.AiContextDTO;
 import org.praxisplatform.config.dto.AiSuggestion;
 import org.praxisplatform.config.dto.AiSuggestionsRequest;
 import org.praxisplatform.config.dto.AiSuggestionsResponse;
+import org.praxisplatform.config.dto.AiProviderModel;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -52,7 +54,7 @@ class AiSuggestionsServiceTest {
                 .build();
 
         // When
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         // Then
         boolean found = response.getSuggestions().stream()
@@ -82,7 +84,7 @@ class AiSuggestionsServiceTest {
                 .build();
 
         // When
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         // Then
         boolean found = response.getSuggestions().stream()
@@ -118,7 +120,7 @@ class AiSuggestionsServiceTest {
                 .build();
 
         // When
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         // Then
         boolean found = response.getSuggestions().stream()
@@ -147,7 +149,7 @@ class AiSuggestionsServiceTest {
                 .build();
 
         // When
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         // Then
         boolean found = response.getSuggestions().stream()
@@ -177,7 +179,7 @@ class AiSuggestionsServiceTest {
                 .build();
 
         // When
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         // Then
         Set<String> ids = response.getSuggestions().stream()
@@ -222,7 +224,7 @@ class AiSuggestionsServiceTest {
                 .build();
 
         // When
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         // Then
         AiSuggestion suggestion = response.getSuggestions().stream()
@@ -267,7 +269,7 @@ class AiSuggestionsServiceTest {
                         "columns[].conditionalRenderers"))
                 .build();
 
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         AiSuggestion suggestion = response.getSuggestions().stream()
                 .filter(s -> "table.renderer.badge.active".equals(s.getId()))
@@ -336,7 +338,7 @@ class AiSuggestionsServiceTest {
                 .build();
 
         // When
-        AiSuggestionsResponse response = service.suggest(request, context);
+        AiSuggestionsResponse response = service.suggest(request, context, null, null);
 
         // Then
         boolean found = response.getSuggestions().stream()
@@ -358,6 +360,11 @@ class AiSuggestionsServiceTest {
         @Override
         public String getProviderName() {
             return "stub";
+        }
+
+        @Override
+        public List<AiProviderModel> listModels(AiCallConfig config) {
+            return Collections.emptyList();
         }
     }
 }

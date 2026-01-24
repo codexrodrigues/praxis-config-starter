@@ -15,4 +15,6 @@ public class AiCallConfig {
     private Double temperature;
     private Integer maxTokens;
     private String apiKey;
+    private String tenantId;
+    private String environment;
 }

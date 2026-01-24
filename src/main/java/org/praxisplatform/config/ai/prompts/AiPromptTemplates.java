@@ -257,6 +257,29 @@ OU (QUANDO PRECISAR DE CONTEXTO):
   "contextRequest": [10, 30],
   "message": "Preciso de exemplos e campos do schema para continuar."
 }
+
+OU (QUANDO PRECISAR DE MAIS INFORMAÇÕES DO USUÁRIO):
+{
+  "message": "Pergunta objetiva para o usuário.",
+  "options": ["opcao 1", "opcao 2"],
+  "optionPayloads": [
+    { "label": "opcao 1", "value": "opcao 1", "example": "exemplo", "contextHints": { "any": "json" } }
+  ],
+  "clarification": {
+    "responseType": "text|choice|confirm|mixed",
+    "selectionMode": "single|multiple",
+    "presentation": "buttons|list|chips",
+    "allowCustom": true
+  }
+}
+
+REGRAS PARA "clarification":
+- "confirm": use quando a pergunta for sim/não (options = ["Sim","Não"]).
+- "choice": use quando só opções fechadas são aceitas (allowCustom=false).
+- "mixed": use quando aceita opção OU texto livre (allowCustom=true).
+- "text": use quando o usuário deve digitar livremente (options vazio).
+- "selectionMode": "multiple" apenas quando múltiplas escolhas são aceitáveis.
+- "presentation": "buttons" para poucas opções; "list" para muitas; "chips" para escolha simples rápida.
 """;
 
     public static final String PROMPT_TABLE_ACTION_PLAN = """

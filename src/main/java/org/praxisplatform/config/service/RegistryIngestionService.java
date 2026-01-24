@@ -3,18 +3,23 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.praxisplatform.config.dto.RegistryIngestionRequest;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
+import org.praxisplatform.config.dto.RegistryIngestionRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
+import org.praxisplatform.config.rag.RagMetadataKeys;
+import org.praxisplatform.config.rag.RagResourceTypes;
+import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
-import java.util.StringJoiner;
 
 @Service
 @RequiredArgsConstructor
@@ -24,21 +29,26 @@ public class RegistryIngestionService {
     private final AiRegistryRepository repository;
     private final ObjectMapper objectMapper;
     private final EmbeddingService embeddingService;
+    private final RagVectorStoreService ragVectorStoreService;
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
 
     @Transactional
-    public void ingestRegistry(RegistryIngestionRequest request) {
+    public void ingestRegistry(RegistryIngestionRequest request, String tenantId, String environment) {
         if (request.getComponents() == null || request.getComponents().isEmpty()) {
             log.warn("No 'components' map found in registry request.");
             return;
         }
 
+        String resolvedTenant = normalize(tenantId);
+        String resolvedEnv = normalize(environment);
         var definitions = request.getDefinitions();
         request.getComponents().forEach((componentId, entry) -> {
             try {
                 AiRegistry def = toComponentDefinition(componentId, entry, definitions);
                 upsertDefinition(def);
+                Document ragDocument = toRagDocument(def, entry, resolvedTenant, resolvedEnv);
+                ragVectorStoreService.upsertDocuments(List.of(ragDocument));
                 log.info("Ingested component: {}", componentId);
             } catch (Exception e) {
                 log.error("Failed to process component: " + componentId, e);
@@ -71,6 +81,42 @@ public class RegistryIngestionService {
                 .payload(payload)
                 .embedding(embedding)
                 .build();
+    }
+
+    private Document toRagDocument(
+            AiRegistry definition,
+            RegistryIngestionRequest.ComponentEntry entry,
+            String tenantId,
+            String environment) {
+        String description = entry.getDescription();
+        if (description == null || description.isBlank()) {
+            description = "Component " + definition.getRegistryKey();
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.COMPONENT_DEFINITION);
+        metadata.put(RagMetadataKeys.RESOURCE_ID, definition.getRegistryKey());
+        metadata.put(RagMetadataKeys.DESCRIPTION, description);
+        metadata.put(RagMetadataKeys.JSON_SCHEMA, toJson(entry));
+        if (tenantId != null) {
+            metadata.put(RagMetadataKeys.TENANT_ID, tenantId);
+        }
+        if (environment != null) {
+            metadata.put(RagMetadataKeys.ENVIRONMENT, environment);
+        }
+        metadata.put(RagMetadataKeys.VERSION, definition.getVersion());
+        return Document.builder()
+                .id("component_definition:" + definition.getRegistryKey())
+                .text(buildSummary(definition.getRegistryKey(), description, entry))
+                .metadata(metadata)
+                .build();
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String buildSummary(String id, String description, RegistryIngestionRequest.ComponentEntry entry) {

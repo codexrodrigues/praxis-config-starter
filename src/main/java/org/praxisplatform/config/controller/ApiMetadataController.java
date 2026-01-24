@@ -7,6 +7,7 @@ import org.praxisplatform.config.service.ApiMetadataIngestionService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -18,8 +19,11 @@ public class ApiMetadataController {
     private final ApiMetadataIngestionService ingestionService;
 
     @PostMapping("/ingest")
-    public ResponseEntity<Void> ingestCatalog(@RequestBody @Valid ApiCatalogRequest request) {
-        ingestionService.ingestCatalog(request);
+    public ResponseEntity<Void> ingestCatalog(
+            @RequestBody @Valid ApiCatalogRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        ingestionService.ingestCatalog(request, tenantId, environment);
         return ResponseEntity.accepted().build();
     }
 }

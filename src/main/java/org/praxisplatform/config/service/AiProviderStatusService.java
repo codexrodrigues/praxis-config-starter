@@ -20,22 +20,22 @@ public class AiProviderStatusService {
     @Value("${praxis.ai.provider:gemini}")
     private String defaultProvider;
 
-    @Value("${praxis.ai.openai.model:gpt-4o-mini}")
+    @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}")
     private String openaiModel;
 
-    @Value("${praxis.ai.gemini.model:gemini-2.0-flash}")
+    @Value("${spring.ai.google.genai.chat.options.model:gemini-2.0-flash}")
     private String geminiModel;
 
-    @Value("${praxis.ai.xai.model:grok-2-latest}")
+    @Value("${spring.ai.openai.chat.options.model:grok-2-latest}")
     private String xaiModel;
 
-    @Value("${praxis.ai.openai.api-key:#{null}}")
+    @Value("${spring.ai.openai.api-key:#{null}}")
     private String openaiApiKey;
 
-    @Value("${praxis.ai.gemini.api-key:#{null}}")
+    @Value("${spring.ai.google.genai.api-key:#{null}}")
     private String geminiApiKey;
 
-    @Value("${praxis.ai.xai.api-key:#{null}}")
+    @Value("${spring.ai.openai.api-key:#{null}}")
     private String xaiApiKey;
 
     private final ObjectMapper objectMapper;

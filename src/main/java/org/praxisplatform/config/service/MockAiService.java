@@ -66,6 +66,7 @@ public class MockAiService implements AiProvider {
         return "mock";
     }
 
+    @Override
     public List<AiProviderModel> listModels(AiCallConfig config) {
         return List.of(
                 AiProviderModel.builder()

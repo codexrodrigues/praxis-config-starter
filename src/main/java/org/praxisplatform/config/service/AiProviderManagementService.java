@@ -2,8 +2,11 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,23 +32,38 @@ public class AiProviderManagementService {
     @Value("${praxis.ai.provider:gemini}")
     private String defaultProvider;
 
-    @Value("${praxis.ai.openai.model:gpt-4o-mini}")
+    @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}")
     private String openaiModel;
 
-    @Value("${praxis.ai.gemini.model:gemini-2.0-flash}")
+    @Value("${spring.ai.google.genai.chat.options.model:gemini-2.0-flash}")
     private String geminiModel;
 
-    @Value("${praxis.ai.xai.model:grok-2-latest}")
+    @Value("${spring.ai.openai.chat.options.model:grok-2-latest}")
     private String xaiModel;
 
     private final ObjectMapper objectMapper;
     private final UserConfigService userConfigService;
     private final AiApiKeyCryptoService apiKeyCryptoService;
-    private final AiProviderRouter providerRouter;
-    private final GeminiAiService gemini;
-    private final OpenAiService openai;
-    private final XaiAiService xai;
-    private final MockAiService mock;
+    private final List<AiProvider> providers;
+    private final Map<String, AiProvider> providerRegistry = new LinkedHashMap<>();
+
+    @PostConstruct
+    void initProviderRegistry() {
+        for (AiProvider provider : providers) {
+            if (provider instanceof AiProviderRouter) {
+                continue;
+            }
+            String name = normalizeProvider(provider.getProviderName());
+            if (name == null) {
+                continue;
+            }
+            if (providerRegistry.containsKey(name)) {
+                log.warn("[AiProviderManagement] Duplicate AiProvider name '{}', keeping first.", name);
+                continue;
+            }
+            providerRegistry.put(name, provider);
+        }
+    }
 
     public AiProviderModelsResponse listModels(AiProviderModelsRequest request) {
         return listModels(request, null, null, null);
@@ -106,7 +124,11 @@ public class AiProviderManagementService {
                 .build();
         String model = config.getModel();
         try {
-            providerRouter.generateText(TEST_PROMPT, config);
+            AiProvider selectedProvider = resolveProvider(provider);
+            if (selectedProvider == null) {
+                throw new IllegalStateException("No providers available");
+            }
+            selectedProvider.generateText(TEST_PROMPT, config);
             return AiProviderTestResponse.builder()
                     .provider(provider)
                     .model(model)
@@ -173,17 +195,28 @@ public class AiProviderManagementService {
     }
 
     private List<AiProviderModel> listModelsByProvider(String provider, AiCallConfig config) {
+        AiProvider selected = resolveProvider(provider);
+        if (selected == null) {
+            return List.of();
+        }
+        return selected.listModels(config);
+    }
+
+    private AiProvider resolveProvider(String provider) {
         String normalized = normalizeProvider(provider);
-        if ("openai".equals(normalized) || "open-ai".equals(normalized)) {
-            return openai.listModels(config);
+        String canonical = normalizeAlias(normalized != null ? normalized : "gemini");
+        AiProvider selected = providerRegistry.get(canonical);
+        if (selected != null) {
+            return selected;
         }
-        if ("xai".equals(normalized) || "grok".equals(normalized) || "grok-ai".equals(normalized)) {
-            return xai.listModels(config);
+        if (!"gemini".equals(canonical)) {
+            log.warn("[AiProviderManagement] Unknown provider '{}', defaulting to gemini.", provider);
         }
-        if ("mock".equals(normalized)) {
-            return mock.listModels(config);
+        selected = providerRegistry.get("gemini");
+        if (selected != null) {
+            return selected;
         }
-        return gemini.listModels(config);
+        return providerRegistry.values().stream().findFirst().orElse(null);
     }
 
     private List<AiProviderModel> sortModelsByRelevance(
@@ -334,6 +367,17 @@ public class AiProviderManagementService {
             return null;
         }
         return value.trim().toLowerCase();
+    }
+
+    private String normalizeAlias(String normalized) {
+        if (normalized == null) {
+            return null;
+        }
+        return switch (normalized) {
+            case "open-ai" -> "openai";
+            case "grok", "grok-ai" -> "xai";
+            default -> normalized;
+        };
     }
 
     private StoredAiConfig resolveStoredConfig(String tenantId, String userId, String environment) {

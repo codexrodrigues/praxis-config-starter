@@ -67,7 +67,7 @@ spring.flyway.locations=classpath:db/baseline
 
 Para upgrades com histórico de migrações, mantenha `classpath:db/migration`.
 
-### AI Orchestrator (Gemini/OpenAI/xAI + Schemas)
+### AI Orchestrator (Spring AI: Gemini/OpenAI/xAI + Schemas)
 
 ```yaml
 praxis:
@@ -86,16 +86,6 @@ praxis:
         template-meta: 4000
         capabilities: 12000
         capability-notes: 3000
-    gemini:
-      api-key: ${GEMINI_API_KEY}
-      model: gemini-2.0-flash
-    openai:
-      api-key: ${OPENAI_API_KEY}
-      model: gpt-4o-mini
-    xai:
-      api-key: ${XAI_API_KEY}
-      model: grok-2-latest
-      base-url: https://api.x.ai/v1
     api-key:
       encryption-key: ${PRAXIS_AI_API_KEY_ENCRYPTION_KEY} # base64 AES key (16/24/32 bytes) to encrypt ui_user_config ai.apiKey
     keys:
@@ -103,17 +93,73 @@ praxis:
       require-admin-token: true
     schemas:
       base-url: http://localhost:8080 # host que expõe /schemas/filtered (metadata-starter)
+
+spring:
+  ai:
+    embedding:
+      provider: gemini # gemini|openai|mock
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      base-url: https://api.openai.com # para xAI: https://api.x.ai
+      chat:
+        options:
+          model: gpt-4o-mini
+      embedding:
+        options:
+          model: text-embedding-3-large
+          dimensions: 768
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY} # AI Studio (Google GenAI)
+        embedding:
+          api-key: ${GEMINI_API_KEY} # opcional; usa api-key acima quando omitido
+        project-id: ${GCP_PROJECT_ID} # opcional para Vertex AI
+        location: us-central1 # opcional para Vertex AI
+        chat:
+          options:
+            model: gemini-2.0-flash
+        embedding:
+          text:
+            options:
+              model: text-embedding-004
+              dimensions: 768
+
+#### AI Studio (Google GenAI REST) — recomendado para testes rápidos
+
+Se você usa **AI Studio** (https://aistudio.google.com/), não precisa de `project-id` nem `location`.
+Basta fornecer a **API key** e o modelo. O backend prioriza o caminho REST do GenAI quando há `apiKey`.
+
+Exemplo (test connection):
+
+```bash
+curl -sS -X POST http://localhost:8080/api/praxis/config/ai/providers/test \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider":"gemini",
+    "model":"gemini-2.5-flash",
+    "apiKey":"SUA_API_KEY_DO_AI_STUDIO"
+  }'
 ```
+
+Variáveis úteis:
+```properties
+praxis.ai.gemini.prefer-genai-api=true
+```
+```
+
+Para xAI, use `spring.ai.openai.base-url=https://api.x.ai` e `spring.ai.openai.chat.options.model=grok-2-latest` no ambiente.
+OpenAI e xAI compartilham as mesmas chaves `spring.ai.openai.*`, portanto escolha apenas um por ambiente.
 
 ### Embeddings (RAG)
 
-```yaml
-embedding:
-  provider: gemini # gemini|mock (valores invalidos geram erro; mock apenas para testes)
-  dimensions: 768
-  gemini:
-    api-key: ${GEMINI_API_KEY}
-```
+Embeddings usam Spring AI e devem manter o `dimensions` alinhado ao banco (pgvector).
+Se o `vector_store` foi criado com `vector(768)`, ajuste `praxis.ai.rag.vector-store.dimensions` e o provedor de embedding para 768 (ou recrie a tabela/migration quando usar outra dimensão).
+Para Gemini via Vertex AI, autentique via `GOOGLE_APPLICATION_CREDENTIALS` ou credenciais locais do SDK.
+Para OpenAI, o serviço envia `dimensions` quando configurado em `spring.ai.openai.embedding.options.dimensions` para garantir alinhamento com o DB.
+Para Gemini, `listModels` requer API key; sem key, o backend retorna apenas o modelo configurado.
+Para o RAG nativo, o Spring AI usa o `vector_store` (pgvector). Para desabilitar o VectorStore, use `praxis.ai.rag.vector-store.enabled=false`.
+Para ativar RAG no chat (Advisors), habilite `praxis.ai.rag.chat.enabled=true` e escolha `praxis.ai.rag.chat.mode=naive|modular`.
+Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG e usados para filtrar resultados quando presentes. Documentos globais (sem tenant/env) continuam visíveis quando esses headers são informados.
 
 ## 📡 Key Endpoints
 
@@ -123,6 +169,7 @@ embedding:
 | GET | `/api/praxis/config/api-catalog/search` | Vector search over API metadata in `api_metadata`. |
 | POST | `/api/praxis/config/ai-registry/component-definitions` | Ingests UI component definitions into `ai_registry`. |
 | GET | `/api/praxis/config/ai-registry/component-definitions/search` | Vector search over component definitions. |
+| POST | `/api/praxis/config/ai/suggestions` | Generates AI suggestions (uses tenant/env headers when present). |
 | GET | `/api/praxis/config/ai-context/{componentId}` | Returns AI context (runtime + metadata). Requires `componentType` query param. |
 | POST | `/api/praxis/config/ai-context/{componentId}` | Returns AI context using runtime `currentState` sent by the caller. |
 | POST | `/api/praxis/config/ai/patch` | Orchestrates prompt → patch generation using runtime `currentState`. |
@@ -255,6 +302,28 @@ POST `/api/praxis/config/ai/patch` accepts runtime state and user prompt and ret
   "schemaContext": { "path": "/api/orders", "operation": "GET", "schemaType": "response" }
 }
 ```
+
+### Clarification responses (UI signature)
+When the backend needs more user input, it can respond with a clarification payload that includes an explicit UI
+signature. The frontend should render the response based on `clarification`.
+
+```json
+{
+  "type": "clarification",
+  "message": "Qual coluna devo usar?",
+  "options": ["status", "createdAt"],
+  "clarification": {
+    "responseType": "choice",
+    "selectionMode": "single",
+    "presentation": "buttons",
+    "allowCustom": false
+  }
+}
+```
+
+Notes:
+- Clarification responses are **mutually exclusive** with `patch` in the same payload.
+- If `clarification` is partially filled, the backend will apply safe defaults (e.g., `choice` implies `allowCustom=false`).
 
 ### Create flow (schema on demand)
 When `aiMode=create` (or `requireSchema=true`) and the resource path is not chosen:

@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import java.text.Normalizer;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
@@ -26,6 +27,7 @@ import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiCapability;
 import org.praxisplatform.config.dto.AiContextDTO;
 import org.praxisplatform.config.dto.AiIntentClassification;
+import org.praxisplatform.config.dto.AiClarificationUi;
 import org.praxisplatform.config.dto.AiOption;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
@@ -731,6 +733,15 @@ public class AiOrchestratorService {
                 }
             }
         }
+        if (result != null && result.get("patch") == null) {
+            AiOrchestratorResponse clarification = parseClarificationFromResult(result);
+            if (clarification != null) {
+                return clarification;
+            }
+        }
+        if (result != null && result.has("patch") && result.has("clarification")) {
+            warnings.add("clarification ignorado: patch e clarification nao podem coexistir na mesma resposta.");
+        }
         if (result == null || result.get("patch") == null) {
             return error("Nenhum patch gerado.");
         }
@@ -1404,28 +1415,40 @@ public class AiOrchestratorService {
 
     private AiCallConfig resolveFrontendCallConfig(String tenantId, String userId, String environment) {
         String resolvedTenant = trimToNull(tenantId);
-        if (resolvedTenant == null || userConfigService == null) {
-            return null;
-        }
         String resolvedEnv = trimToNull(environment);
-        for (String componentId : buildGlobalConfigIds(resolvedTenant)) {
-            Optional<UserConfigService.ResolvedConfig> resolved =
-                    userConfigService.getResolved(
-                            resolvedTenant,
-                            userId,
-                            GLOBAL_CONFIG_COMPONENT_TYPE,
-                            componentId,
-                            resolvedEnv);
-            if (resolved.isEmpty()) {
-                continue;
-            }
-            JsonNode payload = parsePayload(resolved.get().config().getPayload());
-            AiCallConfig config = parseAiCallConfig(payload);
-            if (config != null) {
-                return config;
+        AiCallConfig config = null;
+        if (resolvedTenant != null && userConfigService != null) {
+            for (String componentId : buildGlobalConfigIds(resolvedTenant)) {
+                Optional<UserConfigService.ResolvedConfig> resolved =
+                        userConfigService.getResolved(
+                                resolvedTenant,
+                                userId,
+                                GLOBAL_CONFIG_COMPONENT_TYPE,
+                                componentId,
+                                resolvedEnv);
+                if (resolved.isEmpty()) {
+                    continue;
+                }
+                JsonNode payload = parsePayload(resolved.get().config().getPayload());
+                config = parseAiCallConfig(payload);
+                if (config != null) {
+                    break;
+                }
             }
         }
-        return null;
+        if (resolvedTenant == null) {
+            return config;
+        }
+        if (config == null) {
+            return AiCallConfig.builder()
+                    .tenantId(resolvedTenant)
+                    .environment(resolvedEnv)
+                    .build();
+        }
+        return config.toBuilder()
+                .tenantId(resolvedTenant)
+                .environment(resolvedEnv)
+                .build();
     }
 
     private EmbeddingService.EmbeddingCallConfig resolveEmbeddingCallConfig(
@@ -5159,6 +5182,146 @@ public class AiOrchestratorService {
         }
         String message = textOrNull(result.get("message"));
         return new ContextRequest(codes, message);
+    }
+
+    private AiOrchestratorResponse parseClarificationFromResult(JsonNode result) {
+        if (result == null || result.isNull()) {
+            return null;
+        }
+        String message = textOrNull(result.get("message"));
+        List<String> options = parseStringList(result.get("options"));
+        List<AiOption> optionPayloads = parseOptionPayloads(result.get("optionPayloads"));
+        List<String> questions = parseStringList(result.get("questions"));
+        if ((message == null || message.isBlank()) && questions != null && !questions.isEmpty()) {
+            message = buildQuestionsMessage(questions);
+        }
+        if ((message == null || message.isBlank()) && options.isEmpty() && optionPayloads.isEmpty()) {
+            return null;
+        }
+        AiClarificationUi explicitUi = parseClarificationUi(result.get("clarification"));
+        AiClarificationUi fallbackUi = buildClarificationUi(message, options, optionPayloads, null);
+        AiClarificationUi mergedUi = mergeClarificationUi(explicitUi, fallbackUi);
+        mergedUi = normalizeClarificationUi(mergedUi, options, optionPayloads);
+        return AiOrchestratorResponse.builder()
+                .type("clarification")
+                .message(message)
+                .options(options.isEmpty() ? null : options)
+                .optionPayloads(optionPayloads.isEmpty() ? null : optionPayloads)
+                .clarification(mergedUi)
+                .build();
+    }
+
+    private List<String> parseStringList(JsonNode node) {
+        if (node == null || node.isNull() || !node.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (item == null || item.isNull()) continue;
+            String text = item.asText().trim();
+            if (!text.isBlank()) {
+                values.add(text);
+            }
+        }
+        return values;
+    }
+
+    private List<AiOption> parseOptionPayloads(JsonNode node) {
+        if (node == null || node.isNull() || !node.isArray()) {
+            return List.of();
+        }
+        List<AiOption> payloads = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (item == null || !item.isObject()) continue;
+            String value = textOrNull(item.get("value"));
+            String label = textOrNull(item.get("label"));
+            String example = textOrNull(item.get("example"));
+            JsonNode contextHints = item.get("contextHints");
+            if ((value == null || value.isBlank()) && (label == null || label.isBlank())) {
+                continue;
+            }
+            payloads.add(AiOption.builder()
+                    .value(value)
+                    .label(label)
+                    .example(example)
+                    .contextHints(contextHints)
+                    .build());
+        }
+        return payloads;
+    }
+
+    private AiClarificationUi parseClarificationUi(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+        String responseType = normalizeToken(textOrNull(node.get("responseType")));
+        String selectionMode = normalizeToken(textOrNull(node.get("selectionMode")));
+        String presentation = normalizeToken(textOrNull(node.get("presentation")));
+        Boolean allowCustom = node.has("allowCustom") && !node.get("allowCustom").isNull()
+                ? node.get("allowCustom").asBoolean()
+                : null;
+        return AiClarificationUi.builder()
+                .responseType(isAllowedResponseType(responseType) ? responseType : null)
+                .selectionMode(isAllowedSelectionMode(selectionMode) ? selectionMode : null)
+                .presentation(isAllowedPresentation(presentation) ? presentation : null)
+                .allowCustom(allowCustom)
+                .build();
+    }
+
+    private AiClarificationUi mergeClarificationUi(AiClarificationUi explicitUi, AiClarificationUi fallbackUi) {
+        if (explicitUi == null) return fallbackUi;
+        return AiClarificationUi.builder()
+                .responseType(explicitUi.getResponseType() != null ? explicitUi.getResponseType() : fallbackUi.getResponseType())
+                .selectionMode(explicitUi.getSelectionMode() != null ? explicitUi.getSelectionMode() : fallbackUi.getSelectionMode())
+                .presentation(explicitUi.getPresentation() != null ? explicitUi.getPresentation() : fallbackUi.getPresentation())
+                .allowCustom(explicitUi.getAllowCustom() != null ? explicitUi.getAllowCustom() : fallbackUi.getAllowCustom())
+                .build();
+    }
+
+    private AiClarificationUi normalizeClarificationUi(
+            AiClarificationUi ui,
+            List<String> options,
+            List<AiOption> optionPayloads) {
+        if (ui == null) return null;
+        boolean hasOptions = (options != null && !options.isEmpty())
+                || (optionPayloads != null && !optionPayloads.isEmpty());
+        String responseType = ui.getResponseType();
+        Boolean allowCustom = ui.getAllowCustom();
+
+        if (!hasOptions) {
+            responseType = "text";
+            allowCustom = true;
+        } else if ("choice".equals(responseType)) {
+            allowCustom = false;
+        } else if ("confirm".equals(responseType)) {
+            allowCustom = false;
+        } else if ("mixed".equals(responseType)) {
+            allowCustom = true;
+        }
+
+        return AiClarificationUi.builder()
+                .responseType(responseType)
+                .selectionMode(ui.getSelectionMode())
+                .presentation(ui.getPresentation())
+                .allowCustom(allowCustom)
+                .build();
+    }
+
+    private boolean isAllowedResponseType(String value) {
+        return value != null && (
+                value.equals("text")
+                        || value.equals("choice")
+                        || value.equals("confirm")
+                        || value.equals("mixed")
+                        || value.equals("context"));
+    }
+
+    private boolean isAllowedSelectionMode(String value) {
+        return value != null && (value.equals("single") || value.equals("multiple"));
+    }
+
+    private boolean isAllowedPresentation(String value) {
+        return value != null && (value.equals("buttons") || value.equals("list") || value.equals("chips"));
     }
 
     private Integer parseContextCode(JsonNode node) {
@@ -9188,6 +9351,7 @@ public class AiOrchestratorService {
                 .message(message)
                 .options(options)
                 .optionPayloads(optionPayloads)
+                .clarification(buildClarificationUi(message, options, optionPayloads, null))
                 .build();
     }
 
@@ -9200,8 +9364,133 @@ public class AiOrchestratorService {
                         ? message
                         : "Preciso de mais contexto para continuar.")
                 .contextRequest(contextRequest)
+                .clarification(buildClarificationUi(message, null, null, contextRequest))
                 .build();
     }
+
+    private AiClarificationUi buildClarificationUi(
+            String message,
+            List<String> options,
+            List<AiOption> optionPayloads,
+            List<Integer> contextRequest) {
+        List<String> optionLabels = extractClarificationOptions(options, optionPayloads);
+        boolean hasOptions = !optionLabels.isEmpty();
+        boolean hasContext = contextRequest != null && !contextRequest.isEmpty();
+        String normalizedMessage = normalizeToken(message);
+        boolean allowCustom = hasCustomInputHint(normalizedMessage);
+        String responseType;
+
+        if (!hasOptions) {
+            responseType = hasContext ? "context" : "text";
+            allowCustom = true;
+        } else if (isYesNoPair(optionLabels)) {
+            responseType = "confirm";
+            allowCustom = false;
+        } else if (allowCustom) {
+            responseType = "mixed";
+        } else {
+            responseType = "choice";
+        }
+
+        String selectionMode = shouldAllowMulti(normalizedMessage) ? "multiple" : "single";
+        String presentation = resolvePresentation(responseType, optionLabels.size());
+
+        return AiClarificationUi.builder()
+                .responseType(responseType)
+                .selectionMode(selectionMode)
+                .presentation(presentation)
+                .allowCustom(allowCustom)
+                .build();
+    }
+
+    private List<String> extractClarificationOptions(List<String> options, List<AiOption> payloads) {
+        List<String> labels = new ArrayList<>();
+        if (options != null) {
+            for (String option : options) {
+                if (option != null && !option.isBlank()) {
+                    labels.add(option);
+                }
+            }
+        }
+        if (payloads != null) {
+            for (AiOption option : payloads) {
+                if (option == null) continue;
+                String label = option.getLabel();
+                String value = option.getValue();
+                if (label != null && !label.isBlank()) {
+                    labels.add(label);
+                } else if (value != null && !value.isBlank()) {
+                    labels.add(value);
+                }
+            }
+        }
+        return labels;
+    }
+
+    private boolean isYesNoPair(List<String> options) {
+        if (options == null || options.size() != 2) return false;
+        String first = normalizeToken(options.get(0));
+        String second = normalizeToken(options.get(1));
+        boolean firstYes = isYesToken(first);
+        boolean firstNo = isNoToken(first);
+        boolean secondYes = isYesToken(second);
+        boolean secondNo = isNoToken(second);
+        return (firstYes && secondNo) || (firstNo && secondYes);
+    }
+
+    private boolean isYesToken(String value) {
+        if (value == null || value.isBlank()) return false;
+        return value.equals("sim")
+                || value.equals("yes")
+                || value.equals("true")
+                || value.equals("on")
+                || value.equals("ativar")
+                || value.equals("ativado")
+                || value.equals("enable")
+                || value.equals("enabled");
+    }
+
+    private boolean isNoToken(String value) {
+        if (value == null || value.isBlank()) return false;
+        return value.equals("nao")
+                || value.equals("não")
+                || value.equals("no")
+                || value.equals("false")
+                || value.equals("off")
+                || value.equals("desativar")
+                || value.equals("desativado")
+                || value.equals("disable")
+                || value.equals("disabled");
+    }
+
+    private boolean hasCustomInputHint(String message) {
+        if (message == null || message.isBlank()) return false;
+        return message.contains("ou escreva")
+                || message.contains("ou informe")
+                || message.contains("ou digite")
+                || message.contains("ou detalhe")
+                || message.contains("outro")
+                || message.contains("digite");
+    }
+
+    private boolean shouldAllowMulti(String message) {
+        if (message == null || message.isBlank()) return false;
+        return message.contains("mais de uma")
+                || message.contains("multiplas")
+                || message.contains("múltiplas")
+                || message.contains("selecione todos")
+                || message.contains("escolha todas")
+                || message.contains("multiple")
+                || message.contains("multi");
+    }
+
+    private String resolvePresentation(String responseType, int optionCount) {
+        if ("confirm".equals(responseType)) return "buttons";
+        if (optionCount <= 6) return "buttons";
+        return "list";
+    }
+
+
 
     private AiOrchestratorResponse info(String message) {
         return AiOrchestratorResponse.builder()

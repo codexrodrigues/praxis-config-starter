@@ -30,6 +30,9 @@ class ContextRetrievalServiceTest {
     @Mock
     private AiRegistryRepository aiRegistryRepository;
 
+    @Mock
+    private org.praxisplatform.config.rag.RagVectorStoreService ragVectorStoreService;
+
     @InjectMocks
     private ContextRetrievalService contextRetrievalService;
 
