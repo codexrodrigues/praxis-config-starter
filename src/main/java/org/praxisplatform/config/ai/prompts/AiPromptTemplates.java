@@ -33,6 +33,11 @@ public final class AiPromptTemplates {
     - DESTRUIÇÃO: Não remova elementos (colunas, campos, regras, ações) a menos que explicitamente solicitado.
     """;
 
+    public static final String CONTRACT_API_LISTING = """
+    - PADRÃO PRAXIS (listagem): Para recursos CRUD, use POST {resource}/filter para filtros/paginação e GET {resource}/all para listagem simples.
+    - NÃO invente endpoints como /list. Se o endpoint não estiver no contexto, peça confirmação.
+    """;
+
     public static final String CONTRACT_RENDERER_PAYLOADS = """
     - CONDITIONAL RENDERERS: 'columns[].conditionalRenderers[].renderer' deve seguir o mesmo schema dos renderers principais.
       - CORRETO: { type: 'badge', badge: { text: 'Ativo', color: 'success' } }
@@ -89,9 +94,11 @@ public final class AiPromptTemplates {
 	   - add_column_computed: faltar newField OU baseFields[0] OU baseFields fora das colunas disponíveis.
 	   - custom_expression: faltar expression.
 	11. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
-	12. Retorne APENAS um objeto JSON válido (NUNCA um array).
-	13. Não inclua texto fora do JSON (sem markdown, sem comentários).
-	14. Se needsClarification=true: A) Preencha "options" com os valores possíveis. B) Defina "message" como uma PERGUNTA ESPECÍFICA que as opções respondem (ex: "Qual coluna deseja formatar?", "Qual o formato desejado?"). NUNCA use mensagens genéricas.
+	12. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter (com paginação/filtros) e GET {resource}/all para listagem simples.
+	12.1. resourcePath SEMPRE é o caminho base do recurso (ex.: "/api/funcionarios"). O componente deriva /filter e /all automaticamente.
+	13. Retorne APENAS um objeto JSON válido (NUNCA um array).
+	14. Não inclua texto fora do JSON (sem markdown, sem comentários).
+	15. Se needsClarification=true: A) Preencha "options" com os valores possíveis. B) Defina "message" como uma PERGUNTA ESPECÍFICA que as opções respondem (ex: "Qual coluna deseja formatar?", "Qual o formato desejado?"). NUNCA use mensagens genéricas.
 
 	SCHEMA DE RESPOSTA (JSON):
 	{
@@ -124,7 +131,7 @@ public final class AiPromptTemplates {
 	}
 	""";
 
-    public static final String PROMPT_INTENT_PLAN = """
+	public static final String PROMPT_INTENT_PLAN = """
     INTENT_PLAN
 
     Você é um classificador/planejador. Gere um JSON IntentPlan para o usuário.
@@ -152,6 +159,30 @@ public final class AiPromptTemplates {
         { "id": "string", "checks": [ { "type": "pathChanged|pathEquals|contains", "path": "string", "value": "any" } ] }
       ],
       "questions": []
+    }
+	""";
+
+    public static final String PROMPT_TEMPLATE_VARIANT_SELECTOR = """
+    Você é um classificador de intenção de criação para componentes de UI.
+    Sua tarefa é escolher QUAL opção de criação o usuário deseja, usando apenas a lista fornecida.
+    Se a intenção não corresponder a nenhuma opção, responda "unknown".
+
+    COMPONENTE: "{{COMPONENT_ID}}"
+    PEDIDO DO USUÁRIO: "{{USER_INPUT}}"
+
+    OPÇÕES POSSÍVEIS (JSON):
+    {{OPTIONS_JSON}}
+
+    REGRAS:
+    1. Escolha SOMENTE uma opção existente (id) ou "unknown".
+    2. Não invente opções.
+    3. Se houver ambiguidade, escolha "unknown".
+    4. Responda APENAS JSON válido, sem texto adicional.
+
+    SCHEMA DE RESPOSTA (JSON):
+    {
+      "choice": "string",
+      "reason": "string"
     }
     """;
 
@@ -231,6 +262,7 @@ COMPLETENESS HINTS (se fornecido):
 	{{CONTRACT_DSL}}
 	{{CONTRACT_ICONS}}
 	{{CONTRACT_SAFETY}}
+	{{CONTRACT_API_LISTING}}
 	{{CONTRACT_FORMATTING}}
 	{{CONTRACT_RENDERER_PAYLOADS}}
 
@@ -307,9 +339,10 @@ REGRAS:
 4. Para acoes com detalhes adicionais (ex.: COLUMN.RENDERER.BUTTON.STYLE.SET), use params. Se params for complexo (ex.: renderer completo), envie params como string JSON (ex.: "{\\"renderer\\":{\\"type\\":\\"badge\\",...},\\"condition\\":\\"valor > 0\\"}").
 5. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
 6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
-7. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
+7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter e GET {resource}/all. resourcePath é SEMPRE a base (sem /filter).
+8. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
    10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
-8. Retorne APENAS um objeto JSON valido (sem markdown).
+9. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):
 {
@@ -346,9 +379,10 @@ REGRAS:
 4. Use "params" para valores adicionais exigidos pelo patchTemplate. Se params for complexo, envie params como string JSON.
 5. Se houver ambiguidade de alvo, preencha "ambiguities" com alias e candidates.
 6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
-7. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
+7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter e GET {resource}/all. resourcePath é SEMPRE a base (sem /filter).
+8. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
    10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
-8. Retorne APENAS um objeto JSON valido (sem markdown).
+9. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):
 {

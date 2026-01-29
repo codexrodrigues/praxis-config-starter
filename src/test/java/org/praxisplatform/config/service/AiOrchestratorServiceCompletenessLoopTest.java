@@ -80,7 +80,9 @@ class AiOrchestratorServiceCompletenessLoopTest {
                 ragContextService,
                 mock(UserConfigService.class),
                 objectMapper,
-                mock(AiApiKeyCryptoService.class));
+                mock(AiApiKeyCryptoService.class),
+                mock(AiThreadService.class),
+                mock(AiMessageService.class));
 
         AiOrchestratorRequest request = AiOrchestratorRequest.builder()
                 .componentId("praxis-card")

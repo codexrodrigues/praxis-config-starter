@@ -8,12 +8,15 @@ import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
 import java.text.Normalizer;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
@@ -22,12 +25,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.ai.prompts.AiPromptTemplates;
 import org.praxisplatform.config.dto.AiActionPlan;
+import org.praxisplatform.config.domain.AiThread;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiCapability;
 import org.praxisplatform.config.dto.AiContextDTO;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiClarificationUi;
+import org.praxisplatform.config.dto.AiChatMessage;
 import org.praxisplatform.config.dto.AiOption;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
@@ -50,6 +55,7 @@ public class AiOrchestratorService {
     private static final int DEFAULT_API_SEARCH_LIMIT = 5;
     private static final int DEFAULT_VARIANT_SEARCH_LIMIT = 8;
     private static final double VARIANT_SIMILARITY_THRESHOLD = 0.65d;
+    private static final double TEMPLATE_FALLBACK_THRESHOLD = 0.58d;
     private static final String COMPONENT_ID_TABLE = "praxis-table";
     private static final int MAX_TARGET_CANDIDATES_PER_PATH = 30;
     private static final int BADGE_CARDINALITY_MAX = 6;
@@ -60,6 +66,16 @@ public class AiOrchestratorService {
             "success",
             "info"
     );
+    private static final Set<String> PROMPT_STOPWORDS = Set.of(
+            "a", "o", "e", "de", "do", "da", "dos", "das", "para", "por", "com",
+            "criar", "crie", "novo", "nova", "registro", "registros", "cadastro", "cadastrar",
+            "lista", "listagem", "listar", "tabela", "table", "pagina", "page",
+            "master", "detail", "detalhe", "detalhes", "form", "formulario",
+            "widget", "painel", "dashboard", "card", "cards", "configurar", "configuracao");
+    private static final Set<String> GENERIC_SUMMARY_LABELS = Set.of(
+            "criarnovoregistro", "criarregistro", "novoregistro", "criarnovocadastro",
+            "criarcadastro", "novocadastro", "cadastrar", "cadastro", "criar",
+            "create", "createrecord", "createnewrecord", "insert", "save", "salvar");
     private static final String MISSING_VALUES_AND_COLORS = "values_and_colors";
     private static final String MISSING_BADGE_VALUES = "badge.values";
     private static final String GLOBAL_CONFIG_COMPONENT_TYPE = "praxis-global-config-editor";
@@ -77,6 +93,8 @@ public class AiOrchestratorService {
             "schema",
             "dataset"
     );
+    private static final java.util.regex.Pattern REMOVAL_INTENT_PATTERN = java.util.regex.Pattern.compile(
+            "\\b(remover|remove|remova|limpar|limpe|limpa|resetar|reset|desfazer|apagar|tirar|retirar|desativar|desligar|desabilitar|disable|unset|sem)\\b");
 
     @Value("${praxis.ai.prompt.max-chars.config:12000}")
     private int maxConfigChars;
@@ -130,6 +148,8 @@ public class AiOrchestratorService {
     private final UserConfigService userConfigService;
     private final ObjectMapper objectMapper;
     private final AiApiKeyCryptoService apiKeyCryptoService;
+    private final AiThreadService threadService;
+    private final AiMessageService messageService;
 
     public AiOrchestratorResponse generatePatch(
             AiOrchestratorRequest request,
@@ -137,26 +157,58 @@ public class AiOrchestratorService {
             String tenantId,
             String userId,
             String environment) {
-        AiContextDTO context = contextService.buildContext(
-                request.getComponentId(),
-                request.getComponentType(),
-                request.getAiMode(),
-                request.getRequireSchema(),
-                request.getCurrentState(),
-                request.getResourcePath(),
-                request.getSchemaContext());
-
-        if (context.getComponentDefinition() == null) {
-            return unknownComponentError(request);
+        String resolvedUserPrompt = resolveUserPrompt(request);
+        if (resolvedUserPrompt == null || resolvedUserPrompt.isBlank()) {
+            return error("Prompt vazio.");
         }
+        request.setUserPrompt(resolvedUserPrompt);
+        interactionLogger.logDiagnostic(request, "request_timeline", buildRequestTimelineSnapshot(request));
 
-        AiCallConfig frontendConfig = resolveFrontendCallConfig(tenantId, userId, environment);
-        EmbeddingService.EmbeddingCallConfig embeddingConfig =
-                resolveEmbeddingCallConfig(tenantId, userId, environment);
+        AiMemoryContext memoryContext = null;
+        try {
+            AiContextDTO context = contextService.buildContext(
+                    request.getComponentId(),
+                    request.getComponentType(),
+                    request.getAiMode(),
+                    request.getRequireSchema(),
+                    request.getCurrentState(),
+                    request.getResourcePath(),
+                    request.getSchemaContext());
+
+            if (context.getComponentDefinition() == null) {
+                return unknownComponentError(request);
+            }
+
+            AiThread thread = threadService.resolveThread(
+                    request,
+                    tenantId,
+                    userId,
+                    environment,
+                    resolvedUserPrompt);
+            memoryContext = messageService.prepareTurn(
+                    thread,
+                    request,
+                    resolvedUserPrompt);
+            AiOrchestratorResponse cachedResponse = memoryContext.getCachedResponse();
+            if (cachedResponse != null) {
+                messageService.applyMemoryMetadata(cachedResponse, memoryContext);
+                return cachedResponse;
+            }
+            String modelPrompt = buildPromptWithMemory(resolvedUserPrompt, memoryContext);
+
+            AiCallConfig frontendConfig = resolveFrontendCallConfig(tenantId, userId, environment);
+            EmbeddingService.EmbeddingCallConfig embeddingConfig =
+                    resolveEmbeddingCallConfig(tenantId, userId, environment);
 
         AiOrchestratorResponse createFlowResponse = tryHandleCreateFlow(request, context, embeddingConfig);
         if (createFlowResponse != null) {
-            return createFlowResponse;
+            return finalizeResponse(createFlowResponse, memoryContext);
+        }
+
+        AiOrchestratorResponse templateIntentResponse =
+                tryHandleTemplateCreateIntent(request, context, frontendConfig);
+        if (templateIntentResponse != null) {
+            return finalizeResponse(templateIntentResponse, memoryContext);
         }
 
         List<String> warnings = new ArrayList<>();
@@ -175,6 +227,14 @@ public class AiOrchestratorService {
                     context.getComponentDefinition() != null);
         }
 
+        AiOrchestratorResponse templateResponse = tryHandleTemplateFlow(request, context, embeddingConfig);
+        if (templateResponse != null) {
+            if (!warnings.isEmpty()) {
+                templateResponse.setWarnings(warnings);
+            }
+            return finalizeResponse(templateResponse, memoryContext);
+        }
+
         boolean requireSchema = context.isRequireSchema();
         AiSchemaContext schemaContext = context.getSchemaContext();
         JsonNode resolvedSchema = null;
@@ -182,7 +242,7 @@ public class AiOrchestratorService {
         if (requireSchema) {
             SchemaResolution schemaResolution = resolveSchema(request, context, requestBaseUrl, embeddingConfig);
             if (schemaResolution.response != null) {
-                return schemaResolution.response;
+                return finalizeResponse(schemaResolution.response, memoryContext);
             }
             schemaContext = schemaResolution.schemaContext;
             resolvedSchema = schemaResolution.schema;
@@ -241,14 +301,14 @@ public class AiOrchestratorService {
         List<String> componentCategories = extractCategoryNames(componentCapabilities);
 
         if (request.getSuggestedPatch() != null && !request.getSuggestedPatch().isNull()) {
-            return applySuggestedPatch(
+            return finalizeResponse(applySuggestedPatch(
                     request.getSuggestedPatch(),
                     currentState,
                     request.getComponentId(),
                     warnings,
                     configCapabilities,
                     componentCapabilities,
-                    componentContext);
+                    componentContext), memoryContext);
         }
 
         AiOrchestratorResponse contextHintPatch = tryApplyContextHintPatch(
@@ -260,11 +320,11 @@ public class AiOrchestratorService {
                 componentCapabilities,
                 componentContext);
         if (contextHintPatch != null) {
-            return contextHintPatch;
+            return finalizeResponse(contextHintPatch, memoryContext);
         }
 
         AiIntentClassification intent = classifyIntent(
-                request.getUserPrompt(),
+                modelPrompt,
                 columnNames,
                 inputKeys,
                 outputKeys,
@@ -275,9 +335,19 @@ public class AiOrchestratorService {
                 frontendConfig);
 
         if (intent == null) {
-            return error("Falha ao classificar a intenção do usuário.");
+            return finalizeResponse(error("Falha ao classificar a intenção do usuário."), memoryContext);
         }
-        intent = normalizeIntent(intent, columnNames, configCategories, componentCategories, warnings);
+        intent = normalizeIntent(
+                intent,
+                request != null ? request.getContextHints() : null,
+                request != null ? request.getUserPrompt() : null,
+                columnDescriptors,
+                columnResolverKeys,
+                columnNames,
+                columnOptions,
+                configCategories,
+                componentCategories,
+                warnings);
         adjustPageBuilderCreateIntent(intent, request, context);
         AiOrchestratorResponse creationResponse = handleComputedCreationIntent(
                 intent,
@@ -288,7 +358,7 @@ public class AiOrchestratorService {
                 componentCapabilities,
                 componentContext);
         if (creationResponse != null) {
-            return creationResponse;
+            return finalizeResponse(creationResponse, memoryContext);
         }
         AiOrchestratorResponse computedFastPath = tryResolveComputedFastPath(
                 intent,
@@ -299,7 +369,18 @@ public class AiOrchestratorService {
                 componentCapabilities,
                 componentContext);
         if (computedFastPath != null) {
-            return computedFastPath;
+            return finalizeResponse(computedFastPath, memoryContext);
+        }
+        AiOrchestratorResponse filteringResolution = tryResolveFilteringPrompt(
+                request,
+                currentState,
+                columnDescriptors,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (filteringResolution != null) {
+            return finalizeResponse(filteringResolution, memoryContext);
         }
         AiActionPlan actionPlan = null;
         List<AiActionItem> expectedActions = List.of();
@@ -313,7 +394,7 @@ public class AiOrchestratorService {
                 .anyMatch(key -> key.contains("column"));
         if (shouldProbeTableActions) {
             actionPlan = extractTableActionPlan(
-                    request.getUserPrompt(),
+                    modelPrompt,
                     columnDescriptors,
                     formatOptions,
                     componentActions,
@@ -348,6 +429,29 @@ public class AiOrchestratorService {
         }
         if (Boolean.TRUE.equals(intent.getNeedsClarification())
                 || (missingContext != null && !missingContext.isEmpty())) {
+            if (selectedFormat != null
+                    && "format".equalsIgnoreCase(intent.getCategory())
+                    && !isBlank(selectedFormat.value)) {
+                intent.setNeedsClarification(false);
+                intent.setMissingContext(null);
+                JsonNode forcedPatch = buildFormatPatchFromSelection(
+                        selectedFormat,
+                        intent,
+                        columnDescriptors,
+                        columnResolverKeys);
+                if (forcedPatch != null) {
+                    warnings.add("Formato selecionado aplicado via contexto.");
+                    return finalizeResponse(applySuggestedPatch(
+                            forcedPatch,
+                            currentState,
+                            request.getComponentId(),
+                            warnings,
+                            configCapabilities,
+                            componentCapabilities,
+                            componentContext,
+                            true), memoryContext);
+                }
+            }
             if (canBypassClarification(intent, componentActions)) {
                 intent.setNeedsClarification(false);
                 intent.setMissingContext(null);
@@ -365,7 +469,7 @@ public class AiOrchestratorService {
                         componentContext);
                 if (computedDefaults != null) {
                     warnings.add("Clarificacao ignorada; defaults aplicados para coluna calculada.");
-                    return applySuggestedPatch(
+                    return finalizeResponse(applySuggestedPatch(
                             computedDefaults.patch,
                             currentState,
                             request.getComponentId(),
@@ -373,7 +477,7 @@ public class AiOrchestratorService {
                             configCapabilities,
                             componentCapabilities,
                             componentContext,
-                            true);
+                            true), memoryContext);
                 }
                 AiOrchestratorResponse badgeResolution = tryResolveBadgeMissingContext(
                         intent,
@@ -384,12 +488,12 @@ public class AiOrchestratorService {
                         componentCapabilities,
                         componentContext);
                 if (badgeResolution != null) {
-                    return badgeResolution;
+                    return finalizeResponse(badgeResolution, memoryContext);
                 }
                 AiOrchestratorResponse resourceClarification = resolveResourceClarification(
                         request, intent, embeddingConfig);
                 if (resourceClarification != null) {
-                    return resourceClarification;
+                    return finalizeResponse(resourceClarification, memoryContext);
                 }
                 missingContext = intent.getMissingContext();
                 if (Boolean.TRUE.equals(intent.getNeedsClarification())
@@ -398,24 +502,37 @@ public class AiOrchestratorService {
                             && "format".equalsIgnoreCase(intent.getCategory())
                             && isSensitiveMaskField(intent.getTargetField())) {
                         ClarificationPayload payload = buildFormatClarificationPayload(intent, formatOptions);
-                        return clarification(
+                        return finalizeResponse(clarification(
                                 buildClarificationMessage(intent, request),
                                 payload.options,
-                                payload.payloads);
+                                payload.payloads), memoryContext);
                     }
-                    return clarification(buildClarificationMessage(intent, request), intent.getOptions());
+                    ClarificationPayload columnPayload = buildColumnClarificationPayload(
+                            intent,
+                            columnDescriptors,
+                            columnOptions);
+                    if (columnPayload != null && !columnPayload.options.isEmpty()) {
+                        return finalizeResponse(
+                                clarification(buildClarificationMessage(intent, request),
+                                        columnPayload.options,
+                                        columnPayload.payloads),
+                                memoryContext);
+                    }
+                    return finalizeResponse(
+                            clarification(buildClarificationMessage(intent, request), intent.getOptions()),
+                            memoryContext);
                 }
             }
         }
         if ("ask_about_config".equalsIgnoreCase(intent.getIntent())) {
-            String answer = answerQuestion(request.getUserPrompt(), currentState, request, frontendConfig);
-            return info(answer);
+            String answer = answerQuestion(modelPrompt, currentState, request, frontendConfig);
+            return finalizeResponse(info(answer), memoryContext);
         }
 
         if (isTable && !componentActions.isEmpty()) {
             if (actionPlan == null) {
                 actionPlan = extractTableActionPlan(
-                        request.getUserPrompt(),
+                        modelPrompt,
                         columnDescriptors,
                         formatOptions,
                         componentActions,
@@ -466,6 +583,7 @@ public class AiOrchestratorService {
                     columnDescriptors,
                     columnResolverKeys,
                     warnings);
+            expectedActions = dropEmptyActionsShadowedByClear(expectedActions);
 
             List<String> ambiguityOptions = collectAmbiguityOptions(actionPlan);
             boolean hasAmbiguity = actionPlan != null
@@ -476,15 +594,24 @@ public class AiOrchestratorService {
                 List<String> options = !ambiguityOptions.isEmpty()
                         ? ambiguityOptions
                         : columnOptions;
-                return clarification(
-                        "Preciso da coluna correta para aplicar o ajuste.", options);
+                List<AiOption> payloads = buildColumnOptionPayloads(options, columnDescriptors);
+                List<String> labels = buildAiOptionLabels(payloads);
+                return finalizeResponse(clarification(
+                        "Preciso da coluna correta para aplicar o ajuste.",
+                        labels.isEmpty() ? options : labels,
+                        payloads.isEmpty() ? null : payloads), memoryContext);
             }
             List<String> unknownFields = findUnknownActionFields(expectedActions, columnNames);
             if (!unknownFields.isEmpty() && !createOnlyPlan) {
                 List<String> suggestions = suggestClosestColumns(unknownFields, columnDescriptors);
                 String message = buildUnknownColumnsMessage(unknownFields, suggestions);
                 List<String> options = suggestions.isEmpty() ? columnOptions : suggestions;
-                return clarification(message, options);
+                List<AiOption> payloads = buildColumnOptionPayloads(options, columnDescriptors);
+                List<String> labels = buildAiOptionLabels(payloads);
+                return finalizeResponse(clarification(
+                        message,
+                        labels.isEmpty() ? options : labels,
+                        payloads.isEmpty() ? null : payloads), memoryContext);
             }
             AiActionItem missingFormat = findFormatActionMissingValue(expectedActions);
             if (missingFormat != null) {
@@ -505,14 +632,14 @@ public class AiOrchestratorService {
                 String message = formatChoices.isEmpty()
                         ? "Informe o formato desejado para a coluna " + label + "."
                         : "Qual formato deseja aplicar na coluna " + label + "?";
-                return clarification(
+                return finalizeResponse(clarification(
                         message,
                         formatChoices,
-                        formatPayloads);
+                        formatPayloads), memoryContext);
             }
         } else if (!componentActions.isEmpty()) {
             actionPlan = extractComponentActionPlan(
-                    request.getUserPrompt(),
+                    modelPrompt,
                     componentActions,
                     targetCandidates,
                     ragHintsBlock,
@@ -527,7 +654,7 @@ public class AiOrchestratorService {
                     componentActions,
                     targetOptions);
             if (clarification != null) {
-                return clarification(clarification.message, clarification.options);
+                return finalizeResponse(clarification(clarification.message, clarification.options), memoryContext);
             }
             createOnlyPlan = isCreateOnlyPlan(actionPlan, componentActions);
         }
@@ -570,6 +697,7 @@ public class AiOrchestratorService {
         }
         IntentPlan intentPlan = generateIntentPlan(
                 request,
+                modelPrompt,
                 context,
                 filteredCaps,
                 currentState,
@@ -598,7 +726,7 @@ public class AiOrchestratorService {
                         componentCapabilities,
                         componentContext);
                 if (deterministicFallback != null) {
-                    return deterministicFallback;
+                    return finalizeResponse(deterministicFallback, memoryContext);
                 }
                 deterministicFallback = tryResolveRendererRuleFallback(
                         request,
@@ -608,9 +736,9 @@ public class AiOrchestratorService {
                         componentCapabilities,
                         componentContext);
                 if (deterministicFallback != null) {
-                    return deterministicFallback;
+                    return finalizeResponse(deterministicFallback, memoryContext);
                 }
-                return clarification(buildQuestionsMessage(planQuestions), null);
+                return finalizeResponse(clarification(buildQuestionsMessage(planQuestions), null), memoryContext);
             }
         }
         String intentPlanJson = formatIntentPlan(intentPlan);
@@ -636,7 +764,7 @@ public class AiOrchestratorService {
         }
 
         String prompt = buildExecutionPrompt(
-                request.getUserPrompt(),
+                modelPrompt,
                 context,
                 contextConfig,
                 filteredCaps,
@@ -690,7 +818,7 @@ public class AiOrchestratorService {
                                 mergedHints)),
                         maxRuntimeMetadataChars);
                 String retryPrompt = buildExecutionPrompt(
-                        request.getUserPrompt(),
+                        modelPrompt,
                         context,
                         contextConfig,
                         filteredCaps,
@@ -708,14 +836,16 @@ public class AiOrchestratorService {
                     log.info("[AiOrchestratorService] contextRequest retry requested codes={} message={}",
                             retryContextRequest.codes,
                             retryContextRequest.message);
-                    return clarificationWithContextRequest(
+                    return finalizeResponse(clarificationWithContextRequest(
                             retryContextRequest.message,
-                            retryContextRequest.codes);
+                            retryContextRequest.codes), memoryContext);
                 }
                 result = retryResult;
             } else {
                 log.info("[AiOrchestratorService] contextRequest could not be resolved");
-                return clarificationWithContextRequest(contextRequest.message, contextRequest.codes);
+                return finalizeResponse(
+                        clarificationWithContextRequest(contextRequest.message, contextRequest.codes),
+                        memoryContext);
             }
         }
         if (result == null || result.get("patch") == null) {
@@ -736,14 +866,14 @@ public class AiOrchestratorService {
         if (result != null && result.get("patch") == null) {
             AiOrchestratorResponse clarification = parseClarificationFromResult(result);
             if (clarification != null) {
-                return clarification;
+                return finalizeResponse(clarification, memoryContext);
             }
         }
         if (result != null && result.has("patch") && result.has("clarification")) {
             warnings.add("clarification ignorado: patch e clarification nao podem coexistir na mesma resposta.");
         }
         if (result == null || result.get("patch") == null) {
-            return error("Nenhum patch gerado.");
+            return finalizeResponse(error("Nenhum patch gerado."), memoryContext);
         }
 
         JsonNode patchNode = result.get("patch");
@@ -755,9 +885,9 @@ public class AiOrchestratorService {
                 patchNode, currentState, warnings, allowUnknownColumns);
         if (!semanticCheck.valid) {
             if (semanticCheck.needsClarification) {
-                return clarification(semanticCheck.message, semanticCheck.options);
+                return finalizeResponse(clarification(semanticCheck.message, semanticCheck.options), memoryContext);
             }
-            return errorWithWarnings(semanticCheck.message, warnings);
+            return finalizeResponse(errorWithWarnings(semanticCheck.message, warnings), memoryContext);
         }
         patchNode = semanticCheck.patch;
 
@@ -796,9 +926,9 @@ public class AiOrchestratorService {
         }
 
         if (sanitizeResult.sanitized == null || isEmptyObject(sanitizeResult.sanitized)) {
-            return errorWithWarnings(
+            return finalizeResponse(errorWithWarnings(
                     "O patch gerado não continha configurações válidas permitidas.",
-                    warnings);
+                    warnings), memoryContext);
         }
 
         EnumValidationResult enumValidation = validateEnumValues(
@@ -806,7 +936,7 @@ public class AiOrchestratorService {
                 componentContext,
                 filteredCaps);
         if (!enumValidation.valid) {
-            return invalidEnumValue(enumValidation, warnings);
+            return finalizeResponse(invalidEnumValue(enumValidation, warnings), memoryContext);
         }
 
         List<AiPatchDiff> initialDiff = buildPatchDiff(currentState, sanitizeResult.sanitized);
@@ -829,7 +959,7 @@ public class AiOrchestratorService {
             List<IntentAction> missingActions = completeness.missingActions;
             String completenessHints = buildCompletenessHints(intentPlan, initialDiff, missingActions);
             String retryPrompt = buildExecutionPrompt(
-                    request.getUserPrompt(),
+                    modelPrompt,
                     context,
                     contextConfig,
                     filteredCaps,
@@ -844,9 +974,9 @@ public class AiOrchestratorService {
             JsonNode retryResult = callAiJson("patch_generation_retry", retryPrompt, null, frontendConfig, request, 2);
             ContextRequest retryContextRequest = parseContextRequest(retryResult);
             if (retryContextRequest != null && retryContextRequest.hasCodes()) {
-                return clarificationWithContextRequest(
+                return finalizeResponse(clarificationWithContextRequest(
                         retryContextRequest.message,
-                        retryContextRequest.codes);
+                        retryContextRequest.codes), memoryContext);
             }
             JsonNode retryPatch = retryResult != null ? retryResult.get("patch") : null;
             if (retryPatch != null && !retryPatch.isNull()) {
@@ -887,13 +1017,13 @@ public class AiOrchestratorService {
                                     retryCompleteness);
                             if (retryCompleteness != null && retryCompleteness.complete) {
                                 warnings.add("Patch complementado apos retry de completeness.");
-                                return AiOrchestratorResponse.builder()
+                                return finalizeResponse(AiOrchestratorResponse.builder()
                                         .type("patch")
                                         .patch(mergedPatch)
                                         .diff(mergedDiff)
                                         .explanation(explanation)
                                         .warnings(warnings.isEmpty() ? null : warnings)
-                                        .build();
+                                        .build(), memoryContext);
                             }
                             completeness = retryCompleteness;
                             sanitizeResult = new SanitizeResult(mergedPatch, warnings);
@@ -905,13 +1035,13 @@ public class AiOrchestratorService {
             List<String> questions = completeness != null ? completeness.questions : null;
             if (createOnlyPlan) {
                 warnings.add("Completeness ignorada para plano de criacao; patch aplicado com melhor esforco.");
-                return AiOrchestratorResponse.builder()
+                return finalizeResponse(AiOrchestratorResponse.builder()
                         .type("patch")
                         .patch(sanitizeResult.sanitized)
                         .diff(initialDiff)
                         .explanation(explanation)
                         .warnings(warnings.isEmpty() ? null : warnings)
-                        .build();
+                        .build(), memoryContext);
             }
             if (questions != null && !questions.isEmpty()) {
                 AiOrchestratorResponse deterministicFallback = tryResolveComputedFallback(
@@ -922,7 +1052,7 @@ public class AiOrchestratorService {
                         componentCapabilities,
                         componentContext);
                 if (deterministicFallback != null) {
-                    return deterministicFallback;
+                    return finalizeResponse(deterministicFallback, memoryContext);
                 }
                 deterministicFallback = tryResolveRendererRuleFallback(
                         request,
@@ -932,22 +1062,95 @@ public class AiOrchestratorService {
                         componentCapabilities,
                         componentContext);
                 if (deterministicFallback != null) {
-                    return deterministicFallback;
+                    return finalizeResponse(deterministicFallback, memoryContext);
                 }
             }
             if (questions != null && !questions.isEmpty()) {
-                return clarification(buildQuestionsMessage(questions), null);
+                return finalizeResponse(clarification(buildQuestionsMessage(questions), null), memoryContext);
             }
-            return clarification("Preciso de mais detalhes para completar o ajuste.", null);
+            return finalizeResponse(
+                    clarification("Preciso de mais detalhes para completar o ajuste.", null),
+                    memoryContext);
         }
 
-        return AiOrchestratorResponse.builder()
+        return finalizeResponse(AiOrchestratorResponse.builder()
                 .type("patch")
                 .patch(sanitizeResult.sanitized)
                 .diff(initialDiff)
                 .explanation(explanation)
                 .warnings(warnings.isEmpty() ? null : warnings)
-                .build();
+                .build(), memoryContext);
+        } catch (Exception ex) {
+            messageService.expireTurn(memoryContext);
+            throw ex;
+        }
+    }
+
+    private AiOrchestratorResponse finalizeResponse(
+            AiOrchestratorResponse response,
+            AiMemoryContext memoryContext) {
+        if (response == null) {
+            return null;
+        }
+        messageService.storeAssistantResponse(memoryContext, response);
+        boolean summaryUpdated = messageService.summarizeIfNeeded(memoryContext);
+        messageService.applyMemoryMetadata(response, memoryContext, summaryUpdated);
+        return response;
+    }
+
+    private String resolveUserPrompt(AiOrchestratorRequest request) {
+        if (request == null) {
+            return null;
+        }
+        if (request.getMessages() != null && !request.getMessages().isEmpty()) {
+            for (int i = request.getMessages().size() - 1; i >= 0; i--) {
+                AiChatMessage msg = request.getMessages().get(i);
+                if (msg == null) {
+                    continue;
+                }
+                String role = msg.getRole() != null ? msg.getRole().toLowerCase(Locale.ROOT) : "user";
+                if (!"user".equals(role)) {
+                    continue;
+                }
+                if (msg.getContent() != null && !msg.getContent().isBlank()) {
+                    return msg.getContent().trim();
+                }
+            }
+        }
+        return request.getUserPrompt();
+    }
+
+    private String buildPromptWithMemory(String userPrompt, AiMemoryContext memoryContext) {
+        if (memoryContext == null) {
+            return userPrompt;
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean hasUserInWindow = false;
+        if (memoryContext.getSummary() != null && !memoryContext.getSummary().isBlank()) {
+            sb.append("SUMMARY:\n")
+                    .append(memoryContext.getSummary().trim())
+                    .append("\n\n");
+        }
+        if (memoryContext.getWindowMessages() != null && !memoryContext.getWindowMessages().isEmpty()) {
+            sb.append("CHAT_WINDOW:\n");
+            for (var msg : memoryContext.getWindowMessages()) {
+                if (msg == null || msg.getContent() == null || msg.getContent().isBlank()) {
+                    continue;
+                }
+                String role = msg.getRole() != null ? msg.getRole() : "user";
+                if ("user".equalsIgnoreCase(role) && userPrompt != null
+                        && userPrompt.trim().equals(msg.getContent().trim())) {
+                    hasUserInWindow = true;
+                }
+                sb.append(role).append(": ").append(msg.getContent().trim()).append("\n");
+            }
+            sb.append("\n");
+        }
+        if (!hasUserInWindow && userPrompt != null && !userPrompt.isBlank()) {
+            sb.append("USER:\n").append(userPrompt.trim());
+        }
+        String prompt = sb.toString().trim();
+        return prompt.isEmpty() ? userPrompt : prompt;
     }
 
     private void logPatchDiagnostics(
@@ -1934,7 +2137,7 @@ public class AiOrchestratorService {
         if (!item.isObject()) {
             return null;
         }
-        String[] preferred = new String[] { "field", "id", "name", "label", "value" };
+        String[] preferred = new String[] { "field", "id", "name", "label", "value", "key" };
         for (String key : preferred) {
             JsonNode value = item.get(key);
             if (value != null && !value.isNull() && !value.asText().isBlank()) {
@@ -2156,6 +2359,22 @@ public class AiOrchestratorService {
                     options);
         }
         Map<String, ComponentAction> actionById = indexActionCatalog(actionCatalog);
+        Map<String, Set<String>> clearTargetsByType = new LinkedHashMap<>();
+        if (actionPlan.getActions() != null) {
+            for (AiActionPlan.Action action : actionPlan.getActions()) {
+                if (action == null || action.getType() == null) continue;
+                String type = action.getType().trim().toUpperCase(Locale.ROOT);
+                if (!type.startsWith("CLEAR_")) {
+                    continue;
+                }
+                String baseType = type.substring("CLEAR_".length());
+                String target = trimToNull(action.getTarget());
+                String key = target == null ? "__GLOBAL__" : target;
+                clearTargetsByType
+                        .computeIfAbsent(baseType, k -> new LinkedHashSet<>())
+                        .add(key);
+            }
+        }
         if (actionPlan.getActions() != null) {
             for (AiActionPlan.Action action : actionPlan.getActions()) {
                 if (action == null) continue;
@@ -2163,6 +2382,17 @@ public class AiOrchestratorService {
                 RenderedActionPatch rendered = renderActionPatch(def, action);
                 if (rendered == null || rendered.missingTokens.isEmpty()) {
                     continue;
+                }
+                if (action.getType() != null && !clearTargetsByType.isEmpty()) {
+                    String type = action.getType().trim().toUpperCase(Locale.ROOT);
+                    Set<String> targets = clearTargetsByType.get(type);
+                    if (targets != null && !targets.isEmpty()) {
+                        String target = trimToNull(action.getTarget());
+                        String key = target == null ? "__GLOBAL__" : target;
+                        if (targets.contains(key)) {
+                            continue;
+                        }
+                    }
                 }
                 String message = buildMissingActionMessage(action.getType(), rendered.missingTokens);
                 List<String> options = List.of();
@@ -2667,15 +2897,72 @@ public class AiOrchestratorService {
         if (actions == null || actions.isEmpty()) {
             return null;
         }
+        Set<String> clearedFields = new LinkedHashSet<>();
+        for (AiActionItem action : actions) {
+            if (action == null) continue;
+            if ("CLEAR_SET_FORMAT".equals(action.getType())) {
+                String field = trimToNull(action.getField());
+                if (field != null) {
+                    clearedFields.add(field);
+                }
+            }
+        }
         for (AiActionItem action : actions) {
             if (action == null) continue;
             String value = action.getValue();
             if ("SET_FORMAT".equals(action.getType())
                     && (value == null || value.isBlank() || isNullToken(value))) {
+                if (clearedFields.contains(trimToNull(action.getField()))) {
+                    continue;
+                }
                 return action;
             }
         }
         return null;
+    }
+
+    private List<AiActionItem> dropEmptyActionsShadowedByClear(List<AiActionItem> actions) {
+        if (actions == null || actions.isEmpty()) {
+            return actions != null ? actions : List.of();
+        }
+        Map<String, Set<String>> clearTargetsByType = new LinkedHashMap<>();
+        for (AiActionItem action : actions) {
+            if (action == null || action.getType() == null) continue;
+            String type = action.getType().trim().toUpperCase(Locale.ROOT);
+            if (!type.startsWith("CLEAR_")) {
+                continue;
+            }
+            String baseType = type.substring("CLEAR_".length());
+            String field = trimToNull(action.getField());
+            String key = field == null ? "__GLOBAL__" : field;
+            clearTargetsByType
+                    .computeIfAbsent(baseType, k -> new LinkedHashSet<>())
+                    .add(key);
+        }
+        if (clearTargetsByType.isEmpty()) {
+            return actions;
+        }
+        List<AiActionItem> filtered = new ArrayList<>();
+        for (AiActionItem action : actions) {
+            if (action == null || action.getType() == null) continue;
+            String type = action.getType().trim().toUpperCase(Locale.ROOT);
+            Set<String> targets = clearTargetsByType.get(type);
+            if (targets == null || targets.isEmpty()) {
+                filtered.add(action);
+                continue;
+            }
+            String value = action.getValue();
+            if (value != null && !value.isBlank()) {
+                filtered.add(action);
+                continue;
+            }
+            String field = trimToNull(action.getField());
+            String key = field == null ? "__GLOBAL__" : field;
+            if (!targets.contains(key)) {
+                filtered.add(action);
+            }
+        }
+        return filtered;
     }
 
     private ColumnDescriptor findColumnByField(String field, List<ColumnDescriptor> columns) {
@@ -2711,6 +2998,7 @@ public class AiOrchestratorService {
             if (clause == null || clause.isBlank()) {
                 continue;
             }
+            boolean removalClause = clauseIndicatesRemoval(clause);
             List<ComponentAction> clauseActions = matchActionsForClause(clause, actionCatalog);
             if (!clauseActions.isEmpty()) {
                 lastActions = clauseActions;
@@ -2728,6 +3016,12 @@ public class AiOrchestratorService {
             List<ComponentAction> actionsToApply = !clauseActions.isEmpty() ? clauseActions : lastActions;
             if (actionsToApply == null || actionsToApply.isEmpty()) {
                 continue;
+            }
+            if (removalClause) {
+                List<ComponentAction> removalActions = filterRemovalActions(actionsToApply);
+                if (!removalActions.isEmpty()) {
+                    actionsToApply = removalActions;
+                }
             }
             for (ComponentAction actionDef : actionsToApply) {
                 if (actionDef == null || actionDef.id == null || actionDef.id.isBlank()) {
@@ -2804,6 +3098,34 @@ public class AiOrchestratorService {
             }
         }
         return matches;
+    }
+
+    private boolean clauseIndicatesRemoval(String clause) {
+        if (clause == null || clause.isBlank()) {
+            return false;
+        }
+        return REMOVAL_INTENT_PATTERN.matcher(clause.toLowerCase(Locale.ROOT)).find();
+    }
+
+    private List<ComponentAction> filterRemovalActions(List<ComponentAction> actions) {
+        if (actions == null || actions.isEmpty()) {
+            return List.of();
+        }
+        List<ComponentAction> filtered = new ArrayList<>();
+        for (ComponentAction action : actions) {
+            if (action == null || action.id == null || action.id.isBlank()) {
+                continue;
+            }
+            String id = action.id.trim().toUpperCase(Locale.ROOT);
+            if (id.startsWith("CLEAR_")
+                    || id.startsWith("DISABLE_")
+                    || id.startsWith("HIDE_")
+                    || id.startsWith("REMOVE_")
+                    || (action.operation != null && "delete".equalsIgnoreCase(action.operation))) {
+                filtered.add(action);
+            }
+        }
+        return filtered;
     }
 
     private List<AiActionItem> mergeActions(List<AiActionItem> primary, List<AiActionItem> secondary) {
@@ -3581,6 +3903,83 @@ public class AiOrchestratorService {
         return next;
     }
 
+    private JsonNode buildFormatPatchFromSelection(
+            SelectedFormatSelection selection,
+            AiIntentClassification intent,
+            List<ColumnDescriptor> columns,
+            List<String> columnResolverKeys) {
+        if (selection == null || isBlank(selection.value)) {
+            return null;
+        }
+        String targetField = selection.targetField != null ? selection.targetField : (intent != null ? intent.getTargetField() : null);
+        if (isBlank(targetField)) {
+            return null;
+        }
+        String resolvedField = resolveActionField(targetField, columns, columnResolverKeys);
+        String field = !isBlank(resolvedField) ? resolvedField : targetField;
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode cols = patch.putArray("columns");
+        ObjectNode col = cols.addObject();
+        col.put("field", field);
+        col.put("format", selection.value);
+        String explicitType = null;
+        if ("mask".equalsIgnoreCase(selection.mode)) {
+            String safeType = resolveSafeMaskType(field, explicitType);
+            if ("string".equals(safeType)) {
+                col.put("type", "string");
+            }
+        }
+        return patch;
+    }
+
+    private String resolveSafeMaskType(String field, String explicitType) {
+        if (!isBlank(explicitType)) {
+            if (isTextLikeType(explicitType)) {
+                return "string";
+            }
+            if (isNumericType(explicitType)) {
+                return "string";
+            }
+            return null;
+        }
+        if (isBlank(field)) {
+            return null;
+        }
+        String normalized = normalizeText(field);
+        if (normalized.contains("cpf")
+                || normalized.contains("cnpj")
+                || normalized.contains("cep")
+                || normalized.contains("telefone")
+                || normalized.contains("phone")
+                || normalized.contains("celular")) {
+            return "string";
+        }
+        return null;
+    }
+
+    private boolean isNumericType(String type) {
+        if (type == null) return false;
+        String normalized = type.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("number")
+                || normalized.equals("numeric")
+                || normalized.equals("integer")
+                || normalized.equals("int")
+                || normalized.equals("long")
+                || normalized.equals("float")
+                || normalized.equals("double")
+                || normalized.equals("decimal");
+    }
+
+    private boolean isTextLikeType(String type) {
+        if (type == null) return false;
+        String normalized = type.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("string")
+                || normalized.equals("text")
+                || normalized.equals("uuid")
+                || normalized.equals("url")
+                || normalized.equals("email");
+    }
+
     private boolean looksLikeNumberFormat(String format) {
         if (format == null) return false;
         String fmt = format.trim().toLowerCase(Locale.ROOT);
@@ -3845,6 +4244,15 @@ public class AiOrchestratorService {
             return value != null ? value.trim() : null;
         }
         return null;
+    }
+
+    private String normalizeSearchToken(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "");
+        return normalizeText(normalized);
     }
 
     private String normalizeText(String value) {
@@ -4354,7 +4762,12 @@ public class AiOrchestratorService {
 
     private AiIntentClassification normalizeIntent(
             AiIntentClassification intent,
+            JsonNode contextHints,
+            String userPrompt,
+            List<ColumnDescriptor> columnDescriptors,
+            List<String> columnResolverKeys,
             List<String> columnNames,
+            List<String> columnOptions,
             List<String> configCategories,
             List<String> componentCategories,
             List<String> warnings) {
@@ -4364,6 +4777,18 @@ public class AiOrchestratorService {
         String scope = normalizeScope(intent.getScope());
         String intentType = normalizeIntentType(intent.getIntent());
         intent.setIntent(intentType);
+        if (isBlank(intent.getTargetField())) {
+            String hintedTarget = resolveTargetFieldFromHints(contextHints);
+            if (!isBlank(hintedTarget)) {
+                intent.setTargetField(hintedTarget);
+            }
+        }
+        if (isBlank(intent.getTargetField()) && userPrompt != null && columnDescriptors != null) {
+            String promptTarget = resolveTargetFieldFromPrompt(userPrompt, columnDescriptors, columnResolverKeys);
+            if (!isBlank(promptTarget)) {
+                intent.setTargetField(promptTarget);
+            }
+        }
 
         boolean inConfig = category != null && configCategories.contains(category);
         boolean inComponent = category != null && componentCategories.contains(category);
@@ -4401,17 +4826,38 @@ public class AiOrchestratorService {
             intent.setNeedsClarification(true);
         }
 
-        if (requiresExistingColumnTarget(intentType)) {
+        boolean needsColumnTarget = requiresExistingColumnTarget(intentType)
+                || ("format".equalsIgnoreCase(category) && !isBlank(category));
+        if (needsColumnTarget) {
             String targetField = intent.getTargetField();
-            if (targetField != null && !targetField.isBlank()
-                    && columnNames != null && !columnNames.isEmpty()
+            if (isBlank(targetField)) {
+                addMissing(missing, "column");
+                intent.setNeedsClarification(true);
+                if (intent.getOptions() == null || intent.getOptions().isEmpty()
+                        || !optionsContainColumns(intent.getOptions(), columnDescriptors)) {
+                    intent.setOptions(columnOptions != null && !columnOptions.isEmpty()
+                            ? columnOptions
+                            : columnNames);
+                }
+            } else if (columnNames != null && !columnNames.isEmpty()
                     && !columnNames.contains(targetField)) {
                 addMissing(missing, "column");
                 intent.setNeedsClarification(true);
-                if (intent.getOptions() == null || intent.getOptions().isEmpty()) {
-                    intent.setOptions(columnNames);
+                if (intent.getOptions() == null || intent.getOptions().isEmpty()
+                        || !optionsContainColumns(intent.getOptions(), columnDescriptors)) {
+                    intent.setOptions(columnOptions != null && !columnOptions.isEmpty()
+                            ? columnOptions
+                            : columnNames);
                 }
             }
+        }
+
+        if (!isBlank(intent.getTargetField())
+                && promptMentionsColor(userPrompt)
+                && !hasExplicitColor(userPrompt)
+                && !requiresBadgeValues(missing)) {
+            addMissing(missing, MISSING_BADGE_VALUES);
+            intent.setNeedsClarification(true);
         }
 
         intent.setMissingContext(missing.isEmpty() ? null : missing);
@@ -4495,15 +4941,238 @@ public class AiOrchestratorService {
         if (intent == null) {
             return "Preciso de mais detalhes para continuar.";
         }
+        if ("format".equalsIgnoreCase(intent.getCategory()) && isBlank(intent.getTargetField())) {
+            return "Qual coluna deseja formatar?";
+        }
         List<String> missing = intent.getMissingContext();
         if (missing != null && !missing.isEmpty()) {
             if (hasMissingResourceContext(missing)) {
                 return buildResourceClarificationMessage(
                         request != null ? request.getComponentId() : null);
             }
+            if (missing.contains("column")) {
+                return "Qual coluna devo usar?";
+            }
             return "Preciso de mais contexto para continuar: " + String.join(", ", missing) + ".";
         }
         return "Preciso de mais detalhes para continuar.";
+    }
+
+    private ClarificationPayload buildColumnClarificationPayload(
+            AiIntentClassification intent,
+            List<ColumnDescriptor> columnDescriptors,
+            List<String> columnOptions) {
+        if (intent == null || !Boolean.TRUE.equals(intent.getNeedsClarification())) {
+            return null;
+        }
+        List<String> missing = intent.getMissingContext();
+        if (missing == null || missing.isEmpty() || !missing.contains("column")) {
+            return null;
+        }
+        List<String> options = intent.getOptions() != null && !intent.getOptions().isEmpty()
+                ? intent.getOptions()
+                : columnOptions;
+        if (options == null || options.isEmpty()) {
+            return null;
+        }
+        List<AiOption> payloads = new ArrayList<>();
+        Map<String, Integer> headerCounts = columnDescriptors != null
+                ? countHeaders(columnDescriptors)
+                : Map.of();
+        for (String field : options) {
+            if (isBlank(field)) continue;
+            String label = field;
+            if (columnDescriptors != null && !columnDescriptors.isEmpty()) {
+                ColumnDescriptor descriptor = findColumnByField(field, columnDescriptors);
+                if (descriptor != null) {
+                    label = displayColumnLabel(descriptor, headerCounts);
+                }
+            }
+            ObjectNode selection = objectMapper.createObjectNode();
+            selection.put("value", field);
+            ObjectNode selected = objectMapper.createObjectNode();
+            selected.put("targetField", field);
+            selected.set("selection", selection);
+            ObjectNode hints = objectMapper.createObjectNode();
+            hints.set("optionSelected", selected);
+            payloads.add(AiOption.builder()
+                    .value(field)
+                    .label(label)
+                    .contextHints(hints)
+                    .build());
+        }
+        List<String> labels = buildAiOptionLabels(payloads);
+        return new ClarificationPayload(labels, payloads);
+    }
+
+    private List<AiOption> buildColumnOptionPayloads(
+            List<String> options,
+            List<ColumnDescriptor> columnDescriptors) {
+        if (options == null || options.isEmpty()) {
+            return List.of();
+        }
+        List<AiOption> payloads = new ArrayList<>();
+        Map<String, Integer> headerCounts = columnDescriptors != null
+                ? countHeaders(columnDescriptors)
+                : Map.of();
+        for (String field : options) {
+            if (isBlank(field)) continue;
+            ColumnDescriptor descriptor = resolveColumnDescriptorFromOption(field, columnDescriptors, headerCounts);
+            String resolvedField = descriptor != null ? descriptor.field : field;
+            String label = descriptor != null ? displayColumnLabel(descriptor, headerCounts) : field;
+            ObjectNode selection = objectMapper.createObjectNode();
+            selection.put("value", resolvedField);
+            ObjectNode selected = objectMapper.createObjectNode();
+            selected.put("targetField", resolvedField);
+            selected.set("selection", selection);
+            ObjectNode hints = objectMapper.createObjectNode();
+            hints.set("optionSelected", selected);
+            payloads.add(AiOption.builder()
+                    .value(resolvedField)
+                    .label(label)
+                    .contextHints(hints)
+                    .build());
+        }
+        return payloads;
+    }
+
+    private String resolveTargetFieldFromHints(JsonNode contextHints) {
+        if (contextHints == null || contextHints.isNull() || !contextHints.isObject()) {
+            return null;
+        }
+        String direct = textOrNull(contextHints.get("targetField"));
+        if (!isBlank(direct)) {
+            return direct;
+        }
+        JsonNode selected = contextHints.get("optionSelected");
+        if (selected != null && selected.isObject()) {
+            String target = textOrNull(selected.get("targetField"));
+            if (!isBlank(target)) {
+                return target;
+            }
+            JsonNode selection = selected.get("selection");
+            String value = selection != null && selection.isObject()
+                    ? textOrNull(selection.get("value"))
+                    : null;
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String resolveTargetFieldFromPrompt(
+            String userPrompt,
+            List<ColumnDescriptor> columns,
+            List<String> columnResolverKeys) {
+        if (isBlank(userPrompt) || columns == null || columns.isEmpty()) {
+            return null;
+        }
+        String normalizedPrompt = normalizeText(userPrompt);
+        String best = null;
+        double bestScore = 0d;
+        for (ColumnDescriptor column : columns) {
+            if (column == null) continue;
+            String field = column.field != null ? normalizeText(column.field) : null;
+            String header = column.header != null ? normalizeText(column.header) : null;
+            double score = 0d;
+            if (!isBlank(field) && normalizedPrompt.contains(field)) {
+                score = Math.max(score, 1.0d);
+            }
+            if (!isBlank(header) && normalizedPrompt.contains(header)) {
+                score = Math.max(score, 0.9d);
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = column.field;
+            }
+        }
+        if (!isBlank(best)) {
+            return best;
+        }
+        String extracted = extractFieldFromLabel(userPrompt);
+        if (!isBlank(extracted)) {
+            return resolveActionField(extracted, columns, columnResolverKeys);
+        }
+        return null;
+    }
+
+    private ColumnDescriptor resolveColumnDescriptorFromOption(
+            String option,
+            List<ColumnDescriptor> columns,
+            Map<String, Integer> headerCounts) {
+        if (isBlank(option) || columns == null || columns.isEmpty()) {
+            return null;
+        }
+        String normalized = normalizeToken(option);
+        for (ColumnDescriptor column : columns) {
+            if (column == null) continue;
+            if (!isBlank(column.field) && normalizeToken(column.field).equals(normalized)) {
+                return column;
+            }
+            String label = displayColumnLabel(column, headerCounts);
+            if (!isBlank(label) && normalizeToken(label).equals(normalized)) {
+                return column;
+            }
+        }
+        return null;
+    }
+
+    private boolean optionsContainColumns(List<String> options, List<ColumnDescriptor> columns) {
+        if (options == null || options.isEmpty() || columns == null || columns.isEmpty()) {
+            return false;
+        }
+        Map<String, Integer> headerCounts = countHeaders(columns);
+        for (String option : options) {
+            if (option == null) continue;
+            if (resolveColumnDescriptorFromOption(option, columns, headerCounts) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean promptMentionsColor(String prompt) {
+        if (isBlank(prompt)) {
+            return false;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        return normalized.contains("cor")
+                || normalized.contains("color")
+                || normalized.contains("colors");
+    }
+
+    private boolean hasExplicitColor(String prompt) {
+        if (isBlank(prompt)) {
+            return false;
+        }
+        Map<String, String> style = extractStyleFromPrompt(prompt.toLowerCase(Locale.ROOT));
+        return style.containsKey("color") || style.containsKey("backgroundColor");
+    }
+
+    private ObjectNode buildRequestTimelineSnapshot(AiOrchestratorRequest request) {
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        if (request == null) {
+            return snapshot;
+        }
+        snapshot.put("componentId", request.getComponentId());
+        snapshot.put("componentType", request.getComponentType());
+        snapshot.put("aiMode", request.getAiMode());
+        snapshot.put("mode", request.getMode());
+        if (request.getSessionId() != null) {
+            snapshot.put("sessionId", request.getSessionId().toString());
+        }
+        if (request.getClientTurnId() != null) {
+            snapshot.put("clientTurnId", request.getClientTurnId().toString());
+        }
+        if (request.getMessages() != null) {
+            snapshot.put("messageCount", request.getMessages().size());
+        }
+        snapshot.put("hasContextHints", request.getContextHints() != null && !request.getContextHints().isNull());
+        snapshot.put("hasSchemaFields", request.getSchemaFields() != null && !request.getSchemaFields().isNull());
+        snapshot.put("hasDataProfile", request.getDataProfile() != null && !request.getDataProfile().isNull());
+        snapshot.put("hasRuntimeState", request.getRuntimeState() != null && !request.getRuntimeState().isNull());
+        return snapshot;
     }
 
     private AiOrchestratorResponse tryHandleCreateFlow(
@@ -4564,6 +5233,7 @@ public class AiOrchestratorService {
                     return clarification("nenhum endpoint de listagem (POST filter) encontrado", List.of());
                 }
             }
+            results = filterEndpointsByPromptTokens(request.getUserPrompt(), results);
             if (!isBlank(state.resourcePath)
                     && isValidResourcePath(state.resourcePath, results)) {
                 JsonNode patch = buildPageWidgetPatch(widgetId, state.resourcePath);
@@ -4669,6 +5339,550 @@ public class AiOrchestratorService {
         return root;
     }
 
+    private AiOrchestratorResponse tryHandleTemplateFlow(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+        if (request == null || context == null) {
+            return null;
+        }
+        AiRegistryTemplateRecord template = context.getTemplate();
+        if (template == null || template.getConfigJson() == null) {
+            String hintComponentId = firstNonBlank(request.getComponentId(), context.getComponentId());
+            template = resolveTemplateFromPrompt(request, hintComponentId, embeddingConfig);
+            if (template != null) {
+                context.setTemplate(template);
+            }
+        }
+        if (template == null || template.getConfigJson() == null) {
+            return null;
+        }
+        if (!shouldUseTemplateFlow(request, context, template.getConfigJson())) {
+            return null;
+        }
+        String resourcePath = firstNonBlank(
+                request.getResourcePath(),
+                context.getResourcePath(),
+                extractTemplateResourcePath(request.getContextHints()));
+        if (isBlank(resourcePath)) {
+            return resolveTemplateResourceClarification(request, embeddingConfig);
+        }
+        String normalizedResourcePath = normalizeResourceBasePath(resourcePath);
+        JsonNode templateConfig = resolveTemplateConfig(template.getConfigJson(), request.getComponentId());
+        if (templateConfig == null || templateConfig.isNull()) {
+            return null;
+        }
+        Map<String, String> variables = buildTemplateVariables(normalizedResourcePath, request, context);
+        if (requiresAddressResourcePath(templateConfig) && !variables.containsKey("addressResourcePath")) {
+            return resolveAddressResourcePathClarification(request);
+        }
+        if (requiresRelationField(templateConfig) && !variables.containsKey("relationField")) {
+            return resolveRelationFieldClarification(request);
+        }
+        JsonNode rendered = renderTemplateVariables(templateConfig, variables);
+        if (rendered == null || rendered.isNull()) {
+            return null;
+        }
+        JsonNode wrapped = wrapTemplatePatchIfNeeded(
+                rendered,
+                request.getComponentId(),
+                context.getComponentId(),
+                template.getComponentId());
+        if (wrapped == null || wrapped.isNull()) {
+            return null;
+        }
+        JsonNode currentState = context.getCurrentState();
+        return AiOrchestratorResponse.builder()
+                .type("patch")
+                .patch(wrapped)
+                .diff(buildPatchDiff(currentState, wrapped))
+                .build();
+    }
+
+    private boolean shouldUseTemplateFlow(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            JsonNode templateConfig) {
+        if (request == null || context == null) {
+            return false;
+        }
+        if (!isCreateTemplatePrompt(request.getUserPrompt())) {
+            return false;
+        }
+        if (!isEmptyTemplateTarget(context.getCurrentState())) {
+            return false;
+        }
+        String componentId = firstNonBlank(request.getComponentId(), context.getComponentId());
+        if (componentId != null) {
+            String normalized = componentId.trim().toLowerCase(Locale.ROOT);
+            if (normalized.contains("dynamic-page") || normalized.contains("page-builder")) {
+                return true;
+            }
+        }
+        return templateConfig != null && templateConfig.has("page");
+    }
+
+    private boolean isCreateTemplatePrompt(String prompt) {
+        if (prompt == null) {
+            return false;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        return normalized.contains("criar")
+                || normalized.contains("create")
+                || normalized.contains("gerar")
+                || normalized.contains("montar")
+                || normalized.contains("construir")
+                || normalized.contains("novo")
+                || normalized.contains("nova")
+                || normalized.contains("setup")
+                || normalized.contains("configurar")
+                || normalized.contains("master detail")
+                || normalized.contains("master-detail")
+                || normalized.contains("detalhe");
+    }
+
+    private boolean isEmptyTemplateTarget(JsonNode currentState) {
+        if (currentState == null || currentState.isNull()) {
+            return true;
+        }
+        if (currentState.isObject()) {
+            JsonNode page = currentState.get("page");
+            if (page != null && page.isObject()) {
+                JsonNode widgets = page.get("widgets");
+                if (widgets != null && widgets.isArray()) {
+                    return widgets.isEmpty();
+                }
+            }
+            JsonNode widgets = currentState.get("widgets");
+            if (widgets != null && widgets.isArray()) {
+                return widgets.isEmpty();
+            }
+            return currentState.size() == 0;
+        }
+        return false;
+    }
+
+    private AiOrchestratorResponse resolveTemplateResourceClarification(
+            AiOrchestratorRequest request,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+        if (!hasMeaningfulPromptTokens(request.getUserPrompt())) {
+            String msg = "Informe o resourcePath base (ex.: /api/funcionarios) ou escolha uma opcao.";
+            return clarification(msg, null, null);
+        }
+        List<ApiSearchResult> results = searchEndpoints(request, embeddingConfig);
+        if (!results.isEmpty()) {
+            results = filterEndpointsByPromptTokens(request.getUserPrompt(), results);
+        }
+        if (results.isEmpty()) {
+            String msg = "Informe o resourcePath base (ex.: /api/funcionarios) ou escolha uma opcao.";
+            return clarification(msg, null, null);
+        }
+        results = preferPrimaryTokenMatches(request.getUserPrompt(), results);
+        results = limitApiResults(results, 5);
+        List<AiOption> payloads = buildApiOptionPayloads(results);
+        String msg = buildResourceClarificationMessage(request.getComponentId()) + " (ou informe manualmente o resourcePath base)";
+        return clarification(
+                msg,
+                buildAiOptionLabels(payloads),
+                payloads);
+    }
+
+    private List<ApiSearchResult> preferPrimaryTokenMatches(String prompt, List<ApiSearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return results;
+        }
+        String primary = extractPrimaryToken(prompt, results);
+        if (primary == null || primary.isBlank()) {
+            return results;
+        }
+        List<ApiSearchResult> filtered = new ArrayList<>();
+        for (ApiSearchResult result : results) {
+            if (result == null) continue;
+            String path = normalizeSearchToken(normalizeResourceBasePath(result.getPath()));
+            if (path.contains(primary)) {
+                filtered.add(result);
+            }
+        }
+        return filtered.isEmpty() ? results : filtered;
+    }
+
+    private String extractPrimaryToken(String prompt, List<ApiSearchResult> results) {
+        Set<String> tokens = extractPromptTokens(prompt);
+        if (tokens.isEmpty()) return null;
+        List<String> candidates = new ArrayList<>();
+        for (String token : tokens) {
+            if (token == null || token.isBlank()) continue;
+            String normalized = normalizeSearchToken(token);
+            if (normalized.length() < 4) continue;
+            if (PROMPT_STOPWORDS.contains(normalized)) continue;
+            candidates.add(normalized);
+        }
+        if (candidates.isEmpty()) return null;
+        String best = null;
+        int bestHits = 0;
+        for (String candidate : candidates) {
+            int hits = 0;
+            for (ApiSearchResult result : results) {
+                if (result == null) continue;
+                String path = normalizeSearchToken(normalizeResourceBasePath(result.getPath()));
+                if (path.contains(candidate)) {
+                    hits++;
+                }
+            }
+            if (hits > bestHits || (hits == bestHits && best != null && candidate.length() > best.length())) {
+                bestHits = hits;
+                best = candidate;
+            } else if (best == null) {
+                best = candidate;
+            }
+        }
+        return bestHits > 0 ? best : null;
+    }
+
+    private boolean hasMeaningfulPromptTokens(String prompt) {
+        Set<String> tokens = extractPromptTokens(prompt);
+        if (tokens.isEmpty()) {
+            return false;
+        }
+        for (String token : tokens) {
+            if (token == null || token.isBlank()) continue;
+            String normalized = normalizeSearchToken(token);
+            if (normalized.length() < 3) continue;
+            if (PROMPT_STOPWORDS.contains(normalized)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private List<ApiSearchResult> limitApiResults(List<ApiSearchResult> results, int max) {
+        if (results == null || results.isEmpty()) return List.of();
+        if (results.size() <= max) return results;
+        results.sort((a, b) -> Double.compare(
+                b != null ? b.getSimilarityScore() : 0d,
+                a != null ? a.getSimilarityScore() : 0d));
+        return new ArrayList<>(results.subList(0, max));
+    }
+
+    private AiRegistryTemplateRecord resolveTemplateFromPrompt(
+            AiOrchestratorRequest request,
+            String componentId,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+        if (request == null) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (prompt == null || prompt.isBlank()) {
+            return null;
+        }
+        int limit = Math.max(DEFAULT_VARIANT_SEARCH_LIMIT, 6);
+        List<AiRegistryTemplateSearchResult> results = templateService.searchTemplates(
+                prompt,
+                componentId,
+                limit,
+                embeddingConfig);
+        if (results == null || results.isEmpty()) {
+            return null;
+        }
+        AiRegistryTemplateSearchResult best = null;
+        for (AiRegistryTemplateSearchResult result : results) {
+            if (result == null) continue;
+            if (best == null || result.getSimilarityScore() > best.getSimilarityScore()) {
+                best = result;
+            }
+        }
+        if (best == null || best.getSimilarityScore() < TEMPLATE_FALLBACK_THRESHOLD) {
+            return null;
+        }
+        return loadTemplateRecord(best.getComponentId(), null);
+    }
+
+    private JsonNode wrapTemplatePatchIfNeeded(
+            JsonNode rendered,
+            String requestComponentId,
+            String contextComponentId,
+            String templateComponentId) {
+        if (rendered == null || rendered.isNull()) {
+            return rendered;
+        }
+        if (!rendered.isObject()) {
+            return rendered;
+        }
+        if (rendered.has("page")) {
+            return rendered;
+        }
+        String componentId = firstNonBlank(requestComponentId, contextComponentId, templateComponentId);
+        if (componentId == null) {
+            return rendered;
+        }
+        String normalized = componentId.trim().toLowerCase(Locale.ROOT);
+        if (normalized.contains("page-builder")) {
+            ObjectNode wrapper = objectMapper.createObjectNode();
+            wrapper.set("page", rendered);
+            return wrapper;
+        }
+        return rendered;
+    }
+
+    private String extractTemplateResourcePath(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode templateInputs = contextHints.get("templateInputs");
+        if (templateInputs != null && templateInputs.isObject()) {
+            String resourcePath = textOrNull(templateInputs.get("resourcePath"));
+            if (!isBlank(resourcePath)) {
+                return resourcePath;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode resolveTemplateConfig(JsonNode templateConfig, String componentId) {
+        if (templateConfig == null || templateConfig.isNull()) {
+            return templateConfig;
+        }
+        if (templateConfig.isObject() && templateConfig.has("config")) {
+            JsonNode configNode = templateConfig.get("config");
+            if (configNode != null && configNode.isObject()) {
+                if (templateConfig.size() == 1) {
+                    return configNode;
+                }
+                if (componentId != null) {
+                    String normalized = componentId.trim().toLowerCase(Locale.ROOT);
+                    if (normalized.contains("list")) {
+                        return configNode;
+                    }
+                }
+            }
+        }
+        return templateConfig;
+    }
+
+    private Map<String, String> buildTemplateVariables(
+            String resourcePath,
+            AiOrchestratorRequest request,
+            AiContextDTO context) {
+        String base = normalizeResourceBasePath(resourcePath);
+        String key = sanitizeIdentifier(deriveResourceKey(base));
+        String label = toTitleCase(key);
+        String idField = resolveIdField(request, context);
+        String relationField = resolveRelationField(request != null ? request.getContextHints() : null);
+        String addressResourcePath = resolveAddressResourcePath(request != null ? request.getContextHints() : null);
+        Map<String, String> vars = new LinkedHashMap<>();
+        vars.put("resourcePath", base);
+        vars.put("resourceKey", key);
+        vars.put("resourceLabel", label);
+        vars.put("idField", idField);
+        if (!isBlank(relationField)) {
+            vars.put("relationField", relationField);
+        }
+        if (!isBlank(addressResourcePath)) {
+            vars.put("addressResourcePath", normalizeResourceBasePath(addressResourcePath));
+        }
+        return vars;
+    }
+
+    private String resolveRelationField(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        String direct = textOrNull(contextHints.get("relationField"));
+        if (!isBlank(direct)) {
+            return direct;
+        }
+        JsonNode templateInputs = contextHints.get("templateInputs");
+        if (templateInputs != null && templateInputs.isObject()) {
+            String via = textOrNull(templateInputs.get("relationField"));
+            if (!isBlank(via)) {
+                return via;
+            }
+        }
+        return null;
+    }
+
+    private String resolveAddressResourcePath(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        String direct = textOrNull(contextHints.get("addressResourcePath"));
+        if (!isBlank(direct)) {
+            return direct;
+        }
+        JsonNode templateInputs = contextHints.get("templateInputs");
+        if (templateInputs != null && templateInputs.isObject()) {
+            String via = textOrNull(templateInputs.get("addressResourcePath"));
+            if (!isBlank(via)) {
+                return via;
+            }
+        }
+        return null;
+    }
+
+    private boolean requiresRelationField(JsonNode templateConfig) {
+        if (templateConfig == null || templateConfig.isNull()) return false;
+        return templateConfig.toString().contains("{{relationField}}");
+    }
+
+    private boolean requiresAddressResourcePath(JsonNode templateConfig) {
+        if (templateConfig == null || templateConfig.isNull()) return false;
+        return templateConfig.toString().contains("{{addressResourcePath}}");
+    }
+
+    private AiOrchestratorResponse resolveAddressResourcePathClarification(AiOrchestratorRequest request) {
+        String msg = "Qual endpoint devo usar para os enderecos? (ou informe manualmente o resourcePath base)";
+        return clarification(msg, null, null);
+    }
+
+    private AiOrchestratorResponse resolveRelationFieldClarification(AiOrchestratorRequest request) {
+        List<String> options = new ArrayList<>();
+        JsonNode schemaFields = request != null ? request.getSchemaFields() : null;
+        if (schemaFields != null && schemaFields.isArray()) {
+            for (JsonNode field : schemaFields) {
+                String name = textOrNull(field != null ? field.get("name") : null);
+                if (name == null) continue;
+                String lower = name.toLowerCase(Locale.ROOT);
+                if (lower.endsWith("id") || lower.endsWith("_id") || lower.contains("id")) {
+                    options.add(name);
+                }
+            }
+        }
+        String msg = "Qual campo relaciona os registros? (ou informe manualmente o campo de relação)";
+        return clarification(msg, options.isEmpty() ? null : options, null);
+    }
+
+    private String resolveIdField(AiOrchestratorRequest request, AiContextDTO context) {
+        String[] paths = {
+                "/page/context/idField",
+                "/context/idField",
+                "/resource/idField",
+                "/meta/idField",
+                "/idField",
+                "/__idField__"
+        };
+        JsonNode[] nodes = {
+                request != null ? request.getCurrentState() : null,
+                request != null ? request.getRuntimeState() : null,
+                context != null ? context.getCurrentState() : null
+        };
+        for (JsonNode node : nodes) {
+            if (node == null || node.isNull()) continue;
+            for (String path : paths) {
+                JsonNode found = node.at(path);
+                if (found != null && found.isTextual() && !found.asText().isBlank()) {
+                    return found.asText().trim();
+                }
+            }
+        }
+        JsonNode schemaFields = request != null ? request.getSchemaFields() : null;
+        if (schemaFields != null && schemaFields.isArray()) {
+            String candidate = null;
+            for (JsonNode field : schemaFields) {
+                String name = textOrNull(field != null ? field.get("name") : null);
+                if (name == null) continue;
+                if ("id".equalsIgnoreCase(name)) {
+                    return name;
+                }
+                if (candidate == null && name.toLowerCase(Locale.ROOT).endsWith("id")) {
+                    candidate = name;
+                }
+            }
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return "id";
+    }
+
+    private JsonNode renderTemplateVariables(JsonNode node, Map<String, String> variables) {
+        if (node == null || node.isNull()) {
+            return node;
+        }
+        if (node.isObject()) {
+            ObjectNode out = objectMapper.createObjectNode();
+            node.fields().forEachRemaining(entry -> {
+                out.set(entry.getKey(), renderTemplateVariables(entry.getValue(), variables));
+            });
+            return out;
+        }
+        if (node.isArray()) {
+            ArrayNode out = objectMapper.createArrayNode();
+            for (JsonNode item : node) {
+                out.add(renderTemplateVariables(item, variables));
+            }
+            return out;
+        }
+        if (node.isTextual()) {
+            String replaced = replaceTemplateTokens(node.asText(), variables);
+            return objectMapper.getNodeFactory().textNode(replaced);
+        }
+        return node;
+    }
+
+    private String replaceTemplateTokens(String text, Map<String, String> variables) {
+        if (text == null || text.isBlank() || variables == null || variables.isEmpty()) {
+            return text;
+        }
+        String out = text;
+        for (Map.Entry<String, String> entry : variables.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key == null || value == null) continue;
+            out = out.replace("{{" + key + "}}", value);
+        }
+        return out;
+    }
+
+    private String deriveResourceKey(String resourcePath) {
+        if (resourcePath == null || resourcePath.isBlank()) {
+            return "resource";
+        }
+        String trimmed = normalizeResourceBasePath(resourcePath);
+        if (trimmed.isBlank()) {
+            return "resource";
+        }
+        String[] parts = trimmed.split("/");
+        for (int i = parts.length - 1; i >= 0; i--) {
+            String part = parts[i];
+            if (part == null || part.isBlank()) continue;
+            if (part.startsWith("{") && part.endsWith("}")) continue;
+            return part;
+        }
+        return "resource";
+    }
+
+    private String sanitizeIdentifier(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "resource";
+        }
+        String normalized = Normalizer.normalize(raw, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "");
+        normalized = normalized.replaceAll("[^a-zA-Z0-9_-]", "_");
+        normalized = normalized.replaceAll("_+", "_");
+        normalized = normalized.replaceAll("^_+|_+$", "");
+        if (normalized.isBlank()) {
+            return "resource";
+        }
+        return normalized.toLowerCase(Locale.ROOT);
+    }
+
+    private String toTitleCase(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "Recurso";
+        }
+        String cleaned = raw.replace('_', ' ').replace('-', ' ').trim();
+        String[] parts = cleaned.split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            if (part.isBlank()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                sb.append(part.substring(1).toLowerCase(Locale.ROOT));
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : "Recurso";
+    }
+
     private List<AiOption> resolveWidgetOptions(
             AiOrchestratorRequest request,
             AiContextDTO context) {
@@ -4751,6 +5965,53 @@ public class AiOrchestratorService {
         return normalized.contains("filter");
     }
 
+    private List<ApiSearchResult> filterEndpointsByPromptTokens(String prompt, List<ApiSearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return List.of();
+        }
+        Set<String> tokens = extractPromptTokens(prompt);
+        if (tokens.isEmpty()) {
+            return results;
+        }
+        LinkedHashSet<String> normalizedTokens = new LinkedHashSet<>();
+        for (String token : tokens) {
+            if (token == null || token.isBlank()) {
+                continue;
+            }
+            String normalized = normalizeSearchToken(token);
+            if (normalized.isBlank() || normalized.length() < 3) {
+                continue;
+            }
+            if (PROMPT_STOPWORDS.contains(normalized)) {
+                continue;
+            }
+            normalizedTokens.add(normalized);
+        }
+        if (normalizedTokens.isEmpty()) {
+            return results;
+        }
+        List<ApiSearchResult> filtered = new ArrayList<>();
+        for (ApiSearchResult result : results) {
+            if (result == null) {
+                continue;
+            }
+            String haystack = normalizeSearchToken(normalizeResourceBasePath(result.getPath()))
+                    + normalizeSearchToken(result.getSummary())
+                    + normalizeSearchToken(result.getTags());
+            boolean matches = false;
+            for (String token : normalizedTokens) {
+                if (haystack.contains(token)) {
+                    matches = true;
+                    break;
+                }
+            }
+            if (matches) {
+                filtered.add(result);
+            }
+        }
+        return filtered.isEmpty() ? results : filtered;
+    }
+
     private boolean isValidWidgetId(
             String widgetId,
             AiOrchestratorRequest request,
@@ -4794,8 +6055,17 @@ public class AiOrchestratorService {
         if (isBlank(resourcePath) || results == null || results.isEmpty()) {
             return false;
         }
+        String normalizedTarget = normalizeResourceBasePath(resourcePath);
         for (ApiSearchResult result : results) {
-            if (result != null && resourcePath.equalsIgnoreCase(result.getPath())) {
+            if (result == null || isBlank(result.getPath())) {
+                continue;
+            }
+            String raw = result.getPath();
+            if (resourcePath.equalsIgnoreCase(raw)) {
+                return true;
+            }
+            String normalized = normalizeResourceBasePath(raw);
+            if (!isBlank(normalized) && normalizedTarget.equalsIgnoreCase(normalized)) {
                 return true;
             }
         }
@@ -4823,7 +6093,7 @@ public class AiOrchestratorService {
         if (options == null || options.isEmpty()) {
             return List.of();
         }
-        List<String> labels = new ArrayList<>();
+        LinkedHashSet<String> labels = new LinkedHashSet<>();
         for (AiOption option : options) {
             if (option == null) continue;
             String label = option.getLabel();
@@ -4836,7 +6106,7 @@ public class AiOrchestratorService {
                 labels.add(value);
             }
         }
-        return labels;
+        return new ArrayList<>(labels);
     }
 
     private boolean promptMentionsTable(String prompt) {
@@ -5021,10 +6291,11 @@ public class AiOrchestratorService {
         if (results.isEmpty()) {
             return clarification(buildResourceClarificationMessage(request.getComponentId()), List.of());
         }
+        results = filterEndpointsByPromptTokens(request.getUserPrompt(), results);
         if (results.size() == 1) {
             ApiSearchResult picked = results.get(0);
             if (picked != null && picked.getPath() != null && !picked.getPath().isBlank()) {
-                request.setResourcePath(picked.getPath());
+                request.setResourcePath(normalizeResourceBasePath(picked.getPath()));
                 intent.setMissingContext(removeMissingResourceContext(missing));
                 if (intent.getMissingContext() == null) {
                     intent.setNeedsClarification(false);
@@ -5091,19 +6362,54 @@ public class AiOrchestratorService {
         return key.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
     }
 
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     private List<AiOption> buildApiOptionPayloads(List<ApiSearchResult> results) {
         if (results == null || results.isEmpty()) {
             return List.of();
         }
         List<AiOption> payloads = new ArrayList<>();
+        Set<String> seenPaths = new HashSet<>();
+        Set<String> usedLabels = new HashSet<>();
         for (ApiSearchResult result : results) {
             if (result == null || result.getPath() == null || result.getPath().isBlank()) {
                 continue;
             }
+            String path = normalizeResourceBasePath(result.getPath());
+            if (isBlank(path)) {
+                continue;
+            }
+            String normalizedPath = normalizeText(path);
+            if (!seenPaths.add(normalizedPath)) {
+                continue;
+            }
             String label = buildApiOptionLabel(result);
+            String normalizedLabel = normalizeText(label);
+            if (usedLabels.contains(normalizedLabel)) {
+                String alt = buildApiPathLabel(result);
+                if (alt != null && !alt.isBlank()) {
+                    label = alt;
+                    normalizedLabel = normalizeText(label);
+                }
+            }
+            if (usedLabels.contains(normalizedLabel)) {
+                label = label + " (" + path + ")";
+                normalizedLabel = normalizeText(label);
+            }
+            usedLabels.add(normalizedLabel);
             String example = buildApiOptionExample(result);
             payloads.add(AiOption.builder()
-                    .value(result.getPath().trim())
+                    .value(path)
                     .label(label)
                     .example(example)
                     .build());
@@ -5116,9 +6422,9 @@ public class AiOrchestratorService {
         if (summaryLabel != null && !summaryLabel.isBlank()) {
             return summaryLabel;
         }
-        String path = result != null ? result.getPath() : null;
-        if (path != null && !path.isBlank()) {
-            return path.trim();
+        String fallback = buildApiPathLabel(result);
+        if (fallback != null && !fallback.isBlank()) {
+            return fallback;
         }
         return "Endpoint";
     }
@@ -5128,18 +6434,23 @@ public class AiOrchestratorService {
             return null;
         }
         String summary = result.getSummary();
-        if (summary != null && !summary.isBlank()) {
+        if (summary != null && !summary.isBlank() && !isGenericSummary(summary)) {
             return summary.trim();
         }
-        String method = result.getMethod();
-        String path = result.getPath();
-        if (path == null || path.isBlank()) {
+        String basePath = normalizeResourceBasePath(result.getPath());
+        if (basePath == null || basePath.isBlank()) {
             return null;
         }
-        if (method == null || method.isBlank()) {
-            return path.trim();
+        String method = result.getMethod();
+        String rawPath = result.getPath();
+        if (!isBlank(rawPath) && !rawPath.equals(basePath)
+                && rawPath.toLowerCase(Locale.ROOT).endsWith("/filter")) {
+            return "resourcePath: " + basePath + " (POST " + basePath + "/filter)";
         }
-        return method.trim().toUpperCase(Locale.ROOT) + " " + path.trim();
+        if (method == null || method.isBlank()) {
+            return "resourcePath: " + basePath;
+        }
+        return method.trim().toUpperCase(Locale.ROOT) + " " + basePath.trim();
     }
 
     private String normalizeSummaryLabel(String summary) {
@@ -5147,6 +6458,9 @@ public class AiOrchestratorService {
             return null;
         }
         String cleaned = summary.trim();
+        if (isGenericSummary(cleaned)) {
+            return null;
+        }
         if (cleaned.length() > 80) {
             return null;
         }
@@ -5155,10 +6469,107 @@ public class AiOrchestratorService {
         if (candidate.isBlank()) {
             candidate = cleaned;
         }
+        if (isGenericSummary(candidate)) {
+            return null;
+        }
         if (candidate.length() > 60) {
             return null;
         }
         return candidate;
+    }
+
+    private boolean isGenericSummary(String summary) {
+        if (summary == null || summary.isBlank()) {
+            return true;
+        }
+        String cleaned = summary.trim();
+        String normalized = normalizeText(cleaned);
+        if (normalized.isBlank()) {
+            return true;
+        }
+        String[] words = cleaned.split("\\s+");
+        if (words.length <= 3 && (normalized.contains("criar")
+                || normalized.contains("novo")
+                || normalized.contains("registro")
+                || normalized.contains("cadastro")
+                || normalized.contains("cadastrar")
+                || normalized.contains("create")
+                || normalized.contains("insert")
+                || normalized.contains("salvar"))) {
+            return true;
+        }
+        return GENERIC_SUMMARY_LABELS.contains(normalized);
+    }
+
+    private String buildApiPathLabel(ApiSearchResult result) {
+        if (result == null || result.getPath() == null) {
+            return null;
+        }
+        String path = normalizeResourceBasePath(result.getPath());
+        if (path.isBlank()) {
+            return null;
+        }
+        String[] parts = path.split("/");
+        List<String> segments = new ArrayList<>();
+        for (String part : parts) {
+            if (part == null || part.isBlank()) {
+                continue;
+            }
+            if (part.startsWith("{") && part.endsWith("}")) {
+                continue;
+            }
+            segments.add(part);
+        }
+        if (segments.isEmpty()) {
+            return path;
+        }
+        String last = segments.get(segments.size() - 1);
+        if (isTrivialPathSuffix(last) && segments.size() > 1) {
+            last = segments.get(segments.size() - 2);
+        }
+        String label = last.replace('-', ' ').replace('_', ' ').trim();
+        if (label.isBlank()) {
+            return path;
+        }
+        return label;
+    }
+
+    private boolean isTrivialPathSuffix(String segment) {
+        if (segment == null || segment.isBlank()) {
+            return false;
+        }
+        String normalized = normalizeText(segment);
+        return normalized.equals("filter")
+                || normalized.equals("search")
+                || normalized.equals("list")
+                || normalized.equals("all")
+                || normalized.equals("query")
+                || normalized.equals("page")
+                || normalized.equals("paginate");
+    }
+
+    private String normalizeResourceBasePath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        String trimmed = path.trim().replaceAll("/+$", "");
+        if (trimmed.isBlank()) {
+            return "";
+        }
+        String lowered = trimmed.toLowerCase(Locale.ROOT);
+        if (lowered.endsWith("/filter")) {
+            trimmed = trimmed.substring(0, trimmed.length() - "/filter".length());
+        } else if (lowered.endsWith("/all")) {
+            trimmed = trimmed.substring(0, trimmed.length() - "/all".length());
+        }
+        int lastSlash = trimmed.lastIndexOf('/');
+        if (lastSlash > 0) {
+            String last = trimmed.substring(lastSlash + 1);
+            if (last.startsWith("{") && last.endsWith("}")) {
+                trimmed = trimmed.substring(0, lastSlash);
+            }
+        }
+        return trimmed.trim();
     }
 
     private ContextRequest parseContextRequest(JsonNode result) {
@@ -5684,12 +7095,14 @@ public class AiOrchestratorService {
                         Map.entry("CONTRACT_DSL", AiPromptTemplates.CONTRACT_DSL),
                         Map.entry("CONTRACT_ICONS", AiPromptTemplates.CONTRACT_ICONS),
                         Map.entry("CONTRACT_SAFETY", AiPromptTemplates.CONTRACT_SAFETY),
+                        Map.entry("CONTRACT_API_LISTING", AiPromptTemplates.CONTRACT_API_LISTING),
                         Map.entry("CONTRACT_FORMATTING", contractFormatting),
                         Map.entry("CONTRACT_RENDERER_PAYLOADS", contractRenderers)));
     }
 
     private IntentPlan generateIntentPlan(
             AiOrchestratorRequest request,
+            String userPrompt,
             AiContextDTO context,
             List<AiCapability> capabilities,
             JsonNode currentState,
@@ -5698,8 +7111,9 @@ public class AiOrchestratorService {
             String category) {
         JsonNode definition = context != null ? context.getComponentDefinition() : null;
         String prompt = buildIntentPlanPrompt(
+                context != null ? context.getComponentId() : null,
                 request != null ? request.getComponentType() : null,
-                request != null ? request.getUserPrompt() : null,
+                userPrompt,
                 capabilities,
                 currentState,
                 componentContext,
@@ -5731,6 +7145,7 @@ public class AiOrchestratorService {
     }
 
     private String buildIntentPlanPrompt(
+            String componentId,
             String componentType,
             String userPrompt,
             List<AiCapability> capabilities,
@@ -5738,7 +7153,11 @@ public class AiOrchestratorService {
             JsonNode componentContext,
             JsonNode componentDefinition,
             String category) {
-        List<AiCapability> reducedCaps = reduceCapabilitiesForIntentPlan(capabilities, category);
+        String categoryOverride = category;
+        if ("praxis-dynamic-page".equals(componentId) && "page".equalsIgnoreCase(category)) {
+            categoryOverride = null;
+        }
+        List<AiCapability> reducedCaps = reduceCapabilitiesForIntentPlan(capabilities, categoryOverride);
         String caps = truncateBlock(
                 "capabilities",
                 formatCapabilities(reducedCaps),
@@ -5749,7 +7168,7 @@ public class AiOrchestratorService {
                 maxRuntimeMetadataChars);
         
         String concepts = buildConceptsBlock(componentDefinition);
-        String options = buildOptionsByPathSummary(componentContext, category);
+        String options = buildOptionsByPathSummary(componentContext, categoryOverride);
         
         String optionsSummary = truncateBlock(
                 "options_by_path_and_concepts",
@@ -6440,6 +7859,98 @@ public class AiOrchestratorService {
         return (int) Math.ceil(chars / 4.0d);
     }
 
+    private AiOrchestratorResponse tryHandleTemplateCreateIntent(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            AiCallConfig callConfig) {
+        if (request == null || context == null) {
+            return null;
+        }
+        if (!isCreateMode(request)) {
+            return null;
+        }
+        if (!isEmptyTemplateTarget(context.getCurrentState())) {
+            return null;
+        }
+        if (!isBlank(request.getVariantId())) {
+            return null;
+        }
+        AiRegistryTemplateRecord baseTemplate = context.getTemplate();
+        if (baseTemplate == null || baseTemplate.getTemplateMeta() == null) {
+            return null;
+        }
+        List<CreateTemplateOption> options = buildCreateTemplateOptions(
+                context.getComponentId(),
+                baseTemplate.getTemplateMeta());
+        if (options.size() < 2) {
+            return null;
+        }
+        String heuristicVariant = detectTemplateVariantHeuristic(request.getUserPrompt(), options);
+        if (!isBlank(heuristicVariant)) {
+            request.setVariantId(heuristicVariant);
+            log.info("[AiOrchestratorService] Template variant heuristic: componentId={} choice={}",
+                    context.getComponentId(), heuristicVariant);
+            return null;
+        }
+        String hintedVariantId = extractTemplateVariantFromHints(request.getContextHints());
+        if (!isBlank(hintedVariantId)) {
+            request.setVariantId(hintedVariantId);
+            return null;
+        }
+        if (log.isInfoEnabled()) {
+            log.info("[AiOrchestratorService] Template variant options: componentId={} options={}",
+                    context.getComponentId(),
+                    options.stream()
+                            .map(opt -> opt.variantId + ":" + (opt.useWhen != null ? opt.useWhen : ""))
+                            .collect(Collectors.toList()));
+        }
+        CreateTemplateSelection selection = classifyCreateTemplateVariant(
+                request.getUserPrompt(),
+                context.getComponentId(),
+                options,
+                request,
+                callConfig);
+        if (selection == null || isBlank(selection.choice)
+                || "unknown".equalsIgnoreCase(selection.choice)
+                || options.stream().noneMatch(opt -> opt.variantId.equalsIgnoreCase(selection.choice))) {
+            return buildCreateTemplateClarification(context.getComponentId(), options);
+        }
+        request.setVariantId(selection.choice);
+        log.info("[AiOrchestratorService] Template variant classified: componentId={} choice={} reason={}",
+                context.getComponentId(), selection.choice, selection.reason);
+        return null;
+    }
+
+    private String detectTemplateVariantHeuristic(String prompt, List<CreateTemplateOption> options) {
+        if (prompt == null || prompt.isBlank() || options == null || options.isEmpty()) {
+            return null;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        boolean mentionsAddress = normalized.contains("endereco")
+                || normalized.contains("endereço")
+                || normalized.contains("enderec");
+        boolean wantsMasterDetail = normalized.contains("master-detail")
+                || normalized.contains("master detail")
+                || (normalized.contains("tabela") && (normalized.contains("formulario") || normalized.contains("formulário")));
+        if (mentionsAddress && wantsMasterDetail
+                && options.stream().anyMatch(opt -> "master-detail-address".equalsIgnoreCase(opt.variantId))) {
+            return "master-detail-address";
+        }
+        if (wantsMasterDetail && options.stream().anyMatch(opt -> "master-detail".equalsIgnoreCase(opt.variantId))) {
+            return "master-detail";
+        }
+        return null;
+    }
+
+    private boolean isCreateMode(AiOrchestratorRequest request) {
+        if (request == null) return false;
+        String aiMode = request.getAiMode();
+        if (aiMode != null && "create".equalsIgnoreCase(aiMode)) {
+            return true;
+        }
+        return isCreateTemplatePrompt(request.getUserPrompt());
+    }
+
     private TemplateSelection resolveTemplateVariant(
             AiOrchestratorRequest request,
             AiContextDTO context,
@@ -6451,13 +7962,17 @@ public class AiOrchestratorService {
         }
 
         String componentId = context.getComponentId();
-        String requestedVariantId = request.getVariantId();
+        String requestedVariantId = firstNonBlank(
+                request.getVariantId(),
+                extractTemplateVariantFromHints(request.getContextHints()));
         if (requestedVariantId != null && !requestedVariantId.isBlank()) {
             String registryKey = componentId + ":" + requestedVariantId.trim();
             AiRegistryTemplateRecord variant = loadTemplateRecord(registryKey, null);
             if (variant != null) {
                 return new TemplateSelection(variant, warnings);
             }
+            log.warn("[AiOrchestratorService] Template variante nao encontrada: componentId={} variantId={} registryKey={}",
+                    componentId, requestedVariantId, registryKey);
             warnings.add("Template variante nao encontrada: " + registryKey);
             return new TemplateSelection(baseTemplate, warnings);
         }
@@ -6491,6 +8006,162 @@ public class AiOrchestratorService {
         }
 
         return new TemplateSelection(baseTemplate, warnings);
+    }
+
+    private List<CreateTemplateOption> buildCreateTemplateOptions(
+            String componentId,
+            JsonNode templateMeta) {
+        if (templateMeta == null || !templateMeta.has("variants") || !templateMeta.get("variants").isArray()) {
+            return List.of();
+        }
+        List<CreateTemplateOption> options = new ArrayList<>();
+        for (JsonNode variant : templateMeta.get("variants")) {
+            if (variant == null || variant.isNull()) continue;
+            String variantId = textOrNull(variant.get("variantId"));
+            if (variantId == null) {
+                variantId = textOrNull(variant.get("id"));
+            }
+            String registryKey = textOrNull(variant.get("registryKey"));
+            if (registryKey == null && variantId != null && componentId != null) {
+                registryKey = componentId + ":" + variantId;
+            }
+            if (variantId == null || registryKey == null) {
+                continue;
+            }
+            String useWhen = textOrNull(variant.get("useWhen"));
+            String description = textOrNull(variant.get("description"));
+            String aiDescription = textOrNull(variant.get("aiDescription"));
+            String label = firstNonBlank(
+                    textOrNull(variant.get("label")),
+                    description,
+                    aiDescription,
+                    humanizeVariantId(variantId));
+            List<String> examplePrompts = List.of();
+            JsonNode examplesNode = variant.get("examplePrompts");
+            if (examplesNode != null && examplesNode.isArray()) {
+                examplePrompts = objectMapper.convertValue(examplesNode, new TypeReference<List<String>>() {});
+            }
+            options.add(new CreateTemplateOption(
+                    variantId,
+                    registryKey,
+                    label,
+                    useWhen,
+                    examplePrompts));
+        }
+        return options;
+    }
+
+    private CreateTemplateSelection classifyCreateTemplateVariant(
+            String userPrompt,
+            String componentId,
+            List<CreateTemplateOption> options,
+            AiOrchestratorRequest request,
+            AiCallConfig callConfig) {
+        if (options == null || options.isEmpty()) {
+            return null;
+        }
+        List<String> optionIds = options.stream()
+                .map(opt -> opt.variantId)
+                .collect(Collectors.toList());
+        String optionsJson = objectMapper.valueToTree(options).toString();
+        String prompt = AiPromptTemplates.buildPrompt(
+                AiPromptTemplates.PROMPT_TEMPLATE_VARIANT_SELECTOR,
+                Map.of(
+                        "COMPONENT_ID", safe(componentId),
+                        "USER_INPUT", safe(userPrompt),
+                        "OPTIONS_JSON", optionsJson));
+        AiJsonSchema schema = buildTemplateVariantSchema(optionIds);
+        JsonNode json = callAiJson("template_variant_selection", prompt, schema, callConfig, request, 1);
+        if (json == null) {
+            return null;
+        }
+        return objectMapper.convertValue(json, CreateTemplateSelection.class);
+    }
+
+    private AiJsonSchema buildTemplateVariantSchema(List<String> variantIds) {
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.put("type", "object");
+        schema.put("additionalProperties", false);
+        ObjectNode properties = schema.putObject("properties");
+        ObjectNode choice = properties.putObject("choice");
+        choice.put("type", "string");
+        ArrayNode enumNode = choice.putArray("enum");
+        if (variantIds != null) {
+            for (String id : variantIds) {
+                if (id != null && !id.isBlank()) {
+                    enumNode.add(id);
+                }
+            }
+        }
+        enumNode.add("unknown");
+        ObjectNode reason = properties.putObject("reason");
+        reason.put("type", "string");
+        ArrayNode required = schema.putArray("required");
+        required.add("choice");
+        required.add("reason");
+        return AiJsonSchema.of(schema.toString(), CreateTemplateSelection.class);
+    }
+
+    private AiOrchestratorResponse buildCreateTemplateClarification(
+            String componentId,
+            List<CreateTemplateOption> options) {
+        List<AiOption> payloads = options.stream()
+                .map(opt -> AiOption.builder()
+                        .value(opt.variantId)
+                        .label(opt.label != null ? opt.label : humanizeVariantId(opt.variantId))
+                        .example(firstNonBlank(opt.useWhen, formatExamplePrompts(opt.examplePrompts), ""))
+                        .contextHints(buildTemplateVariantHints(opt.variantId))
+                        .build())
+                .collect(Collectors.toList());
+        String message = "Posso criar estes recursos no " + safe(componentId) + ". Qual deseja?";
+        return clarification(message, buildAiOptionLabels(payloads), payloads);
+    }
+
+    private String formatExamplePrompts(List<String> examplePrompts) {
+        if (examplePrompts == null || examplePrompts.isEmpty()) return null;
+        List<String> trimmed = examplePrompts.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .limit(2)
+                .collect(Collectors.toList());
+        if (trimmed.isEmpty()) return null;
+        return "Ex.: " + String.join(" | ", trimmed);
+    }
+
+    private JsonNode buildTemplateVariantHints(String variantId) {
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.put("templateVariantId", variantId);
+        return hints;
+    }
+
+    private String extractTemplateVariantFromHints(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        String direct = textOrNull(contextHints.get("templateVariantId"));
+        if (!isBlank(direct)) {
+            return direct;
+        }
+        JsonNode templateInputs = contextHints.get("templateInputs");
+        if (templateInputs != null && templateInputs.isObject()) {
+            String via = textOrNull(templateInputs.get("variantId"));
+            if (!isBlank(via)) {
+                return via;
+            }
+        }
+        return null;
+    }
+
+    private String humanizeVariantId(String variantId) {
+        if (variantId == null || variantId.isBlank()) {
+            return "opcao";
+        }
+        String value = variantId.replace('-', ' ').replace('_', ' ').trim();
+        if (value.isEmpty()) {
+            return "opcao";
+        }
+        return value.substring(0, 1).toUpperCase(Locale.ROOT) + value.substring(1);
     }
 
     private AiRegistryTemplateRecord loadTemplateRecord(String registryKey, List<String> warnings) {
@@ -6668,7 +8339,132 @@ public class AiOrchestratorService {
                     operation,
                     requiresExistingTarget));
         }
-        return actions;
+        return appendClearActions(actions);
+    }
+
+    private List<ComponentAction> appendClearActions(List<ComponentAction> base) {
+        if (base == null || base.isEmpty()) {
+            return base != null ? base : List.of();
+        }
+        List<ComponentAction> out = new ArrayList<>(base);
+        Set<String> existingIds = new LinkedHashSet<>();
+        for (ComponentAction action : base) {
+            if (action != null && action.id != null) {
+                existingIds.add(action.id);
+            }
+        }
+        for (ComponentAction action : base) {
+            if (!isClearableAction(action)) {
+                continue;
+            }
+            String clearId = "CLEAR_" + action.id;
+            if (existingIds.contains(clearId)) {
+                continue;
+            }
+            JsonNode clearTemplate = buildClearPatchTemplate(action.patchTemplate);
+            if (clearTemplate == null || clearTemplate.isNull()) {
+                continue;
+            }
+            List<String> clearKeywords = buildClearKeywords(action.keywords);
+            out.add(new ComponentAction(
+                    clearId,
+                    clearKeywords,
+                    clearTemplate,
+                    action.scope,
+                    "NONE",
+                    null,
+                    List.of(),
+                    action.relatedConcepts,
+                    "clear",
+                    action.requiresExistingTarget));
+            existingIds.add(clearId);
+        }
+        return out;
+    }
+
+    private boolean isClearableAction(ComponentAction action) {
+        if (action == null || action.patchTemplate == null || action.patchTemplate.isNull()) {
+            return false;
+        }
+        if (action.id != null && action.id.startsWith("CLEAR_")) {
+            return false;
+        }
+        String valueType = action.valueType != null ? action.valueType.trim().toLowerCase(Locale.ROOT) : null;
+        if ("boolean".equals(valueType)) {
+            return false;
+        }
+        return templateContainsValueToken(action.patchTemplate);
+    }
+
+    private boolean templateContainsValueToken(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return false;
+        }
+        if (node.isTextual()) {
+            String text = node.asText();
+            return text != null && text.contains("{{value}}");
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (templateContainsValueToken(item)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (node.isObject()) {
+            for (Iterator<JsonNode> it = node.elements(); it.hasNext(); ) {
+                if (templateContainsValueToken(it.next())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private JsonNode buildClearPatchTemplate(JsonNode template) {
+        if (template == null || template.isNull()) {
+            return template;
+        }
+        if (template.isObject()) {
+            ObjectNode out = objectMapper.createObjectNode();
+            template.fields().forEachRemaining(entry -> {
+                out.set(entry.getKey(), buildClearPatchTemplate(entry.getValue()));
+            });
+            return out;
+        }
+        if (template.isArray()) {
+            ArrayNode out = objectMapper.createArrayNode();
+            for (JsonNode item : template) {
+                out.add(buildClearPatchTemplate(item));
+            }
+            return out;
+        }
+        if (template.isTextual()) {
+            String text = template.asText();
+            if (text != null && text.contains("{{value}}")) {
+                return objectMapper.getNodeFactory().nullNode();
+            }
+            return objectMapper.getNodeFactory().textNode(text);
+        }
+        return template;
+    }
+
+    private List<String> buildClearKeywords(List<String> baseKeywords) {
+        List<String> out = new ArrayList<>();
+        List<String> clearWords = List.of(
+                "remover", "limpar", "resetar", "desfazer", "tirar", "apagar", "sem", "remove", "clear", "reset", "unset");
+        out.addAll(clearWords);
+        if (baseKeywords != null && !baseKeywords.isEmpty()) {
+            for (String kw : baseKeywords) {
+                if (kw == null || kw.isBlank()) continue;
+                out.add(kw);
+                out.add("remover " + kw);
+                out.add("limpar " + kw);
+                out.add("sem " + kw);
+            }
+        }
+        return out;
     }
 
     private Map<String, JsonNode> extractAiConcepts(JsonNode componentDefinition) {
@@ -7036,6 +8832,13 @@ public class AiOrchestratorService {
                     .collect(Collectors.toList());
         }
 
+        if ("praxis-dynamic-page".equals(componentId) && "page".equalsIgnoreCase(category)) {
+            List<String> targets = List.of("page", "layout", "widgets", "connections", "shell", "context");
+            return capabilities.stream()
+                    .filter(c -> c.getCategory() != null && targets.contains(c.getCategory()))
+                    .collect(Collectors.toList());
+        }
+
         return capabilities.stream()
                 .filter(c -> category.equalsIgnoreCase(c.getCategory()))
                 .collect(Collectors.toList());
@@ -7289,6 +9092,7 @@ public class AiOrchestratorService {
             if (results.isEmpty()) {
                 return new SchemaResolution(error("Nenhum endpoint encontrado para o contexto solicitado."));
             }
+            results = filterEndpointsByPromptTokens(request.getUserPrompt(), results);
             if (results.size() > 1) {
                 List<AiOption> optionPayloads = buildApiOptionPayloads(results);
                 List<String> labels = optionPayloads.stream()
@@ -7302,12 +9106,12 @@ public class AiOrchestratorService {
             }
             ApiSearchResult picked = results.get(0);
             schemaContext = AiSchemaContext.builder()
-                    .path(picked.getPath())
+                    .path(normalizeResourceBasePath(picked.getPath()))
                     .operation(picked.getMethod())
                     .schemaType(defaultSchemaType(request.getComponentId()))
                     .build();
             if (request.getResourcePath() == null || request.getResourcePath().isBlank()) {
-                request.setResourcePath(picked.getPath());
+                request.setResourcePath(normalizeResourceBasePath(picked.getPath()));
             }
         }
 
@@ -7339,7 +9143,7 @@ public class AiOrchestratorService {
         if (contextHints == null || contextHints.isNull()) {
             return null;
         }
-        JsonNode patch = buildPatchFromContextHints(contextHints, componentId);
+        JsonNode patch = buildPatchFromContextHints(contextHints, componentId, currentState);
         if (patch == null || patch.isNull()) {
             return null;
         }
@@ -7353,9 +9157,16 @@ public class AiOrchestratorService {
                 componentContext);
     }
 
-    private JsonNode buildPatchFromContextHints(JsonNode contextHints, String componentId) {
+    private JsonNode buildPatchFromContextHints(JsonNode contextHints, String componentId, JsonNode currentState) {
         if (!COMPONENT_ID_TABLE.equals(componentId) || contextHints == null || !contextHints.isObject()) {
             return null;
+        }
+        JsonNode filteringHints = resolveFilteringHintsNode(contextHints);
+        if (filteringHints != null) {
+            JsonNode patch = buildFilteringPatchFromHints(filteringHints, currentState);
+            if (patch != null) {
+                return patch;
+            }
         }
         JsonNode badgeHints = resolveBadgeHintsNode(contextHints);
         if (badgeHints != null) {
@@ -7383,6 +9194,659 @@ public class AiOrchestratorService {
             return contextHints;
         }
         return null;
+    }
+
+    private JsonNode resolveFilteringHintsNode(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode filtering = contextHints.get("filtering");
+        if (filtering != null && filtering.isObject()) {
+            return filtering;
+        }
+        return null;
+    }
+
+    private JsonNode buildFilteringPatchFromHints(JsonNode filteringHints, JsonNode currentState) {
+        if (filteringHints == null || !filteringHints.isObject()) {
+            return null;
+        }
+        String mode = textOrNull(filteringHints.get("mode"));
+        String advancedMode = textOrNull(filteringHints.get("advancedMode"));
+        String defaultType = textOrNull(filteringHints.get("defaultType"));
+        List<String> fields = readStringArray(filteringHints.get("fields"));
+        List<String> alwaysVisibleFields = readStringArray(filteringHints.get("alwaysVisibleFields"));
+        List<String> selectedFieldIds = readStringArray(filteringHints.get("selectedFieldIds"));
+        boolean columnMode = "column".equalsIgnoreCase(mode) || "simple".equalsIgnoreCase(mode) || "both".equalsIgnoreCase(mode);
+        boolean advanced = "advanced".equalsIgnoreCase(mode) || "both".equalsIgnoreCase(mode);
+
+        ObjectNode patch = objectMapper.createObjectNode();
+        ObjectNode behavior = patch.putObject("behavior");
+        ObjectNode filtering = behavior.putObject("filtering");
+        filtering.put("enabled", true);
+
+        if (columnMode) {
+            ObjectNode columnFilters = filtering.putObject("columnFilters");
+            columnFilters.put("enabled", true);
+            columnFilters.put("position", "header");
+            if (!isBlank(defaultType)) {
+                columnFilters.put("defaultType", defaultType);
+            }
+            if (fields != null && !fields.isEmpty() && currentState != null && currentState.has("columns")) {
+                ArrayNode columns = patch.putArray("columns");
+                for (String field : fields) {
+                    if (isBlank(field)) continue;
+                    ObjectNode col = columns.addObject();
+                    col.put("field", field);
+                    col.put("filterable", true);
+                }
+            }
+        }
+
+        if (advanced) {
+            ObjectNode advancedFilters = filtering.putObject("advancedFilters");
+            advancedFilters.put("enabled", true);
+            boolean hasSettings = !isBlank(advancedMode)
+                    || (alwaysVisibleFields != null && !alwaysVisibleFields.isEmpty())
+                    || (selectedFieldIds != null && !selectedFieldIds.isEmpty())
+                    || (fields != null && !fields.isEmpty());
+            if (hasSettings) {
+                ObjectNode settings = advancedFilters.putObject("settings");
+                if (!isBlank(advancedMode)) {
+                    settings.put("mode", advancedMode);
+                }
+                List<String> visible = (alwaysVisibleFields == null || alwaysVisibleFields.isEmpty()) ? fields : alwaysVisibleFields;
+                if (visible != null && !visible.isEmpty()) {
+                    ArrayNode arr = settings.putArray("alwaysVisibleFields");
+                    for (String field : visible) {
+                        if (!isBlank(field)) {
+                            arr.add(field);
+                        }
+                    }
+                }
+                List<String> selected = (selectedFieldIds == null || selectedFieldIds.isEmpty()) ? fields : selectedFieldIds;
+                if (selected != null && !selected.isEmpty()) {
+                    ArrayNode arr = settings.putArray("selectedFieldIds");
+                    for (String field : selected) {
+                        if (!isBlank(field)) {
+                            arr.add(field);
+                        }
+                    }
+                }
+            }
+        }
+        if (patch.size() == 0) {
+            return null;
+        }
+        return patch;
+    }
+
+    private AiOrchestratorResponse tryResolveFilteringPrompt(
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<ColumnDescriptor> columnDescriptors,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (request == null || !COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (!promptMentionsFiltering(prompt)) {
+            return null;
+        }
+        List<String> fields = resolveFilterFieldsFromPrompt(
+                prompt,
+                columnDescriptors,
+                request.getSchemaFields(),
+                request.getDataProfile());
+        if (isFilteringModeUncertain(prompt)) {
+            boolean mixedTypes = hasMixedFilterTypes(request.getSchemaFields(), request.getDataProfile(), fields);
+            List<AiOption> payloads = buildFilteringModePayloads(
+                    fields,
+                    request.getSchemaFields(),
+                    request.getDataProfile(),
+                    mixedTypes);
+            List<String> labels = buildAiOptionLabels(payloads);
+            return clarification(
+                    mixedTypes
+                            ? "Você prefere filtros simples (por coluna) ou avançados (painel)? Para combinar status e data, o avançado costuma funcionar melhor (no simples, o tipo do filtro é único para todas as colunas)."
+                            : "Você prefere filtros simples (por coluna) ou avançados (painel)?",
+                    labels.isEmpty() ? List.of("Simples (coluna)", "Avançado (card)", "Avançado (filter)") : labels,
+                    payloads.isEmpty() ? null : payloads);
+        }
+        String explicitMode = resolveFilteringModeFromPrompt(prompt);
+        List<ColumnDescriptor> dateCandidates = resolveDateFilterCandidates(
+                prompt,
+                columnDescriptors,
+                request.getSchemaFields(),
+                request.getDataProfile());
+        List<String> dateFields = extractColumnNames(dateCandidates);
+        List<String> explicitDateMatches = resolveExplicitDateMatches(prompt, dateCandidates);
+        if (dateFields.size() > 1 && explicitDateMatches.isEmpty()) {
+            List<String> otherFields = new ArrayList<>(fields);
+            otherFields.removeAll(dateFields);
+            String modeForHints = explicitMode != null ? explicitMode : "column";
+            ClarificationPayload datePayload = buildDateFilterClarificationPayloads(
+                    dateCandidates,
+                    otherFields,
+                    modeForHints,
+                    request.getSchemaFields(),
+                    request.getDataProfile());
+            if (datePayload != null && !datePayload.options.isEmpty()) {
+                return clarification(
+                        "Qual coluna de data você deseja filtrar?",
+                        datePayload.options,
+                        datePayload.payloads);
+            }
+        }
+        if (explicitDateMatches.size() == 1 && !dateFields.isEmpty()) {
+            String chosenDate = explicitDateMatches.get(0);
+            List<String> normalized = new ArrayList<>();
+            for (String field : fields) {
+                if (dateFields.contains(field) && !chosenDate.equalsIgnoreCase(field)) {
+                    continue;
+                }
+                normalized.add(field);
+            }
+            fields = normalized;
+        }
+        if (explicitMode == null) {
+            return null;
+        }
+        ObjectNode hints = objectMapper.createObjectNode();
+        ObjectNode filtering = hints.putObject("filtering");
+        filtering.put("mode", explicitMode);
+        String advMode = resolveAdvancedFilterMode(prompt);
+        if (!isBlank(advMode)) {
+            filtering.put("advancedMode", advMode);
+        }
+        String defaultType = inferDefaultFilterType(request.getSchemaFields(), request.getDataProfile(), fields);
+        if (!isBlank(defaultType)) {
+            filtering.put("defaultType", defaultType);
+        }
+        if (fields != null && !fields.isEmpty()) {
+            ArrayNode arr = filtering.putArray("fields");
+            for (String field : fields) {
+                if (!isBlank(field)) arr.add(field);
+            }
+        }
+        JsonNode patch = buildFilteringPatchFromHints(filtering, currentState);
+        if (patch == null) {
+            return null;
+        }
+        return applySuggestedPatch(
+                patch,
+                currentState,
+                request.getComponentId(),
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+    }
+
+    private List<AiOption> buildFilteringModePayloads(
+            List<String> fields,
+            JsonNode schemaFields,
+            JsonNode dataProfile,
+            boolean preferAdvanced) {
+        List<AiOption> payloads = new ArrayList<>();
+        if (preferAdvanced) {
+            payloads.add(buildFilteringModePayload(
+                    "Avançado (card)",
+                    "advanced",
+                    "card",
+                    fields,
+                    schemaFields,
+                    dataProfile));
+            payloads.add(buildFilteringModePayload(
+                    "Avançado (filter)",
+                    "advanced",
+                    "filter",
+                    fields,
+                    schemaFields,
+                    dataProfile));
+            payloads.add(buildFilteringModePayload(
+                    "Simples (coluna)",
+                    "column",
+                    null,
+                    fields,
+                    schemaFields,
+                    dataProfile));
+        } else {
+            payloads.add(buildFilteringModePayload(
+                    "Simples (coluna)",
+                    "column",
+                    null,
+                    fields,
+                    schemaFields,
+                    dataProfile));
+            payloads.add(buildFilteringModePayload(
+                    "Avançado (card)",
+                    "advanced",
+                    "card",
+                    fields,
+                    schemaFields,
+                    dataProfile));
+            payloads.add(buildFilteringModePayload(
+                    "Avançado (filter)",
+                    "advanced",
+                    "filter",
+                    fields,
+                    schemaFields,
+                    dataProfile));
+        }
+        return payloads;
+    }
+
+    private AiOption buildFilteringModePayload(
+            String label,
+            String mode,
+            String advancedMode,
+            List<String> fields,
+            JsonNode schemaFields,
+            JsonNode dataProfile) {
+        ObjectNode hints = objectMapper.createObjectNode();
+        ObjectNode filtering = hints.putObject("filtering");
+        filtering.put("mode", mode);
+        if (!isBlank(advancedMode)) {
+            filtering.put("advancedMode", advancedMode);
+        }
+        String defaultType = inferDefaultFilterType(schemaFields, dataProfile, fields);
+        boolean mixedTypes = hasMixedFilterTypes(schemaFields, dataProfile, fields);
+        if (!isBlank(defaultType) && !(mixedTypes && "advanced".equalsIgnoreCase(mode))) {
+            filtering.put("defaultType", defaultType);
+        }
+        if ("advanced".equalsIgnoreCase(mode) && fields != null && !fields.isEmpty()) {
+            ArrayNode alwaysVisible = filtering.putArray("alwaysVisibleFields");
+            ArrayNode selected = filtering.putArray("selectedFieldIds");
+            for (String field : fields) {
+                if (isBlank(field)) continue;
+                alwaysVisible.add(field);
+                selected.add(field);
+            }
+        }
+        if (fields != null && !fields.isEmpty()) {
+            ArrayNode arr = filtering.putArray("fields");
+            for (String field : fields) {
+                if (!isBlank(field)) arr.add(field);
+            }
+        }
+        return AiOption.builder()
+                .value(label)
+                .label(label)
+                .contextHints(hints)
+                .build();
+    }
+
+    private boolean promptMentionsFiltering(String prompt) {
+        if (isBlank(prompt)) {
+            return false;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        return normalized.contains("filtro")
+                || normalized.contains("filtrar")
+                || normalized.contains("filter");
+    }
+
+    private boolean isFilteringModeUncertain(String prompt) {
+        if (isBlank(prompt)) {
+            return false;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        boolean hasUncertainty = normalized.contains("nao sei")
+                || normalized.contains("não sei")
+                || normalized.contains("nao tenho certeza")
+                || normalized.contains("não tenho certeza")
+                || normalized.contains("indecis");
+        boolean mentionsSimple = normalized.contains("simples")
+                || normalized.contains("coluna")
+                || normalized.contains("column");
+        boolean mentionsAdvanced = normalized.contains("avancad")
+                || normalized.contains("avançad")
+                || normalized.contains("advanced");
+        return hasUncertainty && mentionsSimple && mentionsAdvanced;
+    }
+
+    private String resolveFilteringModeFromPrompt(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        boolean mentionsAdvanced = normalized.contains("avancad")
+                || normalized.contains("avançad")
+                || normalized.contains("advanced");
+        boolean mentionsSimple = normalized.contains("simples")
+                || normalized.contains("coluna")
+                || normalized.contains("column");
+        if (mentionsAdvanced && !mentionsSimple) {
+            return "advanced";
+        }
+        if (mentionsSimple && !mentionsAdvanced) {
+            return "column";
+        }
+        return null;
+    }
+
+    private String resolveAdvancedFilterMode(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String normalized = prompt.toLowerCase(Locale.ROOT);
+        if (normalized.contains("card")) {
+            return "card";
+        }
+        if (normalized.contains("filter")) {
+            return "filter";
+        }
+        return null;
+    }
+
+    private List<String> resolveFilterFieldsFromPrompt(
+            String prompt,
+            List<ColumnDescriptor> columns,
+            JsonNode schemaFields,
+            JsonNode dataProfile) {
+        if (isBlank(prompt) || columns == null || columns.isEmpty()) {
+            return List.of();
+        }
+        String normalized = normalizeText(prompt);
+        List<String> fields = new ArrayList<>();
+        for (ColumnDescriptor column : columns) {
+            if (column == null || isBlank(column.field)) continue;
+            String field = normalizeText(column.field);
+            String header = normalizeText(column.header);
+            if ((!isBlank(field) && normalized.contains(field))
+                    || (!isBlank(header) && normalized.contains(header))) {
+                if (!fields.contains(column.field)) {
+                    fields.add(column.field);
+                }
+            }
+        }
+        Set<String> tokens = extractPromptTokens(prompt);
+        if (tokens.isEmpty()) {
+            return fields;
+        }
+        LinkedHashSet<String> available = new LinkedHashSet<>();
+        for (ColumnDescriptor column : columns) {
+            if (column == null || isBlank(column.field)) continue;
+            available.add(column.field);
+        }
+        boolean wantsDate = containsAnyToken(tokens,
+                "data", "date", "dia", "mes", "ano", "periodo", "inicio", "fim", "criado", "criacao", "cadastro", "created", "updated");
+        boolean wantsStatus = containsAnyToken(tokens, "status", "estado");
+        if (wantsDate) {
+            for (String field : available) {
+                if (fields.contains(field)) continue;
+                String type = extractSchemaType(schemaFields, field);
+                if (isBlank(type)) {
+                    type = extractInferredType(dataProfile, field);
+                }
+                if ("date".equalsIgnoreCase(type)) {
+                    fields.add(field);
+                    continue;
+                }
+                String normalizedField = normalizeText(field);
+                if (normalizedField.contains("date")
+                        || normalizedField.contains("data")
+                        || normalizedField.contains("created")
+                        || normalizedField.contains("updated")
+                        || normalizedField.endsWith("at")) {
+                    fields.add(field);
+                }
+            }
+        }
+        if (wantsStatus) {
+            for (String field : available) {
+                if (fields.contains(field)) continue;
+                String normalizedField = normalizeText(field);
+                if (normalizedField.contains("status")) {
+                    fields.add(field);
+                    continue;
+                }
+                List<String> options = extractBadgeValuesFromSchema(schemaFields, field);
+                if (options != null && !options.isEmpty()) {
+                    fields.add(field);
+                    continue;
+                }
+                if (isLowCardinalitySelectCandidate(dataProfile, field)) {
+                    fields.add(field);
+                }
+            }
+        }
+        return fields;
+    }
+
+    private String inferDefaultFilterType(JsonNode schemaFields, JsonNode dataProfile, List<String> fields) {
+        if ((schemaFields == null || schemaFields.isNull()) && (dataProfile == null || dataProfile.isNull())) {
+            return null;
+        }
+        if (fields == null || fields.isEmpty()) {
+            return null;
+        }
+        boolean allDate = true;
+        boolean allSelect = true;
+        for (String field : fields) {
+            if (isBlank(field)) continue;
+            String type = extractSchemaType(schemaFields, field);
+            if (isBlank(type)) {
+                type = extractInferredType(dataProfile, field);
+            }
+            List<String> options = extractBadgeValuesFromSchema(schemaFields, field);
+            if ((options == null || options.isEmpty()) && isLowCardinalitySelectCandidate(dataProfile, field)) {
+                options = List.of("placeholder");
+            }
+            if (!"date".equalsIgnoreCase(type)) {
+                allDate = false;
+            }
+            if (options == null || options.isEmpty()) {
+                allSelect = false;
+            }
+        }
+        if (allDate) return "date";
+        if (allSelect) return "select";
+        return "text";
+    }
+
+    private boolean hasMixedFilterTypes(JsonNode schemaFields, JsonNode dataProfile, List<String> fields) {
+        if ((schemaFields == null || schemaFields.isNull()) && (dataProfile == null || dataProfile.isNull())) {
+            return false;
+        }
+        if (fields == null || fields.isEmpty()) {
+            return false;
+        }
+        LinkedHashSet<String> kinds = new LinkedHashSet<>();
+        for (String field : fields) {
+            if (isBlank(field)) continue;
+            String kind = inferFilterKind(schemaFields, dataProfile, field);
+            if (!isBlank(kind)) {
+                kinds.add(kind);
+            }
+            if (kinds.size() > 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String inferFilterKind(JsonNode schemaFields, JsonNode dataProfile, String field) {
+        String type = extractSchemaType(schemaFields, field);
+        if (isBlank(type)) {
+            type = extractInferredType(dataProfile, field);
+        }
+        if ("date".equalsIgnoreCase(type)) {
+            return "date";
+        }
+        if ("number".equalsIgnoreCase(type)) {
+            return "number";
+        }
+        if ("boolean".equalsIgnoreCase(type)) {
+            return "boolean";
+        }
+        List<String> options = extractBadgeValuesFromSchema(schemaFields, field);
+        if (options != null && !options.isEmpty()) {
+            return "select";
+        }
+        if (isLowCardinalitySelectCandidate(dataProfile, field)) {
+            return "select";
+        }
+        return "text";
+    }
+
+    private List<ColumnDescriptor> resolveDateFilterCandidates(
+            String prompt,
+            List<ColumnDescriptor> columns,
+            JsonNode schemaFields,
+            JsonNode dataProfile) {
+        if (isBlank(prompt) || columns == null || columns.isEmpty()) {
+            return List.of();
+        }
+        Set<String> tokens = extractPromptTokens(prompt);
+        boolean wantsDate = containsAnyToken(tokens,
+                "data", "date", "dia", "mes", "ano", "periodo", "inicio", "fim", "criado", "criacao", "cadastro", "created", "updated");
+        if (!wantsDate) {
+            return List.of();
+        }
+        List<ColumnDescriptor> out = new ArrayList<>();
+        for (ColumnDescriptor column : columns) {
+            if (column == null || isBlank(column.field)) continue;
+            String type = extractSchemaType(schemaFields, column.field);
+            if (isBlank(type)) {
+                type = extractInferredType(dataProfile, column.field);
+            }
+            if ("date".equalsIgnoreCase(type)) {
+                out.add(column);
+                continue;
+            }
+            String normalizedField = normalizeText(column.field);
+            String normalizedHeader = normalizeText(column.header);
+            if (normalizedField.contains("date")
+                    || normalizedField.contains("data")
+                    || normalizedField.contains("created")
+                    || normalizedField.contains("updated")
+                    || normalizedField.endsWith("at")
+                    || normalizedHeader.contains("data")
+                    || normalizedHeader.contains("date")) {
+                out.add(column);
+            }
+        }
+        return out;
+    }
+
+    private List<String> resolveExplicitDateMatches(String prompt, List<ColumnDescriptor> dateCandidates) {
+        if (isBlank(prompt) || dateCandidates == null || dateCandidates.isEmpty()) {
+            return List.of();
+        }
+        String normalized = normalizeText(prompt);
+        List<String> matches = new ArrayList<>();
+        for (ColumnDescriptor column : dateCandidates) {
+            if (column == null || isBlank(column.field)) continue;
+            String field = normalizeText(column.field);
+            String header = normalizeText(column.header);
+            if ((!isBlank(field) && normalized.contains(field))
+                    || (!isBlank(header) && normalized.contains(header))) {
+                matches.add(column.field);
+            }
+        }
+        return matches;
+    }
+
+    private ClarificationPayload buildDateFilterClarificationPayloads(
+            List<ColumnDescriptor> dateCandidates,
+            List<String> otherFields,
+            String mode,
+            JsonNode schemaFields,
+            JsonNode dataProfile) {
+        if (dateCandidates == null || dateCandidates.isEmpty()) {
+            return null;
+        }
+        Map<String, Integer> headerCounts = countHeaders(dateCandidates);
+        List<AiOption> payloads = new ArrayList<>();
+        for (ColumnDescriptor dateColumn : dateCandidates) {
+            if (dateColumn == null || isBlank(dateColumn.field)) continue;
+            String label = displayColumnLabel(dateColumn, headerCounts);
+            List<String> fields = new ArrayList<>();
+            if (otherFields != null && !otherFields.isEmpty()) {
+                for (String field : otherFields) {
+                    if (!isBlank(field) && !fields.contains(field)) {
+                        fields.add(field);
+                    }
+                }
+            }
+            if (!fields.contains(dateColumn.field)) {
+                fields.add(dateColumn.field);
+            }
+            ObjectNode hints = objectMapper.createObjectNode();
+            ObjectNode filtering = hints.putObject("filtering");
+            filtering.put("mode", isBlank(mode) ? "column" : mode);
+            String defaultType = inferDefaultFilterType(schemaFields, dataProfile, fields);
+            if (!isBlank(defaultType)) {
+                filtering.put("defaultType", defaultType);
+            }
+            ArrayNode arr = filtering.putArray("fields");
+            for (String field : fields) {
+                if (!isBlank(field)) {
+                    arr.add(field);
+                }
+            }
+            payloads.add(AiOption.builder()
+                    .value(dateColumn.field)
+                    .label(label)
+                    .contextHints(hints)
+                    .build());
+        }
+        List<String> labels = buildAiOptionLabels(payloads);
+        return new ClarificationPayload(labels, payloads);
+    }
+
+    private boolean isLowCardinalitySelectCandidate(JsonNode dataProfile, String field) {
+        if (dataProfile == null || !dataProfile.isObject() || isBlank(field)) {
+            return false;
+        }
+        JsonNode columns = dataProfile.get("columns");
+        if (columns == null || !columns.isObject()) {
+            return false;
+        }
+        JsonNode stats = columns.get(field);
+        if (stats == null || !stats.isObject()) {
+            return false;
+        }
+        int cardinality = stats.has("cardinality") ? stats.get("cardinality").asInt(-1) : -1;
+        JsonNode topValues = stats.get("topValues");
+        boolean hasTopValues = topValues != null && topValues.isArray() && topValues.size() > 0;
+        return hasTopValues && cardinality > 0 && cardinality <= 12;
+    }
+
+    private Set<String> extractPromptTokens(String prompt) {
+        if (isBlank(prompt)) {
+            return Set.of();
+        }
+        String lowered = prompt.toLowerCase(Locale.ROOT);
+        String cleaned = lowered.replaceAll("[^\\p{L}0-9]+", " ").trim();
+        if (cleaned.isEmpty()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> tokens = new LinkedHashSet<>();
+        for (String token : cleaned.split("\\s+")) {
+            if (!isBlank(token)) {
+                tokens.add(token);
+            }
+        }
+        return tokens;
+    }
+
+    private boolean containsAnyToken(Set<String> tokens, String... candidates) {
+        if (tokens == null || tokens.isEmpty() || candidates == null) {
+            return false;
+        }
+        for (String candidate : candidates) {
+            if (candidate == null) continue;
+            if (tokens.contains(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JsonNode resolveComputedHintsNode(JsonNode contextHints) {
@@ -9377,7 +11841,7 @@ public class AiOrchestratorService {
         boolean hasOptions = !optionLabels.isEmpty();
         boolean hasContext = contextRequest != null && !contextRequest.isEmpty();
         String normalizedMessage = normalizeToken(message);
-        boolean allowCustom = hasCustomInputHint(normalizedMessage);
+        boolean allowCustom = hasCustomInputHint(message);
         String responseType;
 
         if (!hasOptions) {
@@ -9392,7 +11856,7 @@ public class AiOrchestratorService {
             responseType = "choice";
         }
 
-        String selectionMode = shouldAllowMulti(normalizedMessage) ? "multiple" : "single";
+        String selectionMode = shouldAllowMulti(message) ? "multiple" : "single";
         String presentation = resolvePresentation(responseType, optionLabels.size());
 
         return AiClarificationUi.builder()
@@ -10530,5 +12994,33 @@ public class AiOrchestratorService {
             this.template = template;
             this.warnings = warnings;
         }
+    }
+
+    private static class CreateTemplateOption {
+        public final String variantId;
+        public final String registryKey;
+        public final String label;
+        public final String useWhen;
+        public final List<String> examplePrompts;
+
+        private CreateTemplateOption(
+                String variantId,
+                String registryKey,
+                String label,
+                String useWhen,
+                List<String> examplePrompts) {
+            this.variantId = variantId;
+            this.registryKey = registryKey;
+            this.label = label;
+            this.useWhen = useWhen;
+            this.examplePrompts = examplePrompts != null ? examplePrompts : List.of();
+        }
+    }
+
+    private static class CreateTemplateSelection {
+        public String choice;
+        public String reason;
+
+        public CreateTemplateSelection() {}
     }
 }

@@ -2,6 +2,7 @@ package org.praxisplatform.config.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,6 +13,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class AiOrchestratorResponse {
+    private UUID sessionId;
     private String code;
     private String type;
     private JsonNode patch;
@@ -28,4 +30,5 @@ public class AiOrchestratorResponse {
     private String path;
     private JsonNode providedValue;
     private List<String> allowedValues;
+    private AiMemoryInfo memory;
 }

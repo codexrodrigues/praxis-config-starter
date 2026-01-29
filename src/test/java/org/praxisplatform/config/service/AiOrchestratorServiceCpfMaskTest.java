@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Constructor;
@@ -27,7 +28,9 @@ class AiOrchestratorServiceCpfMaskTest {
             null,
             null,
             new ObjectMapper(),
-            null);
+            null,
+            mock(AiThreadService.class),
+            mock(AiMessageService.class));
   }
 
   @Test

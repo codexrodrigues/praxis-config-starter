@@ -58,6 +58,11 @@ Expected behavior:
 - Validate against capabilities where possible
 - Keep component reactive (state updates reflect in UI)
 
+#### resourcePath normalization (front-end)
+- Components and hosts may provide `resourcePath` in different formats (ex.: `/api/...`, `api/...`, `/...`, `...`).
+- The assistant normalizes `resourcePath` to the canonical form `/<path>` (single leading slash), preserving any `api/` prefix that exists.
+- The original raw value should be preserved in `contextHints.resourcePathRaw` when available for auditing/debugging.
+
 ### 3) Component wiring
 Location: `projects/<lib>/src/lib/<component>.ts` and `.html`
 

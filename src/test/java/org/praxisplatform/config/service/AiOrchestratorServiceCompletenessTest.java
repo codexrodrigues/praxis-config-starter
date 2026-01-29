@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -31,7 +32,9 @@ class AiOrchestratorServiceCompletenessTest {
                 null,
                 null,
                 objectMapper,
-                null);
+                null,
+                mock(AiThreadService.class),
+                mock(AiMessageService.class));
     }
 
     @Test

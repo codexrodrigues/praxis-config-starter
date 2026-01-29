@@ -2,6 +2,8 @@ package org.praxisplatform.config.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.NotBlank;
+import java.util.List;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -16,8 +18,15 @@ public class AiOrchestratorRequest {
     private String componentId;
     @NotBlank
     private String componentType;
-    @NotBlank
     private String userPrompt;
+
+    private UUID sessionId;
+    private String mode;
+    private UUID clientTurnId;
+    private List<AiChatMessage> messages;
+    private String summary;
+    private AiUiContextRef uiContextRef;
+    private AiCurrentStateDigest currentStateDigest;
 
     private JsonNode currentState;
     private JsonNode dataProfile;

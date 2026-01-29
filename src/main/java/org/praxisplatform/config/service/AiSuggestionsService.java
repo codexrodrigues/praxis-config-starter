@@ -96,6 +96,10 @@ public class AiSuggestionsService {
         JsonNode config = resolveConfig(currentState);
         JsonNode dataProfile = request != null ? request.getDataProfile() : null;
         Map<String, SchemaFieldHint> schemaFieldHints = extractSchemaFieldHints(currentState);
+        JsonNode suggestionContext = resolveSuggestionContext(currentState);
+        JsonNode suggestionPolicy = resolveSuggestionPolicy(currentState);
+        boolean forceSuggestions = isForceSuggestionPolicy(suggestionPolicy);
+        String forceReason = suggestionPolicy != null ? textOrNull(suggestionPolicy.get("reason")) : null;
 
         List<AiCapability> capabilities = extractCapabilities(context != null ? context.getComponentDefinition() : null);
         Set<String> registryPaths = buildAllowedPathSet(capabilities);
@@ -106,43 +110,100 @@ public class AiSuggestionsService {
         boolean usedLlm = false;
         List<String> warnings = new ArrayList<>();
 
-        if (isTable(context, request)) {
-            suggestions.addAll(buildTableSuggestions(
-                    config,
-                    dataProfile,
-                    allowedPaths,
-                    request != null ? request.getLocale() : null,
-                    schemaFieldHints));
-        } else if (isForm(context, request)) {
-            suggestions.addAll(buildFormSuggestions(config, allowedPaths));
-        } else if (isPageBuilder(context, request)) {
-            JsonNode runtimeState = currentState.get("runtimeState");
-            suggestions.addAll(buildPageBuilderSuggestions(config, runtimeState, allowedPaths, context));
-        }
-
-        suggestions.addAll(buildTemplatePromptSuggestions(context != null ? context.getTemplate() : null));
-
-        if (llmEnabled && !isMockProvider() && suggestions.isEmpty()) {
-            List<AiSuggestion> llmSuggestions = buildLlmSuggestions(
-                    request,
-                    context,
-                    config,
-                    currentState.get("runtimeState"),
-                    allowedPaths,
-                    tenantId,
-                    environment);
-            if (!llmSuggestions.isEmpty()) {
-                suggestions.addAll(llmSuggestions);
+        if (forceSuggestions) {
+            if (llmEnabled && !isMockProvider()) {
+                List<AiSuggestion> llmSuggestions = buildForcedLlmSuggestions(
+                        request,
+                        context,
+                        config,
+                        currentState.get("runtimeState"),
+                        allowedPaths,
+                        suggestionContext,
+                        suggestionPolicy,
+                        tenantId,
+                        environment,
+                        1);
                 usedLlm = true;
+                if (llmSuggestions.size() < 3) {
+                    llmSuggestions = buildForcedLlmSuggestions(
+                            request,
+                            context,
+                            config,
+                            currentState.get("runtimeState"),
+                            allowedPaths,
+                            suggestionContext,
+                            suggestionPolicy,
+                            tenantId,
+                            environment,
+                            2);
+                }
+                if (llmSuggestions.size() < 3) {
+                    llmSuggestions = buildForcedLlmSuggestions(
+                            request,
+                            context,
+                            config,
+                            currentState.get("runtimeState"),
+                            allowedPaths,
+                            suggestionContext,
+                            suggestionPolicy,
+                            tenantId,
+                            environment,
+                            3);
+                }
+                if (!llmSuggestions.isEmpty()) {
+                    suggestions.addAll(llmSuggestions);
+                } else {
+                    warnings.add(buildForceWarning("llm_suggestions_empty_force", forceReason));
+                }
+                if (!llmSuggestions.isEmpty() && llmSuggestions.size() < 3) {
+                    warnings.add(buildForceWarning("llm_suggestions_below_min_force", forceReason));
+                }
             } else {
-                warnings.add("llm_suggestions_empty");
+                warnings.add(buildForceWarning("llm_suggestions_unavailable_force", forceReason));
+            }
+        } else {
+            if (isTable(context, request)) {
+                suggestions.addAll(buildTableSuggestions(
+                        config,
+                        dataProfile,
+                        allowedPaths,
+                        request != null ? request.getLocale() : null,
+                        schemaFieldHints));
+            } else if (isForm(context, request)) {
+                suggestions.addAll(buildFormSuggestions(config, allowedPaths));
+            } else if (isPageBuilder(context, request)) {
+                JsonNode runtimeState = currentState.get("runtimeState");
+                suggestions.addAll(buildPageBuilderSuggestions(config, runtimeState, allowedPaths, context));
+            }
+
+            suggestions.addAll(buildTemplatePromptSuggestions(context != null ? context.getTemplate() : null));
+
+            if (llmEnabled && !isMockProvider() && suggestions.isEmpty()) {
+                List<AiSuggestion> llmSuggestions = buildLlmSuggestions(
+                        request,
+                        context,
+                        config,
+                        currentState.get("runtimeState"),
+                        allowedPaths,
+                        tenantId,
+                        environment);
+                if (!llmSuggestions.isEmpty()) {
+                    suggestions.addAll(llmSuggestions);
+                    usedLlm = true;
+                } else {
+                    warnings.add("llm_suggestions_empty");
+                }
             }
         }
 
         List<AiSuggestion> ordered = sortAndLimit(dedupeSuggestions(suggestions), request != null ? request.getMaxSuggestions() : null);
+        String source = usedLlm ? "llm" : "heuristic";
+        if (forceSuggestions) {
+            source = "llm-force";
+        }
         return AiSuggestionsResponse.builder()
                 .suggestions(ordered)
-                .source(usedLlm ? "llm" : "heuristic")
+                .source(source)
                 .warnings(warnings.isEmpty() ? null : warnings)
                 .build();
     }
@@ -468,6 +529,174 @@ public class AiSuggestionsService {
                 allowedPaths != null ? allowedPaths.toString() : "[]",
                 safeJson(context.getTemplate() != null ? context.getTemplate().getTemplateMeta() : null)
             );
+    }
+
+    private List<AiSuggestion> buildForcedLlmSuggestions(
+            AiSuggestionsRequest request,
+            AiContextDTO context,
+            JsonNode config,
+            JsonNode runtimeState,
+            Set<String> allowedPaths,
+            JsonNode suggestionContext,
+            JsonNode suggestionPolicy,
+            String tenantId,
+            String environment,
+            int attempt) {
+        if (request == null || context == null) {
+            return List.of();
+        }
+        String prompt = buildForcedSuggestionsPrompt(
+                request,
+                context,
+                config,
+                runtimeState,
+                allowedPaths,
+                suggestionContext,
+                suggestionPolicy,
+                attempt);
+        AiJsonSchema schema = AiJsonSchema.ofSchema(buildSuggestionsSchema());
+        AiCallConfig callConfig = AiCallConfig.builder()
+                .tenantId(normalize(tenantId))
+                .environment(normalize(environment))
+                .build();
+        JsonNode response = aiProvider.generateJson(prompt, schema, callConfig);
+        if (response == null || response.isNull()) {
+            return List.of();
+        }
+        JsonNode suggestionsNode = response.get("suggestions");
+        if (suggestionsNode == null || !suggestionsNode.isArray()) {
+            return List.of();
+        }
+        try {
+            List<AiSuggestion> suggestions =
+                    objectMapper.convertValue(suggestionsNode, new TypeReference<List<AiSuggestion>>() {});
+            return suggestions != null ? suggestions : List.of();
+        } catch (IllegalArgumentException e) {
+            return List.of();
+        }
+    }
+
+    private String buildForcedSuggestionsPrompt(
+            AiSuggestionsRequest request,
+            AiContextDTO context,
+            JsonNode config,
+            JsonNode runtimeState,
+            Set<String> allowedPaths,
+            JsonNode suggestionContext,
+            JsonNode suggestionPolicy,
+            int attempt) {
+        String componentId = context.getComponentId();
+        String componentType = context.getComponentType();
+        String description = context.getDescription();
+        String locale = request.getLocale();
+        String policyReason = suggestionPolicy != null ? textOrNull(suggestionPolicy.get("reason")) : null;
+        String policyFallback = suggestionPolicy != null ? safeJson(suggestionPolicy.get("fallback")) : "[]";
+        String policyMode = suggestionPolicy != null ? textOrNull(suggestionPolicy.get("mode")) : null;
+        String guidance = attempt <= 1
+                ? "Use o contexto de suggestionContext para propor melhorias ainda nao habilitadas."
+                : (attempt == 2
+                    ? "Gere sugestoes mesmo que o estado esteja completo. Priorize features disponiveis nao usadas."
+                    : "Retorne no minimo 3 sugestoes. Se necessario, derive diretamente de availableFeatures e missingCapabilities.");
+        JsonNode sanitizedSuggestionContext = sanitizeSuggestionContextForPrompt(suggestionContext);
+        return """
+            Você é um especialista em componentes de UI. Gere sugestões curtas e úteis para o usuário.
+
+            COMPONENTE: %s (%s)
+            DESCRICAO: %s
+            LOCALE: %s
+            POLICY: mode=%s reason=%s fallback=%s
+
+            ESTADO ATUAL:
+            %s
+
+            ESTADO DE RUNTIME:
+            %s
+
+            CAPABILITIES PERMITIDAS:
+            %s
+
+            SUGGESTION CONTEXT:
+            %s
+
+            ORIENTACAO:
+            - %s
+            - Gere de 3 a 5 sugestões, mesmo que poucas melhorias sejam óbvias.
+            - Priorize availableFeatures e missingCapabilities do suggestionContext.
+            - Evite sugerir o que ja esta habilitado no estado atual.
+            - Use intents executáveis pelo assistente.
+            - Responda APENAS JSON no formato:
+              {"suggestions":[{"id":"...", "label":"...", "description":"...", "intent":"...", "group":"...", "icon":"...", "score":0.0}]}
+            """.formatted(
+                safeText(componentId),
+                safeText(componentType),
+                safeText(description),
+                safeText(locale),
+                safeText(policyMode),
+                safeText(policyReason),
+                safeText(policyFallback),
+                safeJson(config),
+                safeJson(runtimeState),
+                allowedPaths != null ? allowedPaths.toString() : "[]",
+                safeJson(sanitizedSuggestionContext),
+                safeText(guidance)
+            );
+    }
+
+    private JsonNode resolveSuggestionContext(JsonNode currentState) {
+        if (currentState == null || !currentState.isObject()) {
+            return null;
+        }
+        JsonNode context = currentState.get("suggestionContext");
+        return (context != null && !context.isNull()) ? context : null;
+    }
+
+    private JsonNode resolveSuggestionPolicy(JsonNode currentState) {
+        if (currentState == null || !currentState.isObject()) {
+            return null;
+        }
+        JsonNode policy = currentState.get("suggestionPolicy");
+        return (policy != null && !policy.isNull()) ? policy : null;
+    }
+
+    private boolean isForceSuggestionPolicy(JsonNode policy) {
+        if (policy == null || policy.isNull() || !policy.isObject()) {
+            return false;
+        }
+        String mode = textOrNull(policy.get("mode"));
+        return mode != null && mode.equalsIgnoreCase("force");
+    }
+
+    private String buildForceWarning(String base, String reason) {
+        if (reason == null || reason.isBlank()) {
+            return base;
+        }
+        return base + ":" + reason.trim();
+    }
+
+    private JsonNode sanitizeSuggestionContextForPrompt(JsonNode suggestionContext) {
+        if (suggestionContext == null || suggestionContext.isNull() || !suggestionContext.isObject()) {
+            return suggestionContext;
+        }
+        ObjectNode copy = suggestionContext.deepCopy();
+        JsonNode inputs = copy.get("inputs");
+        if (inputs != null && inputs.isObject()) {
+            ObjectNode sanitized = objectMapper.createObjectNode();
+            sanitized.put("hasResourcePath", hasValue(inputs.get("resourcePath")));
+            sanitized.put("hasIdField", hasValue(inputs.get("idField")));
+            sanitized.put("hasHorizontalScroll", hasValue(inputs.get("horizontalScroll")));
+            copy.set("inputs", sanitized);
+        }
+        return copy;
+    }
+
+    private boolean hasValue(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return false;
+        }
+        if (node.isTextual()) {
+            return !node.asText().isBlank();
+        }
+        return true;
     }
 
     private String buildSuggestionsSchema() {

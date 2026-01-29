@@ -7,6 +7,7 @@ import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class AiOrchestratorServiceClarificationUiTest {
 
@@ -89,7 +90,9 @@ class AiOrchestratorServiceClarificationUiTest {
                 null,
                 null,
                 mapper,
-                null);
+                null,
+                mock(AiThreadService.class),
+                mock(AiMessageService.class));
         return (AiOrchestratorResponse) ReflectionTestUtils.invokeMethod(
                 service,
                 "parseClarificationFromResult",

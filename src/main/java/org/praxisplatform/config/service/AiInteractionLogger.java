@@ -110,6 +110,13 @@ public class AiInteractionLogger {
         appendValue(sb, "componentType", request.getComponentType());
         appendValue(sb, "aiMode", request.getAiMode());
         appendValue(sb, "variantId", request.getVariantId());
+        if (request.getSessionId() != null) {
+            appendValue(sb, "sessionId", request.getSessionId().toString());
+        }
+        if (request.getClientTurnId() != null) {
+            appendValue(sb, "clientTurnId", request.getClientTurnId().toString());
+        }
+        appendValue(sb, "mode", request.getMode());
     }
 
     private void appendValue(StringBuilder sb, String key, String value) {
