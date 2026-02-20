@@ -16,6 +16,8 @@ public class AiOrchestratorResponse {
     private UUID sessionId;
     private String code;
     private String type;
+    private String contractVersion;
+    private String schemaHash;
     private JsonNode patch;
     private List<AiPatchDiff> diff;
     private String explanation;

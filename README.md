@@ -160,6 +160,7 @@ Para Gemini, `listModels` requer API key; sem key, o backend retorna apenas o mo
 Para o RAG nativo, o Spring AI usa o `vector_store` (pgvector). Para desabilitar o VectorStore, use `praxis.ai.rag.vector-store.enabled=false`.
 Para ativar RAG no chat (Advisors), habilite `praxis.ai.rag.chat.enabled=true` e escolha `praxis.ai.rag.chat.mode=naive|modular`.
 Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG e usados para filtrar resultados quando presentes. Documentos globais (sem tenant/env) continuam visíveis quando esses headers são informados.
+`praxis.ai.rag.max-hints` controla quantas dicas (hints) do componente entram no bloco RAG (default: 6).
 
 ## 📡 Key Endpoints
 

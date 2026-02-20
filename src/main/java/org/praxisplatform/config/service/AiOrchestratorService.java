@@ -95,6 +95,8 @@ public class AiOrchestratorService {
     );
     private static final java.util.regex.Pattern REMOVAL_INTENT_PATTERN = java.util.regex.Pattern.compile(
             "\\b(remover|remove|remova|limpar|limpe|limpa|resetar|reset|desfazer|apagar|tirar|retirar|desativar|desligar|desabilitar|disable|unset|sem)\\b");
+    private static final java.util.regex.Pattern HEX_COLOR_PATTERN = java.util.regex.Pattern.compile(
+            "^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$");
 
     @Value("${praxis.ai.prompt.max-chars.config:12000}")
     private int maxConfigChars;
@@ -257,8 +259,11 @@ public class AiOrchestratorService {
                         request.getRuntimeState(),
                         request.getContextHints())),
                 maxRuntimeMetadataChars);
-        List<ColumnDescriptor> columnDescriptors = extractColumnDescriptors(currentState);
+        List<ColumnDescriptor> uiColumnDescriptors = extractColumnDescriptors(currentState);
+        List<ColumnDescriptor> columnDescriptors = mergeColumnDescriptors(uiColumnDescriptors, request.getDataProfile());
         List<String> columnNames = extractColumnNames(columnDescriptors);
+        List<String> availableFields = mergeAvailableFields(columnNames, request.getDataProfile());
+        String fieldTypeHints = buildFieldTypeHints(request.getDataProfile());
         List<String> columnOptions = buildColumnOptions(columnDescriptors);
         List<String> inputKeys = extractObjectKeys(currentState, "inputs");
         List<String> outputKeys = extractObjectKeys(currentState, "outputs");
@@ -325,12 +330,13 @@ public class AiOrchestratorService {
 
         AiIntentClassification intent = classifyIntent(
                 modelPrompt,
-                columnNames,
+                availableFields,
                 inputKeys,
                 outputKeys,
                 configCategories,
                 componentCategories,
                 runtimeMetadata,
+                fieldTypeHints,
                 request,
                 frontendConfig);
 
@@ -343,10 +349,16 @@ public class AiOrchestratorService {
                 request != null ? request.getUserPrompt() : null,
                 columnDescriptors,
                 columnResolverKeys,
-                columnNames,
+                availableFields,
                 columnOptions,
                 configCategories,
                 componentCategories,
+                warnings);
+        intent = enforceFormatIntentWhenFieldExists(
+                intent,
+                request,
+                columnDescriptors,
+                request != null ? request.getDataProfile() : null,
                 warnings);
         adjustPageBuilderCreateIntent(intent, request, context);
         AiOrchestratorResponse creationResponse = handleComputedCreationIntent(
@@ -601,7 +613,7 @@ public class AiOrchestratorService {
                         labels.isEmpty() ? options : labels,
                         payloads.isEmpty() ? null : payloads), memoryContext);
             }
-            List<String> unknownFields = findUnknownActionFields(expectedActions, columnNames);
+            List<String> unknownFields = findUnknownActionFields(expectedActions, availableFields);
             if (!unknownFields.isEmpty() && !createOnlyPlan) {
                 List<String> suggestions = suggestClosestColumns(unknownFields, columnDescriptors);
                 String message = buildUnknownColumnsMessage(unknownFields, suggestions);
@@ -1202,6 +1214,7 @@ public class AiOrchestratorService {
             List<String> configCategories,
             List<String> componentCategories,
             String runtimeMetadata,
+            String fieldTypeHints,
             AiOrchestratorRequest request,
             AiCallConfig callConfig) {
         String prompt = AiPromptTemplates.buildPrompt(
@@ -1212,6 +1225,7 @@ public class AiOrchestratorService {
                         "INPUTS_LIST", objectMapper.valueToTree(inputs).toString(),
                         "OUTPUTS_LIST", objectMapper.valueToTree(outputs).toString(),
                         "RUNTIME_METADATA", safeMetadata(runtimeMetadata),
+                        "FIELD_TYPES", safeMetadata(fieldTypeHints),
                         "CONFIG_CATEGORIES", objectMapper.valueToTree(configCategories).toString(),
                         "COMPONENT_CATEGORIES", objectMapper.valueToTree(componentCategories).toString()));
         AiJsonSchema schema = buildIntentSchema();
@@ -1235,6 +1249,7 @@ public class AiOrchestratorService {
         intent.putArray("enum")
                 .add("add_column_computed")
                 .add("add_column")
+                .add("create_flow") // Adicionado intent create_flow
                 .add("update_column")
                 .add("remove_column")
                 .add("toggle_feature")
@@ -4260,6 +4275,35 @@ public class AiOrchestratorService {
         return value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
     }
 
+    private boolean isSameMeaning(String left, String right) {
+        if (isBlank(left) || isBlank(right)) {
+            return false;
+        }
+        return normalizeText(left).equals(normalizeText(right));
+    }
+
+    private boolean shouldUseExampleAsDescription(String example, String label, String value) {
+        if (isBlank(example)) {
+            return false;
+        }
+        if (isSameMeaning(example, label) || isSameMeaning(example, value)) {
+            return false;
+        }
+        String trimmed = example.trim();
+        return trimmed.length() >= 20 || trimmed.contains(" ");
+    }
+
+    private String normalizeHexColor(String value) {
+        if (isBlank(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (!HEX_COLOR_PATTERN.matcher(trimmed).matches()) {
+            return null;
+        }
+        return trimmed.startsWith("#") ? trimmed : "#" + trimmed;
+    }
+
     private JsonNode mergePatchNodes(JsonNode base, JsonNode extra) {
         if (extra == null || extra.isNull()) {
             return base;
@@ -4946,6 +4990,9 @@ public class AiOrchestratorService {
         }
         List<String> missing = intent.getMissingContext();
         if (missing != null && !missing.isEmpty()) {
+            if (missing.contains("format_intent")) {
+                return "Você prefere formatar a coluna existente ou criar uma nova coluna calculada mantendo a original?";
+            }
             if (hasMissingResourceContext(missing)) {
                 return buildResourceClarificationMessage(
                         request != null ? request.getComponentId() : null);
@@ -6292,6 +6339,14 @@ public class AiOrchestratorService {
             return clarification(buildResourceClarificationMessage(request.getComponentId()), List.of());
         }
         results = filterEndpointsByPromptTokens(request.getUserPrompt(), results);
+        List<ApiSearchResult> tableCandidates = promptMentionsTable(request.getUserPrompt())
+                ? filterTableEndpoints(results)
+                : List.of();
+        if (!tableCandidates.isEmpty()) {
+            results = tableCandidates;
+        } else {
+            results = prioritizeResourceClarificationEndpoints(results);
+        }
         if (results.size() == 1) {
             ApiSearchResult picked = results.get(0);
             if (picked != null && picked.getPath() != null && !picked.getPath().isBlank()) {
@@ -6313,6 +6368,67 @@ public class AiOrchestratorService {
                 buildResourceClarificationMessage(request.getComponentId()),
                 labels,
                 optionPayloads);
+    }
+
+    private List<ApiSearchResult> prioritizeResourceClarificationEndpoints(List<ApiSearchResult> results) {
+        if (results == null || results.size() < 2) {
+            return results;
+        }
+        List<ApiSearchResult> sorted = new ArrayList<>(results);
+        sorted.sort((left, right) -> {
+            int scoreLeft = resourceClarificationScore(left);
+            int scoreRight = resourceClarificationScore(right);
+            if (scoreLeft != scoreRight) {
+                return Integer.compare(scoreRight, scoreLeft);
+            }
+            return Double.compare(
+                    right != null ? right.getSimilarityScore() : 0.0d,
+                    left != null ? left.getSimilarityScore() : 0.0d);
+        });
+        return sorted;
+    }
+
+    private int resourceClarificationScore(ApiSearchResult result) {
+        if (result == null) {
+            return 0;
+        }
+        String rawPath = result.getPath();
+        if (rawPath == null || rawPath.isBlank()) {
+            return 0;
+        }
+        String method = result.getMethod() != null
+                ? result.getMethod().trim().toUpperCase(Locale.ROOT)
+                : "";
+        String path = rawPath.toLowerCase(Locale.ROOT);
+        String summary = result.getSummary() != null
+                ? result.getSummary().toLowerCase(Locale.ROOT)
+                : "";
+        int score = 0;
+        boolean isFilter = path.endsWith("/filter") || path.endsWith("/filter/cursor");
+        boolean isAll = path.endsWith("/all");
+        boolean isByIds = path.endsWith("/by-ids");
+        boolean isOptions = path.contains("/options");
+        boolean hasPathParam = path.contains("{");
+        if (isFilter && "POST".equals(method)) {
+            score += 100;
+        } else if (isAll && "GET".equals(method)) {
+            score += 90;
+        } else if (isByIds && "GET".equals(method)) {
+            score += 80;
+        } else if (isOptions && ("GET".equals(method) || "POST".equals(method))) {
+            score += 70;
+        } else if (!hasPathParam && ("GET".equals(method) || "POST".equals(method))) {
+            score += 60;
+        } else if (hasPathParam && "GET".equals(method)) {
+            score += 30;
+        }
+        if ("PUT".equals(method) || "DELETE".equals(method) || "PATCH".equals(method)) {
+            score -= 40;
+        }
+        if (summary.contains("filtrar") || summary.contains("consultar") || summary.contains("listar")) {
+            score += 20;
+        }
+        return score;
     }
 
     private boolean hasMissingResourceContext(List<String> missingContext) {
@@ -6378,19 +6494,31 @@ public class AiOrchestratorService {
         if (results == null || results.isEmpty()) {
             return List.of();
         }
-        List<AiOption> payloads = new ArrayList<>();
-        Set<String> seenPaths = new HashSet<>();
-        Set<String> usedLabels = new HashSet<>();
+        LinkedHashMap<String, ApiSearchResult> bestByBasePath = new LinkedHashMap<>();
         for (ApiSearchResult result : results) {
             if (result == null || result.getPath() == null || result.getPath().isBlank()) {
                 continue;
             }
-            String path = normalizeResourceBasePath(result.getPath());
-            if (isBlank(path)) {
+            String basePath = normalizeResourceBasePath(result.getPath());
+            if (isBlank(basePath)) {
                 continue;
             }
-            String normalizedPath = normalizeText(path);
-            if (!seenPaths.add(normalizedPath)) {
+            String normalizedPath = normalizeText(basePath);
+            ApiSearchResult current = bestByBasePath.get(normalizedPath);
+            ApiSearchResult preferred = preferApiOptionCandidate(current, result);
+            if (current == null || preferred != current) {
+                bestByBasePath.put(normalizedPath, preferred);
+            }
+        }
+
+        List<AiOption> payloads = new ArrayList<>();
+        Set<String> usedLabels = new HashSet<>();
+        for (ApiSearchResult result : bestByBasePath.values()) {
+            if (result == null || result.getPath() == null || result.getPath().isBlank()) {
+                continue;
+            }
+            String basePath = normalizeResourceBasePath(result.getPath());
+            if (isBlank(basePath)) {
                 continue;
             }
             String label = buildApiOptionLabel(result);
@@ -6403,18 +6531,106 @@ public class AiOrchestratorService {
                 }
             }
             if (usedLabels.contains(normalizedLabel)) {
-                label = label + " (" + path + ")";
+                label = label + " (" + basePath + ")";
                 normalizedLabel = normalizeText(label);
             }
             usedLabels.add(normalizedLabel);
             String example = buildApiOptionExample(result);
+            String description = null;
+            String summary = result.getSummary();
+            if (!isBlank(summary) && !isGenericSummary(summary)) {
+                description = summary.trim();
+                if (isSameMeaning(description, label)) {
+                    description = null;
+                }
+            }
+            if (!isBlank(example)) {
+                String trimmedExample = example.trim();
+                if (isSameMeaning(trimmedExample, label) || (description != null && isSameMeaning(trimmedExample, description))) {
+                    example = null;
+                } else {
+                    example = trimmedExample;
+                }
+            }
+
+            // Enrich contextHints for UI
+            ObjectNode meta = objectMapper.createObjectNode();
+            String icon = "dataset";
+            if (basePath.contains("tabela") || basePath.contains("list") || basePath.contains("grid")) {
+                icon = "table_view";
+            } else if (basePath.contains("report") || basePath.contains("relatorio")) {
+                icon = "analytics";
+            }
+            meta.put("icon", icon);
+            if (!isBlank(description)) {
+                meta.put("description", description);
+            }
+            meta.put("method", result.getMethod() != null ? result.getMethod() : "GET");
+            meta.put("path", basePath);
+            meta.put("resourcePath", basePath);
+            meta.put("rawPath", result.getPath());
+
             payloads.add(AiOption.builder()
-                    .value(path)
+                    .value(basePath)
                     .label(label)
                     .example(example)
+                    .contextHints(meta)
                     .build());
         }
         return payloads;
+    }
+
+    private ApiSearchResult preferApiOptionCandidate(ApiSearchResult current, ApiSearchResult candidate) {
+        if (current == null) {
+            return candidate;
+        }
+        if (candidate == null) {
+            return current;
+        }
+        int currentScore = scoreApiOptionCandidate(current);
+        int candidateScore = scoreApiOptionCandidate(candidate);
+        return candidateScore > currentScore ? candidate : current;
+    }
+
+    private int scoreApiOptionCandidate(ApiSearchResult result) {
+        if (result == null) {
+            return Integer.MIN_VALUE;
+        }
+        String method = result.getMethod() != null ? result.getMethod().toUpperCase(Locale.ROOT) : "";
+        String path = result.getPath() != null ? result.getPath().toLowerCase(Locale.ROOT) : "";
+        boolean hasPathParam = path.contains("{");
+
+        int score = 0;
+        boolean isFilter = path.endsWith("/filter") || path.contains("/filter/");
+        boolean isOptions = path.contains("/options");
+        boolean isAll = path.endsWith("/all");
+        boolean isSearch = path.contains("/search") || path.contains("/query");
+
+        if (isFilter) {
+            score += 80;
+        }
+        if (isAll && "GET".equals(method)) {
+            score += 70;
+        }
+        if (isOptions && ("GET".equals(method) || "POST".equals(method))) {
+            score += 50;
+        }
+        if (!hasPathParam && ("GET".equals(method) || "POST".equals(method))) {
+            score += 30;
+        }
+        if ("POST".equals(method) && !isFilter && !isOptions && !isSearch && !isAll && !hasPathParam) {
+            score -= 60;
+        } else if ("POST".equals(method)) {
+            score += 10;
+        } else if ("GET".equals(method)) {
+            score += 20;
+        } else if ("PUT".equals(method) || "PATCH".equals(method) || "DELETE".equals(method)) {
+            score -= 30;
+        }
+        if (hasPathParam) {
+            score -= 40;
+        }
+        return score;
     }
 
     private String buildApiOptionLabel(ApiSearchResult result) {
@@ -6782,17 +6998,25 @@ public class AiOrchestratorService {
                     }
                 }
                 case CONTEXT_CODE_SCHEMA_FIELDS -> {
+                    JsonNode effectiveSchema = schema;
+                    if (effectiveSchema == null) {
+                        effectiveSchema = resolveSchemaJustInTime(request);
+                    }
                     ArrayNode fields = buildSchemaFieldList(
                             request != null ? request.getSchemaFields() : null,
-                            schema);
+                            effectiveSchema);
                     if (fields != null && fields.size() > 0) {
                         pack.set("schemaFields", fields);
                     }
                 }
                 case CONTEXT_CODE_SCHEMA_SAMPLE -> {
+                    JsonNode effectiveSchema = schema;
+                    if (effectiveSchema == null) {
+                        effectiveSchema = resolveSchemaJustInTime(request);
+                    }
                     JsonNode example = buildSchemaSample(
                             request != null ? request.getSchemaFields() : null,
-                            schema);
+                            effectiveSchema);
                     if (example != null && !example.isNull() && example.size() > 0) {
                         pack.set("schemaSample", example);
                     }
@@ -7040,6 +7264,9 @@ public class AiOrchestratorService {
         String concepts = truncateBlock("relevant_concepts",
                 relevantConcepts != null ? relevantConcepts : "",
                 maxConceptsChars);
+        String behavior = truncateBlock("component_behavior",
+                buildComponentBehaviorBlock(context != null ? context.getComponentDefinition() : null),
+                maxCapabilityNotesChars);
         String configJson = truncateBlock("target_config",
                 contextConfig != null ? contextConfig.toPrettyString() : "{}",
                 maxConfigChars);
@@ -7084,6 +7311,7 @@ public class AiOrchestratorService {
                         Map.entry("CAPABILITIES_RESTRICTION", caps),
                         Map.entry("CAPABILITY_NOTES", notes),
                         Map.entry("RELEVANT_CONCEPTS", concepts),
+                        Map.entry("COMPONENT_BEHAVIOR", behavior),
                         Map.entry("TARGET_CONFIG", configJson),
                         Map.entry("TEMPLATE_CONFIG", templateConfig),
                         Map.entry("TEMPLATE_META", templateMeta),
@@ -7097,7 +7325,31 @@ public class AiOrchestratorService {
                         Map.entry("CONTRACT_SAFETY", AiPromptTemplates.CONTRACT_SAFETY),
                         Map.entry("CONTRACT_API_LISTING", AiPromptTemplates.CONTRACT_API_LISTING),
                         Map.entry("CONTRACT_FORMATTING", contractFormatting),
-                        Map.entry("CONTRACT_RENDERER_PAYLOADS", contractRenderers)));
+                        Map.entry("CONTRACT_RENDERER_PAYLOADS", contractRenderers),
+                        Map.entry("CONTRACT_VISUAL_DESIGN", AiPromptTemplates.CONTRACT_VISUAL_DESIGN)));
+    }
+
+    private String buildComponentBehaviorBlock(JsonNode componentDefinition) {
+        if (componentDefinition == null || componentDefinition.isNull()) {
+            return "N/A";
+        }
+        JsonNode contextPack = extractComponentContextPack(componentDefinition);
+        if (contextPack == null || !contextPack.isObject()) {
+            return "N/A";
+        }
+        JsonNode hints = contextPack.get("hints");
+        if (hints == null || !hints.isArray() || hints.isEmpty()) {
+            return "N/A";
+        }
+        StringBuilder out = new StringBuilder("### COMPONENT BEHAVIOR (from component hints):\n");
+        for (JsonNode hint : hints) {
+            if (hint == null || hint.isNull()) continue;
+            String text = textOrNull(hint);
+            if (text == null || text.isBlank()) continue;
+            out.append("- ").append(text.trim()).append("\n");
+        }
+        String block = out.toString().trim();
+        return block.isEmpty() ? "N/A" : block;
     }
 
     private IntentPlan generateIntentPlan(
@@ -8752,10 +9004,23 @@ public class AiOrchestratorService {
             if (value == null || value.isBlank()) {
                 continue;
             }
+            ObjectNode meta = objectMapper.createObjectNode();
+            String example = option.example != null ? option.example.trim() : null;
+            if (shouldUseExampleAsDescription(example, label, value)) {
+                meta.put("description", example);
+            }
+            String hex = normalizeHexColor(value);
+            if (hex == null) {
+                hex = normalizeHexColor(label);
+            }
+            if (hex != null) {
+                meta.put("hexColor", hex);
+            }
             out.add(AiOption.builder()
                     .value(value)
                     .label(label != null && !label.isBlank() ? label : value)
                     .example(option.example)
+                    .contextHints(meta.size() > 0 ? meta : null)
                     .build());
         }
         return out;
@@ -8939,6 +9204,232 @@ public class AiOrchestratorService {
             names.add(column.field);
         }
         return names;
+    }
+
+    private List<ColumnDescriptor> mergeColumnDescriptors(
+            List<ColumnDescriptor> columns,
+            JsonNode dataProfile) {
+        LinkedHashMap<String, ColumnDescriptor> merged = new LinkedHashMap<>();
+        if (columns != null) {
+            for (ColumnDescriptor column : columns) {
+                if (column == null || isBlank(column.field)) continue;
+                merged.putIfAbsent(column.field, column);
+            }
+        }
+        if (dataProfile != null && dataProfile.isObject()) {
+            JsonNode profileColumns = dataProfile.get("columns");
+            if (profileColumns != null && profileColumns.isObject()) {
+                profileColumns.fieldNames().forEachRemaining(field -> {
+                    if (isBlank(field) || merged.containsKey(field)) {
+                        return;
+                    }
+                    merged.put(field, new ColumnDescriptor(field, null));
+                });
+            }
+        }
+        return merged.isEmpty() ? List.of() : new ArrayList<>(merged.values());
+    }
+
+    private AiIntentClassification enforceFormatIntentWhenFieldExists(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            List<ColumnDescriptor> columnDescriptors,
+            JsonNode dataProfile,
+            List<String> warnings) {
+        if (intent == null || request == null) {
+            return intent;
+        }
+        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return intent;
+        }
+        if (!"add_column_computed".equalsIgnoreCase(intent.getIntent())) {
+            return intent;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return intent;
+        }
+        String targetField = intent.getTargetField();
+        if (isBlank(targetField)) {
+            targetField = resolveTargetFieldFromPrompt(prompt, columnDescriptors, List.of("field", "header"));
+        }
+        if (isBlank(targetField)) {
+            targetField = resolveTargetFieldFromDataProfile(prompt, dataProfile);
+        }
+        if (isBlank(targetField) || !hasFieldInDataProfile(targetField, dataProfile)) {
+            return intent;
+        }
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+        boolean displayIntent = indicatesDisplayIntent(promptLower, targetField, dataProfile);
+        boolean computeIntent = indicatesComputedIntent(promptLower, request);
+        if (displayIntent && computeIntent) {
+            intent.setNeedsClarification(true);
+            intent.setMissingContext(List.of("format_intent"));
+            intent.setOptions(List.of("Formatar coluna existente", "Criar coluna calculada"));
+            if (warnings != null) {
+                warnings.add("Ambiguidade detectada entre formatação e cálculo; solicitando clarificação.");
+            }
+            return intent;
+        }
+        if (!displayIntent) {
+            return intent;
+        }
+        intent.setIntent("update_column_rules");
+        intent.setTargetField(targetField);
+        intent.setNewField(null);
+        intent.setBaseFields(List.of());
+        intent.setComputedFormat(null);
+        intent.setExpression(null);
+        intent.setNeedsClarification(false);
+        intent.setMissingContext(null);
+        intent.setOptions(null);
+        if (warnings != null) {
+            warnings.add("Intent ajustado para update_column devido a campo existente no dataProfile.");
+        }
+        return intent;
+    }
+
+    private boolean indicatesDisplayIntent(String promptLower, String targetField, JsonNode dataProfile) {
+        if (promptLower == null || promptLower.isBlank()) {
+            return false;
+        }
+        String inferredType = extractInferredType(dataProfile, targetField);
+        boolean typeSuggestsFormatting = inferredType != null
+                && (inferredType.equalsIgnoreCase("date")
+                || inferredType.equalsIgnoreCase("datetime")
+                || inferredType.equalsIgnoreCase("timestamp")
+                || inferredType.equalsIgnoreCase("number")
+                || inferredType.equalsIgnoreCase("numeric")
+                || inferredType.equalsIgnoreCase("currency"));
+        if (typeSuggestsFormatting && !indicatesComputedIntent(promptLower, null)) {
+            return true;
+        }
+        return promptLower.contains("format")
+                || promptLower.contains("exibir")
+                || promptLower.contains("mostrar")
+                || promptLower.contains("layout")
+                || promptLower.contains("dd/")
+                || promptLower.contains("mm/")
+                || promptLower.contains("yyyy")
+                || promptLower.contains("shortdate")
+                || promptLower.contains("data curta")
+                || promptLower.contains("moeda")
+                || promptLower.contains("currency")
+                || promptLower.contains("mascara")
+                || promptLower.contains("alinh")
+                || promptLower.contains("label")
+                || promptLower.contains("titulo")
+                || promptLower.contains("header")
+                || promptLower.contains("negrito")
+                || promptLower.contains("bold")
+                || promptLower.contains("cor")
+                || promptLower.contains("badge");
+    }
+
+    private boolean indicatesComputedIntent(String promptLower, AiOrchestratorRequest request) {
+        if (promptLower == null || promptLower.isBlank()) {
+            return false;
+        }
+        if (mentionsComputed(promptLower) || mentionsAgeComputation(promptLower) || mentionsTenure(promptLower)) {
+            return true;
+        }
+        if (promptHasExplicitExpression(request != null ? request.getUserPrompt() : null)) {
+            return true;
+        }
+        return promptLower.contains("calcular")
+                || promptLower.contains("somar")
+                || promptLower.contains("soma")
+                || promptLower.contains("media")
+                || promptLower.contains("média")
+                || promptLower.contains("multiplic")
+                || promptLower.contains("divid")
+                || promptLower.contains("percent")
+                || promptLower.contains("%")
+                || promptLower.contains("if ")
+                || promptLower.contains(" se ");
+    }
+
+    private String resolveTargetFieldFromDataProfile(String prompt, JsonNode dataProfile) {
+        if (isBlank(prompt) || dataProfile == null || !dataProfile.isObject()) {
+            return null;
+        }
+        JsonNode columns = dataProfile.get("columns");
+        if (columns == null || !columns.isObject()) {
+            return null;
+        }
+        String normalizedPrompt = normalizeText(prompt);
+        String best = null;
+        double bestScore = 0d;
+        Iterator<String> it = columns.fieldNames();
+        while (it.hasNext()) {
+            String field = it.next();
+            if (isBlank(field)) continue;
+            String normalizedField = normalizeText(field);
+            if (!normalizedField.isBlank() && normalizedPrompt.contains(normalizedField)) {
+                double score = normalizedField.length();
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = field;
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean hasFieldInDataProfile(String field, JsonNode dataProfile) {
+        if (isBlank(field) || dataProfile == null || !dataProfile.isObject()) {
+            return false;
+        }
+        JsonNode columns = dataProfile.get("columns");
+        if (columns == null || !columns.isObject()) {
+            return false;
+        }
+        return columns.has(field);
+    }
+
+    private List<String> mergeAvailableFields(List<String> columnNames, JsonNode dataProfile) {
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+        if (columnNames != null) {
+            for (String name : columnNames) {
+                if (!isBlank(name)) {
+                    merged.add(name);
+                }
+            }
+        }
+        if (dataProfile != null && dataProfile.isObject()) {
+            JsonNode columns = dataProfile.get("columns");
+            if (columns != null && columns.isObject()) {
+                columns.fieldNames().forEachRemaining(field -> {
+                    if (!isBlank(field)) {
+                        merged.add(field);
+                    }
+                });
+            }
+        }
+        return merged.isEmpty() ? List.of() : new ArrayList<>(merged);
+    }
+
+    private String buildFieldTypeHints(JsonNode dataProfile) {
+        if (dataProfile == null || !dataProfile.isObject()) {
+            return "N/A";
+        }
+        JsonNode columns = dataProfile.get("columns");
+        if (columns == null || !columns.isObject()) {
+            return "N/A";
+        }
+        ObjectNode hints = objectMapper.createObjectNode();
+        columns.fields().forEachRemaining(entry -> {
+            String field = entry.getKey();
+            JsonNode stats = entry.getValue();
+            if (isBlank(field) || stats == null || !stats.isObject()) {
+                return;
+            }
+            String inferredType = textOrNull(stats.get("inferredType"));
+            if (!isBlank(inferredType)) {
+                hints.put(field, inferredType);
+            }
+        });
+        return hints.size() == 0 ? "N/A" : hints.toPrettyString();
     }
 
     private List<String> buildColumnOptions(List<ColumnDescriptor> columns) {
@@ -13022,5 +13513,46 @@ public class AiOrchestratorService {
         public String reason;
 
         public CreateTemplateSelection() {}
+    }
+
+    private JsonNode resolveSchemaJustInTime(AiOrchestratorRequest request) {
+        if (request == null) return null;
+        String resourcePath = request.getResourcePath();
+        if (resourcePath == null || resourcePath.isBlank()) {
+            JsonNode runtime = request.getCurrentState(); // Use currentState from request
+            if (runtime != null && runtime.has("widgets")) {
+                JsonNode widgets = runtime.get("widgets");
+                if (widgets.isArray()) {
+                    for (JsonNode widget : widgets) {
+                        JsonNode def = widget.get("definition");
+                        if (def != null && def.has("inputs")) {
+                            JsonNode inputs = def.get("inputs");
+                            if (inputs != null && inputs.has("resourcePath")) {
+                                String path = textOrNull(inputs.get("resourcePath"));
+                                if (path != null && !path.isBlank()) {
+                                    resourcePath = path;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (resourcePath != null && !resourcePath.isBlank()) {
+            try {
+                // Construct AiSchemaContext for fetchSchema
+                AiSchemaContext context = new AiSchemaContext();
+                context.setPath(resourcePath);
+                context.setOperation("GET"); // Default assume read operation
+                context.setSchemaType("response"); // Default assume response schema
+                
+                // Assuming requestBaseUrl is handled by properties or can be null here
+                return schemaRetrievalService.fetchSchema(context, null);
+            } catch (Exception e) {
+                log.warn("[AiOrchestratorService] Failed to resolve schema JIT for path={}: {}", resourcePath, e.getMessage());
+            }
+        }
+        return null;
     }
 }

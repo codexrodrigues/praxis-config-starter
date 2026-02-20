@@ -110,6 +110,8 @@ public class AiInteractionLogger {
         appendValue(sb, "componentType", request.getComponentType());
         appendValue(sb, "aiMode", request.getAiMode());
         appendValue(sb, "variantId", request.getVariantId());
+        appendValue(sb, "contractVersion", request.getContractVersion());
+        appendValue(sb, "schemaHash", request.getSchemaHash());
         if (request.getSessionId() != null) {
             appendValue(sb, "sessionId", request.getSessionId().toString());
         }

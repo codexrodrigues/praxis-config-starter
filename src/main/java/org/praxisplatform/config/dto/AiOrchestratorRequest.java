@@ -37,6 +37,8 @@ public class AiOrchestratorRequest {
     private String aiMode;
     private Boolean requireSchema;
     private String resourcePath;
+    private String contractVersion;
+    private String schemaHash;
     private AiSchemaContext schemaContext;
     private String variantId;
 

@@ -57,6 +57,24 @@ public final class AiPromptTemplates {
     - Evite objetos vazios: Se usar renderer.badge, preencha suas propriedades.
     """;
 
+    public static final String CONTRACT_VISUAL_DESIGN = """
+    - VISUAL SURPREENDENTE: Sempre que possível, utilize propriedades de estilo para criar interfaces ricas e modernas.
+    - TABLE/LIST:
+      - 'appearance.density': Use "comfortable" ou "compact" conforme a quantidade de dados.
+      - 'appearance.elevation': Use nível 1 ou 2 para destaque.
+      - 'skin': Para listas, prefira "glass" ou "gradient-tile" quando apropriado para dashboard.
+      - 'toolbar.visible': true para permitir ações globais.
+    - DYNAMIC PAGE (Master-Detail / Dashboard):
+      - LAYOUT: Use 'layout.columns' (ex: 3 ou 4) para criar grids flexíveis.
+      - SPANS: Use 'className': 'col-span-2' (ou 3, 4, full) nos widgets para proporções assimétricas.
+        - Exemplo Master-Detail (2:1): Tabela com 'col-span-2', Form com 'col-span-1' (layout.columns=3).
+        - Exemplo Dashboard: KPIs no topo ('col-span-1'), Gráfico principal ('col-span-full').
+    - COLUNAS/DADOS:
+      - Formatação: Sempre preencha 'columns[].format' e 'columns[].width' (ex: "120px", "20%") quando previsível.
+      - Cores/Badges: Use renderers visuais (badge, chip) para status/categorias.
+      - Alinhamento: 'align': 'right' para números/moeda, 'center' para status/boolean.
+    """;
+
 	public static final String PROMPT_INTENT_CLASSIFIER = """
 	Você é um especialista em UX e configuração de componentes de UI.
 	Sua tarefa é analisar o pedido do usuário e classificar a intenção para direcionar o fluxo de processamento.
@@ -67,6 +85,7 @@ public final class AiPromptTemplates {
 	INPUTS DISPONÍVEIS: {{INPUTS_LIST}}
 	OUTPUTS DISPONÍVEIS: {{OUTPUTS_LIST}}
 	METADADOS (se houver): {{RUNTIME_METADATA}}
+	TIPOS INFERIDOS (dataProfile, se houver): {{FIELD_TYPES}}
 
 	CATEGORIAS PARA CONFIG (derivadas das capabilities):
 	{{CONFIG_CATEGORIES}}
@@ -81,28 +100,38 @@ public final class AiPromptTemplates {
 
 	REGRAS:
 	1. Escolha "category" a partir das listas de categorias disponíveis. Se não houver correspondência, use "unknown".
-	2. Se o usuário pedir criar/adicionar/incluir coluna, use intent="add_column" ou "add_column_computed" (quando mencionar calculada/computed/cálculo).
-	3. Para add_column_computed: preencha newField e baseFields quando possível; computedFormat quando explícito (years_months, years, months_total, decimal_years).
-	4. Para update/remove: preencha targetField com coluna existente (fuzzy match permitido).
-	5. Se o usuário for ambíguo (ex: "muda a cor" e houver ambiguidade), marque "needsClarification": true.
-	6. Se o usuário fizer uma PERGUNTA sobre o estado atual, use "intent": "ask_about_config".
-	7. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
-	8. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
-	9. Se o pedido afetar ambos, use scope="mixed".
-	9.1. Se o componente for agregador (ex.: CRUD combina tabela + formulário), siga o contrato do componente interno (TableConfig/FormConfig) para regras de colunas/renderers.
-	10. Só marque needsClarification=true quando faltar dado ESSENCIAL:
+	2. Se o usuário pedir para criar uma página, componente, fluxo, ou "master-detail", use intent="create_flow" e scope="component".
+	3. PROTOCOLO DE INTENCAO (APENAS PARA TABELA):
+	   - Se COLUNAS DISPONIVEIS estiver preenchido e o pedido afetar colunas de tabela, classifique pela INTENCAO DO IMPACTO:
+	     - update_column (transformacao visual): alterar apenas a representacao de um campo JA EXISTENTE no dataProfile/colunas (ex.: formato, mascara, exibicao, alinhamento, destaque).
+	     - add_column_computed (geracao de valor): criar uma nova informacao que nao existe no dataset atual, baseada em calculo/expressao/combinação.
+	   - So use add_column_computed quando o usuario indicar explicitamente criacao de nova coluna/valor derivado.
+	   - Se o campo existir no DATA_PROFILE, trate como update_column mesmo que nao esteja em COLUMNS_LIST.
+	   - Se a solicitacao for ambigua entre formatar o existente e criar novo valor:
+	     - needsClarification=true
+	     - missingContext=["format_intent"]
+	     - options=["Formatar coluna existente","Criar coluna calculada"]
+	4. Para add_column_computed: preencha newField e baseFields quando possível; computedFormat quando explícito (years_months, years, months_total, decimal_years).
+	5. Para update/remove: preencha targetField com coluna existente (fuzzy match permitido).
+	6. Se o usuário for ambíguo (ex: "muda a cor" e houver ambiguidade), marque "needsClarification": true.
+	7. Se o usuário fizer uma PERGUNTA sobre o estado atual, use "intent": "ask_about_config".
+	8. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
+	9. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
+	10. Se o pedido afetar ambos, use scope="mixed".
+	10.1. Se o componente for agregador (ex.: CRUD combina tabela + formulário), siga o contrato do componente interno (TableConfig/FormConfig) para regras de colunas/renderers.
+	11. Só marque needsClarification=true quando faltar dado ESSENCIAL OU quando o protocolo de intenção indicar ambiguidade entre formatar e criar coluna:
 	   - add_column_computed: faltar newField OU baseFields[0] OU baseFields fora das colunas disponíveis.
 	   - custom_expression: faltar expression.
-	11. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
-	12. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter (com paginação/filtros) e GET {resource}/all para listagem simples.
-	12.1. resourcePath SEMPRE é o caminho base do recurso (ex.: "/api/funcionarios"). O componente deriva /filter e /all automaticamente.
-	13. Retorne APENAS um objeto JSON válido (NUNCA um array).
-	14. Não inclua texto fora do JSON (sem markdown, sem comentários).
-	15. Se needsClarification=true: A) Preencha "options" com os valores possíveis. B) Defina "message" como uma PERGUNTA ESPECÍFICA que as opções respondem (ex: "Qual coluna deseja formatar?", "Qual o formato desejado?"). NUNCA use mensagens genéricas.
+	12. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
+	13. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter (com paginação/filtros) e GET {resource}/all para listagem simples.
+	13.1. resourcePath SEMPRE é o caminho base do recurso (ex.: "/api/funcionarios"). O componente deriva /filter e /all automaticamente.
+	14. Retorne APENAS um objeto JSON válido (NUNCA um array).
+	15. Não inclua texto fora do JSON (sem markdown, sem comentários).
+	16. Se needsClarification=true: A) Preencha "options" com os valores possíveis. B) Defina "message" como uma PERGUNTA ESPECÍFICA que as opções respondem (ex: "Qual coluna deseja formatar?", "Qual o formato desejado?"). NUNCA use mensagens genéricas.
 
 	SCHEMA DE RESPOSTA (JSON):
 	{
-	  "intent": "add_column_computed" | "add_column" | "update_column" | "remove_column" | "toggle_feature" | "global_style" | "ask_about_config" | "unknown",
+	  "intent": "add_column_computed" | "add_column" | "create_flow" | "update_column" | "remove_column" | "toggle_feature" | "global_style" | "ask_about_config" | "unknown",
 	  "scope": "config" | "component" | "mixed",
 	  "category": "string",
 	  "targetField": "string" | null,
@@ -218,6 +247,9 @@ CONTEXTO ALVO:
 	CONCEITOS RELEVANTES (se houver):
 	{{RELEVANT_CONCEPTS}}
 
+	COMPORTAMENTO DO COMPONENTE (regras de uso):
+	{{COMPONENT_BEHAVIOR}}
+
 	CONFIGURAÇÃO ATUAL (Do Alvo):
 	{{TARGET_CONFIG}}
 
@@ -265,6 +297,7 @@ COMPLETENESS HINTS (se fornecido):
 	{{CONTRACT_API_LISTING}}
 	{{CONTRACT_FORMATTING}}
 	{{CONTRACT_RENDERER_PAYLOADS}}
+	{{CONTRACT_VISUAL_DESIGN}}
 
 PEDIDO DO USUÁRIO: "{{USER_INPUT}}"
 
@@ -383,6 +416,7 @@ REGRAS:
 8. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
    10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
 9. Retorne APENAS um objeto JSON valido (sem markdown).
+10. VERIFIQUE o estado atual em "CANDIDATOS DE ALVO". Se ja existirem widgets (ex: "masterTable"), NAO use actions de criação (createTable, createForm, applyMasterDetail) ou conexao (bindMasterDetail), a menos que o usuario peca explicitamente "adicionar novo" ou "recriar". Foco em editar o existente.
 
 SCHEMA DE RESPOSTA (JSON):
 {

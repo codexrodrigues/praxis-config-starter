@@ -44,6 +44,9 @@ public class AiRagContextService {
     @Value("${praxis.ai.rag.max-examples:3}")
     private int maxExamples;
 
+    @Value("${praxis.ai.rag.max-hints:6}")
+    private int maxHints;
+
     @Value("${praxis.ai.rag.lexical-weight:0.45}")
     private double lexicalWeight;
 
@@ -73,17 +76,20 @@ public class AiRagContextService {
         List<RagChunk> optionChunks = buildOptionChunks(componentContext);
         List<RagChunk> resolverChunks = buildResolverChunks(componentContext);
         List<RagChunk> exampleChunks = buildExampleChunks(templateMeta);
+        List<RagChunk> hintChunks = buildHintChunks(componentContext, exampleChunks);
 
         List<RagChunk> topActions = pickTop(rankChunks(actionChunks, tokens, embeddingConfig), maxActions);
         List<RagChunk> topOptions = pickTop(rankChunks(optionChunks, tokens, embeddingConfig), maxOptions);
         List<RagChunk> topResolvers = pickTop(rankChunks(resolverChunks, tokens, embeddingConfig), maxResolvers);
         List<RagChunk> topExamples = pickTop(rankChunks(exampleChunks, tokens, embeddingConfig), maxExamples);
+        List<RagChunk> topHints = pickTop(rankChunks(hintChunks, tokens, embeddingConfig), maxHints);
 
         StringBuilder out = new StringBuilder();
         appendSection(out, "ACTIONS", topActions);
         appendSection(out, "OPTIONS", topOptions);
         appendSection(out, "FIELD_RESOLVERS", topResolvers);
         appendSection(out, "EXAMPLES", topExamples);
+        appendSection(out, "HINTS", topHints);
         if (out.length() == 0) {
             return "N/A";
         }
@@ -221,6 +227,33 @@ public class AiRagContextService {
             String label = example;
             String text = example.toLowerCase(Locale.ROOT);
             chunks.add(new RagChunk("example:" + hashKey(example), text, label));
+        }
+        return chunks;
+    }
+
+    private List<RagChunk> buildHintChunks(JsonNode componentContext, List<RagChunk> exampleChunks) {
+        if (componentContext == null || !componentContext.isObject()) {
+            return List.of();
+        }
+        JsonNode hintsNode = componentContext.get("hints");
+        if (hintsNode == null || !hintsNode.isArray()) {
+            return List.of();
+        }
+        Set<String> exampleTexts = normalizeChunkTexts(exampleChunks);
+        List<RagChunk> chunks = new ArrayList<>();
+        int idx = 0;
+        for (JsonNode hint : hintsNode) {
+            if (hint == null || hint.isNull()) continue;
+            String hintText = textOrNull(hint);
+            if (hintText == null) continue;
+            String normalized = normalizeForMatch(hintText);
+            if (normalized.isBlank() || exampleTexts.contains(normalized)) {
+                continue;
+            }
+            String label = hintText;
+            String text = hintText.toLowerCase(Locale.ROOT);
+            chunks.add(new RagChunk("hint:" + idx, text, label));
+            idx++;
         }
         return chunks;
     }
@@ -392,6 +425,26 @@ public class AiRagContextService {
             return null;
         }
         return String.join(", ", keys);
+    }
+
+    private Set<String> normalizeChunkTexts(List<RagChunk> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (RagChunk chunk : chunks) {
+            if (chunk == null || chunk.label == null) continue;
+            String normalized = normalizeForMatch(chunk.label);
+            if (!normalized.isBlank()) {
+                result.add(normalized);
+            }
+        }
+        return result;
+    }
+
+    private String normalizeForMatch(String text) {
+        if (text == null) return "";
+        return text.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
 
     private List<String> textArray(JsonNode node, int limit) {
