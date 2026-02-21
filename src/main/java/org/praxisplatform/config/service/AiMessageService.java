@@ -19,6 +19,7 @@ import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.repository.AiActionRepository;
 import org.praxisplatform.config.repository.AiMessageRepository;
 import org.praxisplatform.config.repository.AiThreadRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,7 +69,7 @@ public class AiMessageService {
     private final AiProvider aiProvider;
     private final AiTurnService turnService;
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public AiMemoryContext prepareTurn(
             AiThread thread,
             AiOrchestratorRequest request,
@@ -80,7 +81,11 @@ public class AiMessageService {
             request.setClientTurnId(turnId);
         }
 
-        AiTurnService.TurnDecision decision = turnService.beginTurn(threadId, turnId);
+        boolean streamTurnPreclaimed = request != null && Boolean.TRUE.equals(request.getStreamTurnPreclaimed());
+        boolean deferTurnCompletion = request != null && Boolean.TRUE.equals(request.getStreamTransport());
+        AiTurnService.TurnDecision decision = streamTurnPreclaimed
+                ? AiTurnService.TurnDecision.PROCESS
+                : turnService.beginTurn(threadId, turnId);
         if (decision == AiTurnService.TurnDecision.DONE) {
             AiOrchestratorResponse cached = loadCachedResponse(threadId, turnId);
             if (cached == null) {
@@ -96,7 +101,8 @@ public class AiMessageService {
                     Collections.emptyList(),
                     DEFAULT_WINDOW_SIZE,
                     true,
-                    cached);
+                    cached,
+                    deferTurnCompletion);
         }
         if (decision == AiTurnService.TurnDecision.IN_PROGRESS) {
             AiOrchestratorResponse cached = AiOrchestratorResponse.builder()
@@ -110,12 +116,15 @@ public class AiMessageService {
                     Collections.emptyList(),
                     DEFAULT_WINDOW_SIZE,
                     true,
-                    cached);
+                    cached,
+                    deferTurnCompletion);
         }
 
         AiOrchestratorResponse cached = loadCachedResponse(threadId, turnId);
         if (cached != null) {
-            turnService.completeTurn(threadId, turnId);
+            if (!deferTurnCompletion) {
+                turnService.completeTurn(threadId, turnId);
+            }
             return new AiMemoryContext(
                     threadId,
                     turnId,
@@ -123,7 +132,8 @@ public class AiMessageService {
                     Collections.emptyList(),
                     DEFAULT_WINDOW_SIZE,
                     true,
-                    cached);
+                    cached,
+                    deferTurnCompletion);
         }
 
         appendUserMessages(threadId, turnId, request, resolvedUserPrompt);
@@ -136,10 +146,11 @@ public class AiMessageService {
                 window,
                 DEFAULT_WINDOW_SIZE,
                 false,
-                null);
+                null,
+                deferTurnCompletion);
     }
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public void storeAssistantResponse(
             AiMemoryContext memoryContext,
             AiOrchestratorResponse response) {
@@ -180,7 +191,9 @@ public class AiMessageService {
                     .build();
             actionRepository.save(action);
         }
-        turnService.completeTurn(threadId, turnId);
+        if (!memoryContext.isDeferTurnCompletion()) {
+            turnService.completeTurn(threadId, turnId);
+        }
     }
 
     public void applyMemoryMetadata(AiOrchestratorResponse response, AiMemoryContext memoryContext) {
@@ -362,7 +375,7 @@ public class AiMessageService {
         return null;
     }
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public boolean summarizeIfNeeded(AiMemoryContext memoryContext) {
         if (memoryContext == null || memoryContext.isCached()) {
             return false;

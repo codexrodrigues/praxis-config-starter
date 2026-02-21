@@ -1,5 +1,6 @@
 package org.praxisplatform.config.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -8,6 +9,8 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.service.AiInteractionLogger;
 import org.praxisplatform.config.service.AiOrchestratorService;
+import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,10 +35,12 @@ public class AiOrchestratorController {
 
     private final AiOrchestratorService orchestratorService;
     private final AiInteractionLogger interactionLogger;
+    private final AiPrincipalContextResolver principalContextResolver;
 
     @PostMapping("/patch")
     public ResponseEntity<AiOrchestratorResponse> generatePatch(
             @Valid @RequestBody AiOrchestratorRequest request,
+            HttpServletRequest servletRequest,
             @RequestHeader(value = "X-Request-Id", required = false) String requestId,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
@@ -57,14 +62,21 @@ public class AiOrchestratorController {
                     DEFAULT_CONTRACT_SCHEMA_HASH);
             request.setContractVersion(resolvedContractVersion);
             request.setSchemaHash(resolvedSchemaHash);
+            request.setStreamTransport(Boolean.FALSE);
+            request.setStreamTurnPreclaimed(Boolean.FALSE);
+            AiPrincipalContext principalContext = principalContextResolver.resolve(
+                    servletRequest,
+                    tenantId,
+                    userId,
+                    environment);
 
             String baseUrl = ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString();
             AiOrchestratorResponse response = orchestratorService.generatePatch(
                     request,
                     baseUrl,
-                    tenantId,
-                    userId,
-                    environment);
+                    principalContext.tenantId(),
+                    principalContext.userId(),
+                    principalContext.environment());
             if (response != null) {
                 response.setContractVersion(resolvedContractVersion);
                 response.setSchemaHash(resolvedSchemaHash);

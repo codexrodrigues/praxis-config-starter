@@ -65,4 +65,5 @@ public class TestAiConfig {
     public VectorStore vectorStore() { // Added
         return mock(VectorStore.class);
     }
+
 }

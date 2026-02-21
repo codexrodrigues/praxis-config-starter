@@ -1,12 +1,14 @@
 package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +19,8 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.service.AiInteractionLogger;
 import org.praxisplatform.config.service.AiOrchestratorService;
+import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -34,17 +38,23 @@ class AiOrchestratorControllerTest {
     @Mock
     private AiInteractionLogger interactionLogger;
 
+    @Mock
+    private AiPrincipalContextResolver principalContextResolver;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private AiOrchestratorController controller;
+    private MockHttpServletRequest servletRequest;
 
     @BeforeEach
     void setUp() {
-        controller = new AiOrchestratorController(orchestratorService, interactionLogger);
-        MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/api/praxis/config/ai/patch");
+        controller = new AiOrchestratorController(orchestratorService, interactionLogger, principalContextResolver);
+        servletRequest = new MockHttpServletRequest("POST", "/api/praxis/config/ai/patch");
         servletRequest.setScheme("http");
         servletRequest.setServerName("localhost");
         servletRequest.setServerPort(8088);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(servletRequest));
+        when(principalContextResolver.resolve(servletRequest, "t1", "u1", "dev"))
+                .thenReturn(new AiPrincipalContext("t1", "u1", "dev", true));
     }
 
     @AfterEach
@@ -64,6 +74,7 @@ class AiOrchestratorControllerTest {
 
         ResponseEntity<AiOrchestratorResponse> response = controller.generatePatch(
                 request,
+                servletRequest,
                 null,
                 "t1",
                 "u1",
@@ -90,6 +101,7 @@ class AiOrchestratorControllerTest {
 
         ResponseEntity<AiOrchestratorResponse> response = controller.generatePatch(
                 request,
+                servletRequest,
                 null,
                 "t1",
                 "u1",
@@ -117,6 +129,7 @@ class AiOrchestratorControllerTest {
 
         ResponseEntity<AiOrchestratorResponse> response = controller.generatePatch(
                 request,
+                servletRequest,
                 null,
                 "t1",
                 "u1",
@@ -130,6 +143,37 @@ class AiOrchestratorControllerTest {
                 .isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_VERSION);
         assertThat(response.getHeaders().getFirst(AiOrchestratorController.CONTRACT_SCHEMA_HASH_HEADER))
                 .isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_SCHEMA_HASH);
+    }
+
+    @Test
+    void shouldForceInternalStreamingFlagsOffForPatchEndpoint() {
+        AiOrchestratorRequest request = baseRequest();
+        request.setStreamTransport(Boolean.TRUE);
+        request.setStreamTurnPreclaimed(Boolean.TRUE);
+        AiOrchestratorResponse serviceResponse = AiOrchestratorResponse.builder().type("patch").build();
+        when(orchestratorService.generatePatch(any(), anyString(), eq("t1"), eq("u1"), eq("dev")))
+                .thenReturn(serviceResponse);
+
+        controller.generatePatch(
+                request,
+                servletRequest,
+                null,
+                "t1",
+                "u1",
+                "dev",
+                "v1.1",
+                HASH);
+
+        ArgumentCaptor<AiOrchestratorRequest> captor = ArgumentCaptor.forClass(AiOrchestratorRequest.class);
+        verify(orchestratorService).generatePatch(
+                captor.capture(),
+                anyString(),
+                eq("t1"),
+                eq("u1"),
+                eq("dev"));
+        AiOrchestratorRequest forwarded = captor.getValue();
+        assertThat(forwarded.getStreamTransport()).isEqualTo(Boolean.FALSE);
+        assertThat(forwarded.getStreamTurnPreclaimed()).isEqualTo(Boolean.FALSE);
     }
 
     private AiOrchestratorRequest baseRequest() {

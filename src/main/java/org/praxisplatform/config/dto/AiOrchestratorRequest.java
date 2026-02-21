@@ -45,4 +45,8 @@ public class AiOrchestratorRequest {
     private String apiMethod;
     private String apiTags;
     private Integer apiSearchLimit;
+
+    // Internal stream execution flags set server-side.
+    private Boolean streamTransport;
+    private Boolean streamTurnPreclaimed;
 }

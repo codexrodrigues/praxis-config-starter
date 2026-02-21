@@ -4,6 +4,47 @@ Status atual
 - Veredito tecnico consolidado: `NO-GO` para implementar streaming no formato atual.
 - Gate para virar `GO`: corrigir contrato testavel, seguranca/logging, isolamento tenant/user, cancelamento deterministico e operacao multi-instancia.
 
+Atualizacao de implementacao (Fase A concluida em 2026-02-20)
+- Endpoints publicados:
+  - `POST /api/praxis/config/ai/patch/stream/start`
+  - `GET /api/praxis/config/ai/patch/stream/{streamId}`
+  - `GET /api/praxis/config/ai/patch/stream/{streamId}/probe`
+  - `POST /api/praxis/config/ai/patch/stream/{streamId}/cancel`
+- `clientTurnId` e obrigatorio em `start` para garantir idempotencia corporativa.
+- Retry sem `sessionId` no primeiro turno usa thread deterministica por `clientTurnId` para evitar duplicacao de thread/stream.
+- Hash idempotente de `start` foi canonizado por allowlist de campos de contrato para desconsiderar flags internas/transientes de stream, evitando `409` falso em rollout entre versoes.
+- Contrato SSE aplicado com envelope `eventSchemaVersion=v1` e campos: `eventId,streamId,threadId,turnId,seq,timestamp,type,payload`.
+- Regras de replay ativas:
+  - `Last-Event-ID` invalido -> `400`
+  - `Last-Event-ID` fora do escopo autorizado -> `403`
+  - stream expirado -> `410`
+- Persistencia de evento antes da emissao SSE implementada via `ai_turn_event`.
+- Cancelamento terminal `cancelled` implementado e persistido.
+- Reserva de turno para stream ajustada para garantir FK do event-store sem bloquear o processamento real do turno.
+- Reconnect para stream ja terminal fecha imediatamente mesmo sem eventos novos no replay.
+- Guarda de cancelamento evita emissao de `result/error` apos evento terminal `cancelled`.
+- Reconciliacao de stream legado orfao agora distingue status real do turno e preserva terminal `cancelled` quando aplicavel.
+- Transicao terminal no event-store ficou atomica: apos `result/error/cancelled`, novos eventos do turno recebem `409`.
+- Append do event-store agora serializa por `ai_turn` com lock pessimista (`PESSIMISTIC_WRITE`) para reduzir corrida cross-node em terminalizacao.
+- Cancelamento deixou de marcar `ai_turn` como `CANCELLED` antes do append terminal; o status do turno agora e reconciliado pelo terminal efetivo persistido.
+- Heartbeat de conexao passou a evento SSE `heartbeat` nao persistido e consumivel pelo FE (reduz falso timeout e custo de replay).
+- Heartbeat SSE nao envia `id` (somente eventos persistidos carregam `id`), evitando `Last-Event-ID: null` em reconnect automatico.
+- `Last-Event-ID: null` (literal) e tratado como ausente no backend para robustez de transporte.
+- Backpressure corporativo ativo com limites locais por `tenant/user` e rejeicao explicita (`429/503`) quando a capacidade e excedida; no scale-out atual o controle e `best effort` por instancia.
+- Suite de integracao HTTP/SSE adicionada (`AiPatchStreamHttpSseIntegrationTest`, corporate-mode=true) cobrindo replay com `Last-Event-ID`, reconnect cross-node com replay incremental, corrida `cancelled` vs `result/error` e erros `400/403/404/409/410`.
+- Auth de stream suporta:
+  - `cookie` (padrao)
+  - `signed_url_token` (token opaco/cifrado, TTL curto, em query para `probe/stream/cancel`; quando nao ha cookie, a identidade desses endpoints e resolvida pelo escopo do token)
+- Formato legado de token assinado somente HMAC foi mantido sob flag de migracao e permanece desativado por default.
+- `signed_url_token` requer redaction de query string em logs de borda (gateway/proxy/APM); sem esse controle, nao e modo recomendado.
+- Sem `signed_url_token`, endpoints de stream preservam semantica de autenticacao server-side (`401/403`) sem fallback token-only.
+- `POST /api/praxis/config/ai/patch` mantido retrocompativel.
+- Gate operacional pendente: reexecutar a matriz SSE/replay em ambiente distribuido real (>=2 instancias com LB) para evidencia final corporativa.
+- Cobertura de `401` adicionada no starter com security chain real (`AiPatchStreamSecurityChainIntegrationTest`); no host, a resposta final segue a politica da cadeia de seguranca da aplicacao consumidora.
+- Isolamento transacional multi-TM reforcado:
+  - servicos/repositorios de stream/event-store usam `transactionManager=configTransactionManager`.
+  - starter registra alias `configTransactionManager` para host single-TM (prioriza `transactionManager`; em ausencia, usa candidato unico) e falha no startup quando a resolucao e ambigua/ausente.
+
 ## 1) Bloqueadores de entrada (must-fix)
 
 1. Contrato SSE invalido para o fluxo atual
@@ -77,12 +118,15 @@ Start
 - `400`: payload invalido.
 - `401/403`: autenticacao/autorizacao.
 - `409`: conflito de idempotencia com payload divergente para mesmo `clientTurnId`.
+- `429`: limite por tenant/user excedido.
+- `503`: saturacao global do executor de stream.
 
 Stream
 - `200`: SSE aberto.
 - sem novos eventos: manter conexao aberta com `heartbeat` periodico.
 - `401/403`: acesso negado.
-- `404`: stream inexistente ou fora de escopo autorizado.
+- `404`: stream inexistente.
+- `403`: stream/`Last-Event-ID` fora de escopo autorizado.
 - `410`: stream expirado (cliente deve reiniciar via `/start`).
 
 Cancel
@@ -92,7 +136,7 @@ Cancel
 
 ### 2.3 Envelope SSE versionado
 
-Campos obrigatorios
+Campos obrigatorios (eventos persistidos em `ai_turn_event`)
 - `eventId`
 - `streamId`
 - `threadId`
@@ -102,6 +146,11 @@ Campos obrigatorios
 - `timestamp`
 - `type`
 - `payload`
+
+Heartbeat (`type=heartbeat`) e keepalive out-of-band
+- Nao e persistido no event-store por default.
+- Pode trafegar com `eventId=null` e `seq=-1`.
+- Nao participa de idempotencia/replay por `Last-Event-ID`.
 
 Eventos MVP
 - `status`
@@ -115,7 +164,7 @@ Eventos MVP
 - `cancelled`
 
 Regras
-- `seq` monotono por `turnId`.
+- `seq` monotono por `turnId` para eventos persistidos.
 - `result`, `error` e `cancelled` sao terminais.
 - FE deve ser idempotente por `eventId`/`seq`.
 - `Last-Event-ID` invalido -> `400`; fora de tenant/user/thread/turn -> `403`; expirado -> `410`.
@@ -126,6 +175,9 @@ Regras
 ### 3.1 Identidade e autorizacao
 - Resolver tenant/user/env no servidor a partir de principal autenticado.
 - Headers do cliente servem apenas como hint em ambiente local controlado e sob flag explicita.
+- Em local mode com fallback por header, identidade anonima do host (`anonymousUser`/equivalente) nao deve sobrescrever `X-User-ID`.
+- Quando tenant nao estiver no principal, a infraestrutura deve projetar atributo server-side confiavel
+  (filtro/gateway); fallback por default tenant corporativo fica desativado por padrao e e opt-in explicito.
 - Ao abrir stream e ao fazer replay:
   - validar associacao `tenantId + userId + threadId + turnId`.
   - negar acesso cruzado.
@@ -166,6 +218,7 @@ Tabela nova: `ai_turn_event`
   - retencao (TTL) por ambiente.
   - criptografia em repouso para payload de evento.
   - purge/arquivamento com trilha de auditoria.
+  - classificacao de PII no payload funcional: campos de negocio mantidos por contrato devem seguir politica corporativa de minimizacao e mascaramento em exportacoes/analytics.
 
 Requisito transacional
 - Persistir evento com `seq` antes de emitir para `SseEmitter`.
@@ -350,3 +403,8 @@ Providers
 4. `ADR-04`: `cancel` obrigatorio no modo streaming corporativo; `cancelled` e terminal.
 5. `ADR-05`: FE com reducer deterministico por `(streamId,eventId,seq)` e tabela de transicoes explicita.
 6. `ADR-06`: adapter por provider com `stream/cancel/fallback` e testes de contrato por provider/modelo.
+
+## 11) Backlog executavel
+
+- Backlog detalhado da Fase A (`contrato + seguranca`):
+  - `docs/ai/p1-backend/P1-BE-6A-backlog-fase-a-contrato-seguranca.md`
