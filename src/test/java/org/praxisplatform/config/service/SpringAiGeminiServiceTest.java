@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -57,6 +58,14 @@ class SpringAiGeminiServiceTest {
 
         assertNotNull(node);
         assertEquals(321, node.get("value").asInt());
+    }
+
+    @Test
+    void supportsStreamingAsTechnicalCapabilityWithoutApiKey() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+
+        assertTrue(service.supportsTextStreaming(AiCallConfig.builder().build()));
+        assertTrue(service.supportsTurnCancellation(AiCallConfig.builder().build()));
     }
 
     private static ObjectProvider<GoogleGenAiChatModel> provider(GoogleGenAiChatModel client) {

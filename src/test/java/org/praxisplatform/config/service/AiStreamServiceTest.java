@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.AfterEach;
@@ -317,6 +318,52 @@ class AiStreamServiceTest {
         assertThat(response.getTerminalState()).isEqualTo("completed");
         verify(turnService, never()).cancelTurn(threadId, turnId);
         verify(turnService).completeTurn(threadId, turnId);
+    }
+
+    @Test
+    void shouldTriggerInFlightAbortHookOnCancel() {
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID streamId = UUID.randomUUID();
+        AiPrincipalContext principal = new AiPrincipalContext("tenant-a", "user-a", "prod", true);
+        AiTurnEventService.StreamOwnership ownership = new AiTurnEventService.StreamOwnership(
+                streamId,
+                threadId,
+                turnId,
+                "tenant-a",
+                "user-a",
+                "prod",
+                Instant.now().plusSeconds(900));
+        AiTurnEventEnvelope cancelled = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(streamId)
+                .threadId(threadId)
+                .turnId(turnId)
+                .seq(2L)
+                .type("cancelled")
+                .timestamp(Instant.now())
+                .payload(new ObjectMapper().valueToTree(Map.of("state", "cancelled")))
+                .build();
+
+        when(turnEventService.requireOwnership(streamId, principal)).thenReturn(ownership);
+        when(turnEventService.findLastEvent(streamId)).thenReturn(Optional.empty());
+        when(turnEventService.appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("cancelled"), any()))
+                .thenReturn(cancelled);
+
+        AtomicInteger abortCalls = new AtomicInteger(0);
+        AiStreamExecutionContextHolder.execute(
+                streamId,
+                threadId,
+                turnId,
+                () -> false,
+                () -> {
+                    AiStreamExecutionContextHolder.registerAbortAction(abortCalls::incrementAndGet);
+                    return null;
+                });
+
+        streamService.cancelStream(streamId, null, principal);
+
+        assertThat(abortCalls.get()).isEqualTo(1);
     }
 
     @Test

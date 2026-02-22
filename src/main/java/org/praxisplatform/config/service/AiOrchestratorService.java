@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -20,6 +21,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.CancellationException;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -139,6 +142,12 @@ public class AiOrchestratorService {
 
     @Value("${praxis.ai.action-plan.retry-temperature:0.1}")
     private double actionPlanRetryTemperature;
+
+    @Value("${praxis.ai.provider.text-stream.enabled:false}")
+    private boolean providerTextStreamEnabled;
+
+    @Value("${praxis.ai.provider.text-stream.fallback-sync-on-error:true}")
+    private boolean providerTextStreamFallbackSyncOnError;
 
     private final AiContextService contextService;
     private final AiProvider aiProvider;
@@ -707,6 +716,16 @@ public class AiOrchestratorService {
                     filteredCaps != null ? filteredCaps.size() : 0,
                     summarizeCapabilityPaths(filteredCaps, 12));
         }
+        AiOrchestratorResponse deterministicFastPath = tryResolveTableDeterministicDirectFallback(
+                request,
+                currentState,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (deterministicFastPath != null) {
+            return finalizeResponse(deterministicFastPath, memoryContext);
+        }
         IntentPlan intentPlan = generateIntentPlan(
                 request,
                 modelPrompt,
@@ -902,6 +921,17 @@ public class AiOrchestratorService {
             return finalizeResponse(errorWithWarnings(semanticCheck.message, warnings), memoryContext);
         }
         patchNode = semanticCheck.patch;
+        AiOrchestratorResponse relevanceFallback = tryResolveDeterministicPatchRelevanceFallback(
+                request,
+                patchNode,
+                currentState,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (relevanceFallback != null) {
+            return finalizeResponse(relevanceFallback, memoryContext);
+        }
 
         if (actionPlan != null
                 && actionPlan.getActions() != null
@@ -1552,7 +1582,7 @@ public class AiOrchestratorService {
             Integer attempt) {
         long start = System.nanoTime();
         try {
-            String text = aiProvider.generateText(prompt, config);
+            String text = resolveTextGeneration(callType, prompt, config, request);
             interactionLogger.logLlmInteraction(
                     request,
                     callType,
@@ -1577,6 +1607,84 @@ public class AiOrchestratorService {
                     ex);
             throw ex;
         }
+    }
+
+    private String resolveTextGeneration(
+            String callType,
+            String prompt,
+            AiCallConfig config,
+            AiOrchestratorRequest request) {
+        boolean streamTransport = request != null && Boolean.TRUE.equals(request.getStreamTransport());
+        if (!providerTextStreamEnabled || !streamTransport || !aiProvider.supportsTextStreaming(config)) {
+            return aiProvider.generateText(prompt, config);
+        }
+
+        Supplier<Boolean> cancellationRequested = AiStreamExecutionContextHolder.cancellationRequested();
+        try {
+            log.debug("[AiOrchestratorService] Using provider text stream (callType={}, provider={}).",
+                    callType, resolveProviderName(config));
+            return aiProvider.generateTextStream(prompt, config, null, cancellationRequested);
+        } catch (Exception ex) {
+            if (ex instanceof CancellationException) {
+                throw ex;
+            }
+            if (shouldFallbackToSyncTextGeneration(ex)) {
+                log.warn("[AiOrchestratorService] Provider stream failed; falling back to sync text generation. provider={} callType={} reason={}",
+                        resolveProviderName(config),
+                        callType,
+                        safeErrorMessage(ex));
+                return aiProvider.generateText(prompt, config);
+            }
+            throw ex;
+        }
+    }
+
+    private boolean shouldFallbackToSyncTextGeneration(Exception streamError) {
+        if (!providerTextStreamFallbackSyncOnError || streamError == null) {
+            return false;
+        }
+        Throwable rootCause = streamError;
+        while (rootCause.getCause() != null && rootCause.getCause() != rootCause) {
+            rootCause = rootCause.getCause();
+        }
+        if (rootCause instanceof CancellationException) {
+            return false;
+        }
+        if (rootCause instanceof AiProviderStreamException streamException) {
+            return switch (streamException.getKind()) {
+                case TRANSPORT, TIMEOUT, RATE_LIMIT, CAPACITY -> true;
+                default -> false;
+            };
+        }
+        if (rootCause instanceof IOException
+                || rootCause instanceof java.net.ConnectException
+                || rootCause instanceof java.net.SocketException
+                || rootCause instanceof java.net.UnknownHostException
+                || rootCause instanceof java.net.http.HttpTimeoutException) {
+            return true;
+        }
+        String message = safeErrorMessage(rootCause).toLowerCase(Locale.ROOT);
+        return message.contains("http 429")
+                || message.contains("http 503")
+                || message.contains("timeout")
+                || message.contains("timed out")
+                || message.contains("capacity")
+                || message.contains("temporarily unavailable")
+                || message.contains("connection reset")
+                || message.contains("connection refused")
+                || message.contains("broken pipe")
+                || message.contains("premature close");
+    }
+
+    private String safeErrorMessage(Throwable error) {
+        if (error == null) {
+            return "unknown";
+        }
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return error.getClass().getSimpleName();
+        }
+        return message;
     }
 
     private String resolveProviderName(AiCallConfig config) {
@@ -10541,6 +10649,433 @@ public class AiOrchestratorService {
         return null;
     }
 
+    private AiOrchestratorResponse tryResolveTableDeterministicDirectFallback(
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (request == null || !COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+
+        String density = resolveDensityValue(promptLower);
+        if (!isBlank(density) && mentionsDensityPrompt(promptLower)) {
+            warnings.add("Patch deterministico aplicado para densidade da tabela.");
+            return applySuggestedPatch(
+                    buildDensityPatch(density),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        SelectionDirective selection = resolveSelectionDirective(promptLower);
+        if (selection != null && (!isBlank(selection.mode) || selection.enabled != null)) {
+            warnings.add("Patch deterministico aplicado para selecao de linhas.");
+            return applySuggestedPatch(
+                    buildSelectionPatch(selection),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        List<ColumnDescriptor> columns = mergeColumnDescriptors(
+                extractColumnDescriptors(currentState),
+                request.getDataProfile());
+        JsonNode alignPatch = buildDeterministicAlignmentPatch(promptLower, columns);
+        if (alignPatch != null) {
+            warnings.add("Patch deterministico aplicado para alinhamento de colunas.");
+            return applySuggestedPatch(
+                    alignPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        JsonNode statusHighlightPatch = buildDeterministicStatusHighlightPatch(request, currentState, promptLower);
+        if (statusHighlightPatch != null) {
+            warnings.add("Patch deterministico aplicado para destaque de status.");
+            return applySuggestedPatch(
+                    statusHighlightPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+        return null;
+    }
+
+    private AiOrchestratorResponse tryResolveDeterministicPatchRelevanceFallback(
+            AiOrchestratorRequest request,
+            JsonNode patchNode,
+            JsonNode currentState,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (request == null || patchNode == null || !patchNode.isObject()
+                || !COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+
+        String density = resolveDensityValue(promptLower);
+        if (!isBlank(density) && mentionsDensityPrompt(promptLower) && !patchHasDensityConfig(patchNode)) {
+            warnings.add("Patch gerado nao aderiu ao pedido de densidade; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    buildDensityPatch(density),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        SelectionDirective selection = resolveSelectionDirective(promptLower);
+        if (selection != null && !patchHasSelectionConfig(patchNode)) {
+            warnings.add("Patch gerado nao aderiu ao pedido de selecao; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    buildSelectionPatch(selection),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        List<ColumnDescriptor> columns = mergeColumnDescriptors(
+                extractColumnDescriptors(currentState),
+                request.getDataProfile());
+        JsonNode alignPatch = buildDeterministicAlignmentPatch(promptLower, columns);
+        if (alignPatch != null && !patchHasAnyColumnAlign(patchNode)) {
+            warnings.add("Patch gerado nao aderiu ao pedido de alinhamento; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    alignPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        JsonNode statusHighlightPatch = buildDeterministicStatusHighlightPatch(request, currentState, promptLower);
+        if (statusHighlightPatch != null && !patchTouchesField(patchNode, "status")) {
+            warnings.add("Patch gerado nao aderiu ao pedido contextual de status; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    statusHighlightPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+        return null;
+    }
+
+    private boolean mentionsDensityPrompt(String promptLower) {
+        if (isBlank(promptLower)) {
+            return false;
+        }
+        return promptLower.contains("densidade") || promptLower.contains("density");
+    }
+
+    private String resolveDensityValue(String promptLower) {
+        if (isBlank(promptLower)) {
+            return null;
+        }
+        if (promptLower.contains("compact")) {
+            return "compact";
+        }
+        if (promptLower.contains("confort") || promptLower.contains("comfortable")) {
+            return "comfortable";
+        }
+        if (promptLower.contains("espac") || promptLower.contains("spacious")) {
+            return "spacious";
+        }
+        return null;
+    }
+
+    private JsonNode buildDensityPatch(String density) {
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.putObject("appearance").put("density", density);
+        return patch;
+    }
+
+    private SelectionDirective resolveSelectionDirective(String promptLower) {
+        String normalized = normalizeSearchToken(promptLower);
+        if (!mentionsSelectionPrompt(promptLower)) {
+            return null;
+        }
+        Boolean enabled = null;
+        if (normalized.contains("desativ") || normalized.contains("disable") || normalized.contains("remover")) {
+            enabled = Boolean.FALSE;
+        } else if (normalized.contains("ativ") || normalized.contains("enable")) {
+            enabled = Boolean.TRUE;
+        }
+
+        String mode = null;
+        if (normalized.contains("multip") || normalized.contains("multiple")) {
+            mode = "multiple";
+        } else if (normalized.contains("unica")
+                || normalized.contains("single")) {
+            mode = "single";
+        }
+
+        if (enabled == null && mode == null) {
+            return null;
+        }
+        if (enabled == null) {
+            enabled = Boolean.TRUE;
+        }
+        return new SelectionDirective(enabled, mode);
+    }
+
+    private boolean mentionsSelectionPrompt(String promptLower) {
+        if (isBlank(promptLower)) {
+            return false;
+        }
+        String normalized = normalizeSearchToken(promptLower);
+        boolean mentionsSelection = normalized.contains("selec")
+                || normalized.contains("selection")
+                || normalized.contains("selectable");
+        if (!mentionsSelection) {
+            return false;
+        }
+        return normalized.contains("linha")
+                || normalized.contains("linhas")
+                || normalized.contains("row")
+                || normalized.contains("rows");
+    }
+
+    private JsonNode buildSelectionPatch(SelectionDirective selection) {
+        ObjectNode patch = objectMapper.createObjectNode();
+        ObjectNode selectionNode = patch.putObject("behavior").putObject("selection");
+        if (selection.enabled != null) {
+            selectionNode.put("enabled", selection.enabled);
+        }
+        if (!isBlank(selection.mode)) {
+            selectionNode.put("type", selection.mode);
+        }
+        return patch;
+    }
+
+    private JsonNode buildDeterministicAlignmentPatch(String promptLower, List<ColumnDescriptor> columns) {
+        if (isBlank(promptLower) || columns == null || columns.isEmpty()) {
+            return null;
+        }
+        if (!promptLower.contains("alinh") && !promptLower.contains("align")) {
+            return null;
+        }
+        LinkedHashMap<String, String> alignByField = new LinkedHashMap<>();
+        for (ColumnDescriptor column : columns) {
+            if (column == null || isBlank(column.field)) {
+                continue;
+            }
+            String align = resolveColumnAlignment(promptLower, column);
+            if (!isBlank(align)) {
+                alignByField.put(column.field, align);
+            }
+        }
+        if (alignByField.isEmpty()) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode patchColumns = patch.putArray("columns");
+        for (Map.Entry<String, String> entry : alignByField.entrySet()) {
+            ObjectNode col = patchColumns.addObject();
+            col.put("field", entry.getKey());
+            col.put("align", entry.getValue());
+        }
+        return patch;
+    }
+
+    private String resolveColumnAlignment(String promptLower, ColumnDescriptor column) {
+        List<String> tokens = new ArrayList<>();
+        tokens.add(column.field.toLowerCase(Locale.ROOT));
+        if (!isBlank(column.header)) {
+            tokens.add(column.header.toLowerCase(Locale.ROOT));
+        }
+        for (String token : tokens) {
+            if (isBlank(token)) {
+                continue;
+            }
+            int index = 0;
+            while (index >= 0) {
+                index = promptLower.indexOf(token, index);
+                if (index < 0) {
+                    break;
+                }
+                int forwardEnd = Math.min(promptLower.length(), index + token.length() + 45);
+                String forwardWindow = promptLower.substring(index, forwardEnd);
+                String alignment = resolveAlignmentKeyword(forwardWindow);
+                if (!isBlank(alignment)) {
+                    return alignment;
+                }
+                int backwardStart = Math.max(0, index - 28);
+                String backwardWindow = promptLower.substring(backwardStart, index + token.length());
+                alignment = resolveAlignmentKeyword(backwardWindow);
+                if (!isBlank(alignment)) {
+                    return alignment;
+                }
+                index = index + token.length();
+            }
+        }
+        return null;
+    }
+
+    private String resolveAlignmentKeyword(String text) {
+        if (isBlank(text)) {
+            return null;
+        }
+        if (text.contains("direit") || text.contains("right")) {
+            return "right";
+        }
+        if (text.contains("esquerd") || text.contains("left")) {
+            return "left";
+        }
+        if (text.contains("centro") || text.contains("center") || text.contains("central")) {
+            return "center";
+        }
+        return null;
+    }
+
+    private boolean isStatusHighlightPrompt(String promptLower) {
+        if (isBlank(promptLower) || !promptLower.contains("status")) {
+            return false;
+        }
+        boolean asksHighlight = promptLower.contains("destaq")
+                || promptLower.contains("highlight")
+                || promptLower.contains("visual");
+        boolean mentionsPending = promptLower.contains("pendente")
+                || promptLower.contains("pending");
+        return asksHighlight && mentionsPending;
+    }
+
+    private JsonNode buildDeterministicStatusHighlightPatch(
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            String promptLower) {
+        if (request == null || !isStatusHighlightPrompt(promptLower)) {
+            return null;
+        }
+        String field = inferFieldFromPrompt(promptLower, currentState, request.getSchemaFields(), "status");
+        if (isBlank(field)) {
+            return null;
+        }
+        BadgeValuesContext ctx = resolveBadgeValuesContext(request, field);
+        List<String> values = ctx != null ? new ArrayList<>(ctx.values) : new ArrayList<>();
+        if (values.isEmpty()) {
+            values = new ArrayList<>(extractValuesFromPrompt(request.getUserPrompt()));
+        }
+        if (values.isEmpty()) {
+            values = new ArrayList<>(List.of("ATIVO", "INATIVO", "PENDENTE"));
+        }
+        values = limitBadgeValues(values);
+        if (values.isEmpty()) {
+            return null;
+        }
+        Map<String, String> colorMap = buildDefaultColorMap(values, promptLower);
+        for (String value : values) {
+            String normalized = normalizeText(value);
+            if ("pendente".equals(normalized) || "pending".equals(normalized)) {
+                colorMap.put(value, "warn");
+            }
+        }
+        if (colorMap.isEmpty()) {
+            colorMap.putAll(assignColors(values, DEFAULT_BADGE_PALETTE));
+        }
+        boolean quoteValues = true;
+        if (ctx != null) {
+            quoteValues = !isBooleanType(ctx.inferredType, ctx.explicitType);
+        }
+        JsonNode patch = buildConditionalBadgePatch(field, colorMap, quoteValues);
+        if (patch == null) {
+            return null;
+        }
+        if (promptLower.contains("prioridade") || promptLower.contains("priority")) {
+            ObjectNode sortingPatch = objectMapper.createObjectNode();
+            sortingPatch.putObject("behavior")
+                    .putObject("sorting")
+                    .put("enabled", true);
+            patch = mergePatchNodes(patch, sortingPatch);
+        }
+        return patch;
+    }
+
+    private boolean patchHasDensityConfig(JsonNode patchNode) {
+        JsonNode appearance = patchNode.get("appearance");
+        return appearance != null && appearance.isObject() && appearance.has("density");
+    }
+
+    private boolean patchHasSelectionConfig(JsonNode patchNode) {
+        JsonNode behavior = patchNode.get("behavior");
+        if (behavior == null || !behavior.isObject()) {
+            return false;
+        }
+        JsonNode selection = behavior.get("selection");
+        return selection != null
+                && selection.isObject()
+                && (selection.has("enabled") || selection.has("type") || selection.has("mode"));
+    }
+
+    private boolean patchHasAnyColumnAlign(JsonNode patchNode) {
+        JsonNode columns = patchNode.get("columns");
+        if (columns == null || !columns.isArray()) {
+            return false;
+        }
+        for (JsonNode column : columns) {
+            if (column != null && column.isObject() && column.has("align")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean patchTouchesField(JsonNode patchNode, String field) {
+        if (patchNode == null || isBlank(field)) {
+            return false;
+        }
+        JsonNode columns = patchNode.get("columns");
+        if (columns == null || !columns.isArray()) {
+            return false;
+        }
+        for (JsonNode column : columns) {
+            if (column == null || !column.isObject()) {
+                continue;
+            }
+            String patchField = textOrNull(column.get("field"));
+            if (!isBlank(patchField) && field.equalsIgnoreCase(patchField)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private AiOrchestratorResponse tryResolveComputedFallback(
             AiOrchestratorRequest request,
             JsonNode currentState,
@@ -13461,6 +13996,16 @@ public class AiOrchestratorService {
     private boolean requiresTarget(ComponentAction action) {
         if (action == null || action.patchTemplate == null) return false;
         return action.patchTemplate.toString().contains("{{target}}");
+    }
+
+    private static class SelectionDirective {
+        private final Boolean enabled;
+        private final String mode;
+
+        private SelectionDirective(Boolean enabled, String mode) {
+            this.enabled = enabled;
+            this.mode = mode;
+        }
     }
 
     private static class ContextRequest {

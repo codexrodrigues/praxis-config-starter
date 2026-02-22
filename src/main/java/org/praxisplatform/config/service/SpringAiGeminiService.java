@@ -3,6 +3,10 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -16,8 +20,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -147,6 +158,29 @@ public class SpringAiGeminiService implements AiProvider {
     @Override
     public String generateText(String prompt, AiCallConfig config) {
         return callWithOptions(prompt, config, false);
+    }
+
+    @Override
+    public boolean supportsTextStreaming(AiCallConfig config) {
+        return true;
+    }
+
+    @Override
+    public boolean supportsTurnCancellation(AiCallConfig config) {
+        return true;
+    }
+
+    @Override
+    public String generateTextStream(
+            String prompt,
+            AiCallConfig config,
+            Consumer<String> onChunk,
+            Supplier<Boolean> cancellationRequested) {
+        String resolvedKey = resolveApiKey(config);
+        if (resolvedKey == null || resolvedKey.isBlank()) {
+            return AiProvider.super.generateTextStream(prompt, config, onChunk, cancellationRequested);
+        }
+        return callWithApiKeyTextStream(prompt, resolvedKey, config, onChunk, cancellationRequested);
     }
 
     @Override
@@ -404,6 +438,127 @@ public class SpringAiGeminiService implements AiProvider {
             return extractContentFromGemini(root);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to call Gemini", e);
+        }
+    }
+
+    private String callWithApiKeyTextStream(
+            String prompt,
+            String apiKey,
+            AiCallConfig config,
+            Consumer<String> onChunk,
+            Supplier<Boolean> cancellationRequested) {
+        String resolvedModel = resolveModel(config);
+        double resolvedTemperature = resolveTemperature(config);
+        int resolvedMaxTokens = resolveMaxTokens(config);
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.putArray("contents").add(
+                objectMapper.createObjectNode()
+                        .putArray("parts")
+                        .add(objectMapper.createObjectNode().put("text", prompt)));
+        ObjectNode generationConfig = payload.putObject("generationConfig");
+        generationConfig.put("temperature", resolvedTemperature);
+        generationConfig.put("maxOutputTokens", resolvedMaxTokens);
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/"
+                + resolvedModel
+                + ":streamGenerateContent?alt=sse&key="
+                + URLEncoder.encode(apiKey, StandardCharsets.UTF_8);
+
+        CompletableFuture<HttpResponse<InputStream>> responseFuture = null;
+        AtomicReference<InputStream> streamRef = new AtomicReference<>();
+        AtomicReference<CompletableFuture<HttpResponse<InputStream>>> responseFutureRef = new AtomicReference<>();
+        AtomicBoolean abortRequested = new AtomicBoolean(false);
+        AiStreamExecutionContextHolder.AbortRegistration abortRegistration = null;
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                    .build();
+            abortRegistration = AiStreamExecutionContextHolder.registerAbortAction(() -> {
+                abortRequested.set(true);
+                CompletableFuture<HttpResponse<InputStream>> inFlight = responseFutureRef.get();
+                if (inFlight != null) {
+                    inFlight.cancel(true);
+                }
+                closeQuietly(streamRef.get());
+            });
+            responseFuture = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
+            responseFutureRef.set(responseFuture);
+            if (abortRequested.get()) {
+                responseFuture.cancel(true);
+                throw new CancellationException("Gemini stream cancelled before response.");
+            }
+            HttpResponse<InputStream> response = responseFuture.get(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
+            streamRef.set(response.body());
+            if (response.statusCode() >= 400) {
+                String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+                throw AiProviderStreamException.fromHttpStatus(
+                        "gemini",
+                        response.statusCode(),
+                        summarizeErrorBody(errorBody));
+            }
+
+            StringBuilder out = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(streamRef.get(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (isCancelled(cancellationRequested)) {
+                        throw new CancellationException("Gemini stream cancelled.");
+                    }
+                    String trimmed = line.trim();
+                    if (trimmed.isEmpty() || !trimmed.startsWith("data:")) {
+                        continue;
+                    }
+                    String data = trimmed.substring(5).trim();
+                    if (data.isEmpty()) {
+                        continue;
+                    }
+                    if ("[DONE]".equals(data)) {
+                        break;
+                    }
+                    String chunk = extractContentFromGeminiEvent(data);
+                    if (chunk == null || chunk.isBlank()) {
+                        continue;
+                    }
+                    out.append(chunk);
+                    if (onChunk != null) {
+                        onChunk.accept(chunk);
+                    }
+                }
+            }
+            return out.toString();
+        } catch (CancellationException cancelled) {
+            throw cancelled;
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("Gemini stream interrupted.");
+        } catch (TimeoutException timeoutException) {
+            if (responseFuture != null) {
+                responseFuture.cancel(true);
+            }
+            throw AiProviderStreamException.timeout("gemini", timeoutException);
+        } catch (ExecutionException executionException) {
+            Throwable cause = executionException.getCause() != null
+                    ? executionException.getCause()
+                    : executionException;
+            throw classifyStreamFailure("gemini", cause);
+        } catch (Exception e) {
+            if (isCancelled(cancellationRequested)) {
+                throw new CancellationException("Gemini stream cancelled.");
+            }
+            if (e instanceof AiProviderStreamException streamException) {
+                throw streamException;
+            }
+            throw classifyStreamFailure("gemini", e);
+        } finally {
+            if (abortRegistration != null) {
+                abortRegistration.close();
+            }
+            closeQuietly(streamRef.getAndSet(null));
         }
     }
 
@@ -780,6 +935,34 @@ public class SpringAiGeminiService implements AiProvider {
         return ex != null ? ex.getMessage() : null;
     }
 
+    private AiProviderStreamException classifyStreamFailure(String provider, Throwable error) {
+        if (error instanceof AiProviderStreamException streamException) {
+            return streamException;
+        }
+        if (error instanceof java.net.http.HttpTimeoutException) {
+            return AiProviderStreamException.timeout(provider, error);
+        }
+        if (error instanceof IOException
+                || error instanceof java.net.ConnectException
+                || error instanceof java.net.SocketException
+                || error instanceof java.net.UnknownHostException) {
+            return AiProviderStreamException.transport(provider, error);
+        }
+        return AiProviderStreamException.unknown(provider, error);
+    }
+
+    private String summarizeErrorBody(String body) {
+        if (body == null) {
+            return null;
+        }
+        String trimmed = body.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        int max = Math.min(trimmed.length(), 180);
+        return trimmed.substring(0, max);
+    }
+
     private String parseReasonFromJson(String message) {
         String trimmed = message.trim();
         int brace = trimmed.indexOf('{');
@@ -900,16 +1083,55 @@ public class SpringAiGeminiService implements AiProvider {
         }
     }
 
+    private String extractContentFromGeminiEvent(String data) {
+        try {
+            JsonNode root = objectMapper.readTree(data);
+            return extractContentFromGemini(root);
+        } catch (Exception ex) {
+            log.debug("[SpringAiGeminiService] Failed to parse Gemini stream chunk: {}", ex.getMessage());
+            return null;
+        }
+    }
+
     private String extractContentFromGemini(JsonNode root) {
         JsonNode candidate = root.path("candidates").path(0);
         JsonNode parts = candidate.path("content").path("parts");
         if (parts.isArray() && parts.size() > 0) {
-            String text = parts.get(0).path("text").asText(null);
-            if (text != null && !text.isBlank()) {
-                return text;
+            StringBuilder merged = new StringBuilder();
+            for (JsonNode part : parts) {
+                String text = part.path("text").asText(null);
+                if (text != null && !text.isBlank()) {
+                    merged.append(text);
+                }
+            }
+            String value = merged.toString();
+            if (!value.isBlank()) {
+                return value;
             }
         }
         return null;
+    }
+
+    private boolean isCancelled(Supplier<Boolean> cancellationRequested) {
+        if (cancellationRequested == null) {
+            return false;
+        }
+        try {
+            return Boolean.TRUE.equals(cancellationRequested.get());
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void closeQuietly(InputStream stream) {
+        if (stream == null) {
+            return;
+        }
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+            // Best-effort close.
+        }
     }
 
     private List<String> listStrings(JsonNode node) {

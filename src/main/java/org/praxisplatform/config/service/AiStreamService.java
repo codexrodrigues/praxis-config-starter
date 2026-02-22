@@ -347,6 +347,7 @@ public class AiStreamService {
         }
 
         cancelSignals.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false)).set(true);
+        AiStreamExecutionContextHolder.abortStream(streamId);
         AiPatchStreamCancelResponse response;
         try {
             appendAndEmit(
@@ -460,12 +461,17 @@ public class AiStreamService {
                 if (isCancellationRequested(streamId)) {
                     return;
                 }
-                response = orchestratorService.generatePatch(
-                        copyRequest(request),
-                        baseUrl,
-                        principalContext.tenantId(),
-                        principalContext.userId(),
-                        principalContext.environment());
+                response = AiStreamExecutionContextHolder.execute(
+                        streamId,
+                        threadId,
+                        turnId,
+                        () -> isCancellationRequested(streamId),
+                        () -> orchestratorService.generatePatch(
+                                copyRequest(request),
+                                baseUrl,
+                                principalContext.tenantId(),
+                                principalContext.userId(),
+                                principalContext.environment()));
                 if (!isInProgressResponse(response)) {
                     break;
                 }
@@ -537,6 +543,7 @@ public class AiStreamService {
                     "error",
                     Map.of("message", safeMessage(ex.getMessage(), "Falha no processamento do stream.")));
         } finally {
+            AiStreamExecutionContextHolder.abortStream(streamId);
             activeProcessingStreams.remove(streamId);
             cancelSignals.remove(streamId);
             releaseCapacityPermit(streamId);

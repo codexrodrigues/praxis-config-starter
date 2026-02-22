@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.praxisplatform.config.dto.AiProviderCatalogResponse;
 import org.praxisplatform.config.dto.AiProviderModel;
 import org.praxisplatform.config.dto.AiProviderModelsRequest;
 import org.praxisplatform.config.dto.AiProviderModelsResponse;
@@ -82,5 +83,28 @@ class AiProviderManagementServiceTest {
         assertEquals("open-ai", response.getProvider());
         assertEquals("gpt-4o-mini", response.getModel());
         verify(openai).generateText(any(), any());
+    }
+
+    @Test
+    void listCatalogIncludesProviderStreamingCapabilities() {
+        when(gemini.supportsTextStreaming(any())).thenReturn(true);
+        when(gemini.supportsTurnCancellation(any())).thenReturn(true);
+        when(openai.supportsTextStreaming(any())).thenReturn(true);
+        when(openai.supportsTurnCancellation(any())).thenReturn(true);
+
+        AiProviderCatalogResponse response = service.listCatalog();
+
+        assertEquals(4, response.getProviders().size());
+        assertTrue(response.getProviders().stream()
+                .anyMatch(item -> "gemini".equals(item.getId())
+                        && item.isSupportsTextStreaming()
+                        && item.isSupportsTurnCancellation()));
+        assertTrue(response.getProviders().stream()
+                .anyMatch(item -> "openai".equals(item.getId())
+                        && item.isSupportsTextStreaming()
+                        && item.isSupportsTurnCancellation()));
+        assertTrue(response.getProviders().stream()
+                .anyMatch(item -> "xai".equals(item.getId())
+                        && !item.isSupportsTextStreaming()));
     }
 }

@@ -20,7 +20,7 @@ Status de execucao (2026-02-20)
 - Configuracao `signed-url-token` agora valida segredo no startup (fail-fast), evitando erro 500 tardio na primeira requisicao.
 - A6 implementado: FE com `start/connect/cancel` + fallback automatico para `/patch`.
 - Fallback do FE ajustado para degradar apenas em indisponibilidade tecnica do stream (nao em `403/409` de contrato/autorizacao nem em expiracao/cancelamento de stream).
-- Timeout de inatividade de SSE passou a erro classificado de transporte (sem fallback direto para `/patch`), evitando snapshot indevido.
+- Timeout de inatividade de SSE passou a erro classificado de transporte (com fallback controlado para `/patch`, mantendo bloqueio de fallback para erros de contrato/autorizacao), evitando travamento de UX.
 - A7 implementado: state machine FE com estado interno terminal (`completed|failed|cancelled|expired`) e sem falso erro em `in_progress`.
 - Consistencia terminal reforcada: apos `cancelled`, o backend nao publica `result/error` tardio para o mesmo stream.
 - Reconciliacao de streams legados orfaos distingue status real do turno (`DONE` vs `CANCELLED`) para nao mascarar cancelamentos em auditoria.
@@ -46,6 +46,19 @@ Status de execucao (2026-02-20)
 - Fase C (2026-02-21): reducer FE endurecido para idempotencia/reordenação por `(streamId,eventId,seq)` com ignoração de eventos de stream estrangeiro.
 - Fase C (2026-02-21): reconnect SSE endurecido para ignorar `Last-Event-ID: null` e heartbeat sem `id` SSE (evita poluicao de cursor de replay).
 - Fase C (2026-02-21): fallback FE alinhado: queda de transporte de stream e schema de evento nao suportado degradam para `/patch`; erros de contrato/autorizacao (`400/403/409/410`) seguem sem fallback.
+- Fase 4 (2026-02-21): iniciado opt-in de provider text streaming no orquestrador (`praxis.ai.provider.text-stream.enabled`) com cancelamento cooperativo por contexto de stream (thread-local).
+- Fase 4 (2026-02-21): Gemini ganhou caminho SSE (`streamGenerateContent?alt=sse`) com fallback sync automatico quando streaming nao estiver disponivel.
+- Fase 4 (2026-02-21): catalogo de providers passa a expor capacidades `supportsTextStreaming` e `supportsTurnCancellation`.
+- Fase 4 (2026-02-21): `supports*` no catalogo foi alinhado para capacidade tecnica do provider (independente de credencial); estado de configuracao permanece tratado separadamente por status/config.
+- Fase 4 (2026-02-21): fallback sync em erro de stream ficou explicito no orquestrador para falhas de transporte/capacidade (`praxis.ai.provider.text-stream.fallback-sync-on-error=true`).
+- Fase 4 (2026-02-21): cancelamento ganhou abort in-flight best-effort (cancel do future + fechamento do stream HTTP) para liberar worker/capacidade sem esperar timeout de rede.
+- Fase 4 (2026-02-21): adicionada suite de integracao local (stub provider in-memory) para provar fallback deterministico do stream e cancelamento in-flight sem dependencia de rede externa.
+- Fase 4 (2026-02-21): classificacao de fallback foi endurecida com excecao tipada de stream (`AiProviderStreamException`) e matriz local para `timeout/connect/reset/capacity`, reduzindo dependencia de `message contains`.
+- Fase 5 (2026-02-21): backlog executavel consolidado em `docs/ai/p1-backend/P1-BE-7-fase5-hardening-canary.md` com tarefas curtas por squad (BE/FE/QA/SRE), DoD e comandos de validacao.
+- Fase 5 (2026-02-21): smoke de stream SSE separado de RAG em `scripts/ai/e2e-sse-smoke.sh`; `e2e-rag-smoke.sh` permanece para snapshot/RAG.
+- Fase 5 (2026-02-21): naming de metricas padronizado para `ai_stream_*` (evita drift com `ai.stream.*`).
+- Fase 5 (2026-02-21): hardening de assertividade no orquestrador com fallback deterministico para intents diretas de tabela (densidade, selecao de linhas, alinhamento de colunas e destaque contextual de status).
+- Fase 5 (2026-02-21): adicionada guarda de relevancia de patch para evitar resposta fora do escopo do prompt (ex.: prompt de densidade recebendo patch de coluna calculada), com fallback deterministico e cobertura de teste dedicada.
 
 ## 1) Principios de implementacao
 

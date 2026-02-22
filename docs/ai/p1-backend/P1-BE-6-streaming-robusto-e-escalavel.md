@@ -306,6 +306,9 @@ Entregas
 - `cancelled` terminal em contrato e UI.
 - OpenAI/Gemini com stream + cancelamento (xAI conforme suporte real).
 - fallback sync estavel.
+- `praxis.ai.provider.text-stream.enabled` controla rollout opt-in de stream no orquestrador.
+- `praxis.ai.provider.text-stream.fallback-sync-on-error` controla degradacao explicita para `generateText` em falha de transporte/capacidade do stream provider.
+- Fallback do orquestrador prioriza classificacao tipada (`AiProviderStreamException`) para `transport|timeout|rate_limit|capacity`, mantendo heuristica textual apenas como compatibilidade para providers legados.
 Saida
 - throughput e latencia dentro de meta definida.
 
@@ -319,14 +322,14 @@ Saida
 
 ## 6) Observabilidade e operacao
 
-Metricas minimas
-- `ai.stream.open.count`
-- `ai.stream.active.count`
-- `ai.stream.duration.ms`
-- `ai.stream.error.count`
-- `ai.stream.replay.count`
-- `ai.step.duration.ms{step=...}`
-- `ai.stream.heartbeat.miss.count`
+Metricas minimas (padrao de naming: `ai_stream_*`)
+- `ai_stream_open_total`
+- `ai_stream_active_count`
+- `ai_stream_duration_ms` (histograma)
+- `ai_stream_error_total`
+- `ai_stream_replay_total`
+- `ai_step_duration_ms{step=...}`
+- `ai_stream_heartbeat_miss_total`
 
 Correlacao
 - `requestId`, `streamId`, `threadId`, `turnId`, `seq`, `provider`, `model`.

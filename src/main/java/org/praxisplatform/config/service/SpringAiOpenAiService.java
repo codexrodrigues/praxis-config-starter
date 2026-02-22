@@ -4,13 +4,27 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiProviderModel;
@@ -100,6 +114,25 @@ public class SpringAiOpenAiService implements AiProvider {
     @Override
     public String generateText(String prompt, AiCallConfig config) {
         return callWithOptions(prompt, config, false);
+    }
+
+    @Override
+    public boolean supportsTextStreaming(AiCallConfig config) {
+        return true;
+    }
+
+    @Override
+    public boolean supportsTurnCancellation(AiCallConfig config) {
+        return true;
+    }
+
+    @Override
+    public String generateTextStream(
+            String prompt,
+            AiCallConfig config,
+            Consumer<String> onChunk,
+            Supplier<Boolean> cancellationRequested) {
+        return callOpenAiTextStream(prompt, config, onChunk, cancellationRequested);
     }
 
     @Override
@@ -206,6 +239,172 @@ public class SpringAiOpenAiService implements AiProvider {
 
         } catch (Exception e) {
             throw new RuntimeException("Direct OpenAI call failed", e);
+        }
+    }
+
+    private String callOpenAiTextStream(
+            String prompt,
+            AiCallConfig config,
+            Consumer<String> onChunk,
+            Supplier<Boolean> cancellationRequested) {
+        String resolvedKey = resolveApiKey(config);
+        String resolvedModel = resolveModel(config);
+        double resolvedTemp = resolveTemperature(config);
+        int resolvedMaxTokens = resolveMaxTokens(config);
+        String resolvedUrl = resolveBaseUrl(baseUrl) + "/v1/chat/completions";
+
+        CompletableFuture<HttpResponse<InputStream>> responseFuture = null;
+        AtomicReference<InputStream> streamRef = new AtomicReference<>();
+        AtomicReference<CompletableFuture<HttpResponse<InputStream>>> responseFutureRef = new AtomicReference<>();
+        AtomicBoolean abortRequested = new AtomicBoolean(false);
+        AiStreamExecutionContextHolder.AbortRegistration abortRegistration = null;
+        try {
+            ObjectNode root = objectMapper.createObjectNode();
+            root.put("model", resolvedModel);
+            root.put("temperature", resolvedTemp);
+            root.put("max_tokens", resolvedMaxTokens);
+            root.put("stream", true);
+            ArrayNode messages = root.putArray("messages");
+            ObjectNode msg = messages.addObject();
+            msg.put("role", "user");
+            msg.put("content", prompt);
+
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(resolvedUrl))
+                    .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .header("Authorization", "Bearer " + resolvedKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(root)))
+                    .build();
+            abortRegistration = AiStreamExecutionContextHolder.registerAbortAction(() -> {
+                abortRequested.set(true);
+                CompletableFuture<HttpResponse<InputStream>> inFlight = responseFutureRef.get();
+                if (inFlight != null) {
+                    inFlight.cancel(true);
+                }
+                closeQuietly(streamRef.get());
+            });
+            responseFuture = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
+            responseFutureRef.set(responseFuture);
+            if (abortRequested.get()) {
+                responseFuture.cancel(true);
+                throw new CancellationException("OpenAI stream cancelled before response.");
+            }
+            HttpResponse<InputStream> response = responseFuture.get(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
+            streamRef.set(response.body());
+            if (response.statusCode() >= 400) {
+                String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+                throw AiProviderStreamException.fromHttpStatus(
+                        "openai",
+                        response.statusCode(),
+                        summarizeErrorBody(errorBody));
+            }
+            StringBuilder out = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(streamRef.get(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (isCancelled(cancellationRequested)) {
+                        throw new CancellationException("OpenAI stream cancelled.");
+                    }
+                    String trimmed = line.trim();
+                    if (trimmed.isEmpty() || !trimmed.startsWith("data:")) {
+                        continue;
+                    }
+                    String data = trimmed.substring(5).trim();
+                    if (data.isEmpty()) {
+                        continue;
+                    }
+                    if ("[DONE]".equals(data)) {
+                        break;
+                    }
+                    String chunk = extractOpenAiDelta(data);
+                    if (chunk == null || chunk.isBlank()) {
+                        continue;
+                    }
+                    out.append(chunk);
+                    if (onChunk != null) {
+                        onChunk.accept(chunk);
+                    }
+                }
+            }
+            return out.toString();
+        } catch (CancellationException cancelled) {
+            throw cancelled;
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("OpenAI stream interrupted.");
+        } catch (TimeoutException timeoutException) {
+            if (responseFuture != null) {
+                responseFuture.cancel(true);
+            }
+            throw AiProviderStreamException.timeout("openai", timeoutException);
+        } catch (ExecutionException executionException) {
+            Throwable cause = executionException.getCause() != null
+                    ? executionException.getCause()
+                    : executionException;
+            throw classifyStreamFailure("openai", cause);
+        } catch (Exception ex) {
+            if (isCancelled(cancellationRequested)) {
+                throw new CancellationException("OpenAI stream cancelled.");
+            }
+            if (ex instanceof AiProviderStreamException streamException) {
+                throw streamException;
+            }
+            throw classifyStreamFailure("openai", ex);
+        } finally {
+            if (abortRegistration != null) {
+                abortRegistration.close();
+            }
+            closeQuietly(streamRef.getAndSet(null));
+        }
+    }
+
+    private String extractOpenAiDelta(String data) {
+        try {
+            JsonNode root = objectMapper.readTree(data);
+            JsonNode choices = root.path("choices");
+            if (!choices.isArray() || choices.isEmpty()) {
+                return null;
+            }
+            JsonNode delta = choices.get(0).path("delta");
+            String content = delta.path("content").asText(null);
+            if (content != null && !content.isBlank()) {
+                return content;
+            }
+            JsonNode message = choices.get(0).path("message");
+            String fallbackContent = message.path("content").asText(null);
+            if (fallbackContent != null && !fallbackContent.isBlank()) {
+                return fallbackContent;
+            }
+            return null;
+        } catch (Exception ex) {
+            log.debug("[SpringAiOpenAiService] Failed to parse OpenAI stream chunk: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private boolean isCancelled(Supplier<Boolean> cancellationRequested) {
+        if (cancellationRequested == null) {
+            return false;
+        }
+        try {
+            return Boolean.TRUE.equals(cancellationRequested.get());
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void closeQuietly(InputStream stream) {
+        if (stream == null) {
+            return;
+        }
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+            // Best-effort close.
         }
     }
 
@@ -356,6 +555,34 @@ public class SpringAiOpenAiService implements AiProvider {
         }
         String text = value.asText();
         return text == null || text.isBlank() ? null : text;
+    }
+
+    private AiProviderStreamException classifyStreamFailure(String provider, Throwable error) {
+        if (error instanceof AiProviderStreamException streamException) {
+            return streamException;
+        }
+        if (error instanceof java.net.http.HttpTimeoutException) {
+            return AiProviderStreamException.timeout(provider, error);
+        }
+        if (error instanceof IOException
+                || error instanceof java.net.ConnectException
+                || error instanceof java.net.SocketException
+                || error instanceof java.net.UnknownHostException) {
+            return AiProviderStreamException.transport(provider, error);
+        }
+        return AiProviderStreamException.unknown(provider, error);
+    }
+
+    private String summarizeErrorBody(String body) {
+        if (body == null) {
+            return null;
+        }
+        String trimmed = body.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        int max = Math.min(trimmed.length(), 180);
+        return trimmed.substring(0, max);
     }
 
     private String trimToNull(String value) {

@@ -148,6 +148,7 @@ public class AiProviderManagementService {
 
     public AiProviderCatalogResponse listCatalog() {
         List<AiProviderCatalogItem> providers = new ArrayList<>();
+        ProviderCapabilities geminiCapabilities = resolveProviderCapabilities("gemini");
         providers.add(AiProviderCatalogItem.builder()
                 .id("gemini")
                 .label("Google Gemini")
@@ -156,8 +157,11 @@ public class AiProviderManagementService {
                 .requiresApiKey(true)
                 .supportsModels(true)
                 .supportsEmbeddings(true)
+                .supportsTextStreaming(geminiCapabilities.supportsTextStreaming())
+                .supportsTurnCancellation(geminiCapabilities.supportsTurnCancellation())
                 .iconKey("gemini")
                 .build());
+        ProviderCapabilities openAiCapabilities = resolveProviderCapabilities("openai");
         providers.add(AiProviderCatalogItem.builder()
                 .id("openai")
                 .label("OpenAI")
@@ -166,8 +170,11 @@ public class AiProviderManagementService {
                 .requiresApiKey(true)
                 .supportsModels(true)
                 .supportsEmbeddings(true)
+                .supportsTextStreaming(openAiCapabilities.supportsTextStreaming())
+                .supportsTurnCancellation(openAiCapabilities.supportsTurnCancellation())
                 .iconKey("openai")
                 .build());
+        ProviderCapabilities xaiCapabilities = resolveProviderCapabilities("xai");
         providers.add(AiProviderCatalogItem.builder()
                 .id("xai")
                 .label("xAI (Grok)")
@@ -176,8 +183,11 @@ public class AiProviderManagementService {
                 .requiresApiKey(true)
                 .supportsModels(true)
                 .supportsEmbeddings(false)
+                .supportsTextStreaming(xaiCapabilities.supportsTextStreaming())
+                .supportsTurnCancellation(xaiCapabilities.supportsTurnCancellation())
                 .iconKey("xai")
                 .build());
+        ProviderCapabilities mockCapabilities = resolveProviderCapabilities("mock");
         providers.add(AiProviderCatalogItem.builder()
                 .id("mock")
                 .label("Mock (dev)")
@@ -186,6 +196,8 @@ public class AiProviderManagementService {
                 .requiresApiKey(false)
                 .supportsModels(true)
                 .supportsEmbeddings(true)
+                .supportsTextStreaming(mockCapabilities.supportsTextStreaming())
+                .supportsTurnCancellation(mockCapabilities.supportsTurnCancellation())
                 .iconKey("mock")
                 .build());
 
@@ -217,6 +229,46 @@ public class AiProviderManagementService {
             return selected;
         }
         return providerRegistry.values().stream().findFirst().orElse(null);
+    }
+
+    private ProviderCapabilities resolveProviderCapabilities(String providerName) {
+        AiProvider selected = findProvider(providerName);
+        if (selected == null) {
+            return new ProviderCapabilities(false, false);
+        }
+        AiCallConfig capabilityConfig = AiCallConfig.builder()
+                .provider(providerName)
+                .build();
+        return new ProviderCapabilities(
+                safeSupportsTextStreaming(selected, capabilityConfig),
+                safeSupportsTurnCancellation(selected, capabilityConfig));
+    }
+
+    private boolean safeSupportsTextStreaming(AiProvider provider, AiCallConfig config) {
+        try {
+            return provider.supportsTextStreaming(config);
+        } catch (Exception ex) {
+            log.debug("[AiProviderManagement] Failed to resolve text streaming capability: {}", ex.getMessage());
+            return false;
+        }
+    }
+
+    private AiProvider findProvider(String provider) {
+        String normalized = normalizeProvider(provider);
+        String canonical = normalizeAlias(normalized);
+        if (canonical == null) {
+            return null;
+        }
+        return providerRegistry.get(canonical);
+    }
+
+    private boolean safeSupportsTurnCancellation(AiProvider provider, AiCallConfig config) {
+        try {
+            return provider.supportsTurnCancellation(config);
+        } catch (Exception ex) {
+            log.debug("[AiProviderManagement] Failed to resolve cancellation capability: {}", ex.getMessage());
+            return false;
+        }
     }
 
     private List<AiProviderModel> sortModelsByRelevance(
@@ -478,4 +530,8 @@ public class AiProviderManagementService {
     }
 
     private record StoredAiConfig(String provider, String model, String apiKey) {}
+
+    private record ProviderCapabilities(
+            boolean supportsTextStreaming,
+            boolean supportsTurnCancellation) {}
 }
