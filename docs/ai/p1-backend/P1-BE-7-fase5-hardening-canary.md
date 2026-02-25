@@ -4,6 +4,8 @@ Status
 - Objetivo: preparar a operacao para rollout controlado com evidencias tecnicas e operacionais.
 - Escopo deste backlog: ambiente de desenvolvimento em maquina unica (single-node), com itens distribuidos marcados como bloqueados por ambiente.
 - Base tecnica: Fases A, B, C e 4 concluida com gate tecnico GO.
+- Atualizacao 2026-02-22: F5-BE-01..06 e F5-SRE-01..03 implementados e evidenciados por artefatos locais versionados.
+- Atualizacao 2026-02-22 (QA): F5-QA-01 e F5-QA-02 executados em host real com artefatos versionados; rodada mais recente fechou score `5.0` e gate de assertividade PASS.
 
 ## 1) Premissas
 
@@ -29,8 +31,8 @@ Status
 | F5-BE-02 | BE | P0 | Expor `ai_stream_cancel_inflight_total` | 0.5d | F5-BE-01 | Incremento em cancel real durante `in_progress` | `curl -s http://localhost:8088/actuator/prometheus \| rg ai_stream_cancel_inflight_total` |
 | F5-BE-03 | BE | P0 | Expor histograma `ai_stream_duration_ms` (p50/p95) | 1d | F5-BE-01 | Buckets e labels por provider disponiveis | `curl -s http://localhost:8088/actuator/prometheus \| rg ai_stream_duration_ms_bucket` |
 | F5-BE-04 | BE | P0 | Correlacao de logs por IDs de fluxo | 1d | F5-BE-01 | Logs de start ate terminal com mesmos IDs | `rg -n \"requestId|threadId|turnId|streamId\" app.log` |
-| F5-BE-05 | BE | P1 | Evento de reconciliacao com `reason_code` deterministico | 0.5d | F5-BE-04 | Terminal tecnico sempre com `reason_code` | `mvn -f praxis-config-starter/pom.xml -Dtest=AiTurnEventServiceTest test -q` |
-| F5-BE-06 | BE | P0 | Script smoke SSE unico (`start/probe/stream/replay/cancel`) | 1d | F5-BE-01..05 | Script 100% reproduzivel com artefato markdown | `BASE_URL=http://localhost:8088 scripts/ai/e2e-sse-smoke.sh` |
+| F5-BE-05 | BE | P1 | Evento de reconciliacao com `reason_code` deterministico | 0.5d | F5-BE-04 | Terminal tecnico sempre com `reason_code` | `mvn -f praxis-config-starter/pom.xml -Dtest=AiStreamServiceTest test -q` |
+| F5-BE-06 | BE | P0 | Script smoke SSE unico (`start/probe/stream/replay/cancel`) | 1d | F5-BE-01..05 | Script 100% reproduzivel com artefato markdown | `BASE_URL=http://localhost:8088 scripts/ai/e2e-sse-smoke.sh` + `docs/ai/fase5-sse-smoke-report.md` |
 | F5-FE-01 | FE | P1 | Telemetria UX (`stream_started`, `fallback_to_patch`, `stream_cancelled`) | 0.5d | F5-BE-01 | Eventos emitidos com metadata minima | `node_modules/.bin/ng test praxis-ai --watch=false --progress=false --karma-config=tools/karma/karma.wsl.conf.cjs --include=projects/praxis-ai/src/lib/ui/ai-assistant/ai-assistant.component.spec.ts` |
 | F5-FE-02 | FE | P1 | Banner tecnico por classe de erro (`transport/schema/contract`) | 1d | F5-FE-01 | UX mostra causa tecnica correta | `node_modules/.bin/ng test praxis-ai --watch=false --progress=false --karma-config=tools/karma/karma.wsl.conf.cjs --include=projects/praxis-ai/src/lib/ui/ai-assistant/ai-assistant.component.spec.ts` |
 | F5-FE-03 | FE | P1 | Indicador de modo degradado durante fallback para `/patch` | 0.5d | F5-FE-02 | Indicador entra/sai conforme estado real | `node_modules/.bin/ng test praxis-ai --watch=false --progress=false --karma-config=tools/karma/karma.wsl.conf.cjs --include=projects/praxis-ai/src/lib/ui/ai-assistant/ai-assistant.component.spec.ts` |
@@ -40,8 +42,8 @@ Status
 | F5-QA-02 | QA | P0 | Scorecard 0-5 por caso + latencia/fallback/cancel | 1d | F5-QA-01 | Relatorio com score medio e variancia | `docs/ai/fase5-llm-report.md` |
 | F5-QA-03 | QA | P0 | Regressao FE SSE (`ai-assistant` + `ai-backend-api`) | 0.5d | F5-FE-04 | Suites alvo verdes em runner oficial | `node_modules/.bin/ng test praxis-ai --watch=false --progress=false --karma-config=tools/karma/karma.wsl.conf.cjs --include=projects/praxis-ai/src/lib/ui/ai-assistant/ai-assistant.component.spec.ts` + `node_modules/.bin/ng test praxis-ai --watch=false --progress=false --karma-config=tools/karma/karma.wsl.conf.cjs --include=projects/praxis-ai/src/lib/core/services/ai-backend-api.service.spec.ts` |
 | F5-QA-04 | QA | P1 | Stress local reconnect/cancel (20 iteracoes) | 1d | F5-BE-06 | Sem perda de terminal e sem lock zumbi | Script loop + relatorio |
-| F5-SRE-01 | SRE | P1 | Dashboard minimo local (fallback/cancel/p95/erros) | 1d | F5-BE-01..03 | Painel exportado em docs | `docs/ai/observability/` |
-| F5-SRE-02 | SRE | P1 | Alertas locais de limiar (fallback, p95, erro) | 0.5d | F5-SRE-01 | Regras versionadas + teste manual | arquivo de regras + evidencia |
+| F5-SRE-01 | SRE | P1 | Dashboard minimo local (fallback/cancel/p95/erros) | 1d | F5-BE-01..03 | Painel exportado em docs | `docs/ai/observability/fase5-dashboard-minimo.grafana.json` + `docs/ai/observability/fase5-dashboard-minimo.md` |
+| F5-SRE-02 | SRE | P1 | Alertas locais de limiar (fallback, p95, erro) | 0.5d | F5-SRE-01 | Regras versionadas + teste manual | `docs/ai/observability/fase5-alert-rules.prometheus.yml` + `docs/ai/observability/fase5-alerts-validation.md` |
 | F5-SRE-03 | SRE | P0 | Runbook de canary/rollback | 0.5d | F5-BE-06, F5-SRE-01 | Procedimento completo de promote/abort | `docs/ai/runbooks/fase5-canary-rollback.md` |
 
 ## 4) Itens Bloqueados por Ambiente (2+ nos + LB)
@@ -56,6 +58,7 @@ Status
 
 1. `scripts/ai/e2e-sse-smoke.sh`: cobre exclusivamente contrato SSE (`start/probe/stream/replay/cancel`).
 2. `scripts/ai/e2e-rag-smoke.sh`: cobre snapshot/RAG/registry e nao substitui validacao de stream SSE.
+3. `scripts/ai/e2e-corporate-hardening.sh`: cobre gate corporativo de identidade server-side, anti-bypass por header, mismatch de contrato (`409`), guardrails de patch e estabilidade SSE repetida.
 
 ## 5) Ordem Recomendada de Execucao
 
@@ -71,3 +74,14 @@ Status
 2. Gate qualidade: suites FE SSE alvo verdes e smoke SSE sem regressao.
 3. Gate assertividade: score medio >= 4.0 na matriz 12x3, sem falha critica.
 4. Gate operacional: dashboard, alertas e runbook publicados.
+
+## 7) Resultado QA atual (execucao real)
+
+1. Matriz e scorecard foram publicados:
+   - `docs/ai/fase5-test-matrix.md`
+   - `docs/ai/fase5-llm-report.md`
+2. Evidencia bruta da execucao 12x3:
+   - `artifacts/ai-llm-assertiveness/20260222-000358/summary.json`
+   - `artifacts/ai-llm-assertiveness/20260222-000358/summary.md`
+3. Resultado do gate de assertividade na rodada mais recente:
+   - **PASS** (`overallScoreMean=5.0`, `overallPassRate=1.0`, sem caso abaixo de `3.0`).

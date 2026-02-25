@@ -59,6 +59,13 @@ Status de execucao (2026-02-20)
 - Fase 5 (2026-02-21): naming de metricas padronizado para `ai_stream_*` (evita drift com `ai.stream.*`).
 - Fase 5 (2026-02-21): hardening de assertividade no orquestrador com fallback deterministico para intents diretas de tabela (densidade, selecao de linhas, alinhamento de colunas e destaque contextual de status).
 - Fase 5 (2026-02-21): adicionada guarda de relevancia de patch para evitar resposta fora do escopo do prompt (ex.: prompt de densidade recebendo patch de coluna calculada), com fallback deterministico e cobertura de teste dedicada.
+- Atualizacao 2026-02-22 (Trilha A-04/A-05): suite retro versionada `v1.1` adicionada para boundary de contrato (`/patch`, `/patch/stream/start`, SSE) com execucao automatizada e relatorio em `docs/ai/contract-v11-retro-compat-report.md`.
+- Atualizacao 2026-02-22 (Trilha B-01/B-02): catalogo FE ganhou schemas formais + validador de governanca com relatorio (`errors=0`) e gate bloqueante acoplado ao `ci:verify` no `praxis-ui-angular`.
+- Atualizacao 2026-02-22 (Trilha C-01/C-02): RAG ganhou IDs compostas por escopo/release/hash, migration com indice unico composto + dedupe pre-index e upsert deterministico com dedupe por `contentHash`.
+- Atualizacao 2026-02-22 (Trilha C-03/C-04): retrieval RAG passou a aplicar filtro obrigatorio de `releaseId` (com fallback controlado para chave legada `version`) e ganhou prova automatizada de isolamento entre releases.
+- Atualizacao 2026-02-22 (D-01 diagnostico host real): `e2e-rag-smoke` ficou `PASS=3 FAIL=6` em modo corporativo por bloqueio de identidade (`403 Corporate identity is required...`); com `PRAXIS_AI_SECURITY_CORPORATE_MODE=false` o mesmo smoke ficou `PASS=9 FAIL=0` e `e2e-sse-smoke` passou, mantendo pendencia de D-01 no eixo identidade server-side + ambiente 2-nos/LB.
+- Atualizacao 2026-02-22 (D-01 diagnostico host real): smokes ganharam bootstrap de autenticacao (`AUTH_LOGIN_URL` + credenciais + cookie auto) e `corporate-mode=true` ficou verde no single-node (`PASS=9`, SSE ok) com principal server-side autenticado e tenant corporativo default; pendencia residual de D-01 ficou restrita ao ambiente distribuido 2-nos + LB.
+- Atualizacao 2026-02-23 (D-01 hardening corporativo): novo gate `scripts/ai/e2e-corporate-hardening.sh` executado com `11/11 PASS` em host real (identity gate, anti-bypass, contract `409`, guardrails e estabilidade SSE em repeticao); D-01 permanece pendente apenas no eixo distribuido real 2+ nos + LB.
 
 ## 1) Principios de implementacao
 

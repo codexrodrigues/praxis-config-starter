@@ -9,15 +9,17 @@ import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.dto.ComponentSearchResult;
 import org.praxisplatform.config.projection.ApiMetadataProjection;
 import org.praxisplatform.config.projection.ComponentDefinitionProjection;
+import org.praxisplatform.config.rag.RagDocumentIdentity;
+import org.praxisplatform.config.rag.RagFilters;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
-import org.praxisplatform.config.rag.RagFilters;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +35,16 @@ public class ContextRetrievalService {
 
     private static final int DEFAULT_SEARCH_LIMIT = 5; // Limite padrão para buscas
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
+    private static final String DEFAULT_RAG_RELEASE_FALLBACK = "v1";
+
+    @Value("${praxis.ai.rag.release.default:v1}")
+    private String ragDefaultRelease = DEFAULT_RAG_RELEASE_FALLBACK;
+
+    @Value("${praxis.ai.rag.release.fallback.legacy-version:true}")
+    private boolean ragReleaseFallbackToLegacyVersion = true;
+
+    @Value("${praxis.ai.rag.release.fallback.default-enabled:false}")
+    private boolean ragReleaseFallbackToDefaultEnabled;
 
     @Transactional(readOnly = true)
     /**
@@ -41,7 +53,7 @@ public class ContextRetrievalService {
      * que o LLM gere configurações de UI precisas.
      */
     public List<ApiSearchResult> searchApiMetadata(String query, String method, String tags, int limit) {
-        return searchApiMetadata(query, method, tags, limit, null, null, null);
+        return searchApiMetadata(query, method, tags, limit, null, null, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -51,7 +63,7 @@ public class ContextRetrievalService {
             String tags,
             int limit,
             EmbeddingCallConfig embeddingConfig) {
-        return searchApiMetadata(query, method, tags, limit, embeddingConfig, null, null);
+        return searchApiMetadata(query, method, tags, limit, embeddingConfig, null, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -63,10 +75,64 @@ public class ContextRetrievalService {
             EmbeddingCallConfig embeddingConfig,
             String tenantId,
             String environment) {
+        return searchApiMetadata(
+                query,
+                method,
+                tags,
+                limit,
+                embeddingConfig,
+                tenantId,
+                environment,
+                null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ApiSearchResult> searchApiMetadata(
+            String query,
+            String method,
+            String tags,
+            int limit,
+            EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment,
+            String releaseId) {
+        String resolvedReleaseId = resolveReleaseId(releaseId);
         List<ApiSearchResult> ragResults =
-                searchApiMetadataWithVectorStore(query, method, tags, limit, tenantId, environment);
+                searchApiMetadataWithVectorStore(
+                        query,
+                        method,
+                        tags,
+                        limit,
+                        tenantId,
+                        environment,
+                        resolvedReleaseId);
+        if (ragResults.isEmpty() && shouldFallbackToDefaultRelease(resolvedReleaseId)) {
+            String defaultReleaseId = resolveDefaultReleaseId();
+            ragResults = searchApiMetadataWithVectorStore(
+                    query,
+                    method,
+                    tags,
+                    limit,
+                    tenantId,
+                    environment,
+                    defaultReleaseId);
+            if (!ragResults.isEmpty()) {
+                log.warn(
+                        "[ContextRetrievalService] API retrieval fallback applied from release '{}' to default '{}'.",
+                        safeQuery(resolvedReleaseId),
+                        safeQuery(defaultReleaseId));
+            }
+        }
         if (!ragResults.isEmpty()) {
             return ragResults;
+        }
+        if (ragVectorStoreService.isAvailable()) {
+            log.warn(
+                    "[ContextRetrievalService] No RAG results for release-scoped API retrieval (releaseId='{}', tenantId='{}', env='{}'); skipping legacy fallback.",
+                    safeQuery(resolvedReleaseId),
+                    safeQuery(tenantId),
+                    safeQuery(environment));
+            return List.of();
         }
         if (hasTenantScope(tenantId, environment)) {
             log.warn(
@@ -93,7 +159,7 @@ public class ContextRetrievalService {
 
     @Transactional(readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(String query, int limit) {
-        return searchComponentDefinitions(query, limit, null, null, null);
+        return searchComponentDefinitions(query, limit, null, null, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -101,7 +167,7 @@ public class ContextRetrievalService {
             String query,
             int limit,
             EmbeddingCallConfig embeddingConfig) {
-        return searchComponentDefinitions(query, limit, embeddingConfig, null, null);
+        return searchComponentDefinitions(query, limit, embeddingConfig, null, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -111,10 +177,56 @@ public class ContextRetrievalService {
             EmbeddingCallConfig embeddingConfig,
             String tenantId,
             String environment) {
+        return searchComponentDefinitions(
+                query,
+                limit,
+                embeddingConfig,
+                tenantId,
+                environment,
+                null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ComponentSearchResult> searchComponentDefinitions(
+            String query,
+            int limit,
+            EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment,
+            String releaseId) {
+        String resolvedReleaseId = resolveReleaseId(releaseId);
         List<ComponentSearchResult> ragResults =
-                searchComponentDefinitionsWithVectorStore(query, limit, tenantId, environment);
+                searchComponentDefinitionsWithVectorStore(
+                        query,
+                        limit,
+                        tenantId,
+                        environment,
+                        resolvedReleaseId);
+        if (ragResults.isEmpty() && shouldFallbackToDefaultRelease(resolvedReleaseId)) {
+            String defaultReleaseId = resolveDefaultReleaseId();
+            ragResults = searchComponentDefinitionsWithVectorStore(
+                    query,
+                    limit,
+                    tenantId,
+                    environment,
+                    defaultReleaseId);
+            if (!ragResults.isEmpty()) {
+                log.warn(
+                        "[ContextRetrievalService] Component retrieval fallback applied from release '{}' to default '{}'.",
+                        safeQuery(resolvedReleaseId),
+                        safeQuery(defaultReleaseId));
+            }
+        }
         if (!ragResults.isEmpty()) {
             return ragResults;
+        }
+        if (ragVectorStoreService.isAvailable()) {
+            log.warn(
+                    "[ContextRetrievalService] No RAG results for release-scoped component retrieval (releaseId='{}', tenantId='{}', env='{}'); skipping legacy fallback.",
+                    safeQuery(resolvedReleaseId),
+                    safeQuery(tenantId),
+                    safeQuery(environment));
+            return List.of();
         }
         if (hasTenantScope(tenantId, environment)) {
             log.warn(
@@ -157,6 +269,22 @@ public class ContextRetrievalService {
         return (tenantId != null && !tenantId.isBlank()) || (environment != null && !environment.isBlank());
     }
 
+    private String resolveReleaseId(String releaseId) {
+        return RagDocumentIdentity.resolveReleaseId(releaseId, resolveDefaultReleaseId(), null);
+    }
+
+    private String resolveDefaultReleaseId() {
+        return RagDocumentIdentity.resolveReleaseId(ragDefaultRelease, DEFAULT_RAG_RELEASE_FALLBACK, null);
+    }
+
+    private boolean shouldFallbackToDefaultRelease(String resolvedReleaseId) {
+        if (!ragReleaseFallbackToDefaultEnabled) {
+            return false;
+        }
+        String defaultReleaseId = resolveDefaultReleaseId();
+        return defaultReleaseId != null && !defaultReleaseId.equals(resolvedReleaseId);
+    }
+
     private ApiSearchResult mapToApiSearchResult(ApiMetadataProjection projection) {
         double score = safeSimilarityScore(projection != null ? projection.getSimilarityScore() : null);
         return ApiSearchResult.builder()
@@ -190,7 +318,8 @@ public class ContextRetrievalService {
             String tags,
             int limit,
             String tenantId,
-            String environment) {
+            String environment,
+            String releaseId) {
         if (!ragVectorStoreService.isAvailable()) {
             return List.of();
         }
@@ -199,11 +328,13 @@ public class ContextRetrievalService {
         }
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
         FilterExpressionBuilder.Op filter = builder.eq(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.API_METADATA);
-        FilterExpressionBuilder.Op tenantFilter =
-                RagFilters.buildTenantEnvironmentFilter(builder, tenantId, environment);
-        if (tenantFilter != null) {
-            filter = builder.and(filter, tenantFilter);
-        }
+        FilterExpressionBuilder.Op scopeFilter = RagFilters.buildScopedFilter(
+                builder,
+                tenantId,
+                environment,
+                releaseId,
+                ragReleaseFallbackToLegacyVersion);
+        filter = builder.and(filter, scopeFilter);
         String normalizedMethod = normalizeMethod(method);
         if (normalizedMethod != null) {
             filter = builder.and(filter, builder.eq(RagMetadataKeys.METHOD, normalizedMethod));
@@ -224,7 +355,8 @@ public class ContextRetrievalService {
             String query,
             int limit,
             String tenantId,
-            String environment) {
+            String environment,
+            String releaseId) {
         if (!ragVectorStoreService.isAvailable()) {
             return List.of();
         }
@@ -232,11 +364,13 @@ public class ContextRetrievalService {
         FilterExpressionBuilder.Op filter = builder.eq(
                 RagMetadataKeys.RESOURCE_TYPE,
                 RagResourceTypes.COMPONENT_DEFINITION);
-        FilterExpressionBuilder.Op tenantFilter =
-                RagFilters.buildTenantEnvironmentFilter(builder, tenantId, environment);
-        if (tenantFilter != null) {
-            filter = builder.and(filter, tenantFilter);
-        }
+        FilterExpressionBuilder.Op scopeFilter = RagFilters.buildScopedFilter(
+                builder,
+                tenantId,
+                environment,
+                releaseId,
+                ragReleaseFallbackToLegacyVersion);
+        filter = builder.and(filter, scopeFilter);
         List<Document> documents = ragVectorStoreService.search(
                 query,
                 limit > 0 ? limit : DEFAULT_SEARCH_LIMIT,

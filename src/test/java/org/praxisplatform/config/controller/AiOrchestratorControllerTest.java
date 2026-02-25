@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +22,7 @@ import org.praxisplatform.config.service.AiInteractionLogger;
 import org.praxisplatform.config.service.AiOrchestratorService;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -79,6 +81,7 @@ class AiOrchestratorControllerTest {
                 "t1",
                 "u1",
                 "dev",
+                null,
                 "ignored-version",
                 "ignored-hash");
 
@@ -106,6 +109,7 @@ class AiOrchestratorControllerTest {
                 "t1",
                 "u1",
                 "dev",
+                null,
                 "v1.1",
                 HASH);
 
@@ -135,6 +139,7 @@ class AiOrchestratorControllerTest {
                 "u1",
                 "dev",
                 null,
+                null,
                 null);
 
         assertThat(request.getContractVersion()).isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_VERSION);
@@ -161,6 +166,7 @@ class AiOrchestratorControllerTest {
                 "t1",
                 "u1",
                 "dev",
+                null,
                 "v1.1",
                 HASH);
 
@@ -174,6 +180,60 @@ class AiOrchestratorControllerTest {
         AiOrchestratorRequest forwarded = captor.getValue();
         assertThat(forwarded.getStreamTransport()).isEqualTo(Boolean.FALSE);
         assertThat(forwarded.getStreamTurnPreclaimed()).isEqualTo(Boolean.FALSE);
+    }
+
+    @Test
+    void shouldReturnConflictWhenSchemaHashDiffersFromExpected() {
+        AiOrchestratorRequest request = baseRequest();
+        request.setContractVersion(AiOrchestratorController.DEFAULT_CONTRACT_VERSION);
+        request.setSchemaHash("deadbeef");
+
+        ResponseEntity<AiOrchestratorResponse> response = controller.generatePatch(
+                request,
+                servletRequest,
+                null,
+                "t1",
+                "u1",
+                "dev",
+                null,
+                null,
+                null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getHeaders().getFirst(AiOrchestratorController.CONTRACT_VERSION_HEADER))
+                .isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_VERSION);
+        assertThat(response.getHeaders().getFirst(AiOrchestratorController.CONTRACT_SCHEMA_HASH_HEADER))
+                .isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_SCHEMA_HASH);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(AiOrchestratorController.CODE_SCHEMA_HASH_MISMATCH);
+        assertThat(response.getBody().getContractVersion()).isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_VERSION);
+        assertThat(response.getBody().getSchemaHash()).isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_SCHEMA_HASH);
+        verifyNoInteractions(orchestratorService);
+    }
+
+    @Test
+    void shouldReturnConflictWhenContractVersionIsUnsupported() {
+        AiOrchestratorRequest request = baseRequest();
+        request.setContractVersion("v9.9");
+        request.setSchemaHash(HASH);
+
+        ResponseEntity<AiOrchestratorResponse> response = controller.generatePatch(
+                request,
+                servletRequest,
+                null,
+                "t1",
+                "u1",
+                "dev",
+                null,
+                null,
+                null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(AiOrchestratorController.CODE_UNSUPPORTED_CONTRACT);
+        assertThat(response.getBody().getContractVersion()).isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_VERSION);
+        assertThat(response.getBody().getSchemaHash()).isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_SCHEMA_HASH);
+        verifyNoInteractions(orchestratorService);
     }
 
     private AiOrchestratorRequest baseRequest() {

@@ -54,7 +54,12 @@ class AiOrchestratorServiceSanitizeTest {
                 AiCapability.builder().path("columns[].computed.dependencies").valueKind("array").build()
         );
 
-        Object sanitizeResult = ReflectionTestUtils.invokeMethod(service, "sanitizePatch", patch, caps);
+        Object sanitizeResult = ReflectionTestUtils.invokeMethod(
+                service,
+                "sanitizePatch",
+                patch,
+                caps,
+                "praxis-table");
         JsonNode sanitized = (JsonNode) ReflectionTestUtils.getField(sanitizeResult, "sanitized");
         @SuppressWarnings("unchecked")
         List<String> warnings = (List<String>) ReflectionTestUtils.getField(sanitizeResult, "warnings");
@@ -63,6 +68,30 @@ class AiOrchestratorServiceSanitizeTest {
                 .isEqualTo("dataNascimento");
         assertThat(warnings)
                 .doesNotContain("Array ignorado: columns[].computed.dependencies");
+    }
+
+    @Test
+    void shouldApplyTableBaselineCapabilitiesWhenCatalogIsMissing() throws Exception {
+        JsonNode patch = objectMapper.readTree("""
+                {
+                  "appearance": {
+                    "density": "compact"
+                  }
+                }
+                """);
+
+        Object sanitizeResult = ReflectionTestUtils.invokeMethod(
+                service,
+                "sanitizePatch",
+                patch,
+                List.<AiCapability>of(),
+                "praxis-table");
+        JsonNode sanitized = (JsonNode) ReflectionTestUtils.getField(sanitizeResult, "sanitized");
+        @SuppressWarnings("unchecked")
+        List<String> warnings = (List<String>) ReflectionTestUtils.getField(sanitizeResult, "warnings");
+
+        assertThat(sanitized.path("appearance").path("density").asText()).isEqualTo("compact");
+        assertThat(warnings).anyMatch(warning -> warning.contains("baseline segura"));
     }
 
     @Test

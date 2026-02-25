@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,12 +18,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
+import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiPatchStreamStartResponse;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiStreamService;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -89,18 +92,87 @@ class AiPatchStreamControllerTest {
         when(streamService.startStream(request, "http://localhost:8088", principalContext))
                 .thenReturn(new AiStreamService.StreamStartResult(startResponse, true));
 
-        ResponseEntity<AiPatchStreamStartResponse> response = controller.start(
+        ResponseEntity<?> response = controller.start(
                 request,
                 servletRequest,
+                null,
                 "tenant-a",
                 "user-a",
                 "prod",
                 null,
+                null,
                 null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().getStreamId()).isEqualTo(streamId);
+        assertThat(response.getBody()).isInstanceOf(AiPatchStreamStartResponse.class);
+        AiPatchStreamStartResponse body = (AiPatchStreamStartResponse) response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.getStreamId()).isEqualTo(streamId);
+    }
+
+    @Test
+    void shouldReturnConflictWhenStreamStartSchemaHashDiffersFromExpected() {
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Atualizar tabela")
+                .clientTurnId(UUID.randomUUID())
+                .schemaHash("deadbeef")
+                .currentState(objectMapper.createObjectNode())
+                .build();
+
+        ResponseEntity<?> response = controller.start(
+                request,
+                servletRequest,
+                null,
+                "tenant-a",
+                "user-a",
+                "prod",
+                null,
+                null,
+                null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getHeaders().getFirst(AiOrchestratorController.CONTRACT_VERSION_HEADER))
+                .isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_VERSION);
+        assertThat(response.getHeaders().getFirst(AiOrchestratorController.CONTRACT_SCHEMA_HASH_HEADER))
+                .isEqualTo(AiOrchestratorController.DEFAULT_CONTRACT_SCHEMA_HASH);
+        assertThat(response.getBody()).isInstanceOf(AiOrchestratorResponse.class);
+        AiOrchestratorResponse body = (AiOrchestratorResponse) response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.getCode()).isEqualTo(AiOrchestratorController.CODE_SCHEMA_HASH_MISMATCH);
+        verifyNoInteractions(streamService);
+    }
+
+    @Test
+    void shouldReturnConflictWhenStreamStartContractVersionIsUnsupported() {
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Atualizar tabela")
+                .clientTurnId(UUID.randomUUID())
+                .contractVersion("v9.9")
+                .schemaHash(AiOrchestratorController.DEFAULT_CONTRACT_SCHEMA_HASH)
+                .currentState(objectMapper.createObjectNode())
+                .build();
+
+        ResponseEntity<?> response = controller.start(
+                request,
+                servletRequest,
+                null,
+                "tenant-a",
+                "user-a",
+                "prod",
+                null,
+                null,
+                null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isInstanceOf(AiOrchestratorResponse.class);
+        AiOrchestratorResponse body = (AiOrchestratorResponse) response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.getCode()).isEqualTo(AiOrchestratorController.CODE_UNSUPPORTED_CONTRACT);
+        verifyNoInteractions(streamService);
     }
 
     @Test
@@ -112,6 +184,7 @@ class AiPatchStreamControllerTest {
         SseEmitter responseEmitter = controller.stream(
                 streamId,
                 servletRequest,
+                null,
                 "evt-param",
                 "signed-token",
                 "evt-header",
@@ -131,6 +204,7 @@ class AiPatchStreamControllerTest {
         SseEmitter responseEmitter = controller.stream(
                 streamId,
                 servletRequest,
+                null,
                 "evt-param",
                 "signed-token",
                 "null",
@@ -153,6 +227,7 @@ class AiPatchStreamControllerTest {
         SseEmitter responseEmitter = controller.stream(
                 streamId,
                 servletRequest,
+                null,
                 "evt-param",
                 "signed-token",
                 "evt-header",
@@ -173,6 +248,7 @@ class AiPatchStreamControllerTest {
         assertThatThrownBy(() -> controller.stream(
                 streamId,
                 servletRequest,
+                null,
                 "evt-param",
                 "signed-token",
                 "evt-header",
@@ -194,6 +270,7 @@ class AiPatchStreamControllerTest {
         assertThatThrownBy(() -> controller.probe(
                 streamId,
                 servletRequest,
+                null,
                 "signed-token",
                 "tenant-a",
                 "user-a",
@@ -211,6 +288,7 @@ class AiPatchStreamControllerTest {
         ResponseEntity<AiPatchStreamCancelResponse> response = controller.cancel(
                 streamId,
                 servletRequest,
+                null,
                 "signed-token",
                 "tenant-a",
                 "user-a",
@@ -220,5 +298,46 @@ class AiPatchStreamControllerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getTerminalState()).isEqualTo("not_found");
         verify(streamService).cancelStream(streamId, "signed-token", principalContext);
+    }
+
+    @Test
+    void shouldPropagateRequestIdIntoMdcDuringStart() {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Atualizar tabela")
+                .clientTurnId(turnId)
+                .currentState(objectMapper.createObjectNode())
+                .build();
+        AiPatchStreamStartResponse startResponse = AiPatchStreamStartResponse.builder()
+                .streamId(streamId)
+                .threadId(threadId)
+                .turnId(turnId)
+                .eventSchemaVersion("v1")
+                .streamAuthMode("cookie")
+                .expiresAt(Instant.now().plusSeconds(900))
+                .fallbackPatchUrl("/api/praxis/config/ai/patch")
+                .build();
+        when(streamService.startStream(request, "http://localhost:8088", principalContext))
+                .thenAnswer(invocation -> {
+                    assertThat(MDC.get("requestId")).isEqualTo("req-correlation-1");
+                    return new AiStreamService.StreamStartResult(startResponse, true);
+                });
+
+        controller.start(
+                request,
+                servletRequest,
+                "req-correlation-1",
+                "tenant-a",
+                "user-a",
+                "prod",
+                null,
+                null,
+                null);
+
+        assertThat(MDC.get("requestId")).isNull();
     }
 }

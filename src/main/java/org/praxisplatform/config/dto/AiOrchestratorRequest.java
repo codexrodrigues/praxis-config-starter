@@ -45,6 +45,7 @@ public class AiOrchestratorRequest {
     private String apiMethod;
     private String apiTags;
     private Integer apiSearchLimit;
+    private String ragReleaseId;
 
     // Internal stream execution flags set server-side.
     private Boolean streamTransport;

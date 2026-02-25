@@ -30,6 +30,51 @@ public final class RagFilters {
         return filter != null ? filter.build() : null;
     }
 
+    public static FilterExpressionBuilder.Op buildReleaseFilter(
+            FilterExpressionBuilder builder,
+            String releaseId,
+            boolean fallbackToLegacyVersionKey) {
+        String normalizedRelease = RagDocumentIdentity.resolveReleaseId(releaseId, null, null);
+        FilterExpressionBuilder.Op releaseFilter = builder.eq(RagMetadataKeys.RELEASE_ID, normalizedRelease);
+        if (!fallbackToLegacyVersionKey) {
+            return releaseFilter;
+        }
+        return builder.or(
+                releaseFilter,
+                builder.eq(RagMetadataKeys.VERSION, normalizedRelease));
+    }
+
+    public static FilterExpressionBuilder.Op buildScopedFilter(
+            FilterExpressionBuilder builder,
+            String tenantId,
+            String environment,
+            String releaseId,
+            boolean fallbackToLegacyVersionKey) {
+        FilterExpressionBuilder.Op releaseFilter =
+                buildReleaseFilter(builder, releaseId, fallbackToLegacyVersionKey);
+        FilterExpressionBuilder.Op tenantEnvFilter =
+                buildTenantEnvironmentFilter(builder, tenantId, environment);
+        if (tenantEnvFilter == null) {
+            return releaseFilter;
+        }
+        return builder.and(releaseFilter, tenantEnvFilter);
+    }
+
+    public static Filter.Expression buildScopedExpression(
+            String tenantId,
+            String environment,
+            String releaseId,
+            boolean fallbackToLegacyVersionKey) {
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        FilterExpressionBuilder.Op filter = buildScopedFilter(
+                builder,
+                tenantId,
+                environment,
+                releaseId,
+                fallbackToLegacyVersionKey);
+        return filter != null ? filter.build() : null;
+    }
+
     private static String normalize(String value) {
         if (value == null) {
             return null;

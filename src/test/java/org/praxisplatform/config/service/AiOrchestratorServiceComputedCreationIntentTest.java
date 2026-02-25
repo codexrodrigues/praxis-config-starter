@@ -144,6 +144,39 @@ class AiOrchestratorServiceComputedCreationIntentTest {
         assertThat(response.getOptions()).contains("dataAdmissao", "dataNascimento");
     }
 
+    @Test
+    void shouldRequestClarificationWhenPromptBaseIsUnknownEvenIfIntentSuggestsKnownField() {
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .intent("add_column_computed")
+                .scope("config")
+                .category("columns")
+                .newField("tempoEmpresa")
+                .baseFields(List.of("dataAdmissao"))
+                .computedFormat("years")
+                .needsClarification(false)
+                .build();
+        ObjectNode dataProfile = objectMapper.createObjectNode();
+        ObjectNode columnsProfile = dataProfile.putObject("columns");
+        columnsProfile.putObject("dataAdmissao").put("inferredType", "date");
+        columnsProfile.putObject("dataNascimento").put("inferredType", "date");
+
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .userPrompt("Crie coluna calculada tempoEmpresa usando dataX")
+                .dataProfile(dataProfile)
+                .build();
+        ObjectNode currentState = objectMapper.createObjectNode();
+        ArrayNode columns = currentState.putArray("columns");
+        columns.addObject().put("field", "dataAdmissao");
+        columns.addObject().put("field", "dataNascimento");
+
+        AiOrchestratorResponse response = invokeHandle(intent, request, currentState);
+
+        assertThat(response.getType()).isEqualTo("clarification");
+        assertThat(response.getOptions()).contains("dataAdmissao", "dataNascimento");
+    }
+
     private AiOrchestratorResponse invokeHandle(
             AiIntentClassification intent,
             AiOrchestratorRequest request,

@@ -10,9 +10,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -24,6 +28,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 @ExtendWith(MockitoExtension.class)
 class AiOrchestratorServiceTextStreamingTest {
 
+    private static final String METRIC_STREAM_FALLBACK_TOTAL = "ai_stream_fallback_total";
+
     @Mock
     private AiProvider aiProvider;
 
@@ -31,9 +37,12 @@ class AiOrchestratorServiceTextStreamingTest {
     private AiInteractionLogger interactionLogger;
 
     private AiOrchestratorService service;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        Metrics.addRegistry(meterRegistry);
         service = new AiOrchestratorService(
                 null,
                 aiProvider,
@@ -47,6 +56,12 @@ class AiOrchestratorServiceTextStreamingTest {
                 null,
                 null,
                 null);
+    }
+
+    @AfterEach
+    void tearDown() {
+        Metrics.removeRegistry(meterRegistry);
+        meterRegistry.close();
     }
 
     @Test
@@ -136,6 +151,7 @@ class AiOrchestratorServiceTextStreamingTest {
         assertEquals("sync-fallback", text);
         verify(aiProvider).generateTextStream(eq("prompt"), eq(config), isNull(), any());
         verify(aiProvider).generateText("prompt", config);
+        assertEquals(1.0d, fallbackCounterValue("gemini", "capacity"));
     }
 
     @Test
@@ -164,6 +180,7 @@ class AiOrchestratorServiceTextStreamingTest {
         assertEquals("sync-fallback", text);
         verify(aiProvider).generateTextStream(eq("prompt"), eq(config), isNull(), any());
         verify(aiProvider).generateText("prompt", config);
+        assertEquals(1.0d, fallbackCounterValue("gemini", "capacity"));
     }
 
     @Test
@@ -193,6 +210,7 @@ class AiOrchestratorServiceTextStreamingTest {
         assertEquals(AiProviderStreamException.Kind.AUTH, thrown.getKind());
         verify(aiProvider).generateTextStream(eq("prompt"), eq(config), isNull(), any());
         verify(aiProvider, never()).generateText("prompt", config);
+        assertEquals(0.0d, fallbackCounterValue("gemini", "auth"));
     }
 
     @Test
@@ -222,5 +240,12 @@ class AiOrchestratorServiceTextStreamingTest {
         assertEquals("validation failed", thrown.getMessage());
         verify(aiProvider).generateTextStream(eq("prompt"), eq(config), isNull(), any());
         verify(aiProvider, never()).generateText("prompt", config);
+    }
+
+    private double fallbackCounterValue(String provider, String reasonKind) {
+        Counter counter = meterRegistry.find(METRIC_STREAM_FALLBACK_TOTAL)
+                .tags("provider", provider, "reason_kind", reasonKind)
+                .counter();
+        return counter != null ? counter.count() : 0.0d;
     }
 }

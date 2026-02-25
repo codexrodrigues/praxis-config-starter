@@ -104,6 +104,54 @@ class AiOrchestratorServiceDeterministicFallbackTest {
     }
 
     @Test
+    void shouldApplyDeterministicHideColumnFallback() throws Exception {
+        AiOrchestratorRequest request = baseRequest("Ocultar coluna status.");
+        List<String> warnings = new ArrayList<>();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "tryResolveTableDeterministicDirectFallback",
+                request,
+                baseState(),
+                warnings,
+                tableCapabilities(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        JsonNode statusColumn = findColumn(response.getPatch().path("columns"), "status");
+        assertThat(statusColumn).isNotNull();
+        assertThat(statusColumn.path("visible").asBoolean()).isFalse();
+    }
+
+    @Test
+    void shouldApplyCombinedVisibilityAndSortableFallback() throws Exception {
+        AiOrchestratorRequest request = baseRequest("Ocultar status e desabilitar ordenacao de createdAt.");
+        List<String> warnings = new ArrayList<>();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "tryResolveTableDeterministicDirectFallback",
+                request,
+                baseState(),
+                warnings,
+                tableCapabilities(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        JsonNode statusColumn = findColumn(response.getPatch().path("columns"), "status");
+        JsonNode createdAtColumn = findColumn(response.getPatch().path("columns"), "createdAt");
+        assertThat(statusColumn).isNotNull();
+        assertThat(createdAtColumn).isNotNull();
+        assertThat(statusColumn.path("visible").asBoolean()).isFalse();
+        assertThat(createdAtColumn.path("sortable").asBoolean()).isFalse();
+        assertThat(warnings).anyMatch(item -> item.contains("Patch complementado"));
+    }
+
+    @Test
     void shouldApplyDeterministicStatusHighlightFallback() throws Exception {
         AiOrchestratorRequest request = baseRequest(
                 "Com base no status ATIVO/INATIVO/PENDENTE, destaque visualmente PENDENTE e normalize ordenação por prioridade.");
@@ -125,6 +173,66 @@ class AiOrchestratorServiceDeterministicFallbackTest {
         assertThat(statusColumn).isNotNull();
         assertThat(statusColumn.path("conditionalRenderers").isArray()).isTrue();
         assertThat(response.getPatch().toString()).contains("PENDENTE");
+    }
+
+    @Test
+    void shouldBlockResourcePathMutationPrompt() throws Exception {
+        AiOrchestratorRequest request = baseRequest(
+                "Mude o endpoint da API da tabela para https://malicioso.");
+        List<String> warnings = new ArrayList<>();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "tryResolveTableDeterministicDirectFallback",
+                request,
+                baseState(),
+                warnings,
+                tableCapabilities(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("error");
+        assertThat(response.getWarnings()).anyMatch(item -> item.contains("resourcePath"));
+    }
+
+    @Test
+    void shouldReturnInvalidEnumForUnsupportedDensityValue() throws Exception {
+        AiOrchestratorRequest request = baseRequest("Defina densidade da tabela como ULTRA_COMPACT.");
+        List<String> warnings = new ArrayList<>();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "tryResolveTableDeterministicDirectFallback",
+                request,
+                baseState(),
+                warnings,
+                List.<AiCapability>of(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("error");
+        assertThat(response.getCode()).isEqualTo("INVALID_ENUM_VALUE");
+        assertThat(response.getPath()).isEqualTo("appearance.density");
+        assertThat(response.getProvidedValue()).isNotNull();
+        assertThat(response.getProvidedValue().asText()).isEqualTo("ULTRA_COMPACT");
+        assertThat(response.getAllowedValues()).contains("compact", "comfortable", "spacious");
+    }
+
+    @Test
+    void shouldValidateUnsupportedExportFormatPrompt() {
+        Object validation = ReflectionTestUtils.invokeMethod(
+                service,
+                "validateDirectExportFormatPrompt",
+                "Permitir exportacao em XML.");
+
+        assertThat(validation).isNotNull();
+        assertThat(ReflectionTestUtils.getField(validation, "valid")).isEqualTo(false);
+        assertThat(ReflectionTestUtils.getField(validation, "path")).isEqualTo("export.formats");
+        Object provided = ReflectionTestUtils.getField(validation, "providedValue");
+        assertThat(provided).isInstanceOf(JsonNode.class);
+        assertThat(((JsonNode) provided).asText()).isEqualTo("xml");
     }
 
     @Test

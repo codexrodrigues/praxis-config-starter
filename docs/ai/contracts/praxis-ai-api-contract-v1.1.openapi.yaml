@@ -1,0 +1,749 @@
+openapi: 3.0.3
+info:
+  title: Praxis AI Patch & Stream Contract
+  version: v1.1
+  description: |
+    Fonte unica de contrato para endpoints corporativos de patch e streaming SSE.
+    Cobre /patch retrocompativel e /patch/stream/{start,connect,probe,cancel}.
+servers:
+  - url: /
+
+tags:
+  - name: ai-patch
+  - name: ai-stream
+
+paths:
+  /api/praxis/config/ai/patch:
+    post:
+      tags: [ai-patch]
+      operationId: generatePatch
+      summary: Gera patch snapshot (retrocompativel)
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/ContractVersionHeader'
+        - $ref: '#/components/parameters/ContractSchemaHashHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiOrchestratorRequest'
+      responses:
+        '200':
+          description: Patch/clarification/error gerado
+          headers:
+            X-Praxis-Contract-Version:
+              $ref: '#/components/headers/ContractVersionHeader'
+            X-Praxis-Schema-Hash:
+              $ref: '#/components/headers/ContractSchemaHashHeader'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiOrchestratorResponse'
+        '409':
+          description: Mismatch de contrato (versao/hash)
+          headers:
+            X-Praxis-Contract-Version:
+              $ref: '#/components/headers/ContractVersionHeader'
+            X-Praxis-Schema-Hash:
+              $ref: '#/components/headers/ContractSchemaHashHeader'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiOrchestratorResponse'
+        '422':
+          description: Erro de validacao semantica (ex. enum invalido)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiOrchestratorResponse'
+
+  /api/praxis/config/ai/patch/stream/start:
+    post:
+      tags: [ai-stream]
+      operationId: startPatchStream
+      summary: Inicia stream SSE com idempotencia por clientTurnId
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/ContractVersionHeader'
+        - $ref: '#/components/parameters/ContractSchemaHashHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiOrchestratorRequest'
+      responses:
+        '201':
+          description: Stream criado
+          headers:
+            X-Praxis-Contract-Version:
+              $ref: '#/components/headers/ContractVersionHeader'
+            X-Praxis-Schema-Hash:
+              $ref: '#/components/headers/ContractSchemaHashHeader'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiPatchStreamStartResponse'
+        '200':
+          description: Start idempotente reutilizando stream existente
+          headers:
+            X-Praxis-Contract-Version:
+              $ref: '#/components/headers/ContractVersionHeader'
+            X-Praxis-Schema-Hash:
+              $ref: '#/components/headers/ContractSchemaHashHeader'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiPatchStreamStartResponse'
+        '400':
+          description: Requisicao invalida (prompt/clientTurnId/contrato)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '403':
+          description: Escopo de identidade nao autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: Contrato divergente ou idempotencia com payload divergente
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AiOrchestratorResponse'
+                  - $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Limite por tenant/user excedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '503':
+          description: Capacidade global/executor saturada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/patch/stream/{streamId}:
+    get:
+      tags: [ai-stream]
+      operationId: connectPatchStream
+      summary: Conecta no stream SSE (replay + incremental)
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+        - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/LastEventIdHeader'
+        - $ref: '#/components/parameters/LastEventIdQuery'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+      responses:
+        '200':
+          description: Stream SSE ativo
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                statusEvent:
+                  summary: Evento status
+                  value: |
+                    id: 94c6fdb6-1aef-49a6-89fe-1437a0023be4
+                    event: message
+                    data: {"eventId":"94c6fdb6-1aef-49a6-89fe-1437a0023be4","streamId":"3f1c7d4c-32ab-4ae4-b7de-d1ae11f5db66","threadId":"34a1a6b9-09b4-4b85-81aa-66b7a95f9356","turnId":"6e9f398a-5bc0-4da5-840e-af5ad78b6bb8","seq":1,"eventSchemaVersion":"v1","timestamp":"2026-02-22T06:44:02.055047900Z","type":"status","payload":{"state":"started","message":"Stream iniciado."}}
+                heartbeat:
+                  summary: Heartbeat out-of-band (sem id)
+                  value: |
+                    event: message
+                    data: {"eventId":null,"streamId":"3f1c7d4c-32ab-4ae4-b7de-d1ae11f5db66","threadId":"34a1a6b9-09b4-4b85-81aa-66b7a95f9356","turnId":"6e9f398a-5bc0-4da5-840e-af5ad78b6bb8","seq":-1,"eventSchemaVersion":"v1","timestamp":"2026-02-22T06:44:10.000000Z","type":"heartbeat","payload":{"state":"alive","message":"keep-alive"}}
+        '400':
+          description: Last-Event-ID invalido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '403':
+          description: Stream ou Last-Event-ID fora do escopo autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Stream inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '410':
+          description: Stream expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/patch/stream/{streamId}/probe:
+    get:
+      tags: [ai-stream]
+      operationId: probePatchStream
+      summary: Probe de autorizacao/disponibilidade do stream
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+        - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+      responses:
+        '204':
+          description: Stream acessivel
+        '403':
+          description: Escopo nao autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Stream inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '410':
+          description: Stream expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/patch/stream/{streamId}/cancel:
+    post:
+      tags: [ai-stream]
+      operationId: cancelPatchStream
+      summary: Cancela stream em andamento com terminal deterministico
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+        - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+      responses:
+        '200':
+          description: Cancel aplicado (ou stream ja terminal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiPatchStreamCancelResponse'
+        '403':
+          description: Escopo nao autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Stream nao encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiPatchStreamCancelResponse'
+
+components:
+  parameters:
+    StreamIdPath:
+      name: streamId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RequestIdHeader:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+    TenantIdHeader:
+      name: X-Tenant-ID
+      in: header
+      required: false
+      schema:
+        type: string
+    UserIdHeader:
+      name: X-User-ID
+      in: header
+      required: false
+      schema:
+        type: string
+    EnvHeader:
+      name: X-Env
+      in: header
+      required: false
+      schema:
+        type: string
+    ContractVersionHeader:
+      name: X-Praxis-Contract-Version
+      in: header
+      required: false
+      schema:
+        type: string
+        default: v1.1
+    ContractSchemaHashHeader:
+      name: X-Praxis-Schema-Hash
+      in: header
+      required: false
+      schema:
+        type: string
+        default: 51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26
+    LastEventIdHeader:
+      name: Last-Event-ID
+      in: header
+      required: false
+      schema:
+        type: string
+    LastEventIdQuery:
+      name: lastEventId
+      in: query
+      required: false
+      schema:
+        type: string
+    AccessTokenQuery:
+      name: accessToken
+      in: query
+      required: false
+      schema:
+        type: string
+
+  headers:
+    ContractVersionHeader:
+      description: Versao de contrato efetiva no backend
+      schema:
+        type: string
+        example: v1.1
+    ContractSchemaHashHeader:
+      description: Hash do schema de contrato efetivo no backend
+      schema:
+        type: string
+        example: 51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26
+
+  schemas:
+    AiOrchestratorRequest:
+      type: object
+      required:
+        - componentId
+        - componentType
+        - currentState
+      properties:
+        componentId:
+          type: string
+        componentType:
+          type: string
+        userPrompt:
+          type: string
+        sessionId:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [new, continue]
+        clientTurnId:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiChatMessage'
+        summary:
+          type: string
+        uiContextRef:
+          $ref: '#/components/schemas/AiUiContextRef'
+        currentStateDigest:
+          $ref: '#/components/schemas/AiCurrentStateDigest'
+        currentState:
+          type: object
+          additionalProperties: true
+        dataProfile:
+          type: object
+          nullable: true
+          additionalProperties: true
+        schemaFields:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+        runtimeState:
+          type: object
+          nullable: true
+          additionalProperties: true
+        suggestedPatch:
+          type: object
+          nullable: true
+          additionalProperties: true
+        contextHints:
+          type: object
+          nullable: true
+          additionalProperties: true
+        aiMode:
+          type: string
+        requireSchema:
+          type: boolean
+        resourcePath:
+          type: string
+        contractVersion:
+          type: string
+          default: v1.1
+        schemaHash:
+          type: string
+          default: 51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26
+        schemaContext:
+          $ref: '#/components/schemas/AiSchemaContext'
+        variantId:
+          type: string
+        apiMethod:
+          type: string
+        apiTags:
+          type: string
+        apiSearchLimit:
+          type: integer
+          format: int32
+      additionalProperties: false
+
+    AiOrchestratorResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+          nullable: true
+        code:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [patch, clarification, error, info]
+        contractVersion:
+          type: string
+          nullable: true
+        schemaHash:
+          type: string
+          nullable: true
+        patch:
+          type: object
+          nullable: true
+          additionalProperties: true
+        diff:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AiPatchDiff'
+        explanation:
+          type: string
+          nullable: true
+        warnings:
+          type: array
+          nullable: true
+          items:
+            type: string
+        message:
+          type: string
+          nullable: true
+        options:
+          type: array
+          nullable: true
+          items:
+            type: string
+        optionPayloads:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AiOption'
+        contextRequest:
+          type: array
+          nullable: true
+          items:
+            type: integer
+        clarification:
+          $ref: '#/components/schemas/AiClarificationUi'
+        componentId:
+          type: string
+          nullable: true
+        componentType:
+          type: string
+          nullable: true
+        path:
+          type: string
+          nullable: true
+        providedValue:
+          nullable: true
+        allowedValues:
+          type: array
+          nullable: true
+          items:
+            type: string
+        memory:
+          $ref: '#/components/schemas/AiMemoryInfo'
+      additionalProperties: false
+
+    AiPatchDiff:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+        before:
+          nullable: true
+        after:
+          nullable: true
+      additionalProperties: false
+
+    AiOption:
+      type: object
+      properties:
+        value:
+          type: string
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        example:
+          type: string
+          nullable: true
+        contextHints:
+          type: object
+          nullable: true
+          additionalProperties: true
+      additionalProperties: false
+
+    AiClarificationUi:
+      type: object
+      properties:
+        responseType:
+          type: string
+          enum: [text, choice, confirm, mixed, context]
+        selectionMode:
+          type: string
+          enum: [single, multiple]
+        presentation:
+          type: string
+          enum: [buttons, list, chips]
+        allowCustom:
+          type: boolean
+          nullable: true
+      additionalProperties: false
+
+    AiMemoryInfo:
+      type: object
+      properties:
+        summaryUpdated:
+          type: boolean
+          nullable: true
+        windowSize:
+          type: integer
+          nullable: true
+        cached:
+          type: boolean
+          nullable: true
+      additionalProperties: false
+
+    AiSchemaContext:
+      type: object
+      properties:
+        path:
+          type: string
+          nullable: true
+        operation:
+          type: string
+          nullable: true
+        schemaType:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    AiChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+      additionalProperties: false
+
+    AiUiContextRef:
+      type: object
+      properties:
+        componentType:
+          type: string
+          nullable: true
+        componentId:
+          type: string
+          nullable: true
+        routeKey:
+          type: string
+          nullable: true
+        schemaHash:
+          type: string
+          nullable: true
+        variantId:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    AiCurrentStateDigest:
+      type: object
+      properties:
+        columns:
+          type: array
+          nullable: true
+          items:
+            type: string
+        sort:
+          type: string
+          nullable: true
+        rowCount:
+          type: integer
+          nullable: true
+      additionalProperties: false
+
+    AiPatchStreamStartResponse:
+      type: object
+      required:
+        - streamId
+        - threadId
+        - turnId
+        - eventSchemaVersion
+        - expiresAt
+        - fallbackPatchUrl
+      properties:
+        streamId:
+          type: string
+          format: uuid
+        threadId:
+          type: string
+          format: uuid
+        turnId:
+          type: string
+          format: uuid
+        eventSchemaVersion:
+          type: string
+          example: v1
+        streamAuthMode:
+          type: string
+          enum: [cookie, signed_url_token]
+          nullable: true
+        streamAccessToken:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+        fallbackPatchUrl:
+          type: string
+      additionalProperties: false
+
+    AiPatchStreamCancelResponse:
+      type: object
+      required:
+        - terminalState
+      properties:
+        streamId:
+          type: string
+          format: uuid
+          nullable: true
+        threadId:
+          type: string
+          format: uuid
+          nullable: true
+        turnId:
+          type: string
+          format: uuid
+          nullable: true
+        terminalState:
+          type: string
+          enum: [cancelled, completed, not_found]
+        message:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    AiTurnEventEnvelope:
+      type: object
+      required:
+        - streamId
+        - threadId
+        - turnId
+        - seq
+        - eventSchemaVersion
+        - timestamp
+        - type
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Nulo em heartbeat out-of-band.
+        streamId:
+          type: string
+          format: uuid
+        threadId:
+          type: string
+          format: uuid
+        turnId:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
+          description: -1 em heartbeat out-of-band; monotono para eventos persistidos.
+        eventSchemaVersion:
+          type: string
+          example: v1
+        timestamp:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [status, thought.step, heartbeat, result, error, cancelled]
+        payload:
+          type: object
+          additionalProperties: true
+      additionalProperties: false
+
+    ProblemResponse:
+      type: object
+      description: Estrutura padrao de erro HTTP no host Spring.
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: integer
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        path:
+          type: string
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+      additionalProperties: true

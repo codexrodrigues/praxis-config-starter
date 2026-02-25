@@ -3,6 +3,8 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Metrics;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +38,7 @@ import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiPatchStreamStartResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -50,6 +54,15 @@ public class AiStreamService {
     private static final int STREAM_WORKER_CORE_POOL_SIZE = 4;
     private static final int STREAM_WORKER_MAX_POOL_SIZE = 16;
     private static final int STREAM_WORKER_QUEUE_CAPACITY = 500;
+    private static final String METRIC_STREAM_CANCEL_INFLIGHT_TOTAL = "ai_stream_cancel_inflight_total";
+    private static final String METRIC_STREAM_DURATION_MS = "ai_stream_duration_ms";
+    private static final String METRIC_TAG_PROVIDER = "provider";
+    private static final String METRIC_TAG_UNKNOWN = "unknown";
+    private static final String RECONCILIATION_REASON_CODE_LEGACY_ORPHAN_TAIL = "legacy_orphan_tail";
+    private static final String MDC_REQUEST_ID = "requestId";
+    private static final String MDC_STREAM_ID = "streamId";
+    private static final String MDC_THREAD_ID = "threadId";
+    private static final String MDC_TURN_ID = "turnId";
     /**
      * Canonical idempotency hash fields: stable public contract only.
      * Internal/transient execution flags must never participate in this digest.
@@ -100,6 +113,7 @@ public class AiStreamService {
     private final Map<UUID, CapacityOwner> capacityOwnersByStream = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> tenantActiveCounts = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> tenantUserActiveCounts = new ConcurrentHashMap<>();
+    private final Map<String, DistributionSummary> streamDurationSummaries = new ConcurrentHashMap<>();
     private final Object capacityLock = new Object();
 
     private final ExecutorService streamExecutor = createStreamExecutor();
@@ -136,6 +150,10 @@ public class AiStreamService {
             AiOrchestratorRequest request,
             String baseUrl,
             AiPrincipalContext principalContext) {
+        String requestId = currentRequestId();
+        if (requestId == null) {
+            requestId = UUID.randomUUID().toString();
+        }
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request is required.");
         }
@@ -192,6 +210,7 @@ public class AiStreamService {
                                     resumedRequest.setStreamTransport(Boolean.TRUE);
                                     resumedRequest.setStreamTurnPreclaimed(Boolean.TRUE);
                                     startProcessing(
+                                            requestId,
                                             existingMetadata.streamId(),
                                             resumedRequest,
                                             principalContext,
@@ -222,6 +241,13 @@ public class AiStreamService {
                         .expiresAt(existingMetadata.expiresAt())
                         .fallbackPatchUrl(baseUrl + "/api/praxis/config/ai/patch")
                         .build();
+                logLifecycle(
+                        "start.reused",
+                        requestId,
+                        existingMetadata.streamId(),
+                        existingMetadata.threadId(),
+                        existingMetadata.turnId(),
+                        "created=false");
                 return new StreamStartResult(response, false);
             }
 
@@ -260,6 +286,7 @@ public class AiStreamService {
             streamRequest.setStreamTransport(Boolean.TRUE);
             streamRequest.setStreamTurnPreclaimed(Boolean.FALSE);
             startProcessing(
+                    requestId,
                     streamId,
                     streamRequest,
                     principalContext,
@@ -276,6 +303,13 @@ public class AiStreamService {
                     .expiresAt(expiresAt)
                     .fallbackPatchUrl(baseUrl + "/api/praxis/config/ai/patch")
                     .build();
+            logLifecycle(
+                    "start.created",
+                    requestId,
+                    streamId,
+                    threadId,
+                    turnId,
+                    "created=true");
             return new StreamStartResult(response, true);
         } finally {
             lock.unlock();
@@ -299,6 +333,12 @@ public class AiStreamService {
         registerEmitter(streamId, emitter);
         ensureHeartbeat(streamId, replayResult.ownership());
         advanceReplayCursor(streamId, replayResult.afterSeq());
+        logLifecycle(
+                "connect.opened",
+                streamId,
+                replayResult.ownership().threadId(),
+                replayResult.ownership().turnId(),
+                "events_replayed=" + replayResult.events().size() + ", after_seq=" + replayResult.afterSeq());
 
         for (AiTurnEventEnvelope replayEvent : replayResult.events()) {
             sendToEmitter(emitter, replayEvent);
@@ -313,6 +353,12 @@ public class AiStreamService {
             stopIncrementalReplay(streamId);
             emitter.complete();
             unregisterEmitter(streamId, emitter);
+            logLifecycle(
+                    "connect.completed_terminal",
+                    streamId,
+                    replayResult.ownership().threadId(),
+                    replayResult.ownership().turnId(),
+                    "terminal_type=" + tail.getType());
         }
         return emitter;
     }
@@ -334,9 +380,21 @@ public class AiStreamService {
                 accessToken,
                 principalContext);
         AiTurnEventService.StreamOwnership ownership = turnEventService.requireOwnership(streamId, effectivePrincipal);
+        logLifecycle(
+                "cancel.requested",
+                streamId,
+                ownership.threadId(),
+                ownership.turnId(),
+                "active_processing=" + activeProcessingStreams.contains(streamId));
         AiTurnEventEnvelope last = turnEventService.findLastEvent(streamId).orElse(null);
         if (last != null && turnEventService.isTerminalType(last.getType())) {
             reconcileTurnState(ownership.threadId(), ownership.turnId(), last.getType());
+            logLifecycle(
+                    "cancel.noop_terminal",
+                    streamId,
+                    ownership.threadId(),
+                    ownership.turnId(),
+                    "terminal_type=" + last.getType());
             return AiPatchStreamCancelResponse.builder()
                     .streamId(streamId)
                     .threadId(ownership.threadId())
@@ -346,7 +404,13 @@ public class AiStreamService {
                     .build();
         }
 
-        cancelSignals.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false)).set(true);
+        AtomicBoolean cancelSignal = cancelSignals.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
+        boolean inFlightCancel = activeProcessingStreams.contains(streamId) && cancelSignal.compareAndSet(false, true);
+        if (!inFlightCancel) {
+            cancelSignal.set(true);
+        } else {
+            Metrics.counter(METRIC_STREAM_CANCEL_INFLIGHT_TOTAL).increment();
+        }
         AiStreamExecutionContextHolder.abortStream(streamId);
         AiPatchStreamCancelResponse response;
         try {
@@ -391,10 +455,17 @@ public class AiStreamService {
         if (!activeProcessingStreams.contains(streamId)) {
             cancelSignals.remove(streamId);
         }
+        logLifecycle(
+                "cancel.applied",
+                streamId,
+                ownership.threadId(),
+                ownership.turnId(),
+                "terminal_state=" + response.getTerminalState());
         return response;
     }
 
     private void startProcessing(
+            String requestId,
             UUID streamId,
             AiOrchestratorRequest request,
             AiPrincipalContext principalContext,
@@ -412,13 +483,21 @@ public class AiStreamService {
             return;
         }
         cancelSignals.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
+        UUID threadId = request.getSessionId();
+        UUID turnId = request.getClientTurnId();
         try {
-            streamExecutor.execute(() -> processTurn(streamId, request, principalContext, baseUrl, decision));
+            streamExecutor.execute(() -> withLogCorrelation(
+                    requestId,
+                    streamId,
+                    threadId,
+                    turnId,
+                    () -> processTurn(streamId, request, principalContext, baseUrl, decision)));
         } catch (RejectedExecutionException rejectedExecutionException) {
             activeProcessingStreams.remove(streamId);
             cancelSignals.remove(streamId);
             releaseCapacityPermit(streamId);
             log.warn("[AiStreamService] Stream executor saturated. streamId={}", streamId);
+            logLifecycle("process.rejected", requestId, streamId, threadId, turnId, "reason=executor_saturated");
             safeAppendCapacityError(streamId, request, principalContext);
         }
     }
@@ -431,6 +510,9 @@ public class AiStreamService {
             AiTurnService.TurnDecision decision) {
         UUID threadId = request.getSessionId();
         UUID turnId = request.getClientTurnId();
+        long startedAtNanos = System.nanoTime();
+        String providerTag = resolveProviderTag(principalContext);
+        logLifecycle("process.begin", streamId, threadId, turnId, "decision=" + decision);
         try {
             if (decision != AiTurnService.TurnDecision.IN_PROGRESS) {
                 appendAndEmit(
@@ -543,6 +625,14 @@ public class AiStreamService {
                     "error",
                     Map.of("message", safeMessage(ex.getMessage(), "Falha no processamento do stream.")));
         } finally {
+            double elapsedMs = Math.max(0d, (System.nanoTime() - startedAtNanos) / 1_000_000d);
+            recordStreamDuration(providerTag, startedAtNanos);
+            logLifecycle(
+                    "process.finalized",
+                    streamId,
+                    threadId,
+                    turnId,
+                    "provider=" + providerTag + ", duration_ms=" + Math.round(elapsedMs));
             AiStreamExecutionContextHolder.abortStream(streamId);
             activeProcessingStreams.remove(streamId);
             cancelSignals.remove(streamId);
@@ -657,20 +747,33 @@ public class AiStreamService {
             UUID turnId,
             String eventType,
             Object payload) {
-        AiTurnEventEnvelope envelope = turnEventService.appendEvent(
-                principalContext,
+        return withLogCorrelation(
+                currentRequestId(),
                 streamId,
                 threadId,
                 turnId,
-                eventType,
-                payload);
-        emitToActiveEmitters(streamId, envelope);
-        if (turnEventService.isTerminalType(eventType)) {
-            reconcileTurnState(threadId, turnId, eventType);
-            stopHeartbeat(streamId);
-            completeStream(streamId);
-        }
-        return envelope;
+                () -> {
+                    AiTurnEventEnvelope envelope = turnEventService.appendEvent(
+                            principalContext,
+                            streamId,
+                            threadId,
+                            turnId,
+                            eventType,
+                            payload);
+                    emitToActiveEmitters(streamId, envelope);
+                    if (turnEventService.isTerminalType(eventType)) {
+                        logLifecycle(
+                                "terminal." + eventType.toLowerCase(),
+                                streamId,
+                                threadId,
+                                turnId,
+                                "seq=" + (envelope != null ? envelope.getSeq() : -1));
+                        reconcileTurnState(threadId, turnId, eventType);
+                        stopHeartbeat(streamId);
+                        completeStream(streamId);
+                    }
+                    return envelope;
+                });
     }
 
     private void appendLegacyTerminalReconciliation(
@@ -680,15 +783,18 @@ public class AiStreamService {
         AiTurnStatus turnStatus = turnService.findTurnStatus(metadata.threadId(), metadata.turnId());
         String reconcileType = turnStatus == AiTurnStatus.CANCELLED ? "cancelled" : "error";
         String tailType = normalize(tail != null ? tail.getType() : null);
+        String reasonCode = RECONCILIATION_REASON_CODE_LEGACY_ORPHAN_TAIL;
         Map<String, Object> payload = "cancelled".equalsIgnoreCase(reconcileType)
                 ? Map.of(
                         "state", "cancelled",
                         "message", "Legacy cancelled turn reconciled without terminal stream event.",
-                        "reason", "legacy_orphan_tail",
+                        "reason", reasonCode,
+                        "reason_code", reasonCode,
                         "tailType", tailType != null ? tailType : "none")
                 : Map.of(
                         "message", "Turn finalized without terminal stream event. Reconciled automatically.",
-                        "reason", "legacy_orphan_tail",
+                        "reason", reasonCode,
+                        "reason_code", reasonCode,
                         "tailType", tailType != null ? tailType : "none",
                         "turnStatus", turnStatus != null ? turnStatus.name() : "UNKNOWN");
         try {
@@ -1134,12 +1240,162 @@ public class AiStreamService {
         return normalize(redacted) != null ? redacted : fallback;
     }
 
+    private void recordStreamDuration(String providerTag, long startedAtNanos) {
+        double elapsedMs = Math.max(0d, (System.nanoTime() - startedAtNanos) / 1_000_000d);
+        durationSummary(providerTag).record(elapsedMs);
+    }
+
+    private DistributionSummary durationSummary(String providerTag) {
+        String normalizedProvider = normalizeMetricTag(providerTag, METRIC_TAG_UNKNOWN);
+        return streamDurationSummaries.computeIfAbsent(
+                normalizedProvider,
+                key -> DistributionSummary.builder(METRIC_STREAM_DURATION_MS)
+                        .baseUnit("milliseconds")
+                        .description("Stream turn processing duration in milliseconds.")
+                        .publishPercentileHistogram(true)
+                        .tag(METRIC_TAG_PROVIDER, key)
+                        .register(Metrics.globalRegistry));
+    }
+
+    private String resolveProviderTag(AiPrincipalContext principalContext) {
+        if (principalContext == null) {
+            return METRIC_TAG_UNKNOWN;
+        }
+        try {
+            return normalizeMetricTag(
+                    orchestratorService.resolveStreamMetricsProvider(
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment()),
+                    METRIC_TAG_UNKNOWN);
+        } catch (Exception ex) {
+            log.debug("[AiStreamService] Could not resolve provider tag for metrics: {}", ex.getMessage());
+            return METRIC_TAG_UNKNOWN;
+        }
+    }
+
+    private String currentRequestId() {
+        return normalize(MDC.get(MDC_REQUEST_ID));
+    }
+
+    private void logLifecycle(String stage, UUID streamId, UUID threadId, UUID turnId, String details) {
+        logLifecycle(stage, currentRequestId(), streamId, threadId, turnId, details);
+    }
+
+    private void logLifecycle(
+            String stage,
+            String requestId,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String details) {
+        String normalizedDetails = normalize(details);
+        if (normalizedDetails == null) {
+            log.info(
+                    "[AiStreamService] stream_lifecycle stage={} requestId={} streamId={} threadId={} turnId={}",
+                    normalize(stage),
+                    normalize(requestId),
+                    streamId,
+                    threadId,
+                    turnId);
+            return;
+        }
+        log.info(
+                "[AiStreamService] stream_lifecycle stage={} requestId={} streamId={} threadId={} turnId={} details={}",
+                normalize(stage),
+                normalize(requestId),
+                streamId,
+                threadId,
+                turnId,
+                normalizedDetails);
+    }
+
+    private void withLogCorrelation(
+            String requestId,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            Runnable action) {
+        withLogCorrelation(
+                requestId,
+                streamId,
+                threadId,
+                turnId,
+                () -> {
+                    action.run();
+                    return null;
+                });
+    }
+
+    private <T> T withLogCorrelation(
+            String requestId,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            Supplier<T> action) {
+        String previousRequestId = MDC.get(MDC_REQUEST_ID);
+        String previousStreamId = MDC.get(MDC_STREAM_ID);
+        String previousThreadId = MDC.get(MDC_THREAD_ID);
+        String previousTurnId = MDC.get(MDC_TURN_ID);
+        putMdcValue(MDC_REQUEST_ID, requestId);
+        putMdcValue(MDC_STREAM_ID, streamId != null ? streamId.toString() : null);
+        putMdcValue(MDC_THREAD_ID, threadId != null ? threadId.toString() : null);
+        putMdcValue(MDC_TURN_ID, turnId != null ? turnId.toString() : null);
+        try {
+            return action.get();
+        } finally {
+            restoreMdcValue(MDC_REQUEST_ID, previousRequestId);
+            restoreMdcValue(MDC_STREAM_ID, previousStreamId);
+            restoreMdcValue(MDC_THREAD_ID, previousThreadId);
+            restoreMdcValue(MDC_TURN_ID, previousTurnId);
+        }
+    }
+
+    private void putMdcValue(String key, String value) {
+        String normalized = normalize(value);
+        if (normalized == null) {
+            MDC.remove(key);
+            return;
+        }
+        MDC.put(key, normalized);
+    }
+
+    private void restoreMdcValue(String key, String previousValue) {
+        if (previousValue == null || previousValue.isBlank()) {
+            MDC.remove(key);
+            return;
+        }
+        MDC.put(key, previousValue);
+    }
+
     private String normalize(String value) {
         if (value == null) {
             return null;
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeMetricTag(String value, String fallback) {
+        String normalized = normalize(value);
+        if (normalized == null) {
+            return fallback;
+        }
+        StringBuilder out = new StringBuilder(normalized.length());
+        for (int idx = 0; idx < normalized.length(); idx++) {
+            char ch = Character.toLowerCase(normalized.charAt(idx));
+            if ((ch >= 'a' && ch <= 'z')
+                    || (ch >= '0' && ch <= '9')
+                    || ch == '_'
+                    || ch == '-'
+                    || ch == '.') {
+                out.append(ch);
+            } else {
+                out.append('_');
+            }
+        }
+        String sanitized = out.toString();
+        return sanitized.isBlank() ? fallback : sanitized;
     }
 
     private ExecutorService createStreamExecutor() {

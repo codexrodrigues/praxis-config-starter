@@ -13,6 +13,9 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.lang.reflect.Modifier;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -25,12 +28,14 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.AiThread;
@@ -38,12 +43,16 @@ import org.praxisplatform.config.domain.AiTurnStatus;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class AiStreamServiceTest {
+
+    private static final String METRIC_STREAM_CANCEL_INFLIGHT_TOTAL = "ai_stream_cancel_inflight_total";
+    private static final String METRIC_STREAM_DURATION_MS = "ai_stream_duration_ms";
 
     @Mock
     private AiThreadService threadService;
@@ -57,9 +66,12 @@ class AiStreamServiceTest {
     private AiStreamAccessTokenService streamAccessTokenService;
 
     private AiStreamService streamService;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        Metrics.addRegistry(meterRegistry);
         streamService = new AiStreamService(
                 threadService,
                 turnService,
@@ -84,6 +96,8 @@ class AiStreamServiceTest {
 
     @AfterEach
     void tearDown() {
+        Metrics.removeRegistry(meterRegistry);
+        meterRegistry.close();
         if (streamService != null) {
             streamService.shutdown();
         }
@@ -367,6 +381,45 @@ class AiStreamServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void shouldIncrementCancelInflightMetricWhenCancellingActiveStream() {
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID streamId = UUID.randomUUID();
+        AiPrincipalContext principal = new AiPrincipalContext("tenant-a", "user-a", "prod", true);
+        AiTurnEventService.StreamOwnership ownership = new AiTurnEventService.StreamOwnership(
+                streamId,
+                threadId,
+                turnId,
+                "tenant-a",
+                "user-a",
+                "prod",
+                Instant.now().plusSeconds(900));
+        AiTurnEventEnvelope cancelled = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(streamId)
+                .threadId(threadId)
+                .turnId(turnId)
+                .seq(2L)
+                .type("cancelled")
+                .timestamp(Instant.now())
+                .payload(new ObjectMapper().valueToTree(Map.of("state", "cancelled")))
+                .build();
+
+        when(turnEventService.requireOwnership(streamId, principal)).thenReturn(ownership);
+        when(turnEventService.findLastEvent(streamId)).thenReturn(Optional.empty());
+        when(turnEventService.appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("cancelled"), any()))
+                .thenReturn(cancelled);
+
+        Set<UUID> activeStreams = (Set<UUID>) ReflectionTestUtils.getField(streamService, "activeProcessingStreams");
+        activeStreams.add(streamId);
+
+        streamService.cancelStream(streamId, null, principal);
+
+        assertThat(metricCounterValue(METRIC_STREAM_CANCEL_INFLIGHT_TOTAL)).isEqualTo(1.0d);
+    }
+
+    @Test
     void shouldRejectStartWhenTenantCapacityIsExceeded() {
         UUID threadId = UUID.randomUUID();
         UUID turnId = UUID.randomUUID();
@@ -613,6 +666,10 @@ class AiStreamServiceTest {
         streamService.startStream(request, "http://localhost:8088", principal);
 
         verify(turnEventService).appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("error"), any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloadCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(turnEventService).appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("error"), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue()).containsEntry("reason_code", "legacy_orphan_tail");
         verify(turnService).completeTurn(threadId, turnId);
         verify(orchestratorService, never()).generatePatch(any(), anyString(), anyString(), anyString(), anyString());
     }
@@ -694,9 +751,151 @@ class AiStreamServiceTest {
         streamService.startStream(request, "http://localhost:8088", principal);
 
         verify(turnEventService).appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("cancelled"), any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloadCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(turnEventService).appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("cancelled"), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue()).containsEntry("reason_code", "legacy_orphan_tail");
         verify(turnService).cancelTurn(threadId, turnId);
         verify(turnService, never()).completeTurn(threadId, turnId);
         verify(orchestratorService, never()).generatePatch(any(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldRecordStreamDurationHistogramWithProviderTag() {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiPrincipalContext principal = new AiPrincipalContext("tenant-a", "user-a", "prod", true);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Atualizar tabela")
+                .sessionId(threadId)
+                .clientTurnId(turnId)
+                .currentState(new ObjectMapper().createObjectNode())
+                .streamTransport(Boolean.TRUE)
+                .build();
+        AtomicLong seq = new AtomicLong(0L);
+
+        when(orchestratorService.resolveStreamMetricsProvider("tenant-a", "user-a", "prod"))
+                .thenReturn("openai");
+        when(orchestratorService.generatePatch(any(), eq("http://localhost:8088"), eq("tenant-a"), eq("user-a"), eq("prod")))
+                .thenReturn(org.praxisplatform.config.dto.AiOrchestratorResponse.builder()
+                        .type("patch")
+                        .build());
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> {
+                    String eventType = invocation.getArgument(0, String.class);
+                    return "result".equalsIgnoreCase(eventType)
+                            || "error".equalsIgnoreCase(eventType)
+                            || "cancelled".equalsIgnoreCase(eventType);
+                });
+        when(turnEventService.appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), anyString(), any()))
+                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
+                        .eventId(UUID.randomUUID())
+                        .streamId(streamId)
+                        .threadId(threadId)
+                        .turnId(turnId)
+                        .seq(seq.incrementAndGet())
+                        .type(invocation.getArgument(4, String.class))
+                        .timestamp(Instant.now())
+                        .payload(new ObjectMapper().createObjectNode())
+                        .build());
+
+        ReflectionTestUtils.invokeMethod(
+                streamService,
+                "processTurn",
+                streamId,
+                request,
+                principal,
+                "http://localhost:8088",
+                AiTurnService.TurnDecision.PROCESS);
+
+        DistributionSummary summary = meterRegistry.find(METRIC_STREAM_DURATION_MS)
+                .tags("provider", "openai")
+                .summary();
+        assertThat(summary).isNotNull();
+        assertThat(summary.count()).isGreaterThan(0);
+    }
+
+    @Test
+    void shouldPropagateCorrelationIdsToAsyncProcessingMdc() {
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Atualizar tabela")
+                .clientTurnId(turnId)
+                .currentState(new ObjectMapper().createObjectNode())
+                .build();
+        AiThread thread = AiThread.builder()
+                .threadId(threadId)
+                .tenantId("tenant-a")
+                .userId("user-a")
+                .environment("prod")
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .build();
+        AtomicLong seq = new AtomicLong(0L);
+        AtomicReference<String> requestIdSeen = new AtomicReference<>();
+        AtomicReference<String> streamIdSeen = new AtomicReference<>();
+        AtomicReference<String> threadIdSeen = new AtomicReference<>();
+        AtomicReference<String> turnIdSeen = new AtomicReference<>();
+
+        when(threadService.resolveThread(request, "tenant-a", "user-a", "prod", "Atualizar tabela"))
+                .thenReturn(thread);
+        when(turnEventService.findStartMetadata(threadId, turnId)).thenReturn(Optional.empty());
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> {
+                    String eventType = invocation.getArgument(0, String.class);
+                    return "result".equalsIgnoreCase(eventType)
+                            || "error".equalsIgnoreCase(eventType)
+                            || "cancelled".equalsIgnoreCase(eventType);
+                });
+        when(turnEventService.appendEvent(any(), any(), any(), any(), anyString(), any()))
+                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
+                        .eventId(UUID.randomUUID())
+                        .streamId(invocation.getArgument(1, UUID.class))
+                        .threadId(invocation.getArgument(2, UUID.class))
+                        .turnId(invocation.getArgument(3, UUID.class))
+                        .seq(seq.incrementAndGet())
+                        .type(invocation.getArgument(4, String.class))
+                        .timestamp(Instant.now())
+                        .payload(new ObjectMapper().createObjectNode())
+                        .build());
+        when(orchestratorService.generatePatch(any(), eq("http://localhost:8088"), eq("tenant-a"), eq("user-a"), eq("prod")))
+                .thenAnswer(invocation -> {
+                    requestIdSeen.set(MDC.get("requestId"));
+                    streamIdSeen.set(MDC.get("streamId"));
+                    threadIdSeen.set(MDC.get("threadId"));
+                    turnIdSeen.set(MDC.get("turnId"));
+                    return org.praxisplatform.config.dto.AiOrchestratorResponse.builder()
+                            .type("patch")
+                            .build();
+                });
+
+        AiStreamService.StreamStartResult startResult;
+        MDC.put("requestId", "req-correlation-async");
+        try {
+            startResult = streamService.startStream(
+                    request,
+                    "http://localhost:8088",
+                    new AiPrincipalContext("tenant-a", "user-a", "prod", true));
+        } finally {
+            MDC.remove("requestId");
+        }
+
+        verify(orchestratorService, timeout(2000)).generatePatch(
+                any(),
+                eq("http://localhost:8088"),
+                eq("tenant-a"),
+                eq("user-a"),
+                eq("prod"));
+        assertThat(requestIdSeen.get()).isEqualTo("req-correlation-async");
+        assertThat(streamIdSeen.get()).isEqualTo(startResult.response().getStreamId().toString());
+        assertThat(threadIdSeen.get()).isEqualTo(threadId.toString());
+        assertThat(turnIdSeen.get()).isEqualTo(turnId.toString());
     }
 
     private String legacyRequestHash(AiOrchestratorRequest request) throws Exception {
@@ -706,5 +905,10 @@ class AiStreamServiceTest {
         node.remove("streamTurnPreclaimed");
         byte[] raw = mapper.writeValueAsBytes(node);
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw));
+    }
+
+    private double metricCounterValue(String metricName) {
+        var counter = meterRegistry.find(metricName).counter();
+        return counter != null ? counter.count() : 0.0d;
     }
 }

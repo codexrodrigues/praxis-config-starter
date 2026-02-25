@@ -359,9 +359,11 @@ public class SpringAiGeminiService implements AiProvider {
             List<Advisor> advisors) {
         GoogleGenAiChatModel chatClient = resolveChatClient();
         ChatClient client = ChatClient.create(chatClient);
-        Filter.Expression filterExpression = RagFilters.buildTenantEnvironmentExpression(
+        Filter.Expression filterExpression = RagFilters.buildScopedExpression(
                 config != null ? config.getTenantId() : null,
-                config != null ? config.getEnvironment() : null);
+                config != null ? config.getEnvironment() : null,
+                config != null ? config.getRagReleaseId() : null,
+                true);
         if (filterExpression == null) {
             return client.prompt(prompt)
                     .options(options)
