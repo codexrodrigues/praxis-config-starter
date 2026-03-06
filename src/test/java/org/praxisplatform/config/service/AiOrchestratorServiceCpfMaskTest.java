@@ -8,9 +8,11 @@ import java.lang.reflect.Constructor;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.springframework.test.util.ReflectionTestUtils;
 
+@Tag("unit")
 class AiOrchestratorServiceCpfMaskTest {
 
   private AiOrchestratorService service;

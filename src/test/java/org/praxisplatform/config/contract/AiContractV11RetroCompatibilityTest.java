@@ -1,5 +1,6 @@
 package org.praxisplatform.config.contract;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -84,6 +85,7 @@ import org.springframework.test.web.servlet.MvcResult;
         OpenAiImageAutoConfiguration.class,
         OpenAiModerationAutoConfiguration.class
 })
+@Tag("integration")
 class AiContractV11RetroCompatibilityTest {
 
     private static final String CONTRACT_VERSION_HEADER = "X-Praxis-Contract-Version";

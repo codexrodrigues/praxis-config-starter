@@ -1,5 +1,6 @@
 package org.praxisplatform.config.controller;
 
+import org.junit.jupiter.api.Tag;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -75,6 +76,7 @@ import org.springframework.test.web.servlet.MockMvc;
         OpenAiImageAutoConfiguration.class,
         OpenAiModerationAutoConfiguration.class
 })
+@Tag("integration")
 class AiPatchStreamSecurityChainIntegrationTest {
 
     private static final String BASIC_AUTH = "Basic c3RyZWFtLXVzZXI6c2VjcmV0";

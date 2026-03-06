@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -15,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+@Tag("unit")
 class AiStreamAccessTokenServiceTest {
 
     private AiStreamAccessTokenService service;

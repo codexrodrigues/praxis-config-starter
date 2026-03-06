@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -26,6 +27,7 @@ import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.springframework.ai.document.Document;
 
 @ExtendWith(MockitoExtension.class)
+@Tag("unit")
 class ApiMetadataIngestionServiceTest {
 
     @Mock

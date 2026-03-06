@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,6 +29,7 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiProviderModel;
 import org.springframework.test.util.ReflectionTestUtils;
 
+@Tag("integration")
 class AiProviderStreamingFallbackAndCancelIntegrationTest {
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();

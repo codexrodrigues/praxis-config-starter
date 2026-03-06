@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
@@ -14,6 +15,7 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
+@Tag("unit")
 class AiOrchestratorServiceDeterministicFallbackTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

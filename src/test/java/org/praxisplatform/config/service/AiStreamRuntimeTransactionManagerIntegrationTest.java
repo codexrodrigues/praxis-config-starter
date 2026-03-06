@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -67,6 +68,7 @@ import org.springframework.transaction.PlatformTransactionManager;
         OpenAiImageAutoConfiguration.class,
         OpenAiModerationAutoConfiguration.class
 })
+@Tag("integration")
 class AiStreamRuntimeTransactionManagerIntegrationTest {
 
     static final AtomicInteger API_TX_BEGIN_COUNT = new AtomicInteger();

@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,6 +27,7 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
+@Tag("unit")
 class AiOrchestratorServiceTextStreamingTest {
 
     private static final String METRIC_STREAM_FALLBACK_TOTAL = "ai_stream_fallback_total";

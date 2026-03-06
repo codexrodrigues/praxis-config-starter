@@ -1,5 +1,6 @@
 package org.praxisplatform.config.controller;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -100,6 +101,7 @@ import org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoCon
         OpenAiModerationAutoConfiguration.class
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Tag("integration")
 class AiPatchStreamHttpSseIntegrationTest {
 
     private static final String TENANT = "tenant-a";

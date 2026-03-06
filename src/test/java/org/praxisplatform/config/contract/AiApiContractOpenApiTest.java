@@ -9,9 +9,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
+@Tag("smoke")
 class AiApiContractOpenApiTest {
 
     private static final String CONTRACT_FILE = "praxis-ai-api-contract-v1.1.openapi.yaml";

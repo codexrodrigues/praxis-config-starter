@@ -1,54 +1,63 @@
 # Releasing - praxis-config-starter
 
-Este documento descreve como publicar Release Candidates (RC) e versoes finais no Maven Central usando o workflow deste repositorio.
+Este documento descreve o fluxo de CI e release no GitHub Actions para publicar no Maven Central com o menor atrito operacional.
 
-## Pre-requisitos
-- GitHub Secrets no repositorio:
-  - `CENTRAL_TOKEN_USER` e `CENTRAL_TOKEN_PASS` (tokens do Sonatype Central Portal)
-  - `GPG_PRIVATE_KEY` (chave privada ASCII-armored ou base64, sem CRLF)
-  - `GPG_PASSPHRASE` (passphrase da chave)
-  - `GPG_KEY_ID` (opcional; se ausente, o workflow resolve automaticamente)
-- Java 17 + Maven instalados localmente (validacao local opcional).
+## O que esta automatizado
+- Build automatico em `push` para `main` (job `Build on main`).
+- Build de `smoke/unit` em `push` para `main` com perfil Maven `ci-smoke-unit`.
+- Criacao automatica de tag por `workflow_dispatch` (job `Create release tag`), com:
+  - versao explicita (`version`), ou
+  - calculo automatico por semver (`bump`: patch/minor/major/prerelease + `preid`).
+- Publicacao automatica no Maven Central ao receber tag `v*`.
+- Release executa `smoke/unit` antes da assinatura/publicacao.
+- O job de release publica **somente** quando a execucao foi disparada por tag `v*`.
 
-## Fluxo (Release Candidate)
-1) Opcional - validar localmente (sem assinatura):
+## Convencao de testes para CI
+- `@Tag("unit")`: testes unitarios deterministicos.
+- `@Tag("smoke")`: testes de sanidade rapidos de contrato/wiring.
+- `@Tag("integration")`, `@Tag("external")`, `@Tag("e2e")`: nao entram no profile `ci-smoke-unit`.
+- O profile `ci-smoke-unit` roda apenas `groups=unit,smoke`.
+
+## Secrets necessarios (repositorio)
+- `CENTRAL_TOKEN_USER`
+- `CENTRAL_TOKEN_PASS`
+- `GPG_PRIVATE_KEY`
+- `GPG_PASSPHRASE`
+- `GPG_KEY_ID` (opcional)
+- `RELEASE_PAT` (opcional, recomendado quando `GITHUB_TOKEN` nao consegue criar/push de tags por regras de branch/protecao)
+
+## Fluxo recomendado (mais simples)
+1) Entrar em **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow**.
+2) Manter `create_tag=true`.
+3) Preencher:
+   - `version` (opcional) para fixar exatamente a versao, ou
+   - `bump` (`patch`, `minor`, `major`, `prerelease`) e `preid` (ex.: `rc`).
+4) Executar.
+
+Resultado:
+- A workflow cria/push da tag `vX.Y.Z` (ou `vX.Y.Z-rc.N`).
+- O push da tag dispara automaticamente o job de release/publicacao no Maven Central.
+
+## Exemplos praticos
+- Proximo patch estavel:
+  - `create_tag=true`, `bump=patch`
+- Novo RC:
+  - `create_tag=true`, `bump=prerelease`, `preid=rc`
+- Versao fixa:
+  - `create_tag=true`, `version=1.2.0`
+
+## Convencao de tags
+- Formato aceito para release automatica: `v*` (ex.: `v1.2.0`, `v1.2.1-rc.1`).
+
+## Validacao local (opcional)
 ```bash
-mvn -B -DskipTests -T 1C clean verify
-mvn -B javadoc:javadoc && test -d target/site/apidocs
+mvn -B -P ci-smoke-unit -T 1C clean verify
 ```
-
-2) Criar a tag do RC e enviar:
-```bash
-git tag v0.1.0-rc.1
-git push origin v0.1.0-rc.1
-```
-
-3) Acompanhar o workflow `Release Java Starter (praxis-config-starter)`:
-- O workflow resolve a versao a partir da tag (`v` e removido).
-- Passos: importar GPG -> `versions:set` -> `clean verify` com perfil `release` (assina) -> publicar via Central Plugin.
-
-4) Verificar artefatos assinados no job:
-- `target/praxis-config-starter-<versao>.jar(.asc)`
-- `target/praxis-config-starter-<versao>-sources.jar(.asc)`
-- `target/praxis-config-starter-<versao>-javadoc.jar(.asc)`
-
-5) Acompanhar aprovacao no Sonatype Central Portal.
-
-## Fluxo (Versao Final)
-Mesmo processo, usando tag sem sufixo RC:
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-## Observacoes
-- O `pom.xml` no repositorio pode ficar em `-SNAPSHOT`; o workflow usa `versions:set` apenas durante a execucao do CI.
-- O perfil `release` assina os artefatos, gera POM flatten compativel com Central e publica usando `central-publishing-maven-plugin`.
 
 ## Troubleshooting
-- GPG key id nao resolvido:
-  - Confirme que `GPG_PRIVATE_KEY` nao tem BOM/CRLF. O workflow sanitiza, mas vale validar o secret bruto.
-- Falha de publicacao (`publish`):
-  - Verifique `CENTRAL_TOKEN_USER/PASS` e se o server `central` foi injetado pelo `actions/setup-java`.
-- Assinaturas ausentes:
-  - Confirme que o build roda com `-P release -Dgpg.skip=false`.
+- Falha para criar tag:
+  - Configure `RELEASE_PAT` com permissao de `contents:write`.
+- Falha em assinatura GPG:
+  - Validar `GPG_PRIVATE_KEY` sem CRLF/BOM e `GPG_PASSPHRASE`.
+- Falha na publicacao:
+  - Verificar `CENTRAL_TOKEN_USER/CENTRAL_TOKEN_PASS` e namespace no Central Portal.

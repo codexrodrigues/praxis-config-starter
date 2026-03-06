@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -24,6 +25,7 @@ import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.springframework.ai.document.Document;
 
 @ExtendWith(MockitoExtension.class)
+@Tag("unit")
 class RegistryIngestionServiceIdentityTest {
 
     @Mock

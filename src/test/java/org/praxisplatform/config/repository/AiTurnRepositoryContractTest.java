@@ -1,5 +1,6 @@
 package org.praxisplatform.config.repository;
 
+import org.junit.jupiter.api.Tag;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.transaction.annotation.Transactional;
 
+@Tag("unit")
 class AiTurnRepositoryContractTest {
 
     @Test
