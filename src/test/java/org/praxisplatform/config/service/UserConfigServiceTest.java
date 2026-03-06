@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +16,7 @@ import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
 
 @ExtendWith(MockitoExtension.class)
+@Tag("unit")
 class UserConfigServiceTest {
 
   @Mock private UiUserConfigRepository repository;

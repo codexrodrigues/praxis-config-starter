@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.AiCapability;
 import org.springframework.test.util.ReflectionTestUtils;
 
+@Tag("unit")
 class AiOrchestratorServiceSanitizeTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

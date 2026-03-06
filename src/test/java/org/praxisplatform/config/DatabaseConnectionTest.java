@@ -1,6 +1,7 @@
 package org.praxisplatform.config;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.domain.ConfigEntry;
 import org.praxisplatform.config.rag.RagVectorStoreConfiguration;
 import org.praxisplatform.config.repository.ConfigEntryRepository;
@@ -48,6 +49,7 @@ import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoCo
         "praxis.ai.rag.vector-store.enabled=false",
         "spring.ai.openai.api-key=dummy"
 })
+@Tag("integration")
 class DatabaseConnectionTest {
 
     @MockBean

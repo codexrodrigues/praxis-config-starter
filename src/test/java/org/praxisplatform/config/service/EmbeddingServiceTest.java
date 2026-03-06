@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Iterator;
 import java.util.List;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.ai.embedding.Embedding;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+@Tag("unit")
 class EmbeddingServiceTest {
 
     @Test

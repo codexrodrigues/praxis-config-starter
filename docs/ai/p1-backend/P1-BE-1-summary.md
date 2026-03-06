@@ -16,7 +16,7 @@ Output
 ```
 [INFO] Scanning for projects...
 [INFO] 
-[INFO] --------------< org.praxisplatform:praxis-config-starter >--------------
+[INFO] --------------< io.github.codexrodrigues:praxis-config-starter >--------------
 [INFO] Building praxis-config-starter 0.0.1-SNAPSHOT
 [INFO]   from pom.xml
 [INFO] --------------------------------[ jar ]---------------------------------

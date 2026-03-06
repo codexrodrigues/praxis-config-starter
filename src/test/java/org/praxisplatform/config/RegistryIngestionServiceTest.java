@@ -3,6 +3,7 @@ package org.praxisplatform.config;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
@@ -57,6 +58,7 @@ import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoCo
         "spring.ai.openai.api-key=dummy",
         "praxis.ai.registry.bootstrap.enabled=false"
 })
+@Tag("integration")
 class RegistryIngestionServiceTest {
 
     @Autowired

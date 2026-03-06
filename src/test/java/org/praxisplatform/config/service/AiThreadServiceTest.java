@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -18,6 +19,7 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.repository.AiThreadRepository;
 
 @ExtendWith(MockitoExtension.class)
+@Tag("unit")
 class AiThreadServiceTest {
 
     @Mock

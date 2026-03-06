@@ -10,9 +10,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.dto.AiPatchDiff;
 import org.springframework.test.util.ReflectionTestUtils;
 
+@Tag("unit")
 class AiOrchestratorServiceDiffTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

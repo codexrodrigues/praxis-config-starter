@@ -1,11 +1,13 @@
 package org.praxisplatform.config.service;
 
+import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+@Tag("unit")
 class AiSensitiveDataRedactorTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Collections;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.dto.AiContextDTO;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
@@ -20,6 +21,7 @@ import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.dto.AiProviderModel;
 import org.praxisplatform.config.dto.IntentPlan;
 
+@Tag("unit")
 class AiOrchestratorServiceCompletenessLoopTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

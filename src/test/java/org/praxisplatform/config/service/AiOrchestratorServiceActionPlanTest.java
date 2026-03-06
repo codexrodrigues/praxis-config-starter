@@ -10,10 +10,12 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.springframework.test.util.ReflectionTestUtils;
 
+@Tag("unit")
 class AiOrchestratorServiceActionPlanTest {
 
   private final ObjectMapper objectMapper = new ObjectMapper();

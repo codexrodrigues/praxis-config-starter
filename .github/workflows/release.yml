@@ -1,18 +1,216 @@
-name: Release Java Starter (praxis-config-starter)
+name: CI and Release Java Starter (praxis-config-starter)
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
+      create_tag:
+        description: 'Create and push git tag from main (recommended).'
+        required: false
+        default: true
+        type: boolean
       version:
-        description: 'Release version (e.g. 0.1.0-rc.1)'
-        required: true
+        description: 'Explicit version (e.g. 0.1.0 or 0.1.0-rc.1). Optional when bump is provided.'
+        required: false
+        type: string
+      bump:
+        description: 'Semver bump to compute the next version when version is empty.'
+        required: false
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+      preid:
+        description: 'Pre-release identifier when bump=prerelease (alpha, beta, rc).'
+        required: false
+        default: rc
         type: string
 
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/tags/v') && format('release-{0}', github.ref_name) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
 jobs:
+  build_main:
+    name: Build on main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build (verify)
+        run: mvn -B -P ci-smoke-unit -T 1C clean verify
+
+  create_tag:
+    name: Create release tag
+    if: github.event_name == 'workflow_dispatch' && inputs.create_tag == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      resolved_version: ${{ steps.compute_version.outputs.resolved_version }}
+      resolved_tag: ${{ steps.compute_version.outputs.resolved_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      - name: Ensure main/master branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+          if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
+            echo "::error::Run this workflow on main/master to create release tags. Current: $BRANCH"
+            exit 1
+          fi
+
+      - name: Compute next version
+        id: compute_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force >/dev/null 2>&1 || true
+
+          normalize_version() {
+            local v="$1"
+            v="${v#v}"
+            echo "$v"
+          }
+
+          validate_version() {
+            local v="$1"
+            if [[ ! "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Invalid version '$v'. Expected semver, e.g. 0.1.0 or 0.1.0-rc.1"
+              exit 1
+            fi
+          }
+
+          latest_stable() {
+            git tag -l 'v[0-9]*.[0-9]*.[0-9]*' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sed 's/^v//' \
+              | sort -V \
+              | tail -n1 || true
+          }
+
+          bump_stable() {
+            local base="$1"
+            local bump="$2"
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "$base"
+            case "$bump" in
+              major) echo "$((major + 1)).0.0" ;;
+              minor) echo "$major.$((minor + 1)).0" ;;
+              patch) echo "$major.$minor.$((patch + 1))" ;;
+              *)
+                echo "::error::Invalid bump '$bump'. Use: major | minor | patch | prerelease"
+                exit 1
+                ;;
+            esac
+          }
+
+          next_prerelease() {
+            local preid="$1"
+            local stable="$2"
+            local last_pre base n major minor patch
+
+            if [[ ! "$preid" =~ ^[0-9A-Za-z-]+$ ]]; then
+              echo "::error::Invalid preid '$preid'. Use only [0-9A-Za-z-]"
+              exit 1
+            fi
+
+            IFS='.' read -r major minor patch <<< "$stable"
+            base="${major}.${minor}.$((patch + 1))"
+
+            last_pre="$(
+              git tag -l "v${base}-${preid}.*" \
+                | grep -E "^v${base//./\\.}-${preid}\.[0-9]+$" \
+                | sed 's/^v//' \
+                | sort -V \
+                | tail -n1 || true
+            )"
+
+            if [[ -n "${last_pre:-}" ]]; then
+              n="${last_pre##*.}"
+              echo "${base}-${preid}.$((n + 1))"
+              return
+            fi
+
+            echo "${base}-${preid}.1"
+          }
+
+          VERSION_INPUT="${{ inputs.version }}"
+          BUMP_INPUT="${{ inputs.bump }}"
+          PREID_INPUT="${{ inputs.preid }}"
+
+          VERSION=""
+          if [[ -n "${VERSION_INPUT:-}" ]]; then
+            VERSION="$(normalize_version "$VERSION_INPUT")"
+          else
+            BASE="$(latest_stable)"
+            if [[ -z "${BASE:-}" ]]; then
+              BASE="0.0.0"
+            fi
+            if [[ "$BUMP_INPUT" == "prerelease" ]]; then
+              VERSION="$(next_prerelease "${PREID_INPUT:-rc}" "$BASE")"
+            else
+              VERSION="$(bump_stable "$BASE" "$BUMP_INPUT")"
+            fi
+          fi
+
+          validate_version "$VERSION"
+          TAG="v$VERSION"
+
+          echo "resolved_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "resolved_tag=$TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release Tag Prepared"
+            echo "- Version: \`$VERSION\`"
+            echo "- Tag: \`$TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.compute_version.outputs.resolved_tag }}"
+
+          git fetch --tags --force
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Tag '$TAG' already exists. Nothing to push."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          echo "Created and pushed tag '$TAG'."
+
   release:
+    name: Publish to Maven Central
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -32,7 +230,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: 'maven'
+          cache: maven
           server-id: central
           server-username: CENTRAL_TOKEN_USER
           server-password: CENTRAL_TOKEN_PASS
@@ -75,26 +273,26 @@ jobs:
             echo "GPG_KEY_ID provided via secrets"
           fi
 
-      - name: Resolve version from tag
+      - name: Resolve release version
         id: ver
+        shell: bash
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            V="${{ inputs.version }}"
-          else
-            TAG="${GITHUB_REF_NAME}"
-            V="${TAG#v}"
+          TAG="${GITHUB_REF_NAME}"
+          V="${TAG#v}"
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release version '$V'. Expected semver, e.g. 1.2.3 or 1.2.3-rc.1"
+            exit 1
           fi
           echo "resolved=${V}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $V"
 
       - name: Set module version
-        run: |
-          mvn -q versions:set -DnewVersion=${{ steps.ver.outputs.resolved }} -DgenerateBackupPoms=false
+        run: mvn -q versions:set -DnewVersion=${{ steps.ver.outputs.resolved }} -DgenerateBackupPoms=false
 
       - name: Build and sign (verify)
         run: |
-          mvn -B -P release -Dmaven.test.skip=true -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -Dgpg.executable=gpg -T 1C \
+          mvn -B -P release,ci-smoke-unit -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -Dgpg.executable=gpg -T 1C \
             clean verify
 
       - name: Check signatures exist
@@ -110,5 +308,5 @@ jobs:
 
       - name: Publish to Central
         run: |
-          mvn -B -P release -Dmaven.test.skip=true -Dgpg.skip=false -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -T 1C \
+          mvn -B -P release,ci-smoke-unit -DskipTests -Dgpg.skip=false -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -T 1C \
             clean verify org.sonatype.central:central-publishing-maven-plugin:publish
