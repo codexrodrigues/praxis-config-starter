@@ -18,17 +18,18 @@ public class AiInteractionLogger {
     private static final Logger LOG = LoggerFactory.getLogger("ai-interactions");
 
     private final ObjectMapper objectMapper;
+    private final AiSensitiveDataRedactor sensitiveDataRedactor;
 
     @Value("${praxis.ai.logging.enabled:true}")
     private boolean enabled;
 
-    @Value("${praxis.ai.logging.include-prompt:true}")
+    @Value("${praxis.ai.logging.include-prompt:false}")
     private boolean includePrompt;
 
-    @Value("${praxis.ai.logging.include-response:true}")
+    @Value("${praxis.ai.logging.include-response:false}")
     private boolean includeResponse;
 
-    @Value("${praxis.ai.logging.include-front-response:true}")
+    @Value("${praxis.ai.logging.include-front-response:false}")
     private boolean includeFrontResponse;
 
     @Value("${praxis.ai.logging.pretty-json:true}")
@@ -61,17 +62,17 @@ public class AiInteractionLogger {
         }
 
         if (includePrompt) {
-            sb.append("\nPROMPT:\n").append(truncate(prompt));
+            sb.append("\nPROMPT:\n").append(truncate(redact(prompt)));
         }
         if (includeResponse) {
             sb.append("\nRESPONSE (formatted):\n")
-                    .append(truncate(formatResponse(responseJson, responseText)));
+                    .append(truncate(redact(formatResponse(responseJson, responseText))));
         }
         if (error != null) {
             sb.append("\nERROR:\n")
                     .append(error.getClass().getSimpleName())
                     .append(": ")
-                    .append(error.getMessage());
+                    .append(redact(error.getMessage()));
         }
         LOG.info(sb.toString());
     }
@@ -84,7 +85,7 @@ public class AiInteractionLogger {
         sb.append("[FRONT_RESPONSE]");
         appendRequestContext(sb, request);
         sb.append("\nRESPONSE (formatted):\n")
-                .append(truncate(formatJsonSafe(objectMapper.valueToTree(response))));
+                .append(truncate(formatJsonSafe(sensitiveDataRedactor.redactJson(objectMapper.valueToTree(response)))));
         LOG.info(sb.toString());
     }
 
@@ -97,7 +98,7 @@ public class AiInteractionLogger {
         appendRequestContext(sb, request);
         appendValue(sb, "label", label);
         sb.append("\nPAYLOAD (formatted):\n")
-                .append(truncate(formatJsonSafe(payload)));
+                .append(truncate(formatJsonSafe(sensitiveDataRedactor.redactJson(payload))));
         LOG.info(sb.toString());
     }
 
@@ -171,5 +172,9 @@ public class AiInteractionLogger {
             return value;
         }
         return value.substring(0, limit) + "\n... [truncated]";
+    }
+
+    private String redact(String value) {
+        return sensitiveDataRedactor.redactText(value);
     }
 }

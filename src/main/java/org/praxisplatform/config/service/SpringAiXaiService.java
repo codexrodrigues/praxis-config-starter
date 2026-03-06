@@ -190,9 +190,11 @@ public class SpringAiXaiService implements AiProvider {
             AiCallConfig config,
             List<Advisor> advisors) {
         ChatClient client = ChatClient.create(resolveClient(config));
-        Filter.Expression filterExpression = RagFilters.buildTenantEnvironmentExpression(
+        Filter.Expression filterExpression = RagFilters.buildScopedExpression(
                 config != null ? config.getTenantId() : null,
-                config != null ? config.getEnvironment() : null);
+                config != null ? config.getEnvironment() : null,
+                config != null ? config.getRagReleaseId() : null,
+                true);
         if (filterExpression == null) {
             return client.prompt(prompt)
                     .options(options)

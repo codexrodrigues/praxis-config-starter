@@ -13,6 +13,7 @@ public class AiMemoryContext {
     private final int windowSize;
     private final boolean cached;
     private final AiOrchestratorResponse cachedResponse;
+    private final boolean deferTurnCompletion;
 
     public AiMemoryContext(
             UUID threadId,
@@ -22,6 +23,18 @@ public class AiMemoryContext {
             int windowSize,
             boolean cached,
             AiOrchestratorResponse cachedResponse) {
+        this(threadId, turnId, summary, windowMessages, windowSize, cached, cachedResponse, false);
+    }
+
+    public AiMemoryContext(
+            UUID threadId,
+            UUID turnId,
+            String summary,
+            List<AiChatMessage> windowMessages,
+            int windowSize,
+            boolean cached,
+            AiOrchestratorResponse cachedResponse,
+            boolean deferTurnCompletion) {
         this.threadId = threadId;
         this.turnId = turnId;
         this.summary = summary;
@@ -29,6 +42,7 @@ public class AiMemoryContext {
         this.windowSize = windowSize;
         this.cached = cached;
         this.cachedResponse = cachedResponse;
+        this.deferTurnCompletion = deferTurnCompletion;
     }
 
     public UUID getThreadId() {
@@ -57,5 +71,9 @@ public class AiMemoryContext {
 
     public AiOrchestratorResponse getCachedResponse() {
         return cachedResponse;
+    }
+
+    public boolean isDeferTurnCompletion() {
+        return deferTurnCompletion;
     }
 }

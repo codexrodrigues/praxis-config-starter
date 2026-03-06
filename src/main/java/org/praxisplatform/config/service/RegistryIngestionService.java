@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.StringJoiner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,7 @@ import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
+import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
@@ -42,12 +44,14 @@ public class RegistryIngestionService {
 
         String resolvedTenant = normalize(tenantId);
         String resolvedEnv = normalize(environment);
+        String releaseId = RagDocumentIdentity.resolveReleaseId(null, request.getVersion(), request.getGeneratedAt());
+        String requestVersion = normalize(request.getVersion());
         var definitions = request.getDefinitions();
         request.getComponents().forEach((componentId, entry) -> {
             try {
                 AiRegistry def = toComponentDefinition(componentId, entry, definitions);
                 upsertDefinition(def);
-                Document ragDocument = toRagDocument(def, entry, resolvedTenant, resolvedEnv);
+                Document ragDocument = toRagDocument(def, entry, resolvedTenant, resolvedEnv, releaseId, requestVersion);
                 ragVectorStoreService.upsertDocuments(List.of(ragDocument));
                 log.info("Ingested component: {}", componentId);
             } catch (Exception e) {
@@ -87,14 +91,24 @@ public class RegistryIngestionService {
             AiRegistry definition,
             RegistryIngestionRequest.ComponentEntry entry,
             String tenantId,
-            String environment) {
+            String environment,
+            String releaseId,
+            String requestVersion) {
         String description = entry.getDescription();
         if (description == null || description.isBlank()) {
             description = "Component " + definition.getRegistryKey();
         }
+        String content = buildSummary(definition.getRegistryKey(), description, entry);
+        String contentHash = RagDocumentIdentity.sha256(
+                definition.getPayload() != null ? definition.getPayload() : content);
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.COMPONENT_DEFINITION);
         metadata.put(RagMetadataKeys.RESOURCE_ID, definition.getRegistryKey());
+        metadata.put(RagMetadataKeys.COMPONENT_ID, definition.getRegistryKey());
+        metadata.put(RagMetadataKeys.DOC_TYPE, RagResourceTypes.COMPONENT_DEFINITION);
+        metadata.put(RagMetadataKeys.RELEASE_ID, releaseId);
+        metadata.put(RagMetadataKeys.CONTENT_HASH, contentHash);
+        metadata.put(RagMetadataKeys.CHUNK_INDEX, 0);
         metadata.put(RagMetadataKeys.DESCRIPTION, description);
         metadata.put(RagMetadataKeys.JSON_SCHEMA, toJson(entry));
         if (tenantId != null) {
@@ -103,10 +117,18 @@ public class RegistryIngestionService {
         if (environment != null) {
             metadata.put(RagMetadataKeys.ENVIRONMENT, environment);
         }
-        metadata.put(RagMetadataKeys.VERSION, definition.getVersion());
+        metadata.put(RagMetadataKeys.VERSION, hasText(requestVersion) ? requestVersion : definition.getVersion());
+        metadata.entrySet().removeIf(entryMetadata -> Objects.isNull(entryMetadata.getValue()));
         return Document.builder()
-                .id("component_definition:" + definition.getRegistryKey())
-                .text(buildSummary(definition.getRegistryKey(), description, entry))
+                .id(RagDocumentIdentity.buildDocumentId(
+                        tenantId,
+                        environment,
+                        definition.getRegistryKey(),
+                        releaseId,
+                        RagResourceTypes.COMPONENT_DEFINITION,
+                        contentHash,
+                        0))
+                .text(content)
                 .metadata(metadata)
                 .build();
     }

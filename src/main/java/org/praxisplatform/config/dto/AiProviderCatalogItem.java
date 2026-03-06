@@ -17,5 +17,7 @@ public class AiProviderCatalogItem {
     private boolean requiresApiKey;
     private boolean supportsModels;
     private boolean supportsEmbeddings;
+    private boolean supportsTextStreaming;
+    private boolean supportsTurnCancellation;
     private String iconKey;
 }

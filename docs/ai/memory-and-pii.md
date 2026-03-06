@@ -14,3 +14,7 @@
 - Redaction is tracked via `ai_message.redacted`.
 - Card redaction only triggers for numbers that pass Luhn validation.
 - Can be disabled with `praxis.ai.memory.scrub.enabled=false`.
+- Log defaults for production are hardened:
+  - `praxis.ai.logging.include-prompt=false`
+  - `praxis.ai.logging.include-response=false`
+  - `praxis.ai.logging.include-front-response=false`

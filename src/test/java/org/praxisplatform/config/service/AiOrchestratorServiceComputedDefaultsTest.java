@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -188,5 +189,76 @@ class AiOrchestratorServiceComputedDefaultsTest {
                         + "toString(monthsSince(dataAdmissao) - yearsSince(dataAdmissao) * 12) + ' meses'");
         assertThat(column.path("computed").path("outputType").asText())
                 .isEqualTo("string");
+    }
+
+    @Test
+    void shouldRequestClarificationWhenComputedBaseFieldIsUnknown() {
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .intent("update_column_rules")
+                .category("columns")
+                .needsClarification(false)
+                .build();
+        ObjectNode dataProfileColumns = objectMapper.createObjectNode();
+        dataProfileColumns.set("dataNascimento", objectMapper.createObjectNode().put("inferredType", "date"));
+        dataProfileColumns.set("dataAdmissao", objectMapper.createObjectNode().put("inferredType", "date"));
+        ObjectNode dataProfile = objectMapper.createObjectNode();
+        dataProfile.set("columns", dataProfileColumns);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .userPrompt("Crie coluna calculada tempoEmpresa usando dataX")
+                .dataProfile(dataProfile)
+                .build();
+        ObjectNode currentState = objectMapper.createObjectNode();
+        ArrayNode columns = currentState.putArray("columns");
+        columns.addObject().put("field", "dataNascimento");
+        columns.addObject().put("field", "dataAdmissao");
+        List<String> warnings = new ArrayList<>();
+
+        Object response = ReflectionTestUtils.invokeMethod(
+                service,
+                "tryResolveComputedFastPath",
+                intent,
+                request,
+                currentState,
+                warnings,
+                List.<AiCapability>of(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(response).isNotNull();
+        JsonNode responseNode = objectMapper.valueToTree(response);
+        assertThat(responseNode.path("type").asText()).isEqualTo("clarification");
+        assertThat(responseNode.path("options").toString()).contains("dataAdmissao");
+    }
+
+    @Test
+    void shouldNotTreatDensityPromptAsComputedAgeRequest() {
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .intent("update_column_rules")
+                .category("appearance")
+                .needsClarification(false)
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .userPrompt("Troque a densidade da tabela para compacta.")
+                .build();
+        ObjectNode currentState = objectMapper.createObjectNode();
+        ArrayNode columns = currentState.putArray("columns");
+        columns.addObject().put("field", "dataNascimento");
+
+        Object response = ReflectionTestUtils.invokeMethod(
+                service,
+                "tryResolveComputedFastPath",
+                intent,
+                request,
+                currentState,
+                new ArrayList<String>(),
+                List.<AiCapability>of(),
+                List.<AiCapability>of(),
+                null);
+
+        assertThat(response).isNull();
     }
 }

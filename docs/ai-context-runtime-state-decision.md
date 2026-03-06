@@ -1,32 +1,39 @@
 # AI Context Runtime State Decision
 
 ## Purpose
-Document the decision to build AI context in the backend using runtime state and selector-based
-component identifiers, without reading `ui_user_config` in the AI flow.
+Document how AI context is resolved in the backend using selector-based component identifiers,
+with two supported sources for runtime state: persisted state (`ui_user_config`) and explicit
+runtime state sent by the caller.
 
 ## Decision
 - `componentId` equals the Angular selector (example: `praxis-table`).
 - `componentType` is a logical namespace (example: `table`, `form`, `page`) used for
-  prompt context; it is not used to resolve runtime state or template keys.
-- AI context must use runtime state provided by the caller; it must not read or derive
-  `currentState` from `ui_user_config` for the AI flow.
+  prompt context and for runtime state lookup keys.
+- `GET /api/praxis/config/ai-context/{componentId}` may hydrate `currentState` from
+  `ui_user_config` (tenant/user/environment fallback path).
+- `POST /api/praxis/config/ai-context/{componentId}` accepts `currentState` explicitly,
+  allowing deterministic context generation over unsaved editor state.
 - Store templates in `ai_registry` with `registry_key = <componentId>` for base templates
   and `registry_key = <componentId>:<variantId>` for variants.
 - Add an AI context/orchestrator endpoint that accepts runtime state and returns `AiContextDTO`
   with template + component definition resolved from `ai_registry`.
 
 ## Rationale
-- The user can have unsaved changes in the editor; using runtime state avoids stale context.
+- The user can have unsaved changes in the editor; explicit runtime state avoids stale context.
 - Selector-based IDs remain stable across frontend/backends.
-- Templates can be scoped by logical type without coupling to per-user storage.
+- GET fallback preserves convenience for editor bootstrap/resume from persisted state.
+- Templates can be scoped by logical type without coupling template storage to per-user state.
 
 ## Implications
-- The AI orchestrator/frontend must send `currentState` on every context request.
+- For deterministic generation/edition flows, the frontend should send `currentState`
+  in `POST /ai-context` (and in AI patch/orchestrator requests).
+- `GET /ai-context` can be used to bootstrap context from persisted `ui_user_config`
+  when explicit runtime state is not available.
 - Templates are fetched from `ai_registry` using `componentId` (base) or
   `componentId:variantId` (variant). Base templates can list `templateMeta.variants`
   and `defaultVariantId` to guide selection.
 - Definitions remain stored by selector in `ai_registry` (`registry_type=component_definition`).
-- The AI flow must not query `ui_user_config`; that storage is only for user/tenant state.
+- `ui_user_config` remains user/tenant/environment storage; `ai_registry` remains template/definition storage.
 
 ## AI Recipes (Generic Examples)
 - The files under `praxis-ui-angular/examples/ai-recipes/` are intentionally generic and serve as

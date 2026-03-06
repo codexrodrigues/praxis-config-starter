@@ -2,6 +2,9 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
+import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -47,6 +50,30 @@ public class AiProviderRouter implements AiProvider {
     @Override
     public String generateText(String prompt, AiCallConfig config) {
         return resolve(config).generateText(prompt, config);
+    }
+
+    @Override
+    public boolean supportsTextStreaming(AiCallConfig config) {
+        return resolve(config).supportsTextStreaming(config);
+    }
+
+    @Override
+    public boolean supportsTurnCancellation(AiCallConfig config) {
+        return resolve(config).supportsTurnCancellation(config);
+    }
+
+    @Override
+    public String generateTextStream(
+            String prompt,
+            AiCallConfig config,
+            Consumer<String> onChunk,
+            Supplier<Boolean> cancellationRequested) {
+        return resolve(config).generateTextStream(prompt, config, onChunk, cancellationRequested);
+    }
+
+    @Override
+    public void cancelTurn(UUID threadId, UUID turnId) {
+        resolve().cancelTurn(threadId, turnId);
     }
 
     @Override

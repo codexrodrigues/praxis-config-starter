@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.Metrics;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -20,6 +22,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.CancellationException;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -56,6 +60,10 @@ public class AiOrchestratorService {
     private static final int DEFAULT_VARIANT_SEARCH_LIMIT = 8;
     private static final double VARIANT_SIMILARITY_THRESHOLD = 0.65d;
     private static final double TEMPLATE_FALLBACK_THRESHOLD = 0.58d;
+    private static final String METRIC_STREAM_FALLBACK_TOTAL = "ai_stream_fallback_total";
+    private static final String METRIC_TAG_PROVIDER = "provider";
+    private static final String METRIC_TAG_REASON_KIND = "reason_kind";
+    private static final String METRIC_TAG_UNKNOWN = "unknown";
     private static final String COMPONENT_ID_TABLE = "praxis-table";
     private static final int MAX_TARGET_CANDIDATES_PER_PATH = 30;
     private static final int BADGE_CARDINALITY_MAX = 6;
@@ -97,6 +105,17 @@ public class AiOrchestratorService {
             "\\b(remover|remove|remova|limpar|limpe|limpa|resetar|reset|desfazer|apagar|tirar|retirar|desativar|desligar|desabilitar|disable|unset|sem)\\b");
     private static final java.util.regex.Pattern HEX_COLOR_PATTERN = java.util.regex.Pattern.compile(
             "^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$");
+    private static final List<String> TABLE_DENSITY_ALLOWED_VALUES = List.of(
+            "compact",
+            "comfortable",
+            "spacious");
+    private static final List<String> TABLE_SELECTION_ALLOWED_VALUES = List.of(
+            "single",
+            "multiple");
+    private static final List<String> TABLE_ALIGN_ALLOWED_VALUES = List.of(
+            "left",
+            "center",
+            "right");
 
     @Value("${praxis.ai.prompt.max-chars.config:12000}")
     private int maxConfigChars;
@@ -139,6 +158,12 @@ public class AiOrchestratorService {
 
     @Value("${praxis.ai.action-plan.retry-temperature:0.1}")
     private double actionPlanRetryTemperature;
+
+    @Value("${praxis.ai.provider.text-stream.enabled:false}")
+    private boolean providerTextStreamEnabled;
+
+    @Value("${praxis.ai.provider.text-stream.fallback-sync-on-error:true}")
+    private boolean providerTextStreamFallbackSyncOnError;
 
     private final AiContextService contextService;
     private final AiProvider aiProvider;
@@ -191,7 +216,9 @@ public class AiOrchestratorService {
                     thread,
                     request,
                     resolvedUserPrompt);
-            AiOrchestratorResponse cachedResponse = memoryContext.getCachedResponse();
+            AiOrchestratorResponse cachedResponse = memoryContext != null
+                    ? memoryContext.getCachedResponse()
+                    : null;
             if (cachedResponse != null) {
                 messageService.applyMemoryMetadata(cachedResponse, memoryContext);
                 return cachedResponse;
@@ -199,10 +226,16 @@ public class AiOrchestratorService {
             String modelPrompt = buildPromptWithMemory(resolvedUserPrompt, memoryContext);
 
             AiCallConfig frontendConfig = resolveFrontendCallConfig(tenantId, userId, environment);
+            frontendConfig = withRagRelease(frontendConfig, request.getRagReleaseId());
             EmbeddingService.EmbeddingCallConfig embeddingConfig =
                     resolveEmbeddingCallConfig(tenantId, userId, environment);
 
-        AiOrchestratorResponse createFlowResponse = tryHandleCreateFlow(request, context, embeddingConfig);
+        AiOrchestratorResponse createFlowResponse = tryHandleCreateFlow(
+                request,
+                context,
+                embeddingConfig,
+                tenantId,
+                environment);
         if (createFlowResponse != null) {
             return finalizeResponse(createFlowResponse, memoryContext);
         }
@@ -229,7 +262,12 @@ public class AiOrchestratorService {
                     context.getComponentDefinition() != null);
         }
 
-        AiOrchestratorResponse templateResponse = tryHandleTemplateFlow(request, context, embeddingConfig);
+        AiOrchestratorResponse templateResponse = tryHandleTemplateFlow(
+                request,
+                context,
+                embeddingConfig,
+                tenantId,
+                environment);
         if (templateResponse != null) {
             if (!warnings.isEmpty()) {
                 templateResponse.setWarnings(warnings);
@@ -242,7 +280,13 @@ public class AiOrchestratorService {
         JsonNode resolvedSchema = null;
 
         if (requireSchema) {
-            SchemaResolution schemaResolution = resolveSchema(request, context, requestBaseUrl, embeddingConfig);
+            SchemaResolution schemaResolution = resolveSchema(
+                    request,
+                    context,
+                    requestBaseUrl,
+                    embeddingConfig,
+                    tenantId,
+                    environment);
             if (schemaResolution.response != null) {
                 return finalizeResponse(schemaResolution.response, memoryContext);
             }
@@ -415,7 +459,9 @@ public class AiOrchestratorService {
                     request,
                     frontendConfig,
                     resolvedSchema,
-                    embeddingConfig);
+                    embeddingConfig,
+                    tenantId,
+                    environment);
         }
         if (shouldIgnoreColumnClarification(isTable, columnNames, missingContext)) {
             missingContext = removeMissingContext(missingContext, "column");
@@ -438,6 +484,16 @@ public class AiOrchestratorService {
                 intent.setOptions(null);
             }
             warnings.add("Categoria indefinida ignorada devido a actionCatalog disponível.");
+        }
+        AiOrchestratorResponse deterministicPreClarification = tryResolveTableDeterministicDirectFallback(
+                request,
+                currentState,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (deterministicPreClarification != null) {
+            return finalizeResponse(deterministicPreClarification, memoryContext);
         }
         if (Boolean.TRUE.equals(intent.getNeedsClarification())
                 || (missingContext != null && !missingContext.isEmpty())) {
@@ -503,7 +559,11 @@ public class AiOrchestratorService {
                     return finalizeResponse(badgeResolution, memoryContext);
                 }
                 AiOrchestratorResponse resourceClarification = resolveResourceClarification(
-                        request, intent, embeddingConfig);
+                        request,
+                        intent,
+                        embeddingConfig,
+                        tenantId,
+                        environment);
                 if (resourceClarification != null) {
                     return finalizeResponse(resourceClarification, memoryContext);
                 }
@@ -553,7 +613,9 @@ public class AiOrchestratorService {
                         request,
                         frontendConfig,
                         resolvedSchema,
-                        embeddingConfig);
+                        embeddingConfig,
+                        tenantId,
+                        environment);
             }
             actionPlan = applyActionPlanDefaults(actionPlan, componentActions);
             actionPlan = applySingleActionTargetFallback(
@@ -625,6 +687,11 @@ public class AiOrchestratorService {
                         labels.isEmpty() ? options : labels,
                         payloads.isEmpty() ? null : payloads), memoryContext);
             }
+            EnumValidationResult exportFormatValidation = validateDirectExportFormatPrompt(
+                    request != null ? request.getUserPrompt() : null);
+            if (exportFormatValidation != null && !exportFormatValidation.valid) {
+                return finalizeResponse(invalidEnumValue(exportFormatValidation, warnings), memoryContext);
+            }
             AiActionItem missingFormat = findFormatActionMissingValue(expectedActions);
             if (missingFormat != null) {
                 ColumnDescriptor target = findColumnByField(missingFormat.getField(), columnDescriptors);
@@ -659,7 +726,9 @@ public class AiOrchestratorService {
                     request,
                     frontendConfig,
                     resolvedSchema,
-                    embeddingConfig);
+                    embeddingConfig,
+                    tenantId,
+                    environment);
             actionPlan = applyActionPlanDefaults(actionPlan, componentActions);
             ActionPlanClarification clarification = resolveActionPlanClarification(
                     actionPlan,
@@ -706,6 +775,16 @@ public class AiOrchestratorService {
                     intent.getCategory(),
                     filteredCaps != null ? filteredCaps.size() : 0,
                     summarizeCapabilityPaths(filteredCaps, 12));
+        }
+        AiOrchestratorResponse deterministicFastPath = tryResolveTableDeterministicDirectFallback(
+                request,
+                currentState,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (deterministicFastPath != null) {
+            return finalizeResponse(deterministicFastPath, memoryContext);
         }
         IntentPlan intentPlan = generateIntentPlan(
                 request,
@@ -814,7 +893,9 @@ public class AiOrchestratorService {
                     request,
                     resolvedSchema,
                     embeddingConfig,
-                    contextRequest.codes);
+                    contextRequest.codes,
+                    tenantId,
+                    environment);
             if (resolvedHints != null && !resolvedHints.isNull() && resolvedHints.size() > 0) {
                 log.info("[AiOrchestratorService] contextRequest resolved hints keys={}",
                         resolvedHints.isObject()
@@ -902,6 +983,17 @@ public class AiOrchestratorService {
             return finalizeResponse(errorWithWarnings(semanticCheck.message, warnings), memoryContext);
         }
         patchNode = semanticCheck.patch;
+        AiOrchestratorResponse relevanceFallback = tryResolveDeterministicPatchRelevanceFallback(
+                request,
+                patchNode,
+                currentState,
+                warnings,
+                configCapabilities,
+                componentCapabilities,
+                componentContext);
+        if (relevanceFallback != null) {
+            return finalizeResponse(relevanceFallback, memoryContext);
+        }
 
         if (actionPlan != null
                 && actionPlan.getActions() != null
@@ -928,7 +1020,10 @@ public class AiOrchestratorService {
 
         JsonNode normalizedPatch = normalizePatch(
                 request.getComponentId(), patchNode);
-        SanitizeResult sanitizeResult = sanitizePatch(normalizedPatch, filteredCaps);
+        SanitizeResult sanitizeResult = sanitizePatch(
+                normalizedPatch,
+                filteredCaps,
+                request.getComponentId());
         List<String> sanitizeWarnings = filterInternalWarnings(
                 sanitizeResult.warnings,
                 patchNode,
@@ -946,7 +1041,7 @@ public class AiOrchestratorService {
         EnumValidationResult enumValidation = validateEnumValues(
                 sanitizeResult.sanitized,
                 componentContext,
-                filteredCaps);
+                sanitizeResult.effectiveCapabilities);
         if (!enumValidation.valid) {
             return finalizeResponse(invalidEnumValue(enumValidation, warnings), memoryContext);
         }
@@ -996,7 +1091,10 @@ public class AiOrchestratorService {
                         retryPatch, currentState, warnings, allowUnknownColumns);
                 if (retryCheck.valid && retryCheck.patch != null) {
                     JsonNode normalizedRetry = normalizePatch(request.getComponentId(), retryCheck.patch);
-                    SanitizeResult retrySanitized = sanitizePatch(normalizedRetry, filteredCaps);
+                    SanitizeResult retrySanitized = sanitizePatch(
+                            normalizedRetry,
+                            filteredCaps,
+                            request.getComponentId());
                     List<String> retryWarnings = filterInternalWarnings(
                             retrySanitized.warnings,
                             retryPatch,
@@ -1006,10 +1104,14 @@ public class AiOrchestratorService {
                     }
                     if (retrySanitized.sanitized != null && !isEmptyObject(retrySanitized.sanitized)) {
                         JsonNode mergedPatch = mergePatchNodes(sanitizeResult.sanitized, retrySanitized.sanitized);
+                        List<AiCapability> retryEnumCaps = sanitizeResult.effectiveCapabilities;
+                        if (retryEnumCaps == null || retryEnumCaps.isEmpty()) {
+                            retryEnumCaps = retrySanitized.effectiveCapabilities;
+                        }
                         EnumValidationResult retryEnumValidation = validateEnumValues(
                                 mergedPatch,
                                 componentContext,
-                                filteredCaps);
+                                retryEnumCaps);
                         if (retryEnumValidation.valid) {
                             List<AiPatchDiff> mergedDiff = buildPatchDiff(currentState, mergedPatch);
                             CompletenessResult retryCompleteness = evaluateCompleteness(
@@ -1379,7 +1481,9 @@ public class AiOrchestratorService {
             AiOrchestratorRequest request,
             AiCallConfig callConfig,
             JsonNode resolvedSchema,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         ArrayNode columnsNode = objectMapper.createArrayNode();
         if (columns != null) {
             for (ColumnDescriptor col : columns) {
@@ -1412,7 +1516,9 @@ public class AiOrchestratorService {
                     request,
                     resolvedSchema,
                     embeddingConfig,
-                    contextRequest.codes);
+                    contextRequest.codes,
+                    tenantId,
+                    environment);
             JsonNode merged = mergeContextHints(
                     request != null ? request.getContextHints() : null,
                     resolvedHints);
@@ -1445,7 +1551,9 @@ public class AiOrchestratorService {
             AiOrchestratorRequest request,
             AiCallConfig callConfig,
             JsonNode resolvedSchema,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         ArrayNode actionsNode = buildActionCatalogNode(actionCatalog);
         String candidates = targetCandidates != null ? targetCandidates.toString() : "[]";
         String prompt = AiPromptTemplates.buildPrompt(
@@ -1465,7 +1573,9 @@ public class AiOrchestratorService {
                     request,
                     resolvedSchema,
                     embeddingConfig,
-                    contextRequest.codes);
+                    contextRequest.codes,
+                    tenantId,
+                    environment);
             JsonNode merged = mergeContextHints(
                     request != null ? request.getContextHints() : null,
                     resolvedHints);
@@ -1552,7 +1662,7 @@ public class AiOrchestratorService {
             Integer attempt) {
         long start = System.nanoTime();
         try {
-            String text = aiProvider.generateText(prompt, config);
+            String text = resolveTextGeneration(callType, prompt, config, request);
             interactionLogger.logLlmInteraction(
                     request,
                     callType,
@@ -1579,6 +1689,110 @@ public class AiOrchestratorService {
         }
     }
 
+    private String resolveTextGeneration(
+            String callType,
+            String prompt,
+            AiCallConfig config,
+            AiOrchestratorRequest request) {
+        boolean streamTransport = request != null && Boolean.TRUE.equals(request.getStreamTransport());
+        if (!providerTextStreamEnabled || !streamTransport || !aiProvider.supportsTextStreaming(config)) {
+            return aiProvider.generateText(prompt, config);
+        }
+
+        Supplier<Boolean> cancellationRequested = AiStreamExecutionContextHolder.cancellationRequested();
+        try {
+            log.debug("[AiOrchestratorService] Using provider text stream (callType={}, provider={}).",
+                    callType, resolveProviderName(config));
+            return aiProvider.generateTextStream(prompt, config, null, cancellationRequested);
+        } catch (Exception ex) {
+            if (ex instanceof CancellationException) {
+                throw ex;
+            }
+            String fallbackReasonKind = resolveSyncFallbackReasonKind(ex);
+            if (fallbackReasonKind != null) {
+                incrementStreamFallbackMetric(config, fallbackReasonKind);
+                log.warn("[AiOrchestratorService] Provider stream failed; falling back to sync text generation. provider={} callType={} reason_kind={} reason={}",
+                        resolveProviderName(config),
+                        callType,
+                        fallbackReasonKind,
+                        safeErrorMessage(ex));
+                return aiProvider.generateText(prompt, config);
+            }
+            throw ex;
+        }
+    }
+
+    private String resolveSyncFallbackReasonKind(Exception streamError) {
+        if (!providerTextStreamFallbackSyncOnError || streamError == null) {
+            return null;
+        }
+        Throwable rootCause = streamError;
+        while (rootCause.getCause() != null && rootCause.getCause() != rootCause) {
+            rootCause = rootCause.getCause();
+        }
+        if (rootCause instanceof CancellationException) {
+            return null;
+        }
+        if (rootCause instanceof AiProviderStreamException streamException) {
+            return switch (streamException.getKind()) {
+                case TRANSPORT -> "transport";
+                case TIMEOUT -> "timeout";
+                case RATE_LIMIT -> "rate_limit";
+                case CAPACITY -> "capacity";
+                default -> null;
+            };
+        }
+        if (rootCause instanceof IOException
+                || rootCause instanceof java.net.ConnectException
+                || rootCause instanceof java.net.SocketException
+                || rootCause instanceof java.net.UnknownHostException
+                || rootCause instanceof java.net.http.HttpTimeoutException) {
+            return "transport";
+        }
+        String message = safeErrorMessage(rootCause).toLowerCase(Locale.ROOT);
+        if (message.contains("http 429")) {
+            return "rate_limit";
+        }
+        if (message.contains("http 503")
+                || message.contains("capacity")
+                || message.contains("temporarily unavailable")) {
+            return "capacity";
+        }
+        if (message.contains("timeout") || message.contains("timed out")) {
+            return "timeout";
+        }
+        if (message.contains("connection reset")
+                || message.contains("connection refused")
+                || message.contains("broken pipe")
+                || message.contains("premature close")) {
+            return "transport";
+        }
+        return null;
+    }
+
+    private void incrementStreamFallbackMetric(AiCallConfig config, String reasonKind) {
+        String provider = normalizeMetricTag(resolveProviderName(config), METRIC_TAG_UNKNOWN);
+        String normalizedReason = normalizeMetricTag(reasonKind, "unknown");
+        Metrics.counter(
+                        METRIC_STREAM_FALLBACK_TOTAL,
+                        METRIC_TAG_PROVIDER,
+                        provider,
+                        METRIC_TAG_REASON_KIND,
+                        normalizedReason)
+                .increment();
+    }
+
+    private String safeErrorMessage(Throwable error) {
+        if (error == null) {
+            return "unknown";
+        }
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return error.getClass().getSimpleName();
+        }
+        return message;
+    }
+
     private String resolveProviderName(AiCallConfig config) {
         String provider = config != null ? trimToNull(config.getProvider()) : null;
         if (provider != null) {
@@ -1587,8 +1801,35 @@ public class AiOrchestratorService {
         return aiProvider.getProviderName();
     }
 
+    String resolveStreamMetricsProvider(String tenantId, String userId, String environment) {
+        AiCallConfig frontendConfig = resolveFrontendCallConfig(tenantId, userId, environment);
+        return normalizeMetricTag(resolveProviderName(frontendConfig), METRIC_TAG_UNKNOWN);
+    }
+
     private long elapsedMs(long startNanos) {
         return (System.nanoTime() - startNanos) / 1_000_000L;
+    }
+
+    private String normalizeMetricTag(String value, String fallback) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            return fallback;
+        }
+        StringBuilder out = new StringBuilder(normalized.length());
+        for (int idx = 0; idx < normalized.length(); idx++) {
+            char ch = Character.toLowerCase(normalized.charAt(idx));
+            if ((ch >= 'a' && ch <= 'z')
+                    || (ch >= '0' && ch <= '9')
+                    || ch == '_'
+                    || ch == '-'
+                    || ch == '.') {
+                out.append(ch);
+            } else {
+                out.append('_');
+            }
+        }
+        String sanitized = out.toString();
+        return sanitized.isBlank() ? fallback : sanitized;
     }
 
     private AiCallConfig buildActionPlanConfig(AiCallConfig baseConfig) {
@@ -1666,6 +1907,21 @@ public class AiOrchestratorService {
         return config.toBuilder()
                 .tenantId(resolvedTenant)
                 .environment(resolvedEnv)
+                .build();
+    }
+
+    private AiCallConfig withRagRelease(AiCallConfig config, String releaseId) {
+        String resolvedReleaseId = trimToNull(releaseId);
+        if (resolvedReleaseId == null) {
+            return config;
+        }
+        if (config == null) {
+            return AiCallConfig.builder()
+                    .ragReleaseId(resolvedReleaseId)
+                    .build();
+        }
+        return config.toBuilder()
+                .ragReleaseId(resolvedReleaseId)
                 .build();
     }
 
@@ -1757,6 +2013,14 @@ public class AiOrchestratorService {
         }
         if (apiKey != null) {
             builder.apiKey(apiKey);
+            hasValue = true;
+        }
+        String ragReleaseId = trimToNull(textOrNull(aiNode.get("ragReleaseId")));
+        if (ragReleaseId == null) {
+            ragReleaseId = trimToNull(textOrNull(aiNode.get("releaseId")));
+        }
+        if (ragReleaseId != null) {
+            builder.ragReleaseId(ragReleaseId);
             hasValue = true;
         }
 
@@ -5225,7 +5489,9 @@ public class AiOrchestratorService {
     private AiOrchestratorResponse tryHandleCreateFlow(
             AiOrchestratorRequest request,
             AiContextDTO context,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         if (request == null || !isPageBuilder(request.getComponentId())) {
             return null;
         }
@@ -5270,7 +5536,11 @@ public class AiOrchestratorService {
             if (isBlank(widgetId) || !isValidWidgetId(widgetId, request, context)) {
                 return buildWidgetStepResponse(request, context);
             }
-            List<ApiSearchResult> results = searchEndpoints(request, embeddingConfig);
+            List<ApiSearchResult> results = searchEndpoints(
+                    request,
+                    embeddingConfig,
+                    tenantId,
+                    environment);
             if (results.isEmpty()) {
                 return clarification("nenhum endpoint encontrado", List.of());
             }
@@ -5389,7 +5659,9 @@ public class AiOrchestratorService {
     private AiOrchestratorResponse tryHandleTemplateFlow(
             AiOrchestratorRequest request,
             AiContextDTO context,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         if (request == null || context == null) {
             return null;
         }
@@ -5412,7 +5684,11 @@ public class AiOrchestratorService {
                 context.getResourcePath(),
                 extractTemplateResourcePath(request.getContextHints()));
         if (isBlank(resourcePath)) {
-            return resolveTemplateResourceClarification(request, embeddingConfig);
+            return resolveTemplateResourceClarification(
+                    request,
+                    embeddingConfig,
+                    tenantId,
+                    environment);
         }
         String normalizedResourcePath = normalizeResourceBasePath(resourcePath);
         JsonNode templateConfig = resolveTemplateConfig(template.getConfigJson(), request.getComponentId());
@@ -5511,12 +5787,18 @@ public class AiOrchestratorService {
 
     private AiOrchestratorResponse resolveTemplateResourceClarification(
             AiOrchestratorRequest request,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         if (!hasMeaningfulPromptTokens(request.getUserPrompt())) {
             String msg = "Informe o resourcePath base (ex.: /api/funcionarios) ou escolha uma opcao.";
             return clarification(msg, null, null);
         }
-        List<ApiSearchResult> results = searchEndpoints(request, embeddingConfig);
+        List<ApiSearchResult> results = searchEndpoints(
+                request,
+                embeddingConfig,
+                tenantId,
+                environment);
         if (!results.isEmpty()) {
             results = filterEndpointsByPromptTokens(request.getUserPrompt(), results);
         }
@@ -5973,13 +6255,29 @@ public class AiOrchestratorService {
 
     private List<ApiSearchResult> searchEndpoints(
             AiOrchestratorRequest request,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
+        return searchApiMetadataScoped(request, embeddingConfig, tenantId, environment);
+    }
+
+    private List<ApiSearchResult> searchApiMetadataScoped(
+            AiOrchestratorRequest request,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
+        if (request == null) {
+            return List.of();
+        }
         return retrievalService.searchApiMetadata(
                 request.getUserPrompt(),
                 request.getApiMethod(),
                 request.getApiTags(),
                 request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
-                embeddingConfig);
+                embeddingConfig,
+                trimToNull(tenantId),
+                trimToNull(environment),
+                trimToNull(request.getRagReleaseId()));
     }
 
     private List<ApiSearchResult> filterTableEndpoints(List<ApiSearchResult> results) {
@@ -6319,7 +6617,9 @@ public class AiOrchestratorService {
     private AiOrchestratorResponse resolveResourceClarification(
             AiOrchestratorRequest request,
             AiIntentClassification intent,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         if (request == null || intent == null) {
             return null;
         }
@@ -6328,12 +6628,11 @@ public class AiOrchestratorService {
             return null;
         }
 
-        List<ApiSearchResult> results = retrievalService.searchApiMetadata(
-                request.getUserPrompt(),
-                request.getApiMethod(),
-                request.getApiTags(),
-                request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
-                embeddingConfig);
+        List<ApiSearchResult> results = searchApiMetadataScoped(
+                request,
+                embeddingConfig,
+                tenantId,
+                environment);
 
         if (results.isEmpty()) {
             return clarification(buildResourceClarificationMessage(request.getComponentId()), List.of());
@@ -6975,7 +7274,9 @@ public class AiOrchestratorService {
             AiOrchestratorRequest request,
             JsonNode schema,
             EmbeddingService.EmbeddingCallConfig embeddingConfig,
-            List<Integer> codes) {
+            List<Integer> codes,
+            String tenantId,
+            String environment) {
         if (codes == null || codes.isEmpty()) {
             return null;
         }
@@ -7022,7 +7323,11 @@ public class AiOrchestratorService {
                     }
                 }
                 case CONTEXT_CODE_ENDPOINT_CANDIDATES -> {
-                    ArrayNode endpoints = buildEndpointCandidates(request, embeddingConfig);
+                    ArrayNode endpoints = buildEndpointCandidates(
+                            request,
+                            embeddingConfig,
+                            tenantId,
+                            environment);
                     if (endpoints != null && endpoints.size() > 0) {
                         pack.set("endpointCandidates", endpoints);
                     }
@@ -7143,16 +7448,17 @@ public class AiOrchestratorService {
 
     private ArrayNode buildEndpointCandidates(
             AiOrchestratorRequest request,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         if (request == null) {
             return objectMapper.createArrayNode();
         }
-        List<ApiSearchResult> results = retrievalService.searchApiMetadata(
-                request.getUserPrompt(),
-                request.getApiMethod(),
-                request.getApiTags(),
-                request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
-                embeddingConfig);
+        List<ApiSearchResult> results = searchApiMetadataScoped(
+                request,
+                embeddingConfig,
+                tenantId,
+                environment);
         ArrayNode out = objectMapper.createArrayNode();
         if (results == null || results.isEmpty()) {
             return out;
@@ -9559,7 +9865,9 @@ public class AiOrchestratorService {
             AiOrchestratorRequest request,
             AiContextDTO context,
             String requestBaseUrl,
-            EmbeddingService.EmbeddingCallConfig embeddingConfig) {
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
         AiSchemaContext schemaContext = request.getSchemaContext();
         String resolvedResourcePath = request.getResourcePath() != null
                 ? request.getResourcePath()
@@ -9573,12 +9881,11 @@ public class AiOrchestratorService {
         }
 
         if (schemaContext == null) {
-            List<ApiSearchResult> results = retrievalService.searchApiMetadata(
-                    request.getUserPrompt(),
-                    request.getApiMethod(),
-                    request.getApiTags(),
-                    request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
-                    embeddingConfig);
+            List<ApiSearchResult> results = searchApiMetadataScoped(
+                    request,
+                    embeddingConfig,
+                    tenantId,
+                    environment);
 
             if (results.isEmpty()) {
                 return new SchemaResolution(error("Nenhum endpoint encontrado para o contexto solicitado."));
@@ -10541,6 +10848,709 @@ public class AiOrchestratorService {
         return null;
     }
 
+    private AiOrchestratorResponse tryResolveTableDeterministicDirectFallback(
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (request == null || !COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+
+        if (isResourcePathMutationPrompt(promptLower)) {
+            warnings.add("Campo ignorado: resourcePath (alteracao bloqueada por politica).");
+            return errorWithWarnings(
+                    "Nao e permitido alterar resourcePath/endpoint via assistente.",
+                    warnings);
+        }
+
+        String density = resolveDensityValue(promptLower);
+        if (!isBlank(density) && mentionsDensityPrompt(promptLower)) {
+            warnings.add("Patch deterministico aplicado para densidade da tabela.");
+            return applySuggestedPatch(
+                    buildDensityPatch(density),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        SelectionDirective selection = resolveSelectionDirective(promptLower);
+        if (selection != null && (!isBlank(selection.mode) || selection.enabled != null)) {
+            warnings.add("Patch deterministico aplicado para selecao de linhas.");
+            return applySuggestedPatch(
+                    buildSelectionPatch(selection),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        List<ColumnDescriptor> columns = mergeColumnDescriptors(
+                extractColumnDescriptors(currentState),
+                request.getDataProfile());
+        JsonNode alignPatch = buildDeterministicAlignmentPatch(promptLower, columns);
+        if (alignPatch != null) {
+            warnings.add("Patch deterministico aplicado para alinhamento de colunas.");
+            return applySuggestedPatch(
+                    alignPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        JsonNode sortablePatch = buildDeterministicColumnSortablePatch(promptLower, columns);
+        JsonNode visibilityPatch = buildDeterministicColumnVisibilityPatch(promptLower, columns);
+        JsonNode mergedColumnPatch = mergePatchNodes(sortablePatch, visibilityPatch);
+        JsonNode statusHighlightPatch = buildDeterministicStatusHighlightPatch(request, currentState, promptLower);
+        JsonNode combinedPatch = mergePatchNodes(mergedColumnPatch, statusHighlightPatch);
+        if (combinedPatch != null) {
+            if (sortablePatch != null && visibilityPatch != null) {
+                warnings.add("Patch complementado para visibilidade e ordenacao de colunas.");
+            } else if (sortablePatch != null) {
+                warnings.add("Patch deterministico aplicado para ordenacao de colunas.");
+            } else if (visibilityPatch != null) {
+                warnings.add("Patch deterministico aplicado para visibilidade de colunas.");
+            }
+            if (statusHighlightPatch != null && mergedColumnPatch != null) {
+                warnings.add("Patch complementado com destaque contextual de status.");
+            } else if (statusHighlightPatch != null) {
+                warnings.add("Patch deterministico aplicado para destaque de status.");
+            }
+            return applySuggestedPatch(
+                    combinedPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        return null;
+    }
+
+    private AiOrchestratorResponse tryResolveDeterministicPatchRelevanceFallback(
+            AiOrchestratorRequest request,
+            JsonNode patchNode,
+            JsonNode currentState,
+            List<String> warnings,
+            List<AiCapability> configCapabilities,
+            List<AiCapability> componentCapabilities,
+            JsonNode componentContext) {
+        if (request == null || patchNode == null || !patchNode.isObject()
+                || !COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+
+        String density = resolveDensityValue(promptLower);
+        if (!isBlank(density) && mentionsDensityPrompt(promptLower) && !patchHasDensityConfig(patchNode)) {
+            warnings.add("Patch gerado nao aderiu ao pedido de densidade; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    buildDensityPatch(density),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        SelectionDirective selection = resolveSelectionDirective(promptLower);
+        if (selection != null && !patchHasSelectionConfig(patchNode)) {
+            warnings.add("Patch gerado nao aderiu ao pedido de selecao; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    buildSelectionPatch(selection),
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        List<ColumnDescriptor> columns = mergeColumnDescriptors(
+                extractColumnDescriptors(currentState),
+                request.getDataProfile());
+        JsonNode alignPatch = buildDeterministicAlignmentPatch(promptLower, columns);
+        if (alignPatch != null && !patchHasAnyColumnAlign(patchNode)) {
+            warnings.add("Patch gerado nao aderiu ao pedido de alinhamento; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    alignPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+
+        JsonNode statusHighlightPatch = buildDeterministicStatusHighlightPatch(request, currentState, promptLower);
+        if (statusHighlightPatch != null && !patchTouchesField(patchNode, "status")) {
+            warnings.add("Patch gerado nao aderiu ao pedido contextual de status; aplicado fallback deterministico.");
+            return applySuggestedPatch(
+                    statusHighlightPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
+        }
+        return null;
+    }
+
+    private boolean mentionsDensityPrompt(String promptLower) {
+        if (isBlank(promptLower)) {
+            return false;
+        }
+        return promptLower.contains("densidade") || promptLower.contains("density");
+    }
+
+    private String resolveDensityValue(String promptLower) {
+        if (isBlank(promptLower)) {
+            return null;
+        }
+        String normalized = normalizeSearchToken(promptLower);
+        if (normalized.contains("ultracompact")) {
+            return "ULTRA_COMPACT";
+        }
+        if (promptLower.contains("compact")) {
+            return "compact";
+        }
+        if (promptLower.contains("confort") || promptLower.contains("comfortable")) {
+            return "comfortable";
+        }
+        if (promptLower.contains("espac") || promptLower.contains("spacious")) {
+            return "spacious";
+        }
+        return null;
+    }
+
+    private JsonNode buildDensityPatch(String density) {
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.putObject("appearance").put("density", density);
+        return patch;
+    }
+
+    private SelectionDirective resolveSelectionDirective(String promptLower) {
+        String normalized = normalizeSearchToken(promptLower);
+        if (!mentionsSelectionPrompt(promptLower)) {
+            return null;
+        }
+        Boolean enabled = null;
+        if (normalized.contains("desativ") || normalized.contains("disable") || normalized.contains("remover")) {
+            enabled = Boolean.FALSE;
+        } else if (normalized.contains("ativ") || normalized.contains("enable")) {
+            enabled = Boolean.TRUE;
+        }
+
+        String mode = null;
+        if (normalized.contains("multip") || normalized.contains("multiple")) {
+            mode = "multiple";
+        } else if (normalized.contains("unica")
+                || normalized.contains("single")) {
+            mode = "single";
+        }
+
+        if (enabled == null && mode == null) {
+            return null;
+        }
+        if (enabled == null) {
+            enabled = Boolean.TRUE;
+        }
+        return new SelectionDirective(enabled, mode);
+    }
+
+    private boolean mentionsSelectionPrompt(String promptLower) {
+        if (isBlank(promptLower)) {
+            return false;
+        }
+        String normalized = normalizeSearchToken(promptLower);
+        boolean mentionsSelection = normalized.contains("selec")
+                || normalized.contains("selection")
+                || normalized.contains("selectable");
+        if (!mentionsSelection) {
+            return false;
+        }
+        return normalized.contains("linha")
+                || normalized.contains("linhas")
+                || normalized.contains("row")
+                || normalized.contains("rows");
+    }
+
+    private JsonNode buildSelectionPatch(SelectionDirective selection) {
+        ObjectNode patch = objectMapper.createObjectNode();
+        ObjectNode selectionNode = patch.putObject("behavior").putObject("selection");
+        if (selection.enabled != null) {
+            selectionNode.put("enabled", selection.enabled);
+        }
+        if (!isBlank(selection.mode)) {
+            selectionNode.put("type", selection.mode);
+        }
+        return patch;
+    }
+
+    private JsonNode buildDeterministicAlignmentPatch(String promptLower, List<ColumnDescriptor> columns) {
+        if (isBlank(promptLower) || columns == null || columns.isEmpty()) {
+            return null;
+        }
+        if (!promptLower.contains("alinh") && !promptLower.contains("align")) {
+            return null;
+        }
+        LinkedHashMap<String, String> alignByField = new LinkedHashMap<>();
+        for (ColumnDescriptor column : columns) {
+            if (column == null || isBlank(column.field)) {
+                continue;
+            }
+            String align = resolveColumnAlignment(promptLower, column);
+            if (!isBlank(align)) {
+                alignByField.put(column.field, align);
+            }
+        }
+        if (alignByField.isEmpty()) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode patchColumns = patch.putArray("columns");
+        for (Map.Entry<String, String> entry : alignByField.entrySet()) {
+            ObjectNode col = patchColumns.addObject();
+            col.put("field", entry.getKey());
+            col.put("align", entry.getValue());
+        }
+        return patch;
+    }
+
+    private JsonNode buildDeterministicColumnVisibilityPatch(String promptLower, List<ColumnDescriptor> columns) {
+        if (isBlank(promptLower) || columns == null || columns.isEmpty()) {
+            return null;
+        }
+        LinkedHashMap<String, Boolean> visibilityByField = new LinkedHashMap<>();
+        List<String> clauses = splitPromptClausesDeterministic(promptLower);
+        for (String clause : clauses) {
+            Boolean visible = resolveVisibilityDirective(clause);
+            if (visible == null) {
+                continue;
+            }
+            for (ColumnDescriptor column : columns) {
+                if (column == null || isBlank(column.field)) {
+                    continue;
+                }
+                if (promptMentionsColumn(clause, column)) {
+                    visibilityByField.put(column.field, visible);
+                }
+            }
+        }
+        if (visibilityByField.isEmpty()) {
+            Boolean visible = resolveVisibilityDirective(promptLower);
+            if (visible == null) {
+                return null;
+            }
+            for (ColumnDescriptor column : columns) {
+                if (column == null || isBlank(column.field)) {
+                    continue;
+                }
+                if (promptMentionsColumn(promptLower, column)) {
+                    visibilityByField.put(column.field, visible);
+                }
+            }
+        }
+        if (visibilityByField.isEmpty()) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode patchColumns = patch.putArray("columns");
+        for (Map.Entry<String, Boolean> entry : visibilityByField.entrySet()) {
+            ObjectNode col = patchColumns.addObject();
+            col.put("field", entry.getKey());
+            col.put("visible", entry.getValue());
+        }
+        return patch;
+    }
+
+    private JsonNode buildDeterministicColumnSortablePatch(String promptLower, List<ColumnDescriptor> columns) {
+        if (isBlank(promptLower) || columns == null || columns.isEmpty()) {
+            return null;
+        }
+        LinkedHashMap<String, Boolean> sortableByField = new LinkedHashMap<>();
+        List<String> clauses = splitPromptClausesDeterministic(promptLower);
+        for (String clause : clauses) {
+            Boolean sortable = resolveSortableDirective(clause);
+            if (sortable == null) {
+                continue;
+            }
+            for (ColumnDescriptor column : columns) {
+                if (column == null || isBlank(column.field)) {
+                    continue;
+                }
+                if (promptMentionsColumn(clause, column)) {
+                    sortableByField.put(column.field, sortable);
+                }
+            }
+        }
+        if (sortableByField.isEmpty()) {
+            Boolean sortable = resolveSortableDirective(promptLower);
+            if (sortable == null) {
+                return null;
+            }
+            for (ColumnDescriptor column : columns) {
+                if (column == null || isBlank(column.field)) {
+                    continue;
+                }
+                if (promptMentionsColumn(promptLower, column)) {
+                    sortableByField.put(column.field, sortable);
+                }
+            }
+        }
+        if (sortableByField.isEmpty()) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode patchColumns = patch.putArray("columns");
+        for (Map.Entry<String, Boolean> entry : sortableByField.entrySet()) {
+            ObjectNode col = patchColumns.addObject();
+            col.put("field", entry.getKey());
+            col.put("sortable", entry.getValue());
+        }
+        return patch;
+    }
+
+    private Boolean resolveVisibilityDirective(String promptLower) {
+        if (isBlank(promptLower)) {
+            return null;
+        }
+        String normalized = normalizeSearchToken(promptLower);
+        if (normalized.contains("ocult")
+                || normalized.contains("escond")
+                || normalized.contains("hide")
+                || normalized.contains("invis")) {
+            return Boolean.FALSE;
+        }
+        if (normalized.contains("mostrar")
+                || normalized.contains("exibir")
+                || normalized.contains("show")
+                || normalized.contains("visivel")) {
+            return Boolean.TRUE;
+        }
+        return null;
+    }
+
+    private Boolean resolveSortableDirective(String promptLower) {
+        if (isBlank(promptLower)) {
+            return null;
+        }
+        String normalized = normalizeSearchToken(promptLower);
+        if (!mentionsSortableKeyword(normalized)) {
+            return null;
+        }
+        if (normalized.contains("desabilit")
+                || normalized.contains("disable")
+                || normalized.contains("semorden")
+                || normalized.contains("removeorden")) {
+            return Boolean.FALSE;
+        }
+        if (normalized.contains("habilit")
+                || normalized.contains("enable")
+                || normalized.contains("permit")
+                || normalized.contains("allow")
+                || normalized.contains("ativ")) {
+            return Boolean.TRUE;
+        }
+        return null;
+    }
+
+    private boolean mentionsSortableKeyword(String normalized) {
+        if (isBlank(normalized)) {
+            return false;
+        }
+        return normalized.contains("orden")
+                || normalized.contains("sort")
+                || normalized.contains("orderby");
+    }
+
+    private List<String> splitPromptClausesDeterministic(String promptLower) {
+        if (isBlank(promptLower)) {
+            return List.of();
+        }
+        List<String> clauses = new ArrayList<>();
+        for (String part : promptLower.split("(?i)\\be\\b|,|;|\\.|\\n")) {
+            String clause = part != null ? part.trim() : "";
+            if (!clause.isEmpty()) {
+                clauses.add(clause);
+            }
+        }
+        return clauses.isEmpty() ? List.of(promptLower) : clauses;
+    }
+
+    private boolean promptMentionsColumn(String promptLower, ColumnDescriptor column) {
+        if (isBlank(promptLower) || column == null || isBlank(column.field)) {
+            return false;
+        }
+        if (containsWord(promptLower, column.field.toLowerCase(Locale.ROOT))) {
+            return true;
+        }
+        if (isBlank(column.header)) {
+            return false;
+        }
+        String normalizedPrompt = normalizeText(promptLower);
+        String normalizedHeader = normalizeText(column.header);
+        return !normalizedHeader.isBlank() && normalizedPrompt.contains(normalizedHeader);
+    }
+
+    private boolean isResourcePathMutationPrompt(String promptLower) {
+        if (isBlank(promptLower)) {
+            return false;
+        }
+        String normalized = normalizeSearchToken(promptLower);
+        boolean mentionsResource = normalized.contains("resourcepath")
+                || normalized.contains("endpoint")
+                || normalized.contains("api");
+        boolean mentionsMutation = normalized.contains("mude")
+                || normalized.contains("troque")
+                || normalized.contains("altere")
+                || normalized.contains("change")
+                || normalized.contains("set");
+        if (!mentionsResource || !mentionsMutation) {
+            return false;
+        }
+        return promptLower.contains("http://")
+                || promptLower.contains("https://")
+                || normalized.contains("url")
+                || normalized.contains("dominio")
+                || normalized.contains("malicioso");
+    }
+
+    private EnumValidationResult validateDirectExportFormatPrompt(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String promptLower = prompt.toLowerCase(Locale.ROOT);
+        String normalized = normalizeSearchToken(promptLower);
+        if (!normalized.contains("export")) {
+            return null;
+        }
+        String format = resolveExportFormatValue(normalized);
+        if (isBlank(format)) {
+            return null;
+        }
+        List<String> allowed = List.of("excel", "pdf", "csv", "json", "print");
+        if (allowed.contains(format)) {
+            return null;
+        }
+        return EnumValidationResult.invalid(
+                "export.formats",
+                objectMapper.getNodeFactory().textNode(format),
+                allowed);
+    }
+
+    private String resolveExportFormatValue(String normalizedPrompt) {
+        if (isBlank(normalizedPrompt)) {
+            return null;
+        }
+        if (normalizedPrompt.contains("xml")) {
+            return "xml";
+        }
+        if (normalizedPrompt.contains("excel") || normalizedPrompt.contains("xlsx")) {
+            return "excel";
+        }
+        if (normalizedPrompt.contains("csv")) {
+            return "csv";
+        }
+        if (normalizedPrompt.contains("json")) {
+            return "json";
+        }
+        if (normalizedPrompt.contains("pdf")) {
+            return "pdf";
+        }
+        if (normalizedPrompt.contains("print")
+                || normalizedPrompt.contains("impress")
+                || normalizedPrompt.contains("imprimir")) {
+            return "print";
+        }
+        return null;
+    }
+
+    private String resolveColumnAlignment(String promptLower, ColumnDescriptor column) {
+        List<String> tokens = new ArrayList<>();
+        tokens.add(column.field.toLowerCase(Locale.ROOT));
+        if (!isBlank(column.header)) {
+            tokens.add(column.header.toLowerCase(Locale.ROOT));
+        }
+        for (String token : tokens) {
+            if (isBlank(token)) {
+                continue;
+            }
+            int index = 0;
+            while (index >= 0) {
+                index = promptLower.indexOf(token, index);
+                if (index < 0) {
+                    break;
+                }
+                int forwardEnd = Math.min(promptLower.length(), index + token.length() + 45);
+                String forwardWindow = promptLower.substring(index, forwardEnd);
+                String alignment = resolveAlignmentKeyword(forwardWindow);
+                if (!isBlank(alignment)) {
+                    return alignment;
+                }
+                int backwardStart = Math.max(0, index - 28);
+                String backwardWindow = promptLower.substring(backwardStart, index + token.length());
+                alignment = resolveAlignmentKeyword(backwardWindow);
+                if (!isBlank(alignment)) {
+                    return alignment;
+                }
+                index = index + token.length();
+            }
+        }
+        return null;
+    }
+
+    private String resolveAlignmentKeyword(String text) {
+        if (isBlank(text)) {
+            return null;
+        }
+        if (text.contains("direit") || text.contains("right")) {
+            return "right";
+        }
+        if (text.contains("esquerd") || text.contains("left")) {
+            return "left";
+        }
+        if (text.contains("centro") || text.contains("center") || text.contains("central")) {
+            return "center";
+        }
+        return null;
+    }
+
+    private boolean isStatusHighlightPrompt(String promptLower) {
+        if (isBlank(promptLower) || !promptLower.contains("status")) {
+            return false;
+        }
+        boolean asksHighlight = promptLower.contains("destaq")
+                || promptLower.contains("highlight")
+                || promptLower.contains("visual");
+        boolean mentionsPending = promptLower.contains("pendente")
+                || promptLower.contains("pending");
+        return asksHighlight && mentionsPending;
+    }
+
+    private JsonNode buildDeterministicStatusHighlightPatch(
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            String promptLower) {
+        if (request == null || !isStatusHighlightPrompt(promptLower)) {
+            return null;
+        }
+        String field = inferFieldFromPrompt(promptLower, currentState, request.getSchemaFields(), "status");
+        if (isBlank(field)) {
+            return null;
+        }
+        BadgeValuesContext ctx = resolveBadgeValuesContext(request, field);
+        List<String> values = ctx != null ? new ArrayList<>(ctx.values) : new ArrayList<>();
+        if (values.isEmpty()) {
+            values = new ArrayList<>(extractValuesFromPrompt(request.getUserPrompt()));
+        }
+        if (values.isEmpty()) {
+            values = new ArrayList<>(List.of("ATIVO", "INATIVO", "PENDENTE"));
+        }
+        values = limitBadgeValues(values);
+        if (values.isEmpty()) {
+            return null;
+        }
+        Map<String, String> colorMap = buildDefaultColorMap(values, promptLower);
+        for (String value : values) {
+            String normalized = normalizeText(value);
+            if ("pendente".equals(normalized) || "pending".equals(normalized)) {
+                colorMap.put(value, "warn");
+            }
+        }
+        if (colorMap.isEmpty()) {
+            colorMap.putAll(assignColors(values, DEFAULT_BADGE_PALETTE));
+        }
+        boolean quoteValues = true;
+        if (ctx != null) {
+            quoteValues = !isBooleanType(ctx.inferredType, ctx.explicitType);
+        }
+        JsonNode patch = buildConditionalBadgePatch(field, colorMap, quoteValues);
+        if (patch == null) {
+            return null;
+        }
+        if (promptLower.contains("prioridade") || promptLower.contains("priority")) {
+            ObjectNode sortingPatch = objectMapper.createObjectNode();
+            sortingPatch.putObject("behavior")
+                    .putObject("sorting")
+                    .put("enabled", true);
+            patch = mergePatchNodes(patch, sortingPatch);
+        }
+        return patch;
+    }
+
+    private boolean patchHasDensityConfig(JsonNode patchNode) {
+        JsonNode appearance = patchNode.get("appearance");
+        return appearance != null && appearance.isObject() && appearance.has("density");
+    }
+
+    private boolean patchHasSelectionConfig(JsonNode patchNode) {
+        JsonNode behavior = patchNode.get("behavior");
+        if (behavior == null || !behavior.isObject()) {
+            return false;
+        }
+        JsonNode selection = behavior.get("selection");
+        return selection != null
+                && selection.isObject()
+                && (selection.has("enabled") || selection.has("type") || selection.has("mode"));
+    }
+
+    private boolean patchHasAnyColumnAlign(JsonNode patchNode) {
+        JsonNode columns = patchNode.get("columns");
+        if (columns == null || !columns.isArray()) {
+            return false;
+        }
+        for (JsonNode column : columns) {
+            if (column != null && column.isObject() && column.has("align")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean patchTouchesField(JsonNode patchNode, String field) {
+        if (patchNode == null || isBlank(field)) {
+            return false;
+        }
+        JsonNode columns = patchNode.get("columns");
+        if (columns == null || !columns.isArray()) {
+            return false;
+        }
+        for (JsonNode column : columns) {
+            if (column == null || !column.isObject()) {
+                continue;
+            }
+            String patchField = textOrNull(column.get("field"));
+            if (!isBlank(patchField) && field.equalsIgnoreCase(patchField)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private AiOrchestratorResponse tryResolveComputedFallback(
             AiOrchestratorRequest request,
             JsonNode currentState,
@@ -10613,6 +11623,14 @@ public class AiOrchestratorService {
         }
         String prompt = request.getUserPrompt();
         String promptLower = prompt.toLowerCase(Locale.ROOT);
+        String explicitBaseField = extractExplicitComputedBaseField(prompt);
+        if (!isBlank(explicitBaseField)) {
+            List<String> knownFields = resolveKnownFieldNames(currentState, request.getSchemaFields());
+            if (!containsFieldIgnoreCase(knownFields, explicitBaseField)) {
+                List<String> options = extractDateFieldOptions(request.getDataProfile(), knownFields);
+                return clarification("Qual campo de data devo usar para o cálculo?", options);
+            }
+        }
         if (!mentionsComputed(promptLower) && !mentionsTenure(promptLower) && !mentionsAgeComputation(promptLower)) {
             return null;
         }
@@ -10665,6 +11683,15 @@ public class AiOrchestratorService {
         }
         if (!"add_column_computed".equalsIgnoreCase(intent.getIntent())) {
             return null;
+        }
+
+        String explicitBaseField = extractExplicitComputedBaseField(request.getUserPrompt());
+        if (!isBlank(explicitBaseField)) {
+            List<String> knownFields = resolveKnownFieldNames(currentState, request.getSchemaFields());
+            if (!containsFieldIgnoreCase(knownFields, explicitBaseField)) {
+                List<String> options = extractDateFieldOptions(request.getDataProfile(), knownFields);
+                return clarification("Qual campo de data devo usar para o cálculo?", options);
+            }
         }
 
         String newField = normalizeFieldName(intent.getNewField());
@@ -10999,6 +12026,13 @@ public class AiOrchestratorService {
         }
         String prompt = request.getUserPrompt();
         String promptLower = prompt.toLowerCase(Locale.ROOT);
+        String explicitBaseField = extractExplicitComputedBaseField(prompt);
+        if (!isBlank(explicitBaseField)) {
+            List<String> knownFields = resolveKnownFieldNames(currentState, request.getSchemaFields());
+            if (!containsFieldIgnoreCase(knownFields, explicitBaseField)) {
+                return null;
+            }
+        }
         if (!mentionsComputed(promptLower)) {
             return null;
         }
@@ -11041,7 +12075,7 @@ public class AiOrchestratorService {
 
     private boolean mentionsAgeComputation(String promptLower) {
         if (promptLower == null) return false;
-        return promptLower.contains("idade") || promptLower.contains("age");
+        return containsWord(promptLower, "idade") || containsWord(promptLower, "age");
     }
 
     private boolean mentionsTenure(String promptLower) {
@@ -11610,7 +12644,7 @@ public class AiOrchestratorService {
         }
         JsonNode normalizedPatch = normalizePatch(componentId, semanticCheck.patch);
         List<AiCapability> allowedCaps = mergeCapabilities(configCapabilities, componentCapabilities);
-        SanitizeResult sanitizeResult = sanitizePatch(normalizedPatch, allowedCaps);
+        SanitizeResult sanitizeResult = sanitizePatch(normalizedPatch, allowedCaps, componentId);
         List<String> sanitizeWarnings = filterInternalWarnings(
                 sanitizeResult.warnings,
                 suggestedPatch,
@@ -11626,7 +12660,7 @@ public class AiOrchestratorService {
         EnumValidationResult enumValidation = validateEnumValues(
                 sanitizeResult.sanitized,
                 componentContext,
-                allowedCaps);
+                sanitizeResult.effectiveCapabilities);
         if (!enumValidation.valid) {
             return invalidEnumValue(enumValidation, outWarnings);
         }
@@ -12156,13 +13190,23 @@ public class AiOrchestratorService {
         return SemanticPatchCheck.ok(patch);
     }
 
-    private SanitizeResult sanitizePatch(JsonNode patch, List<AiCapability> caps) {
-        if (patch == null) return new SanitizeResult(null, List.of());
-        if (caps == null || caps.isEmpty()) {
-            return new SanitizeResult(null, List.of("Capabilities ausentes; patch bloqueado."));
+    private SanitizeResult sanitizePatch(
+            JsonNode patch,
+            List<AiCapability> caps,
+            String componentId) {
+        if (patch == null) return new SanitizeResult(null, List.of(), List.of());
+        List<String> warnings = new ArrayList<>();
+        List<AiCapability> effectiveCaps = caps;
+        if ((effectiveCaps == null || effectiveCaps.isEmpty())
+                && COMPONENT_ID_TABLE.equals(componentId)) {
+            effectiveCaps = defaultTableBaselineCapabilities();
+            warnings.add("Capabilities ausentes; baseline segura de tabela aplicada.");
         }
-        List<String> allowedPaths = buildAllowedPaths(caps);
-        List<String> objectPaths = caps.stream()
+        if (effectiveCaps == null || effectiveCaps.isEmpty()) {
+            return new SanitizeResult(null, List.of("Capabilities ausentes; patch bloqueado."), List.of());
+        }
+        List<String> allowedPaths = buildAllowedPaths(effectiveCaps);
+        List<String> objectPaths = effectiveCaps.stream()
                 .filter(c -> c != null
                         && c.getPath() != null
                         && !c.getPath().isBlank()
@@ -12170,9 +13214,47 @@ public class AiOrchestratorService {
                         && "object".equalsIgnoreCase(c.getValueKind()))
                 .map(AiCapability::getPath)
                 .collect(Collectors.toList());
-        List<String> warnings = new ArrayList<>();
         JsonNode sanitized = sanitizeNode(patch, "", allowedPaths, objectPaths, warnings);
-        return new SanitizeResult(sanitized, warnings);
+        return new SanitizeResult(sanitized, warnings, effectiveCaps);
+    }
+
+    private List<AiCapability> defaultTableBaselineCapabilities() {
+        return List.of(
+                AiCapability.builder().path("appearance").valueKind("object").build(),
+                AiCapability.builder()
+                        .path("appearance.density")
+                        .valueKind("enum")
+                        .allowedValues(new ArrayList<>(TABLE_DENSITY_ALLOWED_VALUES))
+                        .build(),
+                AiCapability.builder().path("behavior").valueKind("object").build(),
+                AiCapability.builder().path("behavior.selection").valueKind("object").build(),
+                AiCapability.builder().path("behavior.selection.enabled").valueKind("boolean").build(),
+                AiCapability.builder()
+                        .path("behavior.selection.type")
+                        .valueKind("enum")
+                        .allowedValues(new ArrayList<>(TABLE_SELECTION_ALLOWED_VALUES))
+                        .build(),
+                AiCapability.builder().path("behavior.sorting").valueKind("object").build(),
+                AiCapability.builder().path("behavior.sorting.enabled").valueKind("boolean").build(),
+                AiCapability.builder().path("columns[]").valueKind("object").build(),
+                AiCapability.builder().path("columns[].field").valueKind("string").build(),
+                AiCapability.builder().path("columns[].header").valueKind("string").build(),
+                AiCapability.builder().path("columns[].visible").valueKind("boolean").build(),
+                AiCapability.builder()
+                        .path("columns[].align")
+                        .valueKind("enum")
+                        .allowedValues(new ArrayList<>(TABLE_ALIGN_ALLOWED_VALUES))
+                        .build(),
+                AiCapability.builder().path("columns[].computed").valueKind("object").build(),
+                AiCapability.builder().path("columns[].computed.expression").valueKind("string").build(),
+                AiCapability.builder()
+                        .path("columns[].computed.outputType")
+                        .valueKind("enum")
+                        .allowedValues(List.of("number", "string", "currency", "percentage", "date"))
+                        .build(),
+                AiCapability.builder().path("columns[].computed.format").valueKind("string").build(),
+                AiCapability.builder().path("columns[].computed.dependencies").valueKind("array").build(),
+                AiCapability.builder().path("columns[].conditionalRenderers[]").valueKind("object").build());
     }
 
     private List<String> buildAllowedPaths(List<AiCapability> caps) {
@@ -12953,6 +14035,63 @@ public class AiOrchestratorService {
         return new ArrayList<>(unique);
     }
 
+    private String extractExplicitComputedBaseField(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
+                        "(?:usando|using|com\\s+base\\s+em|baseado\\s+em)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+                        java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(prompt);
+        if (!matcher.find()) {
+            return null;
+        }
+        return matcher.group(1);
+    }
+
+    private List<String> resolveKnownFieldNames(JsonNode currentState, JsonNode schemaFields) {
+        LinkedHashSet<String> known = new LinkedHashSet<>();
+        List<String> columns = extractColumnNames(currentState);
+        if (columns != null) {
+            for (String column : columns) {
+                if (!isBlank(column)) {
+                    known.add(column.trim());
+                }
+            }
+        }
+        if (schemaFields != null && schemaFields.isArray()) {
+            for (JsonNode schemaField : schemaFields) {
+                if (schemaField == null || !schemaField.isObject()) {
+                    continue;
+                }
+                String name = textOrNull(schemaField.get("name"));
+                if (isBlank(name)) {
+                    name = textOrNull(schemaField.get("field"));
+                }
+                if (!isBlank(name)) {
+                    known.add(name.trim());
+                }
+            }
+        }
+        return new ArrayList<>(known);
+    }
+
+    private boolean containsFieldIgnoreCase(List<String> fields, String candidate) {
+        if (fields == null || fields.isEmpty() || isBlank(candidate)) {
+            return false;
+        }
+        String normalizedCandidate = normalizeText(candidate);
+        for (String field : fields) {
+            if (isBlank(field)) {
+                continue;
+            }
+            if (normalizedCandidate.equals(normalizeText(field))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private List<String> readStringArray(JsonNode node) {
         if (node == null || node.isNull()) {
             return List.of();
@@ -13349,10 +14488,21 @@ public class AiOrchestratorService {
     private static class SanitizeResult {
         private final JsonNode sanitized;
         private final List<String> warnings;
+        private final List<AiCapability> effectiveCapabilities;
 
-        private SanitizeResult(JsonNode sanitized, List<String> warnings) {
+        private SanitizeResult(
+                JsonNode sanitized,
+                List<String> warnings,
+                List<AiCapability> effectiveCapabilities) {
             this.sanitized = sanitized;
             this.warnings = warnings;
+            this.effectiveCapabilities = effectiveCapabilities != null
+                    ? effectiveCapabilities
+                    : List.of();
+        }
+
+        private SanitizeResult(JsonNode sanitized, List<String> warnings) {
+            this(sanitized, warnings, List.of());
         }
     }
 
@@ -13461,6 +14611,16 @@ public class AiOrchestratorService {
     private boolean requiresTarget(ComponentAction action) {
         if (action == null || action.patchTemplate == null) return false;
         return action.patchTemplate.toString().contains("{{target}}");
+    }
+
+    private static class SelectionDirective {
+        private final Boolean enabled;
+        private final String mode;
+
+        private SelectionDirective(Boolean enabled, String mode) {
+            this.enabled = enabled;
+            this.mode = mode;
+        }
     }
 
     private static class ContextRequest {

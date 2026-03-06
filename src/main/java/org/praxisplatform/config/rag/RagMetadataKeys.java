@@ -6,6 +6,11 @@ public final class RagMetadataKeys {
     public static final String VERSION = "version";
     public static final String TENANT_ID = "tenantId";
     public static final String ENVIRONMENT = "environment";
+    public static final String RELEASE_ID = "releaseId";
+    public static final String COMPONENT_ID = "componentId";
+    public static final String DOC_TYPE = "docType";
+    public static final String CONTENT_HASH = "contentHash";
+    public static final String CHUNK_INDEX = "chunkIndex";
 
     public static final String DB_ID = "dbId";
     public static final String PATH = "path";

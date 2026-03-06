@@ -25,6 +25,10 @@ public class ApiCatalogRequest {
     @NotNull
     private List<ApiEndpointEntry> endpoints;
 
+    private String releaseId;
+    private String version;
+    private String generatedAt;
+
     @Data
     @NoArgsConstructor
     @AllArgsConstructor

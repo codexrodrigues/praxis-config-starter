@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -11,6 +12,7 @@ import org.praxisplatform.config.domain.AiThreadStatus;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiUiContextRef;
 import org.praxisplatform.config.repository.AiThreadRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -32,6 +34,12 @@ public class AiThreadService {
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request is required");
         }
+        String resolvedTenant = normalizeIdentity(tenantId);
+        String resolvedUser = normalizeIdentity(userId);
+        String resolvedEnvironment = normalizeIdentity(environment);
+        if (resolvedTenant == null || resolvedUser == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Identity context is required");
+        }
         String normalizedComponentType = normalizeComponentType(request.getComponentType());
         request.setComponentType(normalizedComponentType);
 
@@ -40,11 +48,27 @@ public class AiThreadService {
 
         boolean createNew = shouldCreateNewThread(request);
         if (createNew) {
+            UUID deterministicThreadId = resolveDeterministicThreadId(
+                    request,
+                    resolvedTenant,
+                    resolvedUser,
+                    resolvedEnvironment);
+            if (deterministicThreadId != null) {
+                AiThread existingThread = threadRepository.findById(deterministicThreadId).orElse(null);
+                if (existingThread != null) {
+                    if (!isAuthorized(existingThread, resolvedTenant, resolvedEnvironment, resolvedUser)) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied");
+                    }
+                    AiThread savedExisting = touchThread(existingThread);
+                    request.setSessionId(savedExisting.getThreadId());
+                    return savedExisting;
+                }
+            }
             AiThread created = AiThread.builder()
-                    .threadId(UUID.randomUUID())
-                    .tenantId(tenantId != null ? tenantId : "default")
-                    .environment(environment)
-                    .userId(userId)
+                    .threadId(deterministicThreadId != null ? deterministicThreadId : UUID.randomUUID())
+                    .tenantId(resolvedTenant)
+                    .environment(resolvedEnvironment)
+                    .userId(resolvedUser)
                     .componentType(normalizedComponentType)
                     .componentId(request.getComponentId())
                     .routeKey(routeKey)
@@ -55,7 +79,20 @@ public class AiThreadService {
                     .variantId(request.getVariantId() != null ? request.getVariantId()
                             : uiContextRef != null ? uiContextRef.getVariantId() : null)
                     .build();
-            AiThread saved = threadRepository.save(created);
+            AiThread saved;
+            try {
+                saved = threadRepository.save(created);
+            } catch (DataIntegrityViolationException ex) {
+                if (deterministicThreadId == null) {
+                    throw ex;
+                }
+                AiThread existingThread = threadRepository.findById(deterministicThreadId)
+                        .orElseThrow(() -> ex);
+                if (!isAuthorized(existingThread, resolvedTenant, resolvedEnvironment, resolvedUser)) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied");
+                }
+                saved = touchThread(existingThread);
+            }
             request.setSessionId(saved.getThreadId());
             return saved;
         }
@@ -67,11 +104,10 @@ public class AiThreadService {
         Optional<AiThread> loaded = threadRepository.findById(sessionId);
         AiThread thread = loaded.orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread not found"));
-        if (!isAuthorized(thread, tenantId, environment, userId)) {
+        if (!isAuthorized(thread, resolvedTenant, resolvedEnvironment, resolvedUser)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied");
         }
-        thread.setLastUsedAt(java.time.Instant.now());
-        AiThread saved = threadRepository.save(thread);
+        AiThread saved = touchThread(thread);
         request.setSessionId(saved.getThreadId());
         return saved;
     }
@@ -88,25 +124,45 @@ public class AiThreadService {
         if (thread == null) {
             return false;
         }
-        if (tenantId == null && thread.getTenantId() != null
-                && !"default".equals(thread.getTenantId())) {
+        String threadTenant = normalizeIdentity(thread.getTenantId());
+        String threadEnvironment = normalizeIdentity(thread.getEnvironment());
+        String threadUser = normalizeIdentity(thread.getUserId());
+        if (threadTenant == null || tenantId == null || !tenantId.equals(threadTenant)) {
             return false;
         }
-        if (tenantId != null && thread.getTenantId() != null
-                && !tenantId.equals(thread.getTenantId())) {
+        if (threadEnvironment != null && (environment == null || !environment.equals(threadEnvironment))) {
             return false;
         }
-        if (environment == null && thread.getEnvironment() != null) {
+        if (threadUser == null || userId == null) {
             return false;
         }
-        if (environment != null && thread.getEnvironment() != null
-                && !environment.equals(thread.getEnvironment())) {
-            return false;
+        return userId.equals(threadUser);
+    }
+
+    private AiThread touchThread(AiThread thread) {
+        if (thread == null) {
+            return null;
         }
-        if (thread.getUserId() == null) {
-            return true;
+        thread.setLastUsedAt(java.time.Instant.now());
+        return threadRepository.save(thread);
+    }
+
+    private UUID resolveDeterministicThreadId(
+            AiOrchestratorRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (request == null || request.getClientTurnId() == null) {
+            return null;
         }
-        return userId != null && userId.equals(thread.getUserId());
+        String key = String.join(
+                "|",
+                "ai-thread-v1",
+                normalizeIdentity(tenantId) != null ? normalizeIdentity(tenantId) : "",
+                normalizeIdentity(userId) != null ? normalizeIdentity(userId) : "",
+                normalizeIdentity(environment) != null ? normalizeIdentity(environment) : "",
+                request.getClientTurnId().toString());
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
     }
 
     private String buildTitle(String prompt) {
@@ -171,5 +227,13 @@ public class AiThreadService {
         aliases.put("form", "praxis-dynamic-form");
         aliases.put("praxis-dynamic-form", "praxis-dynamic-form");
         return aliases;
+    }
+
+    private String normalizeIdentity(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

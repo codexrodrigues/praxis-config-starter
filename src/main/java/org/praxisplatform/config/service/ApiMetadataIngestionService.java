@@ -6,6 +6,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.dto.ApiCatalogRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
+import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
@@ -43,6 +45,11 @@ public class ApiMetadataIngestionService {
 
         String resolvedTenant = normalize(tenantId);
         String resolvedEnv = normalize(environment);
+        String releaseId = RagDocumentIdentity.resolveReleaseId(
+                request.getReleaseId(),
+                request.getVersion(),
+                request.getGeneratedAt());
+        String requestVersion = normalize(request.getVersion());
         for (ApiCatalogRequest.ApiEndpointEntry ep : request.getEndpoints()) {
             try {
                 String path = ep.getPath();
@@ -96,8 +103,11 @@ public class ApiMetadataIngestionService {
                         requestSchema,
                         responseSchema,
                         parameters,
+                        rawJson,
                         resolvedTenant,
-                        resolvedEnv);
+                        resolvedEnv,
+                        releaseId,
+                        requestVersion);
                 ragVectorStoreService.upsertDocuments(List.of(ragDocument));
             } catch (Exception e) {
                 String msg = "Error ingesting endpoint: " + ep.getMethod() + " " + ep.getPath();
@@ -252,11 +262,21 @@ public class ApiMetadataIngestionService {
             String requestSchema,
             String responseSchema,
             String parameters,
+            String rawJson,
             String tenantId,
-            String environment) {
+            String environment,
+            String releaseId,
+            String requestVersion) {
+        String componentId = buildApiComponentId(meta.getMethod(), meta.getPath());
+        String contentHash = RagDocumentIdentity.sha256(buildApiHashPayload(meta, rawJson));
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.API_METADATA);
         metadata.put(RagMetadataKeys.RESOURCE_ID, meta.getMethod() + " " + meta.getPath());
+        metadata.put(RagMetadataKeys.COMPONENT_ID, componentId);
+        metadata.put(RagMetadataKeys.DOC_TYPE, RagResourceTypes.API_METADATA);
+        metadata.put(RagMetadataKeys.RELEASE_ID, releaseId);
+        metadata.put(RagMetadataKeys.CONTENT_HASH, contentHash);
+        metadata.put(RagMetadataKeys.CHUNK_INDEX, 0);
         metadata.put(RagMetadataKeys.DB_ID, meta.getId());
         metadata.put(RagMetadataKeys.PATH, meta.getPath());
         metadata.put(RagMetadataKeys.METHOD, meta.getMethod());
@@ -273,12 +293,38 @@ public class ApiMetadataIngestionService {
         if (environment != null) {
             metadata.put(RagMetadataKeys.ENVIRONMENT, environment);
         }
-        metadata.put(RagMetadataKeys.VERSION, 1);
+        metadata.put(RagMetadataKeys.VERSION, requestVersion != null ? requestVersion : "1");
+        metadata.entrySet().removeIf(entry -> Objects.isNull(entry.getValue()));
         return Document.builder()
-                .id("api_metadata:" + meta.getId())
+                .id(RagDocumentIdentity.buildDocumentId(
+                        tenantId,
+                        environment,
+                        componentId,
+                        releaseId,
+                        RagResourceTypes.API_METADATA,
+                        contentHash,
+                        0))
                 .text(content)
                 .metadata(metadata)
                 .build();
+    }
+
+    private String buildApiComponentId(String method, String path) {
+        String normalizedMethod = normalize(method);
+        String normalizedPath = normalize(path);
+        String methodPart = normalizedMethod != null ? normalizedMethod.toUpperCase() : "UNKNOWN";
+        String pathPart = normalizedPath != null ? normalizedPath : "unknown";
+        return methodPart + ":" + pathPart;
+    }
+
+    private String buildApiHashPayload(ApiMetadata metadata, String rawJson) {
+        String normalizedMethod = normalize(metadata.getMethod());
+        String normalizedPath = normalize(metadata.getPath());
+        StringJoiner joiner = new StringJoiner("|");
+        joiner.add(normalizedMethod != null ? normalizedMethod : "");
+        joiner.add(normalizedPath != null ? normalizedPath : "");
+        joiner.add(rawJson != null ? rawJson : "");
+        return joiner.toString();
     }
 
     private String normalize(String value) {

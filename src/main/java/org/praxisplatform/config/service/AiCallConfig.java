@@ -17,4 +17,5 @@ public class AiCallConfig {
     private String apiKey;
     private String tenantId;
     private String environment;
+    private String ragReleaseId;
 }

@@ -25,24 +25,26 @@ public class ContextRetrievalController {
             @RequestParam String query,
             @RequestParam(required = false) String method,
             @RequestParam(required = false) String tags,
+            @RequestParam(required = false) String releaseId,
             @RequestParam(defaultValue = "5") int limit,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         
         List<ApiSearchResult> results =
-                retrievalService.searchApiMetadata(query, method, tags, limit, null, tenantId, environment);
+                retrievalService.searchApiMetadata(query, method, tags, limit, null, tenantId, environment, releaseId);
         return ResponseEntity.ok(results);
     }
 
     @GetMapping("/ai-registry/component-definitions/search")
     public ResponseEntity<List<ComponentSearchResult>> searchComponentDefinitions(
             @RequestParam String query,
+            @RequestParam(required = false) String releaseId,
             @RequestParam(defaultValue = "5") int limit,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
 
         List<ComponentSearchResult> results =
-                retrievalService.searchComponentDefinitions(query, limit, null, tenantId, environment);
+                retrievalService.searchComponentDefinitions(query, limit, null, tenantId, environment, releaseId);
         return ResponseEntity.ok(results);
     }
 }

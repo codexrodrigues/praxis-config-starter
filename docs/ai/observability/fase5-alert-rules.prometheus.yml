@@ -1,0 +1,47 @@
+groups:
+  - name: ai-stream-fase5-local
+    interval: 30s
+    rules:
+      - alert: AiStreamFallbackBurst
+        expr: sum(increase(ai_stream_fallback_total[10m])) > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: ai-stream
+        annotations:
+          summary: "Fallback stream->sync acima do esperado"
+          description: "Fallback total em 10m > 10. Verificar provider e rede."
+
+      - alert: AiStreamCancelInflightBurst
+        expr: sum(increase(ai_stream_cancel_inflight_total[10m])) > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: ai-stream
+        annotations:
+          summary: "Cancel in-flight elevado"
+          description: "Cancelamentos in-flight em 10m > 10. Verificar UX, timeout e estabilidade."
+
+      - alert: AiStreamDurationP95High
+        expr: histogram_quantile(0.95, sum by (le) (rate(ai_stream_duration_ms_bucket[10m]))) > 15000
+        for: 15m
+        labels:
+          severity: warning
+          service: ai-stream
+        annotations:
+          summary: "Latencia p95 de stream alta"
+          description: "p95 de ai_stream_duration_ms acima de 15s por 15m."
+
+      - alert: AiStreamHttp5xxRatioHigh
+        expr: (
+          sum(rate(http_server_requests_seconds_count{uri=~"/api/praxis/config/ai/patch/stream.*",status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{uri=~"/api/praxis/config/ai/patch/stream.*"}[5m])), 0.001)
+        ) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          service: ai-stream
+        annotations:
+          summary: "Erro 5xx elevado em endpoints de stream"
+          description: "Taxa de 5xx > 5% nos endpoints de stream por 10m."

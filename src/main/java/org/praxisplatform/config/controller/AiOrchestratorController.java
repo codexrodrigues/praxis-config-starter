@@ -1,13 +1,20 @@
 package org.praxisplatform.config.controller;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.contract.AiContractSpec;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.service.AiInteractionLogger;
 import org.praxisplatform.config.service.AiOrchestratorService;
+import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,20 +33,25 @@ public class AiOrchestratorController {
 
     static final String CONTRACT_VERSION_HEADER = "X-Praxis-Contract-Version";
     static final String CONTRACT_SCHEMA_HASH_HEADER = "X-Praxis-Schema-Hash";
-    static final String DEFAULT_CONTRACT_VERSION = "v1.1";
-    static final String DEFAULT_CONTRACT_SCHEMA_HASH =
-            "51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26";
+    static final String RAG_RELEASE_ID_HEADER = "X-Praxis-Rag-Release-Id";
+    static final String DEFAULT_CONTRACT_VERSION = AiContractSpec.CONTRACT_VERSION;
+    static final String DEFAULT_CONTRACT_SCHEMA_HASH = AiContractSpec.CONTRACT_SCHEMA_HASH;
+    static final String CODE_SCHEMA_HASH_MISMATCH = "SCHEMA_HASH_MISMATCH";
+    static final String CODE_UNSUPPORTED_CONTRACT = "UNSUPPORTED_CONTRACT";
 
     private final AiOrchestratorService orchestratorService;
     private final AiInteractionLogger interactionLogger;
+    private final AiPrincipalContextResolver principalContextResolver;
 
     @PostMapping("/patch")
     public ResponseEntity<AiOrchestratorResponse> generatePatch(
             @Valid @RequestBody AiOrchestratorRequest request,
+            HttpServletRequest servletRequest,
             @RequestHeader(value = "X-Request-Id", required = false) String requestId,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment,
+            @RequestHeader(value = RAG_RELEASE_ID_HEADER, required = false) String ragReleaseIdHeader,
             @RequestHeader(value = CONTRACT_VERSION_HEADER, required = false) String contractVersionHeader,
             @RequestHeader(value = CONTRACT_SCHEMA_HASH_HEADER, required = false) String schemaHashHeader) {
         String resolvedRequestId = requestId != null && !requestId.isBlank()
@@ -57,14 +69,32 @@ public class AiOrchestratorController {
                     DEFAULT_CONTRACT_SCHEMA_HASH);
             request.setContractVersion(resolvedContractVersion);
             request.setSchemaHash(resolvedSchemaHash);
+            request.setRagReleaseId(firstNonBlank(request.getRagReleaseId(), ragReleaseIdHeader, null));
+            request.setStreamTransport(Boolean.FALSE);
+            request.setStreamTurnPreclaimed(Boolean.FALSE);
+            AiPrincipalContext principalContext = principalContextResolver.resolve(
+                    servletRequest,
+                    tenantId,
+                    userId,
+                    environment);
+            ContractValidationError contractValidationError = validateContractMetadata(
+                    resolvedContractVersion,
+                    resolvedSchemaHash);
+            if (contractValidationError != null) {
+                return buildContractMismatchResponse(
+                        request,
+                        resolvedContractVersion,
+                        resolvedSchemaHash,
+                        contractValidationError);
+            }
 
             String baseUrl = ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString();
             AiOrchestratorResponse response = orchestratorService.generatePatch(
                     request,
                     baseUrl,
-                    tenantId,
-                    userId,
-                    environment);
+                    principalContext.tenantId(),
+                    principalContext.userId(),
+                    principalContext.environment());
             if (response != null) {
                 response.setContractVersion(resolvedContractVersion);
                 response.setSchemaHash(resolvedSchemaHash);
@@ -95,6 +125,7 @@ public class AiOrchestratorController {
         return switch (response.getCode()) {
             case "UNKNOWN_COMPONENT" -> HttpStatus.NOT_FOUND;
             case "INVALID_ENUM_VALUE" -> HttpStatus.UNPROCESSABLE_ENTITY;
+            case CODE_SCHEMA_HASH_MISMATCH, CODE_UNSUPPORTED_CONTRACT -> HttpStatus.CONFLICT;
             default -> HttpStatus.OK;
         };
     }
@@ -107,5 +138,55 @@ public class AiOrchestratorController {
             return headerValue.trim();
         }
         return fallback;
+    }
+
+    private ContractValidationError validateContractMetadata(String contractVersion, String schemaHash) {
+        if (!DEFAULT_CONTRACT_VERSION.equals(contractVersion)) {
+            return new ContractValidationError(
+                    CODE_UNSUPPORTED_CONTRACT,
+                    "Versao de contrato nao suportada.");
+        }
+        if (!DEFAULT_CONTRACT_SCHEMA_HASH.equals(schemaHash)) {
+            return new ContractValidationError(
+                    CODE_SCHEMA_HASH_MISMATCH,
+                    "Schema hash divergente.");
+        }
+        return null;
+    }
+
+    private ResponseEntity<AiOrchestratorResponse> buildContractMismatchResponse(
+            AiOrchestratorRequest request,
+            String providedContractVersion,
+            String providedSchemaHash,
+            ContractValidationError error) {
+        ObjectNode provided = JsonNodeFactory.instance.objectNode();
+        if (providedContractVersion != null) {
+            provided.put("contractVersion", providedContractVersion);
+        }
+        if (providedSchemaHash != null) {
+            provided.put("schemaHash", providedSchemaHash);
+        }
+        AiOrchestratorResponse response = AiOrchestratorResponse.builder()
+                .type("error")
+                .code(error.code())
+                .message(error.message())
+                .contractVersion(DEFAULT_CONTRACT_VERSION)
+                .schemaHash(DEFAULT_CONTRACT_SCHEMA_HASH)
+                .path("$.contract")
+                .allowedValues(List.of(DEFAULT_CONTRACT_VERSION))
+                .providedValue(provided)
+                .build();
+        if (request != null) {
+            response.setComponentId(request.getComponentId());
+            response.setComponentType(request.getComponentType());
+        }
+        interactionLogger.logFrontendResponse(request, response);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .header(CONTRACT_VERSION_HEADER, DEFAULT_CONTRACT_VERSION)
+                .header(CONTRACT_SCHEMA_HASH_HEADER, DEFAULT_CONTRACT_SCHEMA_HASH)
+                .body(response);
+    }
+
+    private record ContractValidationError(String code, String message) {
     }
 }

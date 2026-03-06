@@ -1,6 +1,7 @@
 # Praxis Config Starter
 
 ![Version](https://img.shields.io/badge/version-0.0.1--SNAPSHOT-blue)
+![Maven Central](https://img.shields.io/maven-central/v/io.github.codexrodrigues/praxis-config-starter?logo=apachemaven&color=blue)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2%2B-brightgreen)
 ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20Vector-blue)
 
@@ -29,7 +30,7 @@ Add the dependency to your Host Application's `pom.xml` (e.g., `praxis-api-quick
 
 ```xml
 <dependency>
-    <groupId>org.praxisplatform</groupId>
+    <groupId>io.github.codexrodrigues</groupId>
     <artifactId>praxis-config-starter</artifactId>
     <version>0.0.1-SNAPSHOT</version>
 </dependency>
@@ -48,13 +49,15 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/praxis_db
     username: user
-  password: password
+    password: password
   jpa:
     hibernate:
       ddl-auto: validate # Flyway manages schema
 
-# Opcional: firewall (Spring Security)
-praxis.config.firewall.allow-encoded-slash=true # default; aceita %2F nas chaves de UI
+praxis:
+  config:
+    firewall:
+      allow-encoded-slash: true # default; aceita %2F nas chaves de UI
 ```
 
 ### Baseline (installs limpos)
@@ -171,7 +174,7 @@ Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG 
 | POST | `/api/praxis/config/ai-registry/component-definitions` | Ingests UI component definitions into `ai_registry`. |
 | GET | `/api/praxis/config/ai-registry/component-definitions/search` | Vector search over component definitions. |
 | POST | `/api/praxis/config/ai/suggestions` | Generates AI suggestions (uses tenant/env headers when present). |
-| GET | `/api/praxis/config/ai-context/{componentId}` | Returns AI context (runtime + metadata). Requires `componentType` query param. |
+| GET | `/api/praxis/config/ai-context/{componentId}` | Returns AI context (runtime + metadata). Requires `X-Tenant-ID` header and `componentType` query param. |
 | POST | `/api/praxis/config/ai-context/{componentId}` | Returns AI context using runtime `currentState` sent by the caller. |
 | POST | `/api/praxis/config/ai/patch` | Orchestrates prompt → patch generation using runtime `currentState`. |
 | POST | `/api/praxis/config/ai/providers/models` | Lists available LLM models for a provider (accepts `provider`, `apiKey`). |
@@ -274,10 +277,10 @@ Optional envs: `CATALOG_URL`, `CHUNK_SIZE`, `PAUSE_MS`, `TIMEOUT_MS`.
 - `schemaContext`: optional `{ path, operation, schemaType }` when the caller already resolved the endpoint.
 
 Important:
-- The AI flow must not read `ui_user_config`. The caller must send `currentState` on every request.
-- Templates are resolved using the namespaced key `<componentType>:<componentId>` (example:
-  `table:praxis-table`), where `componentType` is a logical namespace (table/form/page), not a
-  runtime state source.
+- `GET /api/praxis/config/ai-context/{componentId}` pode hidratar estado salvo em `ui_user_config` (fallback de conveniência).
+- Para fluxos determinísticos de geração/edição, envie `currentState` explicitamente no `POST /ai-context` e no `POST /ai/patch` (sem depender de estado persistido).
+- Templates are resolved by `registry_key = <componentId>` (base) or `registry_key = <componentId>:<variantId>` (variants).
+- `componentType` remains a logical namespace for context/runtime lookup and is not part of the template key.
 
 POST `/api/praxis/config/ai-context/{componentId}` accepts `currentState` in the body so AI
 can operate on unsaved runtime changes (no dependency on `ui_user_config`):
