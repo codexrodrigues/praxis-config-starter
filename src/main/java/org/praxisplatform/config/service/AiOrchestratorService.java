@@ -888,20 +888,21 @@ public class AiOrchestratorService {
             log.info("[AiOrchestratorService] contextRequest codes={} message={}",
                     contextRequest.codes,
                     contextRequest.message);
-            JsonNode resolvedHints = buildContextHintsFromRequest(
+            ContextHintsBuildResult resolvedHints = buildContextHintsFromRequest(
                     context,
                     request,
                     resolvedSchema,
                     embeddingConfig,
                     contextRequest.codes,
                     tenantId,
-                    environment);
-            if (resolvedHints != null && !resolvedHints.isNull() && resolvedHints.size() > 0) {
+                    environment,
+                    warnings);
+            if (resolvedHints.hints() != null && !resolvedHints.hints().isNull() && resolvedHints.hints().size() > 0) {
                 log.info("[AiOrchestratorService] contextRequest resolved hints keys={}",
-                        resolvedHints.isObject()
-                                ? resolveContextHintKeys(resolvedHints)
+                        resolvedHints.hints().isObject()
+                                ? resolveContextHintKeys(resolvedHints.hints())
                                 : List.of("non-object"));
-                JsonNode mergedHints = mergeContextHints(request.getContextHints(), resolvedHints);
+                JsonNode mergedHints = mergeContextHints(request.getContextHints(), resolvedHints.hints());
                 String retryRuntimeMetadata = truncateBlock(
                         "runtime_metadata",
                         safeMetadata(formatRuntimeMetadata(
@@ -929,15 +930,19 @@ public class AiOrchestratorService {
                     log.info("[AiOrchestratorService] contextRequest retry requested codes={} message={}",
                             retryContextRequest.codes,
                             retryContextRequest.message);
-                    return finalizeResponse(clarificationWithContextRequest(
-                            retryContextRequest.message,
-                            retryContextRequest.codes), memoryContext);
+                    return finalizeResponse(withWarnings(
+                            clarificationWithContextRequest(
+                                    retryContextRequest.message,
+                                    retryContextRequest.codes),
+                            warnings), memoryContext);
                 }
                 result = retryResult;
             } else {
                 log.info("[AiOrchestratorService] contextRequest could not be resolved");
                 return finalizeResponse(
-                        clarificationWithContextRequest(contextRequest.message, contextRequest.codes),
+                        withWarnings(
+                                clarificationWithContextRequest(contextRequest.message, contextRequest.codes),
+                                warnings),
                         memoryContext);
             }
         }
@@ -1511,17 +1516,18 @@ public class AiOrchestratorService {
         JsonNode json = generateActionPlanJson("table_action_plan", prompt, planSchema, request, callConfig);
         ContextRequest contextRequest = parseContextRequest(json);
         if (contextRequest != null && contextRequest.hasCodes()) {
-            JsonNode resolvedHints = buildContextHintsFromRequest(
+            ContextHintsBuildResult resolvedHints = buildContextHintsFromRequest(
                     context,
                     request,
                     resolvedSchema,
                     embeddingConfig,
                     contextRequest.codes,
                     tenantId,
-                    environment);
+                    environment,
+                    null);
             JsonNode merged = mergeContextHints(
                     request != null ? request.getContextHints() : null,
-                    resolvedHints);
+                    resolvedHints.hints());
             String retryPrompt = AiPromptTemplates.buildPrompt(
                     AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN,
                     Map.of(
@@ -1568,17 +1574,18 @@ public class AiOrchestratorService {
         JsonNode json = generateActionPlanJson("component_action_plan", prompt, planSchema, request, callConfig);
         ContextRequest contextRequest = parseContextRequest(json);
         if (contextRequest != null && contextRequest.hasCodes()) {
-            JsonNode resolvedHints = buildContextHintsFromRequest(
+            ContextHintsBuildResult resolvedHints = buildContextHintsFromRequest(
                     context,
                     request,
                     resolvedSchema,
                     embeddingConfig,
                     contextRequest.codes,
                     tenantId,
-                    environment);
+                    environment,
+                    null);
             JsonNode merged = mergeContextHints(
                     request != null ? request.getContextHints() : null,
-                    resolvedHints);
+                    resolvedHints.hints());
             String retryPrompt = AiPromptTemplates.buildPrompt(
                     AiPromptTemplates.PROMPT_COMPONENT_ACTION_PLAN,
                     Map.of(
@@ -7269,16 +7276,17 @@ public class AiOrchestratorService {
         return null;
     }
 
-    private JsonNode buildContextHintsFromRequest(
+    private ContextHintsBuildResult buildContextHintsFromRequest(
             AiContextDTO context,
             AiOrchestratorRequest request,
             JsonNode schema,
             EmbeddingService.EmbeddingCallConfig embeddingConfig,
             List<Integer> codes,
             String tenantId,
-            String environment) {
+            String environment,
+            List<String> warnings) {
         if (codes == null || codes.isEmpty()) {
-            return null;
+            return ContextHintsBuildResult.empty();
         }
         ObjectNode hints = objectMapper.createObjectNode();
         ObjectNode pack = objectMapper.createObjectNode();
@@ -7301,7 +7309,11 @@ public class AiOrchestratorService {
                 case CONTEXT_CODE_SCHEMA_FIELDS -> {
                     JsonNode effectiveSchema = schema;
                     if (effectiveSchema == null) {
-                        effectiveSchema = resolveSchemaJustInTime(request);
+                        SchemaFetchResult jitSchemaResult = resolveSchemaJustInTimeResult(request);
+                        registerJitSchemaWarning(jitSchemaResult, warnings);
+                        effectiveSchema = jitSchemaResult != null && jitSchemaResult.isSuccess()
+                                ? jitSchemaResult.getSchema()
+                                : null;
                     }
                     ArrayNode fields = buildSchemaFieldList(
                             request != null ? request.getSchemaFields() : null,
@@ -7313,7 +7325,11 @@ public class AiOrchestratorService {
                 case CONTEXT_CODE_SCHEMA_SAMPLE -> {
                     JsonNode effectiveSchema = schema;
                     if (effectiveSchema == null) {
-                        effectiveSchema = resolveSchemaJustInTime(request);
+                        SchemaFetchResult jitSchemaResult = resolveSchemaJustInTimeResult(request);
+                        registerJitSchemaWarning(jitSchemaResult, warnings);
+                        effectiveSchema = jitSchemaResult != null && jitSchemaResult.isSuccess()
+                                ? jitSchemaResult.getSchema()
+                                : null;
                     }
                     JsonNode example = buildSchemaSample(
                             request != null ? request.getSchemaFields() : null,
@@ -7344,10 +7360,10 @@ public class AiOrchestratorService {
             }
         }
         if (pack.size() == 0) {
-            return null;
+            return ContextHintsBuildResult.empty();
         }
         hints.set("contextPack", pack);
-        return hints;
+        return new ContextHintsBuildResult(hints);
     }
 
     private JsonNode buildComponentSignature(AiContextDTO context, AiOrchestratorRequest request) {
@@ -9913,11 +9929,11 @@ public class AiOrchestratorService {
             }
         }
 
-        JsonNode schema = schemaRetrievalService.fetchSchema(schemaContext, requestBaseUrl);
-        if (schema == null) {
-            return new SchemaResolution(error("Não foi possível carregar o schema informado."));
+        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(schemaContext, requestBaseUrl);
+        if (!schemaResult.isSuccess()) {
+            return new SchemaResolution(schemaFetchError(schemaContext, schemaResult));
         }
-        return new SchemaResolution(schemaContext, schema);
+        return new SchemaResolution(schemaContext, schemaResult.getSchema());
     }
 
     private String defaultSchemaType(String componentId) {
@@ -13544,6 +13560,15 @@ public class AiOrchestratorService {
                 .build();
     }
 
+    private AiOrchestratorResponse error(String code, String message, String explanation) {
+        return AiOrchestratorResponse.builder()
+                .type("error")
+                .code(code)
+                .message(message)
+                .explanation(explanation)
+                .build();
+    }
+
     private AiOrchestratorResponse errorWithWarnings(String message, List<String> warnings) {
         return AiOrchestratorResponse.builder()
                 .type("error")
@@ -13565,6 +13590,77 @@ public class AiOrchestratorService {
                 .componentId(componentId)
                 .componentType(componentType)
                 .build();
+    }
+
+    private AiOrchestratorResponse schemaFetchError(AiSchemaContext schemaContext, SchemaFetchResult result) {
+        String explanation = buildSchemaFetchExplanation(schemaContext, result);
+        if (result.getStatus() == SchemaFetchResult.Status.NOT_FOUND) {
+            return error(
+                    "SCHEMA_NOT_FOUND",
+                    "Schema estrutural nao encontrado para o endpoint informado.",
+                    explanation);
+        }
+        if (result.getStatus() == SchemaFetchResult.Status.UNAUTHORIZED
+                || result.getStatus() == SchemaFetchResult.Status.FORBIDDEN) {
+            return error(
+                    "SCHEMA_ACCESS_DENIED",
+                    "Sem permissao para consultar o schema estrutural informado.",
+                    explanation);
+        }
+        if (result.getStatus() == SchemaFetchResult.Status.INVALID_RESPONSE) {
+            return error(
+                    "SCHEMA_INVALID_RESPONSE",
+                    "A plataforma retornou um schema estrutural invalido.",
+                    explanation);
+        }
+        if (result.getStatus() == SchemaFetchResult.Status.BASE_URL_NOT_CONFIGURED
+                || result.getStatus() == SchemaFetchResult.Status.UNAVAILABLE
+                || result.getStatus() == SchemaFetchResult.Status.TRANSPORT_ERROR) {
+            return error(
+                    "SCHEMA_PLATFORM_UNAVAILABLE",
+                    "A plataforma de metadata para resolucao de schema esta indisponivel no momento.",
+                    explanation);
+        }
+        return error(
+                "SCHEMA_RESOLUTION_FAILED",
+                "Nao foi possivel resolver o schema estrutural informado.",
+                explanation);
+    }
+
+    private String buildSchemaFetchExplanation(AiSchemaContext schemaContext, SchemaFetchResult result) {
+        String path = schemaContext != null ? schemaContext.getPath() : null;
+        String operation = schemaContext != null ? schemaContext.getOperation() : null;
+        String schemaType = schemaContext != null ? schemaContext.getSchemaType() : null;
+        StringJoiner joiner = new StringJoiner(", ");
+        joiner.add("code=" + result.getCode());
+        joiner.add("status=" + (result.getHttpStatus() != null ? result.getHttpStatus() : "n/a"));
+        joiner.add("retryable=" + result.isRetryable());
+        if (path != null) {
+            joiner.add("path=" + path);
+        }
+        if (operation != null) {
+            joiner.add("operation=" + operation);
+        }
+        if (schemaType != null) {
+            joiner.add("schemaType=" + schemaType);
+        }
+        if (result.getEndpointUrl() != null) {
+            joiner.add("endpoint=" + sanitizeSchemaEndpoint(result.getEndpointUrl()));
+        }
+        return joiner.toString();
+    }
+
+    private String sanitizeSchemaEndpoint(String endpointUrl) {
+        try {
+            java.net.URI uri = java.net.URI.create(endpointUrl);
+            String path = uri.getPath();
+            if (uri.getQuery() == null || uri.getQuery().isBlank()) {
+                return path;
+            }
+            return path + "?" + uri.getQuery();
+        } catch (IllegalArgumentException ex) {
+            return "/schemas/filtered";
+        }
     }
 
     private AiOrchestratorResponse invalidEnumValue(EnumValidationResult validation, List<String> warnings) {
@@ -14676,10 +14772,17 @@ public class AiOrchestratorService {
     }
 
     private JsonNode resolveSchemaJustInTime(AiOrchestratorRequest request) {
-        if (request == null) return null;
+        SchemaFetchResult result = resolveSchemaJustInTimeResult(request);
+        return result != null && result.isSuccess() ? result.getSchema() : null;
+    }
+
+    private SchemaFetchResult resolveSchemaJustInTimeResult(AiOrchestratorRequest request) {
+        if (request == null || schemaRetrievalService == null) {
+            return null;
+        }
         String resourcePath = request.getResourcePath();
         if (resourcePath == null || resourcePath.isBlank()) {
-            JsonNode runtime = request.getCurrentState(); // Use currentState from request
+            JsonNode runtime = request.getCurrentState();
             if (runtime != null && runtime.has("widgets")) {
                 JsonNode widgets = runtime.get("widgets");
                 if (widgets.isArray()) {
@@ -14699,20 +14802,63 @@ public class AiOrchestratorService {
                 }
             }
         }
-        if (resourcePath != null && !resourcePath.isBlank()) {
-            try {
-                // Construct AiSchemaContext for fetchSchema
-                AiSchemaContext context = new AiSchemaContext();
-                context.setPath(resourcePath);
-                context.setOperation("GET"); // Default assume read operation
-                context.setSchemaType("response"); // Default assume response schema
-                
-                // Assuming requestBaseUrl is handled by properties or can be null here
-                return schemaRetrievalService.fetchSchema(context, null);
-            } catch (Exception e) {
-                log.warn("[AiOrchestratorService] Failed to resolve schema JIT for path={}: {}", resourcePath, e.getMessage());
+        if (resourcePath == null || resourcePath.isBlank()) {
+            return null;
+        }
+        try {
+            AiSchemaContext context = new AiSchemaContext();
+            context.setPath(resourcePath);
+            context.setOperation("GET");
+            context.setSchemaType("response");
+
+            SchemaFetchResult result = schemaRetrievalService.fetchSchemaResult(context, null);
+            if (result != null && !result.isSuccess()) {
+                log.warn(
+                        "[AiOrchestratorService] JIT schema resolution failed path={} code={} status={} retryable={}",
+                        resourcePath,
+                        result.getCode(),
+                        result.getHttpStatus(),
+                        result.isRetryable());
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("[AiOrchestratorService] Failed to resolve schema JIT for path={}: {}", resourcePath, e.getMessage());
+            return null;
+        }
+    }
+
+    private void registerJitSchemaWarning(SchemaFetchResult result, List<String> warnings) {
+        if (warnings == null || result == null || result.isSuccess()) {
+            return;
+        }
+        String code = result.getCode() != null ? result.getCode() : "SCHEMA_RESOLUTION_FAILED";
+        String detail = "SCHEMA_CONTEXT_DEGRADED: " + code;
+        if (!warnings.contains(detail)) {
+            warnings.add(detail);
+        }
+    }
+
+    private AiOrchestratorResponse withWarnings(AiOrchestratorResponse response, List<String> warnings) {
+        if (response == null || warnings == null || warnings.isEmpty()) {
+            return response;
+        }
+        if (response.getWarnings() == null || response.getWarnings().isEmpty()) {
+            response.setWarnings(new ArrayList<>(warnings));
+            return response;
+        }
+        List<String> merged = new ArrayList<>(response.getWarnings());
+        for (String warning : warnings) {
+            if (warning != null && !warning.isBlank() && !merged.contains(warning)) {
+                merged.add(warning);
             }
         }
-        return null;
+        response.setWarnings(merged);
+        return response;
+    }
+
+    private record ContextHintsBuildResult(JsonNode hints) {
+        private static ContextHintsBuildResult empty() {
+            return new ContextHintsBuildResult(null);
+        }
     }
 }

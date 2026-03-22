@@ -335,6 +335,32 @@ When `aiMode=create` (or `requireSchema=true`) and the resource path is not chos
 2. Ask the user to pick the endpoint.
 3. Call `/schemas/filtered` for the chosen path/operation/schemaType.
 
+Important:
+- `/schemas/catalog` is discovery/RAG input, not a structural substitute for runtime schema resolution.
+- Request/response schemas used by AI or UI generation must come from `/schemas/filtered` for the chosen `path`, `operation`, and `schemaType`.
+- `SchemaRetrievalService` now classifies operational outcomes explicitly: `SCHEMA_NOT_FOUND`, `SCHEMA_ACCESS_DENIED`, `SCHEMA_PLATFORM_UNAVAILABLE`, `SCHEMA_INVALID_RESPONSE` and `SCHEMA_RESOLUTION_FAILED`.
+- Corporate recommendation: treat `SCHEMA_NOT_FOUND` as functional absence, `SCHEMA_ACCESS_DENIED` as security/configuration error, and `SCHEMA_PLATFORM_UNAVAILABLE` as transient operational failure eligible for retry/backoff upstream.
+
+### JIT schema degradation
+When schema resolution happens in the best-effort JIT enrichment path, the orchestrator no longer degrades silently.
+
+Important:
+- the main required-schema flow still returns explicit typed errors such as `SCHEMA_NOT_FOUND`, `SCHEMA_ACCESS_DENIED` and `SCHEMA_PLATFORM_UNAVAILABLE`;
+- the JIT enrichment flow can continue the response, but it now emits warnings such as `SCHEMA_CONTEXT_DEGRADED: SCHEMA_PLATFORM_UNAVAILABLE`;
+- consumers should treat these warnings as a quality degradation signal, not as a successful structural resolution.
+
+Corporate recommendation:
+- if the use case depends materially on structural schema, fail explicitly;
+- if schema is only contextual enrichment, allow best-effort continuation but surface warnings in logs, metrics and client UX.
+
+### Downstream validation before release
+The recommended downstream validation target is `praxis-api-quickstart`.
+
+Validated release pattern:
+- the quickstart must prove that `/api/praxis/config/ai/patch` propagates typed schema outcomes from the starter;
+- CI must not depend on shared database, pgvector, external embedding quota or dynamic OpenAPI self-calls for this check;
+- the downstream smoke may isolate host-only concerns with mocks, as long as it still exercises the real AI patch endpoint and validates the HTTP contract returned to the client.
+
 ### Usage Example (Java)
 
 ```java
