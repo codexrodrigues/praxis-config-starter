@@ -6,6 +6,9 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Identificador composto de {@link AiAction}, formado por thread, turno e tipo de acao.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

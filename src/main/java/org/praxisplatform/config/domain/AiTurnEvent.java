@@ -14,6 +14,13 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnTransformer;
 
+/**
+ * Entidade persistida para eventos emitidos ao longo do streaming de um turno AI.
+ *
+ * <p>Cada linha identifica de forma ordenada um evento de stream dentro de
+ * {@code (threadId, turnId, seq)}, preservando payload jsonb e metadados de identidade para
+ * auditoria, replay e depuracao.
+ */
 @Entity
 @Table(name = "ai_turn_event")
 @IdClass(AiTurnEventId.class)

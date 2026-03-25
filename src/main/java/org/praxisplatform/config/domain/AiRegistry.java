@@ -20,6 +20,15 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnTransformer;
 
+/**
+ * Registro persistido do AI registry da plataforma.
+ *
+ * <p>
+ * Armazena definições de componentes, templates e outros artefatos governados por tipo/chave,
+ * escopo e versão. O domínio mantém {@code version}, {@code etag} e timestamps para suportar
+ * atualização incremental, health checks e recuperação contextual.
+ * </p>
+ */
 @Entity
 @Table(name = "ai_registry")
 @Data

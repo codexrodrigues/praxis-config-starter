@@ -6,6 +6,9 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Identificador composto de {@link AiTurnEvent}, formado por thread, turno e sequencia.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

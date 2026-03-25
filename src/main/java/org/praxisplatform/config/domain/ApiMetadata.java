@@ -12,6 +12,13 @@ import org.hibernate.annotations.ColumnTransformer;
 
 import java.util.List;
 
+/**
+ * Fonte canonica persistida para metadados operacionais de endpoints publicados pela plataforma.
+ *
+ * <p>O registro consolida metodo, path, schemas, parametros, payload bruto e embedding vetorial
+ * do endpoint, servindo tanto para busca estruturada quanto para indexacao e recuperacao semantica
+ * em fluxos RAG.
+ */
 @Entity
 @Table(name = "api_metadata", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"path", "method"})

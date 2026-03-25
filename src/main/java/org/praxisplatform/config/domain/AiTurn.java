@@ -16,6 +16,13 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Entidade persistida que representa um turno individual dentro de um {@link AiThread}.
+ *
+ * <p>O registro controla o ciclo de vida de uma geracao ou operacao AI, incluindo status,
+ * timestamps de criacao/atualizacao e expiracao, usando identificador composto
+ * {@code (threadId, turnId)}.
+ */
 @Entity
 @Table(name = "ai_turn")
 @IdClass(AiTurnId.class)

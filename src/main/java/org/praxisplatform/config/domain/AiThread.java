@@ -16,6 +16,13 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Entidade persistida que ancora uma conversa AI por tenant, usuario e alvo funcional.
+ *
+ * <p>O thread identifica o contexto macro da interacao, incluindo componente, rota, variante,
+ * hash de schema e ultimo ETag de configuracao observado, permitindo retomar sessoes e detectar
+ * drift entre conversa e configuracao vigente.
+ */
 @Entity
 @Table(name = "ai_thread")
 @Data

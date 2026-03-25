@@ -6,6 +6,9 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Identificador composto de {@link AiMessage}, formado por thread e sequencia.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

@@ -13,6 +13,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Entidade persistida para acoes estruturadas associadas a um turno AI.
+ *
+ * <p>Essas acoes registram intencoes ou operacoes derivadas da geracao, com payload jsonb ligado
+ * ao par {@code (threadId, turnId)} e tipificado por {@code actionType}.
+ */
 @Entity
 @Table(name = "ai_action")
 @IdClass(AiActionId.class)

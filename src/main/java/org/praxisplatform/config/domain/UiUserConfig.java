@@ -1,4 +1,4 @@
-package org.praxisplatform.config.domain;
+﻿package org.praxisplatform.config.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -23,6 +23,15 @@ import lombok.NoArgsConstructor;
       @UniqueConstraint(
           columnNames = {"tenant_id", "user_id", "component_type", "component_id", "environment"})
     })
+/**
+ * Entidade persistida que representa configuraÃ§Ã£o de UI por componente e escopo.
+ *
+ * <p>
+ * Cada registro Ã© Ãºnico por {@code tenantId}, {@code userId}, {@code componentType},
+ * {@code componentId} e {@code environment}. O domÃ­nio mantÃ©m {@code version} monotÃ´nica e
+ * {@code etag} renovado a cada atualizaÃ§Ã£o para suportar cache condicional no endpoint pÃºblico.
+ * </p>
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -89,3 +98,4 @@ public class UiUserConfig {
     this.updatedAt = Instant.now();
   }
 }
+

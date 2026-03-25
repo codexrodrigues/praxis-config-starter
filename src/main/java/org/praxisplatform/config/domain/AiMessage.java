@@ -13,6 +13,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Entidade persistida para o historico cronologico de mensagens de um thread AI.
+ *
+ * <p>Cada mensagem guarda papel, conteudo, turno associado e estimativa de tokens, preservando a
+ * sequencia original via chave composta {@code (threadId, seq)} para reconstituicao do contexto.
+ */
 @Entity
 @Table(name = "ai_message")
 @IdClass(AiMessageId.class)

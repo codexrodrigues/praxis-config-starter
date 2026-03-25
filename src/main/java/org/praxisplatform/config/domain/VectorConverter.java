@@ -7,6 +7,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Converte listas de {@link Float} para a representacao textual esperada pelas colunas vetoriais
+ * persistidas via JPA.
+ */
 @Converter(autoApply = false)
 public class VectorConverter implements AttributeConverter<List<Float>, String> {
 

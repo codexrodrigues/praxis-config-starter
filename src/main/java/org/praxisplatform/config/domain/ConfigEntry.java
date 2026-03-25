@@ -9,6 +9,9 @@ import jakarta.persistence.Table;
 
 import java.util.UUID;
 
+/**
+ * Registro simples de chave/valor usado para configuracoes internas persistidas do modulo.
+ */
 @Entity
 @Table(name = "config_entries")
 public class ConfigEntry {
