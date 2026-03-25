@@ -15,6 +15,15 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Catálogo operacional e utilitários de teste para provedores AI configuráveis.
+ *
+ * <p>
+ * O controller expõe descoberta de provedores, listagem de modelos e validação de credenciais
+ * sob demanda. Essas rotas são usadas por telas de administração e por fluxos de bootstrap do
+ * registry para inspecionar capacidade real dos provedores ativos.
+ * </p>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ai/providers")
 @RequiredArgsConstructor

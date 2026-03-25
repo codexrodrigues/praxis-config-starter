@@ -11,6 +11,15 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Endpoint de ingestão do registry de definições de componentes.
+ *
+ * <p>
+ * Recebe um snapshot estruturado de componentes, capacidades e schemas auxiliares e o entrega ao
+ * {@link RegistryIngestionService}. O retorno {@code 202 Accepted} sinaliza que a persistência foi
+ * aceita pelo backend, sem prometer processamento síncrono de todo o lote.
+ * </p>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ai-registry")
 @RequiredArgsConstructor

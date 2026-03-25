@@ -13,6 +13,16 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Optional;
 
+/**
+ * Endpoint de composição de contexto AI para um componente específico.
+ *
+ * <p>
+ * A rota permite montar um {@link AiContextDTO} tanto a partir do estado persistido do host
+ * ({@code GET}) quanto de um estado transitório enviado pelo cliente ({@code POST}). Em ambos os
+ * casos, o resultado é normalizado pelo {@link AiContextService} e pode incluir contexto de schema
+ * quando o caller informar path/operação/tipo ou um {@link AiSchemaContext} completo.
+ * </p>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ai-context")
 @RequiredArgsConstructor

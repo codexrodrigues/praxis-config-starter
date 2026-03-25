@@ -1,4 +1,4 @@
-package org.praxisplatform.config.controller;
+﻿package org.praxisplatform.config.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,6 +25,25 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Endpoint canÃ´nico para leitura, gravaÃ§Ã£o e remoÃ§Ã£o de configuraÃ§Ãµes de UI por componente.
+ *
+ * <p>
+ * Esta superfÃ­cie governa registros persistidos em {@code ui_user_config}, com resoluÃ§Ã£o por
+ * escopo {@code user} ou {@code tenant}, suporte a {@code ETag}/{@code If-None-Match} e
+ * compatibilidade com duas formas de endereÃ§amento: query params ou path params.
+ * </p>
+ *
+ * <p>
+ * Regras centrais:
+ * </p>
+ * <ul>
+ *   <li>{@code X-Tenant-ID} Ã© obrigatÃ³rio para todas as operaÃ§Ãµes.</li>
+ *   <li>Quando {@code scope} nÃ£o Ã© informado, a ausÃªncia/presenÃ§a de {@code X-User-ID} decide entre {@code TENANT} e {@code USER}.</li>
+ *   <li>Leitura responde {@code 304 Not Modified} quando o {@code ETag} atual casa com {@code If-None-Match}.</li>
+ *   <li>Escrita sempre retorna a versÃ£o persistida com novo {@code ETag} calculado pelo domÃ­nio.</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ui")
 @RequiredArgsConstructor
@@ -207,7 +226,7 @@ public class UserConfigController {
 
   private UserConfigService.Scope resolveScope(String scopeParam, String userId) {
     if (scopeParam == null || scopeParam.isBlank()) {
-      // Auto: se houver userId, assume USER; senão TENANT
+      // Auto: se houver userId, assume USER; senÃ£o TENANT
       return (userId != null && !userId.isBlank())
           ? UserConfigService.Scope.USER
           : UserConfigService.Scope.TENANT;
@@ -269,3 +288,4 @@ public class UserConfigController {
     return ResponseEntity.badRequest().body(ex.getMessage());
   }
 }
+

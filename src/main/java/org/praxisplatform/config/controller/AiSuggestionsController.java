@@ -16,6 +16,15 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Endpoint de sugestões AI orientadas por contexto de componente.
+ *
+ * <p>
+ * A rota combina o request do cliente com um {@link AiContextDTO} resolvido pelo
+ * {@link AiContextService}. Quando o componente não é conhecido pelo backend, responde com
+ * {@code 404} e uma lista de warnings em vez de falhar silenciosamente.
+ * </p>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ai")
 @RequiredArgsConstructor

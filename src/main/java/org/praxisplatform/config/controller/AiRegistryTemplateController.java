@@ -20,6 +20,15 @@ import org.praxisplatform.config.service.AiRegistryTemplateService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * CRUD de templates AI por componente.
+ *
+ * <p>
+ * Este endpoint governa os templates persistidos no AI registry, incluindo leitura individual,
+ * upsert simples, upsert em lote, exclusão e busca textual. Os payloads retornados já vêm
+ * normalizados para o contrato DTO publicado pelo starter.
+ * </p>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ai-registry/templates")
 @RequiredArgsConstructor

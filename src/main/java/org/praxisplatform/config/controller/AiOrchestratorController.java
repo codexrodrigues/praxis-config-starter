@@ -1,4 +1,4 @@
-package org.praxisplatform.config.controller;
+﻿package org.praxisplatform.config.controller;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -25,6 +25,25 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+/**
+ * Endpoint canÃ´nico de orquestraÃ§Ã£o AI para geraÃ§Ã£o de patches metadata-driven.
+ *
+ * <p>
+ * O controller expÃµe {@code POST /api/praxis/config/ai/patch} e faz a mediaÃ§Ã£o entre contrato
+ * HTTP, validaÃ§Ã£o de metadados de contrato ({@code contractVersion}/{@code schemaHash}),
+ * resoluÃ§Ã£o de contexto principal ({@code tenant/user/environment}) e delegaÃ§Ã£o para o
+ * {@link AiOrchestratorService}.
+ * </p>
+ *
+ * <p>
+ * PrecedÃªncia documental importante:
+ * </p>
+ * <ul>
+ *   <li>Valores de contrato no body tÃªm precedÃªncia sobre headers homÃ´nimos.</li>
+ *   <li>Quando ausentes, versÃ£o e schema hash caem nos defaults do {@link AiContractSpec}.</li>
+ *   <li>DivergÃªncia de contrato retorna {@code 409 Conflict} com payload explicativo e headers canÃ´nicos.</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ai")
 @RequiredArgsConstructor
@@ -190,3 +209,4 @@ public class AiOrchestratorController {
     private record ContractValidationError(String code, String message) {
     }
 }
+

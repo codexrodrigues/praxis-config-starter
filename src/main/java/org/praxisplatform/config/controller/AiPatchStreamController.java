@@ -33,6 +33,16 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+/**
+ * Endpoints de streaming para geração incremental de patch AI.
+ *
+ * <p>
+ * Esta superfície complementa o endpoint síncrono de patch com um fluxo em três etapas:
+ * iniciar stream, conectar via SSE e cancelar/probar o stream. O controller preserva a mesma
+ * validação de contrato da rota síncrona e delega o controle de ciclo de vida ao
+ * {@link AiStreamService}.
+ * </p>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/ai")
 @RequiredArgsConstructor

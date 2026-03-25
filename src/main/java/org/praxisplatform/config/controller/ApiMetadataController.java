@@ -1,4 +1,4 @@
-package org.praxisplatform.config.controller;
+﻿package org.praxisplatform.config.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +11,15 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Endpoint de ingestÃ£o do catÃ¡logo de APIs publicado para busca e recuperaÃ§Ã£o contextual.
+ *
+ * <p>
+ * Esta superfÃ­cie recebe snapshots do catÃ¡logo em {@code /ingest} e os delega ao
+ * {@link ApiMetadataIngestionService}, preservando headers de tenant e ambiente quando fornecidos.
+ * O retorno {@code 202 Accepted} indica ingestÃ£o assÃ­ncrona ou desacoplada do ciclo HTTP.
+ * </p>
+ */
 @RestController
 @RequestMapping("/api/praxis/config/api-catalog")
 @RequiredArgsConstructor
@@ -27,3 +36,4 @@ public class ApiMetadataController {
         return ResponseEntity.accepted().build();
     }
 }
+
