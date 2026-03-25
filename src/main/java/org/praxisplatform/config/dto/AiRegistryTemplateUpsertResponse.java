@@ -6,6 +6,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Resposta normalizada do upsert de template AI.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

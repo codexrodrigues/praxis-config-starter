@@ -6,6 +6,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Payload de resposta do endpoint de sugestões AI.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

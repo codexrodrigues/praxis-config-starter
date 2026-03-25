@@ -7,6 +7,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Request para geração de sugestões AI orientadas por estado e variante.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

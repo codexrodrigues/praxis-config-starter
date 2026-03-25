@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Request de teste de conectividade/autorização de um provedor AI.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

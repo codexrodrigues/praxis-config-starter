@@ -6,6 +6,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Representação serializada de um template AI persistido para um componente.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

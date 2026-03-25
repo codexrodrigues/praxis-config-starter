@@ -1,4 +1,4 @@
-package org.praxisplatform.config.dto;
+﻿package org.praxisplatform.config.dto;
 
 import com.fasterxml.jackson.annotation.JsonAnyGetter;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
@@ -15,8 +15,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * DTO estruturado para ingestão de componentes de UI.
- * Espelha a estrutura esperada pelo RegistryIngestionService.
+ * DTO estruturado para ingestÃ£o de componentes de UI.
+ *
+ * <p>
+ * Espelha a estrutura esperada pelo {@code RegistryIngestionService} para persistir definiÃ§Ãµes
+ * de componentes, capacidades e schemas auxiliares em lote.
+ * </p>
  */
 @Data
 @NoArgsConstructor
@@ -37,6 +41,9 @@ public class RegistryIngestionRequest {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    /**
+     * DescriÃ§Ã£o serializada de um componente individual dentro do lote de ingestÃ£o.
+     */
     public static class ComponentEntry {
         
         private String description;
@@ -74,6 +81,9 @@ public class RegistryIngestionRequest {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    /**
+     * Capacidade declarativa publicada por um componente ingerido.
+     */
     public static class CapabilityEntry {
         private String path;
         private String category;
@@ -91,9 +101,14 @@ public class RegistryIngestionRequest {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    /**
+     * Entrada simples de input/output declarada pelo componente.
+     */
     public static class IoEntry {
         private String name;
         private String type;
         private boolean required;
     }
 }
+
+

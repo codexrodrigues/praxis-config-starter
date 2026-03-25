@@ -8,6 +8,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Request de upsert em lote de templates AI.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

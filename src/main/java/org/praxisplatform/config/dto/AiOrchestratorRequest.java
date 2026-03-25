@@ -1,4 +1,4 @@
-package org.praxisplatform.config.dto;
+﻿package org.praxisplatform.config.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.NotBlank;
@@ -9,6 +9,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Payload de entrada do endpoint de orquestraÃ§Ã£o AI.
+ *
+ * <p>
+ * O contrato reÃºne identidade do componente, prompt do usuÃ¡rio, contexto de estado/runtime,
+ * metadados de contrato e hints auxiliares para geraÃ§Ã£o de patch. Parte dos campos Ã© enriquecida
+ * ou normalizada no servidor antes da delegaÃ§Ã£o ao orquestrador.
+ * </p>
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -51,3 +60,4 @@ public class AiOrchestratorRequest {
     private Boolean streamTransport;
     private Boolean streamTurnPreclaimed;
 }
+

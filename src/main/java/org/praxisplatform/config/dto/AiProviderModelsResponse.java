@@ -6,6 +6,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Resultado da listagem de modelos disponíveis para um provedor AI.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
