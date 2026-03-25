@@ -7,6 +7,14 @@ import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 
+/**
+ * Serviço de status e prontidão do AI registry.
+ *
+ * <p>
+ * Consolida contagens mínimas, componentes obrigatórios e estado do bootstrap para produzir o
+ * relatório usado por health checks e endpoints de status do registry.
+ * </p>
+ */
 @RequiredArgsConstructor
 public class AiRegistryStatusService {
 

@@ -10,6 +10,15 @@ import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 
+/**
+ * Bootstrap opcional do AI registry a partir de um snapshot versionado.
+ *
+ * <p>
+ * O serviço tenta carregar um snapshot externo ou de classpath no startup e o injeta via
+ * {@link RegistryIngestionService} apenas quando o registry ainda não é considerado pronto.
+ * Também registra estado operacional em {@link AiRegistryBootstrapState} para troubleshooting.
+ * </p>
+ */
 @RequiredArgsConstructor
 @Slf4j
 public class AiRegistryBootstrapService {
