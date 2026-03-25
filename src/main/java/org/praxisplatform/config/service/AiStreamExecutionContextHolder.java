@@ -6,7 +6,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
 
 /**
- * Thread-local bridge used by SSE stream worker threads to expose cooperative cancellation to provider calls.
+ * Ponte thread-local usada pelas workers de SSE para expor contexto de execucao e cancelamento
+ * cooperativo aos providers.
  */
 final class AiStreamExecutionContextHolder {
 

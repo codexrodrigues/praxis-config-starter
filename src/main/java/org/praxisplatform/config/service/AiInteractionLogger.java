@@ -11,6 +11,12 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Logger estruturado das interacoes AI observadas pelo modulo.
+ *
+ * <p>O servico centraliza trilhas de prompt, resposta, diagnostico e payload frontend, aplicando
+ * redacao e limites de tamanho antes de enviar os eventos para o logger operacional dedicado.
+ */
 @Service
 @RequiredArgsConstructor
 public class AiInteractionLogger {

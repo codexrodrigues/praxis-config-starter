@@ -51,6 +51,13 @@ import org.praxisplatform.config.dto.IntentPlan;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Orquestrador central do fluxo AI metadata-driven da plataforma.
+ *
+ * <p>O servico combina classificacao de intencao, recuperacao de contexto, memoria conversacional,
+ * busca de templates, validacao de capacidades e chamada ao provider para produzir patches e
+ * respostas coerentes com os contratos canônicos do runtime.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

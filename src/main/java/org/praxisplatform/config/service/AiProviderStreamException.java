@@ -1,10 +1,16 @@
 package org.praxisplatform.config.service;
 
 /**
- * Provider-level stream failure with normalized kind/status to support deterministic fallback decisions.
+ * Falha de streaming normalizada no nivel do provider.
+ *
+ * <p>Encapsula tipo e status da falha para que o orquestrador tome decisoes deterministicas de
+ * fallback, retry ou encerramento do stream sem depender de mensagens opacas do SDK.
  */
 public final class AiProviderStreamException extends RuntimeException {
 
+    /**
+     * Categorias normalizadas de falha observadas no streaming de providers.
+     */
     public enum Kind {
         TRANSPORT,
         TIMEOUT,

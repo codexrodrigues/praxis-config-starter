@@ -1,4 +1,4 @@
-package org.praxisplatform.config.service;
+﻿package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,6 +12,16 @@ import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.springframework.stereotype.Service;
 
+/**
+ * ServiÃ§o de montagem do contexto AI usado pela orquestraÃ§Ã£o metadata-driven.
+ *
+ * <p>
+ * ResponsÃ¡vel por combinar template registrado, definiÃ§Ã£o de componente, estado atual da UI e
+ * contexto de schema em um {@link AiContextDTO} coerente para o pipeline de AI. Quando dados
+ * opcionais nÃ£o sÃ£o informados, o serviÃ§o aplica defaults determinÃ­sticos para manter o contrato
+ * estÃ¡vel entre backend e consumidores.
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AiContextService {
@@ -151,3 +161,4 @@ public class AiContextService {
         return "Dynamic Component";
     }
 }
+

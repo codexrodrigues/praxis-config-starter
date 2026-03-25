@@ -7,6 +7,15 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.praxisplatform.config.dto.AiProviderModel;
 
+/**
+ * Contrato canônico de um provedor AI conectável ao config-starter.
+ *
+ * <p>
+ * Implementações concretas encapsulam geração de texto/JSON, descoberta de modelos, suporte a
+ * streaming e cancelamento cooperativo. O restante da plataforma deve depender desta interface,
+ * não de SDKs específicos de fornecedor.
+ * </p>
+ */
 public interface AiProvider {
     JsonNode generateJson(String prompt);
 

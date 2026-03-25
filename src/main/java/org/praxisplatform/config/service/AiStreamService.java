@@ -46,6 +46,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+/**
+ * Orquestrador de ciclo de vida para streams SSE de geração de patch AI.
+ *
+ * <p>
+ * O serviço gerencia criação idempotente de streams, conexão de emissores, replay incremental de
+ * eventos, heartbeat, cancelamento, limites de capacidade e integração com thread/turn/event log.
+ * Ele é a implementação canônica por trás dos endpoints {@code /patch/stream/**}.
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

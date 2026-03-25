@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Override por chamada para provider, modelo, limites e contexto de recuperacao.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

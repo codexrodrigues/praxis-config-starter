@@ -23,6 +23,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Faz recuperacao semantica dos contextos que alimentam os fluxos AI da plataforma.
+ *
+ * <p>O servico consulta tanto a fonte estruturada quanto o vector store derivado para localizar
+ * APIs e definicoes de componentes por similaridade, respeitando filtros de tenant, ambiente e
+ * release quando a busca depende do corpus publicado para RAG.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

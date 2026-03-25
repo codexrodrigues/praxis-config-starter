@@ -13,6 +13,15 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.praxisplatform.config.dto.AiProviderModel;
 
+/**
+ * Roteador primário de provedores AI.
+ *
+ * <p>
+ * Seleciona a implementação concreta a partir do provider pedido em runtime ou do provider padrão
+ * configurado, preservando a interface {@link AiProvider} como boundary estável para o restante do
+ * módulo.
+ * </p>
+ */
 @Service
 @Primary
 @RequiredArgsConstructor

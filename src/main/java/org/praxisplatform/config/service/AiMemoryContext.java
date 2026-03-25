@@ -5,6 +5,12 @@ import java.util.UUID;
 import org.praxisplatform.config.dto.AiChatMessage;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
 
+/**
+ * Snapshot da memoria util de um turno AI preparado antes da orquestracao.
+ *
+ * <p>O objeto reúne thread, turno, sumario, janela recente de mensagens e eventual resposta em
+ * cache, permitindo que o orquestrador trate caminhos com ou sem reaproveitamento.
+ */
 public class AiMemoryContext {
     private final UUID threadId;
     private final UUID turnId;

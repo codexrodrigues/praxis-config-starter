@@ -2,8 +2,17 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+/**
+ * Resultado normalizado de uma tentativa de obter schema canônico para o contexto AI.
+ *
+ * <p>Encapsula payload, endpoint efetivo, codigo tecnico e classificacao de falha para que os
+ * consumidores decidam entre seguir sem schema, reportar erro ou tentar novamente.
+ */
 public final class SchemaFetchResult {
 
+    /**
+     * Estados observaveis no fetch de schema remoto.
+     */
     public enum Status {
         SUCCESS,
         INVALID_CONTEXT,

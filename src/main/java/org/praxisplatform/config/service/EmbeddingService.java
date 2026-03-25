@@ -26,6 +26,14 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Faixa canonica de geracao de embeddings usada pelos servicos de ingestao, busca semantica e
+ * RAG do modulo.
+ *
+ * <p>O servico abstrai a selecao de provider, modelo, dimensoes e fallback de configuracao para
+ * OpenAI, Gemini ou modo mock, devolvendo vetores compatíveis com os contratos persistidos no
+ * banco e no vector store.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

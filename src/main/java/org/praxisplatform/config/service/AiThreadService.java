@@ -17,6 +17,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * Servico canonico de resolucao e persistencia do thread de conversa AI.
+ *
+ * <p>Ele decide quando reutilizar um thread existente, quando criar um novo identificador
+ * deterministico e quais atributos de contexto do componente, rota e variante precisam ser
+ * preservados no registro persistido para garantir continuidade segura da sessao.
+ */
 @Service
 @RequiredArgsConstructor
 public class AiThreadService {

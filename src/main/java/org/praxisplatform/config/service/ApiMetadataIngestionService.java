@@ -25,6 +25,14 @@ import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Ingesta o catalogo operacional de APIs na fonte canonica {@code api_metadata} e sincroniza a
+ * superficie derivada consumida pelo RAG.
+ *
+ * <p>Para cada endpoint recebido, o servico normaliza o payload, gera resumo para embedding,
+ * persiste ou atualiza o registro estruturado e publica um {@link Document} correspondente no
+ * vector store com metadados de tenant, ambiente e release.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

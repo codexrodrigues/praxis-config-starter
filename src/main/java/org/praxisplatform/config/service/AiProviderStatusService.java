@@ -10,6 +10,12 @@ import org.praxisplatform.config.dto.AiProviderStatusResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Resolve o status efetivo do provider AI visto pelo runtime.
+ *
+ * <p>O servico combina configuracao persistida e variaveis de ambiente para informar provider,
+ * modelo, origem da configuracao e presenca de API key, sem expor o segredo em si.
+ */
 @Service
 @RequiredArgsConstructor
 public class AiProviderStatusService {

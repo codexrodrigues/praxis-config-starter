@@ -1,4 +1,4 @@
-package org.praxisplatform.config.service;
+﻿package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,6 +9,15 @@ import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
 import org.springframework.stereotype.Service;
 
+/**
+ * ServiÃ§o canÃ´nico de persistÃªncia e resoluÃ§Ã£o de configuraÃ§Ãµes de UI.
+ *
+ * <p>
+ * Centraliza a semÃ¢ntica de escopo ({@code USER} vs {@code TENANT}), versionamento, geraÃ§Ã£o de
+ * {@code ETag}, limites de payload e sanitizaÃ§Ã£o de segredos antes da escrita em
+ * {@code ui_user_config}. Controllers pÃºblicos do starter nÃ£o devem reimplementar essas regras.
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class UserConfigService {
@@ -226,3 +235,4 @@ public class UserConfigService {
     }
   }
 }
+

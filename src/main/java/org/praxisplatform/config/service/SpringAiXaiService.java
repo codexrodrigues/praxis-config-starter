@@ -30,9 +30,18 @@ import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.vectorstore.filter.Filter;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+/**
+ * Adaptador canonico do runtime xAI/Grok para os contratos de {@link AiProvider}.
+ *
+ * <p>O servico reaproveita a infraestrutura compatível com OpenAI do Spring AI para oferecer
+ * geracao estruturada, texto, listagem de modelos e streaming quando o provider configurado e
+ * `xai`.
+ */
 @Service
+@ConditionalOnProperty(name = "praxis.ai.provider", havingValue = "xai")
 @RequiredArgsConstructor
 @Slf4j
 public class SpringAiXaiService implements AiProvider {

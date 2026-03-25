@@ -12,6 +12,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * Resolve a identidade operacional canonica do fluxo AI a partir do principal autenticado,
+ * atributos do request e hints opcionais de header.
+ *
+ * <p>Em modo corporativo, tenant e usuario devem ser resolvidos preferencialmente pelo lado
+ * servidor; hints de caller nao substituem a identidade autenticada. Em modo local, o resolver
+ * pode aplicar defaults de desenvolvimento e, quando habilitado, aceitar hints de header para
+ * simular contexto multi-tenant de forma controlada.
+ */
 @Service
 public class AiPrincipalContextResolver {
 

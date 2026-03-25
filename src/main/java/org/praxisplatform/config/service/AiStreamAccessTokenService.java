@@ -17,6 +17,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * Emite e valida tokens de acesso para o canal de streaming AI quando a plataforma opera em modo
+ * de URL assinada.
+ *
+ * <p>O servico encapsula assinatura, cifragem, TTL e verificacao de escopo do token para garantir
+ * que um stream SSE so seja consumido pelo tenant/usuario autorizado e dentro da janela valida.
+ */
 @Service
 public class AiStreamAccessTokenService {
 

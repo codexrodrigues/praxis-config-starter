@@ -13,6 +13,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiProviderModel;
 import org.springframework.stereotype.Service;
 
+/**
+ * Implementacao mock do provider AI usada para desenvolvimento, testes e fallback controlado.
+ *
+ * <p>Ela reconhece alguns prompts canônicos do orquestrador e devolve respostas deterministicas,
+ * permitindo exercitar classificacao de intencao, patches e catalogos sem depender de um provedor
+ * externo.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

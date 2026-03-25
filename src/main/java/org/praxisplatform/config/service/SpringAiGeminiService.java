@@ -54,6 +54,13 @@ import org.springframework.web.client.RestClientResponseException;
 
 import org.springframework.stereotype.Service;
 
+/**
+ * Adaptador canonico do runtime Gemini para os contratos de {@link AiProvider}.
+ *
+ * <p>A implementacao combina Spring AI, politicas de retry, circuit breaker por modelo e fallback
+ * entre variantes Gemini para sustentar geracao estruturada, texto, modelos e streaming no
+ * provider padrao do modulo.
+ */
 @Service
 @ConditionalOnProperty(name = "praxis.ai.provider", havingValue = "gemini", matchIfMissing = true)
 @RequiredArgsConstructor

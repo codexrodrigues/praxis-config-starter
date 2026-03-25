@@ -23,6 +23,13 @@ import org.praxisplatform.config.dto.AiSuggestionsResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Produz sugestoes de configuracao UI a partir do contexto atual, capacidades declaradas e regras
+ * heuristicas da plataforma.
+ *
+ * <p>Quando habilitado, o servico tambem pode complementar o resultado com apoio de LLM, mas o
+ * filtro final continua respeitando as paths e superficies permitidas para o componente em foco.
+ */
 @Service
 @RequiredArgsConstructor
 public class AiSuggestionsService {

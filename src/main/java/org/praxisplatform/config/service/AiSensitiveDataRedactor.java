@@ -10,6 +10,13 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
+/**
+ * Remove ou mascara dados sensiveis de textos e payloads JSON antes de logging, auditoria ou
+ * persistencia de eventos.
+ *
+ * <p>O redactor aplica regras para secrets, tokens, credenciais e campos livres do fluxo AI,
+ * reduzindo o risco de vazamento acidental em trilhas operacionais e historicos de stream.
+ */
 @Component
 public class AiSensitiveDataRedactor {
 

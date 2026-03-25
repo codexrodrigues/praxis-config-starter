@@ -24,6 +24,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Gerencia a memoria conversacional persistida de cada thread AI.
+ *
+ * <p>O servico prepara o contexto do turno, persiste mensagens e acoes, gera sumarios quando a
+ * janela cresce e aplica higienizacao/redacao antes de devolver historico util para o
+ * orquestrador e para os providers.
+ */
 @Service
 @RequiredArgsConstructor
 public class AiMessageService {

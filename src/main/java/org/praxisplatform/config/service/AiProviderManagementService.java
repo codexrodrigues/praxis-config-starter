@@ -20,6 +20,14 @@ import org.praxisplatform.config.dto.AiProviderTestResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Serviço de catálogo, descoberta de modelos e teste operacional de provedores AI.
+ *
+ * <p>
+ * Esta camada centraliza resolução de provider, sobreposição de credenciais temporárias e leitura
+ * de configuração persistida do host antes de consultar um {@link AiProvider} concreto.
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

@@ -23,6 +23,14 @@ import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Ingesta definicoes de componentes na fonte canonica {@code ai_registry} e mantem a copia
+ * derivada indexada para recuperacao semantica.
+ *
+ * <p>Cada entrada do manifesto e convertida em um registro de {@code component_definition} em
+ * escopo global, com payload serializado, embedding e documento RAG associado para busca
+ * contextual por componente, capability e IO.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

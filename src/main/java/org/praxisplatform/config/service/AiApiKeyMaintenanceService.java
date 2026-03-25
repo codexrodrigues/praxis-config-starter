@@ -14,6 +14,12 @@ import org.praxisplatform.config.dto.AiApiKeyRotateRequest;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
 import org.springframework.stereotype.Service;
 
+/**
+ * Orquestra operacoes administrativas de limpeza e rotacao de API keys armazenadas em configuracao.
+ *
+ * <p>O servico resolve o escopo correto, localiza a configuracao alvo, manipula os campos
+ * protegidos do payload AI e persiste a nova versao com os metadados de auditoria adequados.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

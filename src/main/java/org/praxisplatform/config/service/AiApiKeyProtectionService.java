@@ -7,6 +7,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+/**
+ * Sanitiza e protege segredos AI antes da persistencia de configuracoes do usuario ou globais.
+ *
+ * <p>O servico remove plaintexts transitórios, preserva secrets previamente armazenados quando o
+ * caller nao envia novos valores e migra chaves antigas para o formato criptografado quando
+ * possivel.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

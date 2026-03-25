@@ -46,9 +46,17 @@ import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.vectorstore.filter.Filter;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+/**
+ * Adaptador canonico do runtime OpenAI para os contratos de {@link AiProvider}.
+ *
+ * <p>O servico traduz chamadas de texto, JSON estruturado, listagem de modelos e streaming para a
+ * stack Spring AI/OpenAI, incluindo opcionalmente advisors RAG e overrides por chamada.
+ */
 @Service
+@ConditionalOnProperty(name = "praxis.ai.provider", havingValue = "openai")
 @RequiredArgsConstructor
 @Slf4j
 public class SpringAiOpenAiService implements AiProvider {

@@ -22,6 +22,14 @@ import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Servico canonico de persistencia, upsert e busca semantica dos templates de registry
+ * armazenados em {@code ai_registry}.
+ *
+ * <p>Os templates sao salvos como registros de escopo {@code SYSTEM/GLOBAL}, com embedding e
+ * payload serializado, para sustentar lookup por similaridade, catalogos de templates publicados
+ * e reutilizacao de configuracoes base pela plataforma.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

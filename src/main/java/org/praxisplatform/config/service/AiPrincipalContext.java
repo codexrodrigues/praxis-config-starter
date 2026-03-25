@@ -1,5 +1,13 @@
 package org.praxisplatform.config.service;
 
+/**
+ * Identidade operacional resolvida para uma chamada AI/config.
+ *
+ * <p>
+ * Normaliza tenant, usuário e ambiente a partir de headers e/ou principal do servidor para que
+ * serviços internos não precisem repetir lógica de saneamento de contexto.
+ * </p>
+ */
 public record AiPrincipalContext(
         String tenantId,
         String userId,

@@ -4,6 +4,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Guarda de acesso administrativo para operacoes sensiveis de manutencao de API keys.
+ *
+ * <p>O componente valida um token administrativo dedicado, aceitando header direto ou bearer
+ * token, para impedir que rotacoes e limpezas de segredo fiquem expostas sem controle explicito.
+ */
 @Service
 @Slf4j
 public class AiApiKeyAccessGuard {

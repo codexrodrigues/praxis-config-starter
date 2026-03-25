@@ -16,6 +16,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Sintetiza hints textuais de RAG a partir do contexto do componente e do prompt do usuario.
+ *
+ * <p>O servico ranqueia acoes, options, resolvers, exemplos e dicas por heuristica lexical e,
+ * opcionalmente, por similaridade de embedding, produzindo um resumo compacto para orientar a
+ * geracao do modelo sem expor o corpus completo.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

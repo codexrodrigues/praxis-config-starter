@@ -16,6 +16,13 @@ import org.praxisplatform.config.dto.AiSchemaContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Busca schemas canônicos publicados por {@code /schemas/filtered} para enriquecer o contexto AI.
+ *
+ * <p>O servico resolve a base URL efetiva, chama o endpoint remoto com timeout controlado e
+ * devolve um {@link SchemaFetchResult} com status normalizado para tratamento uniforme no fluxo de
+ * orquestracao.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

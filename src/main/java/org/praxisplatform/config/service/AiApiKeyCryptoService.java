@@ -11,6 +11,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+/**
+ * Faixa canonica de criptografia para secrets persistidos em configuracoes AI.
+ *
+ * <p>O servico aplica AES/GCM com chave configuravel para cifrar e decifrar API keys antes da
+ * gravacao em `ui_user_config`, evitando que segredos fiquem expostos em texto puro quando a
+ * protecao esta habilitada.
+ */
 @Service
 @Slf4j
 public class AiApiKeyCryptoService {

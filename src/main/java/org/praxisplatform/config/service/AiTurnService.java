@@ -13,6 +13,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Controla o ciclo de vida transacional dos turnos AI associados a um thread.
+ *
+ * <p>O servico reserva, reaproveita, expira, conclui ou cancela turnos de forma idempotente,
+ * protegendo a execucao concorrente e a integridade das referencias usadas por streaming e
+ * historico de mensagens.
+ */
 @Service
 @RequiredArgsConstructor
 public class AiTurnService {
