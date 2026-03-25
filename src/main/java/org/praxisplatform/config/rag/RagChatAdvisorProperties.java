@@ -2,6 +2,9 @@ package org.praxisplatform.config.rag;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+/**
+ * Propriedades de configuração do advisor RAG para chat.
+ */
 @ConfigurationProperties(prefix = "praxis.ai.rag.chat")
 public class RagChatAdvisorProperties {
 

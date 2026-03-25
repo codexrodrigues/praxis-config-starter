@@ -8,6 +8,14 @@ import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+/**
+ * Resolve a cadeia de advisors RAG usada pelo chat AI.
+ *
+ * <p>
+ * Seleciona entre estratégia ingênua e modular conforme {@link RagChatAdvisorProperties},
+ * devolvendo apenas advisors disponíveis e habilitados no contexto Spring.
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class RagChatAdvisorService {
