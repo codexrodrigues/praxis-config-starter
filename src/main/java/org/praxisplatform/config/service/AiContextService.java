@@ -1,4 +1,4 @@
-﻿package org.praxisplatform.config.service;
+package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

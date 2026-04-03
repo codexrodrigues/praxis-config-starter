@@ -1,4 +1,4 @@
-﻿package org.praxisplatform.config.domain;
+package org.praxisplatform.config.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

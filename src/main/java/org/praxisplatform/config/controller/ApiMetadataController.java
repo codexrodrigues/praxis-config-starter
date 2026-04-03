@@ -1,4 +1,4 @@
-﻿package org.praxisplatform.config.controller;
+package org.praxisplatform.config.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

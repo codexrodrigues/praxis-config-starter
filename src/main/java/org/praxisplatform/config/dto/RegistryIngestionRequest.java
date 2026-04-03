@@ -1,4 +1,4 @@
-﻿package org.praxisplatform.config.dto;
+package org.praxisplatform.config.dto;
 
 import com.fasterxml.jackson.annotation.JsonAnyGetter;
 import com.fasterxml.jackson.annotation.JsonAnySetter;

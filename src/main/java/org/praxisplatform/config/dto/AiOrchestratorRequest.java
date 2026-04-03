@@ -1,4 +1,4 @@
-﻿package org.praxisplatform.config.dto;
+package org.praxisplatform.config.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.NotBlank;
