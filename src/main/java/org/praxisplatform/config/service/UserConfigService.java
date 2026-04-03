@@ -1,4 +1,4 @@
-﻿package org.praxisplatform.config.service;
+package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -77,6 +77,7 @@ public class UserConfigService {
       String environment,
       JsonNode payload,
       JsonNode tags,
+      String ifMatch,
       String updatedBy) {
     validateComponentType(componentType);
     validateComponentId(componentId);
@@ -88,6 +89,7 @@ public class UserConfigService {
 
     Optional<UiUserConfig> existing =
         findConfig(tenantId, effectiveUserId, componentType, componentId, environment);
+    validateIfMatch(existing, ifMatch);
     JsonNode existingPayload = existing.map(cfg -> readJson(cfg.getPayload())).orElse(null);
     JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, existingPayload);
     validatePayloadSize(sanitizedPayload);
@@ -127,7 +129,8 @@ public class UserConfigService {
       String userId,
       String componentType,
       String componentId,
-      String environment) {
+      String environment,
+      String ifMatch) {
     validateComponentType(componentType);
     validateComponentId(componentId);
     if (scope == Scope.USER && (userId == null || userId.isBlank())) {
@@ -137,10 +140,33 @@ public class UserConfigService {
     String effectiveUserId = scope == Scope.USER ? userId : null;
     Optional<UiUserConfig> existing =
         findConfig(tenantId, effectiveUserId, componentType, componentId, environment);
+    validateIfMatch(existing, ifMatch);
     if (existing.isEmpty()) {
       throw new NotFoundException("Configuration not found for the requested scope");
     }
     repository.delete(existing.get());
+  }
+
+  private void validateIfMatch(Optional<UiUserConfig> existing, String ifMatch) {
+    if (ifMatch == null || ifMatch.isBlank()) {
+      return;
+    }
+
+    if (existing.isEmpty()) {
+      throw new PreconditionFailedException(
+          "If-Match precondition failed: configuration not found");
+    }
+
+    String expected = ifMatch.trim();
+    if ("*".equals(expected)) {
+      return;
+    }
+
+    String current = String.valueOf(existing.get().getEtag());
+    if (!current.equals(expected)) {
+      throw new PreconditionFailedException(
+          "If-Match precondition failed: stale configuration version");
+    }
   }
 
   private Optional<UiUserConfig> findConfig(
@@ -231,6 +257,12 @@ public class UserConfigService {
 
   public static class NotFoundException extends RuntimeException {
     public NotFoundException(String message) {
+      super(message);
+    }
+  }
+
+  public static class PreconditionFailedException extends RuntimeException {
+    public PreconditionFailedException(String message) {
       super(message);
     }
   }
