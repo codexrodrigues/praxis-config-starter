@@ -124,7 +124,7 @@ public class MockAiService implements AiProvider {
 
     private JsonNode buildIntentClassification(String input) {
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("intent", "update_column_rules");
+        root.put("intent", "update_column");
         root.put("category", "columns");
         root.put("scope", "config");
         root.put("needsClarification", false);

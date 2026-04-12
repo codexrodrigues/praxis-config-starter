@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import org.junit.jupiter.api.Tag;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -40,6 +41,9 @@ class AiProviderManagementServiceTest {
 
     @Mock
     private AiProvider openai;
+
+    @Mock
+    private AiProvider mockProvider;
 
     private AiProviderManagementService service;
 
@@ -108,5 +112,49 @@ class AiProviderManagementServiceTest {
         assertTrue(response.getProviders().stream()
                 .anyMatch(item -> "xai".equals(item.getId())
                         && !item.isSupportsTextStreaming()));
+    }
+
+    @Test
+    void explicitUnavailableProviderDoesNotFallbackToMockForModels() {
+        when(mockProvider.getProviderName()).thenReturn("mock");
+        AiProviderManagementService mockOnlyService = new AiProviderManagementService(
+                objectMapper,
+                userConfigService,
+                apiKeyCryptoService,
+                List.of(mockProvider));
+        ReflectionTestUtils.setField(mockOnlyService, "defaultProvider", "mock");
+        ReflectionTestUtils.setField(mockOnlyService, "openaiModel", "gpt-4o-mini");
+        ReflectionTestUtils.setField(mockOnlyService, "geminiModel", "gemini-2.0-flash");
+        ReflectionTestUtils.setField(mockOnlyService, "xaiModel", "grok-2-latest");
+        mockOnlyService.initProviderRegistry();
+
+        AiProviderModelsResponse response = mockOnlyService.listModels(
+                AiProviderModelsRequest.builder().provider("gemini").apiKey("key").build());
+
+        assertFalse(response.isSuccess());
+        assertEquals("gemini", response.getProvider());
+        assertTrue(response.getModels().isEmpty());
+    }
+
+    @Test
+    void explicitUnavailableProviderDoesNotFallbackToMockForTestConnection() {
+        when(mockProvider.getProviderName()).thenReturn("mock");
+        AiProviderManagementService mockOnlyService = new AiProviderManagementService(
+                objectMapper,
+                userConfigService,
+                apiKeyCryptoService,
+                List.of(mockProvider));
+        ReflectionTestUtils.setField(mockOnlyService, "defaultProvider", "mock");
+        ReflectionTestUtils.setField(mockOnlyService, "openaiModel", "gpt-4o-mini");
+        ReflectionTestUtils.setField(mockOnlyService, "geminiModel", "gemini-2.0-flash");
+        ReflectionTestUtils.setField(mockOnlyService, "xaiModel", "grok-2-latest");
+        mockOnlyService.initProviderRegistry();
+
+        AiProviderTestResponse response = mockOnlyService.testConnection(
+                AiProviderTestRequest.builder().provider("gemini").model("gemini-2.5-flash").apiKey("key").build());
+
+        assertFalse(response.isSuccess());
+        assertEquals("gemini", response.getProvider());
+        assertEquals("gemini-2.5-flash", response.getModel());
     }
 }

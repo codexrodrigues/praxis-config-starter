@@ -135,7 +135,7 @@ class AiOrchestratorServiceCpfMaskTest {
   void buildFormatClarificationPayloadUsesStructuredOptionsForCpf() {
     AiIntentClassification intent =
         AiIntentClassification.builder()
-            .intent("update_column_rules")
+            .intent("update_column")
             .category("format")
             .targetField("cpf")
             .needsClarification(true)

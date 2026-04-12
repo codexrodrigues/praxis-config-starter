@@ -4,6 +4,10 @@ target/
 *.iml
 *.log
 
+# Local AI provider secrets. Keep real API keys out of Git.
+.env.openai.local.ps1
+.env.*.local.ps1
+
 # OS artifacts
 .DS_Store
 Thumbs.db

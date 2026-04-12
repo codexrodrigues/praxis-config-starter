@@ -43,7 +43,7 @@ class AiOrchestratorServiceComputedDefaultsTest {
     @Test
     void shouldApplyDefaultsForComputedAgeColumn() {
         AiIntentClassification intent = AiIntentClassification.builder()
-                .intent("update_column_rules")
+                .intent("add_column_computed")
                 .category("columns")
                 .needsClarification(true)
                 .missingContext(List.of("dataType", "headerLabel", "renderer/format"))
@@ -86,7 +86,7 @@ class AiOrchestratorServiceComputedDefaultsTest {
     @Test
     void shouldKeepClarificationWhenPresentationIsExplicit() {
         AiIntentClassification intent = AiIntentClassification.builder()
-                .intent("update_column_rules")
+                .intent("add_column_computed")
                 .category("columns")
                 .needsClarification(true)
                 .missingContext(List.of("renderer/format"))
@@ -117,7 +117,7 @@ class AiOrchestratorServiceComputedDefaultsTest {
     @Test
     void shouldApplyDefaultsForTenureYears() {
         AiIntentClassification intent = AiIntentClassification.builder()
-                .intent("update_column_rules")
+                .intent("add_column_computed")
                 .category("columns")
                 .needsClarification(true)
                 .missingContext(List.of("dataType", "headerLabel", "renderer/format"))
@@ -157,7 +157,7 @@ class AiOrchestratorServiceComputedDefaultsTest {
     @Test
     void shouldApplyDefaultsForTenureYearsMonths() {
         AiIntentClassification intent = AiIntentClassification.builder()
-                .intent("update_column_rules")
+                .intent("add_column_computed")
                 .category("columns")
                 .needsClarification(true)
                 .missingContext(List.of("dataType", "headerLabel", "renderer/format"))
@@ -196,7 +196,7 @@ class AiOrchestratorServiceComputedDefaultsTest {
     @Test
     void shouldRequestClarificationWhenComputedBaseFieldIsUnknown() {
         AiIntentClassification intent = AiIntentClassification.builder()
-                .intent("update_column_rules")
+                .intent("add_column_computed")
                 .category("columns")
                 .needsClarification(false)
                 .build();
@@ -237,7 +237,7 @@ class AiOrchestratorServiceComputedDefaultsTest {
     @Test
     void shouldNotTreatDensityPromptAsComputedAgeRequest() {
         AiIntentClassification intent = AiIntentClassification.builder()
-                .intent("update_column_rules")
+                .intent("update_column")
                 .category("appearance")
                 .needsClarification(false)
                 .build();

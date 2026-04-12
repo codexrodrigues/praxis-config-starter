@@ -154,6 +154,34 @@ public class AiProviderManagementService {
         }
     }
 
+    public JsonNode generateJson(
+            String prompt,
+            AiJsonSchema schema,
+            AiCallConfig requestConfig,
+            String tenantId,
+            String userId,
+            String environment) {
+        StoredAiConfig stored = resolveStoredConfig(tenantId, userId, environment);
+        String provider = resolveProviderName(
+                requestConfig != null ? requestConfig.getProvider() : null,
+                stored != null ? stored.provider() : null);
+        AiProvider selectedProvider = resolveProvider(provider);
+        if (selectedProvider == null) {
+            throw new IllegalStateException("Provider not available: " + provider);
+        }
+        AiCallConfig config = AiCallConfig.builder()
+                .provider(provider)
+                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
+                .model(resolveModel(requestConfig != null ? requestConfig.getModel() : null, stored))
+                .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
+                .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
+                .tenantId(tenantId)
+                .environment(environment)
+                .ragReleaseId(requestConfig != null ? requestConfig.getRagReleaseId() : null)
+                .build();
+        return selectedProvider.generateJson(prompt, schema, config);
+    }
+
     public AiProviderCatalogResponse listCatalog() {
         List<AiProviderCatalogItem> providers = new ArrayList<>();
         ProviderCapabilities geminiCapabilities = resolveProviderCapabilities("gemini");
@@ -217,22 +245,22 @@ public class AiProviderManagementService {
     private List<AiProviderModel> listModelsByProvider(String provider, AiCallConfig config) {
         AiProvider selected = resolveProvider(provider);
         if (selected == null) {
-            return List.of();
+            throw new IllegalStateException("Provider not available: " + provider);
         }
         return selected.listModels(config);
     }
 
     private AiProvider resolveProvider(String provider) {
         String normalized = normalizeProvider(provider);
-        String canonical = normalizeAlias(normalized != null ? normalized : "gemini");
+        String canonical = normalizeAlias(normalized);
+        if (canonical != null) {
+            return providerRegistry.get(canonical);
+        }
+        canonical = normalizeAlias(normalizeProvider(defaultProvider));
+        if (canonical == null) {
+            canonical = "gemini";
+        }
         AiProvider selected = providerRegistry.get(canonical);
-        if (selected != null) {
-            return selected;
-        }
-        if (!"gemini".equals(canonical)) {
-            log.warn("[AiProviderManagement] Unknown provider '{}', defaulting to gemini.", provider);
-        }
-        selected = providerRegistry.get("gemini");
         if (selected != null) {
             return selected;
         }

@@ -5191,8 +5191,16 @@ public class AiOrchestratorService {
             return intentType;
         }
         String normalized = intentType.trim().toLowerCase(Locale.ROOT);
-        if ("update_column".equals(normalized) || "remove_column".equals(normalized)) {
-            return "update_column_rules";
+        if ("add_column_computed".equals(normalized)
+                || "add_column".equals(normalized)
+                || "create_flow".equals(normalized)
+                || "update_column".equals(normalized)
+                || "remove_column".equals(normalized)
+                || "toggle_feature".equals(normalized)
+                || "global_style".equals(normalized)
+                || "ask_about_config".equals(normalized)
+                || "unknown".equals(normalized)) {
+            return normalized;
         }
         return intentType;
     }
@@ -5201,7 +5209,8 @@ public class AiOrchestratorService {
         if (intentType == null) {
             return false;
         }
-        return "update_column_rules".equalsIgnoreCase(intentType);
+        return "update_column".equalsIgnoreCase(intentType)
+                || "remove_column".equalsIgnoreCase(intentType);
     }
 
     private void addMissing(List<String> missing, String value) {
@@ -5227,7 +5236,7 @@ public class AiOrchestratorService {
         String category = intent.getCategory();
         boolean unknown = category == null || category.isBlank() || "unknown".equalsIgnoreCase(category);
         String intentType = intent.getIntent();
-        return unknown && "update_column_rules".equalsIgnoreCase(intentType);
+        return unknown && "update_column".equalsIgnoreCase(intentType);
     }
 
     private String normalizeCategory(String category) {
@@ -9603,7 +9612,7 @@ public class AiOrchestratorService {
         if (!displayIntent) {
             return intent;
         }
-        intent.setIntent("update_column_rules");
+        intent.setIntent("update_column");
         intent.setTargetField(targetField);
         intent.setNewField(null);
         intent.setBaseFields(List.of());
@@ -11641,7 +11650,9 @@ public class AiOrchestratorService {
         if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
             return null;
         }
-        if (!"update_column_rules".equalsIgnoreCase(intent.getIntent())) {
+        String intentType = normalizeIntentType(intent.getIntent());
+        if (!"add_column_computed".equalsIgnoreCase(intentType)
+                && !"update_column".equalsIgnoreCase(intentType)) {
             return null;
         }
         String prompt = request.getUserPrompt();

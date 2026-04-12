@@ -46,7 +46,6 @@ import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.vectorstore.filter.Filter;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 /**
@@ -56,12 +55,11 @@ import org.springframework.stereotype.Service;
  * stack Spring AI/OpenAI, incluindo opcionalmente advisors RAG e overrides por chamada.
  */
 @Service
-@ConditionalOnProperty(name = "praxis.ai.provider", havingValue = "openai")
 @RequiredArgsConstructor
 @Slf4j
 public class SpringAiOpenAiService implements AiProvider {
 
-    private final OpenAiChatModel chatClient;
+    private final ObjectProvider<OpenAiChatModel> chatClientProvider;
     private final ObjectMapper objectMapper;
 
     @Autowired(required = false)
@@ -212,7 +210,7 @@ public class SpringAiOpenAiService implements AiProvider {
             ObjectNode root = objectMapper.createObjectNode();
             root.put("model", resolvedModel);
             root.put("temperature", resolvedTemp);
-            root.put("max_tokens", resolvedMaxTokens);
+            putTokenLimit(root, resolvedModel, resolvedMaxTokens);
             if (jsonMode) {
                 ObjectNode fmt = root.putObject("response_format");
                 fmt.put("type", "json_object");
@@ -270,7 +268,7 @@ public class SpringAiOpenAiService implements AiProvider {
             ObjectNode root = objectMapper.createObjectNode();
             root.put("model", resolvedModel);
             root.put("temperature", resolvedTemp);
-            root.put("max_tokens", resolvedMaxTokens);
+            putTokenLimit(root, resolvedModel, resolvedMaxTokens);
             root.put("stream", true);
             ArrayNode messages = root.putArray("messages");
             ObjectNode msg = messages.addObject();
@@ -370,6 +368,25 @@ public class SpringAiOpenAiService implements AiProvider {
         }
     }
 
+    private void putTokenLimit(ObjectNode payload, String modelName, int maxTokens) {
+        if (requiresMaxCompletionTokens(modelName)) {
+            payload.put("max_completion_tokens", maxTokens);
+            return;
+        }
+        payload.put("max_tokens", maxTokens);
+    }
+
+    private boolean requiresMaxCompletionTokens(String modelName) {
+        if (modelName == null) {
+            return false;
+        }
+        String normalized = modelName.trim().toLowerCase();
+        return normalized.startsWith("gpt-5")
+                || normalized.startsWith("o1")
+                || normalized.startsWith("o3")
+                || normalized.startsWith("o4");
+    }
+
     private String extractOpenAiDelta(String data) {
         try {
             JsonNode root = objectMapper.readTree(data);
@@ -435,6 +452,10 @@ public class SpringAiOpenAiService implements AiProvider {
                     .openAiApi(api)
                     .defaultOptions(buildOptions(config, false))
                     .build();
+        }
+        OpenAiChatModel chatClient = chatClientProvider.getIfAvailable();
+        if (chatClient == null) {
+            throw new IllegalStateException("OpenAI chat client not configured. Provide spring.ai.openai.api-key or use the direct API-key request path.");
         }
         return chatClient;
     }

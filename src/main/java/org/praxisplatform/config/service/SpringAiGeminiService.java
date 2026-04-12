@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -49,7 +50,6 @@ import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.client.RestClientResponseException;
 
 import org.springframework.stereotype.Service;
@@ -62,7 +62,6 @@ import org.springframework.stereotype.Service;
  * provider padrao do modulo.
  */
 @Service
-@ConditionalOnProperty(name = "praxis.ai.provider", havingValue = "gemini", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 public class SpringAiGeminiService implements AiProvider {
@@ -415,10 +414,7 @@ public class SpringAiGeminiService implements AiProvider {
         double resolvedTemperature = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.putArray("contents").add(
-                objectMapper.createObjectNode()
-                        .putArray("parts")
-                        .add(objectMapper.createObjectNode().put("text", prompt)));
+        addTextContent(payload, prompt);
         ObjectNode generationConfig = payload.putObject("generationConfig");
         generationConfig.put("temperature", resolvedTemperature);
         generationConfig.put("maxOutputTokens", resolvedMaxTokens);
@@ -460,10 +456,7 @@ public class SpringAiGeminiService implements AiProvider {
         double resolvedTemperature = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.putArray("contents").add(
-                objectMapper.createObjectNode()
-                        .putArray("parts")
-                        .add(objectMapper.createObjectNode().put("text", prompt)));
+        addTextContent(payload, prompt);
         ObjectNode generationConfig = payload.putObject("generationConfig");
         generationConfig.put("temperature", resolvedTemperature);
         generationConfig.put("maxOutputTokens", resolvedMaxTokens);
@@ -1119,6 +1112,13 @@ public class SpringAiGeminiService implements AiProvider {
             }
         }
         return null;
+    }
+
+    private void addTextContent(ObjectNode payload, String prompt) {
+        ObjectNode content = objectMapper.createObjectNode();
+        ArrayNode parts = content.putArray("parts");
+        parts.addObject().put("text", prompt);
+        payload.putArray("contents").add(content);
     }
 
     private boolean isCancelled(Supplier<Boolean> cancellationRequested) {

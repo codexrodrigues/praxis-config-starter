@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -68,6 +69,18 @@ class SpringAiGeminiServiceTest {
 
         assertTrue(service.supportsTextStreaming(AiCallConfig.builder().build()));
         assertTrue(service.supportsTurnCancellation(AiCallConfig.builder().build()));
+    }
+
+    @Test
+    void restPayloadUsesGeminiContentsPartsShape() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        ObjectNode payload = objectMapper.createObjectNode();
+
+        ReflectionTestUtils.invokeMethod(service, "addTextContent", payload, "ping");
+
+        JsonNode firstContent = payload.path("contents").path(0);
+        assertTrue(firstContent.isObject());
+        assertEquals("ping", firstContent.path("parts").path(0).path("text").asText());
     }
 
     private static ObjectProvider<GoogleGenAiChatModel> provider(GoogleGenAiChatModel client) {
