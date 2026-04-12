@@ -6,6 +6,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
@@ -39,6 +40,12 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnMissingBean
     public AgenticAuthoringDryRunService agenticAuthoringDryRunService(ObjectMapper objectMapper) {
         return new AgenticAuthoringDryRunService(objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringIntentResolverService agenticAuthoringIntentResolverService(ObjectMapper objectMapper) {
+        return new AgenticAuthoringIntentResolverService(objectMapper);
     }
 
     @Bean

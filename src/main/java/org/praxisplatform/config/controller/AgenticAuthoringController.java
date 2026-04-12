@@ -11,6 +11,9 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionRequest;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanResult;
@@ -36,6 +39,7 @@ public class AgenticAuthoringController {
 
     private final AgenticAuthoringDryRunService dryRunService;
     private final AgenticAuthoringArtifactSource artifactSource;
+    private final AgenticAuthoringIntentResolverService intentResolverService;
     private final AgenticAuthoringPlanService planService;
     private final AgenticAuthoringPatchCompilerService patchCompilerService;
     private final AgenticAuthoringPreviewService previewService;
@@ -61,6 +65,16 @@ public class AgenticAuthoringController {
             AgenticAuthoringPlanResult result = planService.generateMinimalFormPlan(request, tenantId, userId, environment);
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException | IllegalStateException | IOException ex) {
+            return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/intent-resolution")
+    public ResponseEntity<?> resolveIntent(@RequestBody AgenticAuthoringIntentResolutionRequest request) {
+        try {
+            AgenticAuthoringIntentResolutionResult result = intentResolverService.resolve(request);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));
         }
     }

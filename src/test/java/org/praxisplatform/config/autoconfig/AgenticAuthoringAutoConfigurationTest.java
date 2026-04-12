@@ -10,6 +10,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
@@ -36,6 +37,7 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context.getBean(AgenticAuthoringArtifactProperties.class).isHttpEnabled()).isFalse();
             assertThat(context).hasSingleBean(AgenticAuthoringArtifactSource.class);
             assertThat(context).hasSingleBean(AgenticAuthoringDryRunService.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringIntentResolverService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringPatchCompilerService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringDryRunReportService.class);
             assertThat(context).doesNotHaveBean(AgenticAuthoringPlanService.class);

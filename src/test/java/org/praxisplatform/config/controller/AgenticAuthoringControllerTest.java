@@ -19,6 +19,9 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunErrorResponse;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionRequest;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanResult;
@@ -38,6 +41,9 @@ class AgenticAuthoringControllerTest {
 
     @Mock
     private AgenticAuthoringArtifactSource artifactSource;
+
+    @Mock
+    private AgenticAuthoringIntentResolverService intentResolverService;
 
     @Mock
     private AgenticAuthoringPlanService planService;
@@ -94,6 +100,45 @@ class AgenticAuthoringControllerTest {
         when(planService.generateMinimalFormPlan(request, "tenant", "user", "local")).thenReturn(expected);
 
         ResponseEntity<?> response = controller().generateMinimalFormPlan(request, "tenant", "user", "local");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isSameAs(expected);
+    }
+
+    @Test
+    void intentResolutionReturnsResolvedIntent() {
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Crie um formulario para funcionarios",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
+                null,
+                null,
+                null,
+                null);
+        AgenticAuthoringIntentResolutionResult expected = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "form",
+                "create_minimal_form",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "eligible",
+                        List.of()),
+                List.of(),
+                List.of("metadata-probe-not-run"),
+                List.of(),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance());
+        when(intentResolverService.resolve(request)).thenReturn(expected);
+
+        ResponseEntity<?> response = controller().resolveIntent(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isSameAs(expected);
@@ -181,6 +226,6 @@ class AgenticAuthoringControllerTest {
     }
 
     private AgenticAuthoringController controller() {
-        return new AgenticAuthoringController(dryRunService, artifactSource, planService, patchCompilerService, previewService, applyService);
+        return new AgenticAuthoringController(dryRunService, artifactSource, intentResolverService, planService, patchCompilerService, previewService, applyService);
     }
 }
