@@ -33,7 +33,7 @@ public class AgenticAuthoringPlanService {
             throw new IllegalArgumentException("userPrompt must not be blank.");
         }
         JsonNode plan = providerManagementService.generateJson(
-                minimalFormPlanPrompt(request.userPrompt()),
+                minimalFormPlanPrompt(request),
                 AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
                 AiCallConfig.builder()
                         .provider(request.provider())
@@ -46,16 +46,78 @@ public class AgenticAuthoringPlanService {
                 userId,
                 environment
         );
-        List<String> failures = validator.validate(plan);
+        List<String> failures = validator.validate(plan, request.intentResolution());
         return new AgenticAuthoringPlanResult(
                 failures.isEmpty(),
                 failures,
-                List.of("minimal-form-plan-only", "patch-compilation-not-run"),
+                warnings(request.intentResolution()),
                 plan
         );
     }
 
-    private String minimalFormPlanPrompt(String userPrompt) {
+    private List<String> warnings(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
+            return List.of("minimal-form-plan-only", "patch-compilation-not-run");
+        }
+        return List.of("minimal-form-plan-only", "patch-compilation-not-run", "intent-resolution-applied");
+    }
+
+    private String minimalFormPlanPrompt(AgenticAuthoringPlanRequest request) {
+        AgenticAuthoringIntentResolutionResult intentResolution = request.intentResolution();
+        if (intentResolution == null || intentResolution.selectedCandidate() == null) {
+            return legacyHelpdeskMinimalFormPlanPrompt(request.userPrompt());
+        }
+        AgenticAuthoringCandidate candidate = intentResolution.selectedCandidate();
+        String submitMethod = candidate.submitMethod() == null || candidate.submitMethod().isBlank()
+                ? candidate.operation()
+                : candidate.submitMethod();
+        String submitActionRef = (submitMethod == null ? "POST" : submitMethod.toUpperCase()) + " " + candidate.submitUrl();
+        return """
+                You are generating an internal Praxis MinimalFormPlan.
+                Return only one JSON object. Do not include Markdown.
+
+                User request:
+                %s
+
+                Resolved intent:
+                - operationKind: %s
+                - artifactKind: %s
+                - changeKind: %s
+                - targetApp: %s
+                - targetComponentId: %s
+                - resourcePath: %s
+                - submitActionRef: %s
+                - requestSchemaUrl: %s
+
+                Hard constraints:
+                - version must be "1.0.0".
+                - profileId must be "create-minimal-form".
+                - targetApp must be "%s".
+                - targetComponentId must be "%s".
+                - submitActionRef must be "%s".
+                - apiUseCaseResolutionRef must reference the resolved resource path.
+                - fieldSelectionPlanRef must reference the resolved request schema URL.
+                - fields must include only fields that are truly necessary for the user request and the create request schema.
+                - Prefer the smallest didactic form that can submit successfully.
+                - Do not include server-managed, audit, id, status, timestamp, owner or workflow fields unless the user explicitly asked for them.
+                - clarificationNeed.needed must be true only when the prompt cannot be satisfied safely from the resolved API candidate.
+                - sourceRefs must cite intent-resolution and the resolved schema URL.
+                """.formatted(
+                request.userPrompt().trim(),
+                intentResolution.operationKind(),
+                intentResolution.artifactKind(),
+                intentResolution.changeKind(),
+                intentResolution.targetApp(),
+                intentResolution.targetComponentId(),
+                candidate.resourcePath(),
+                submitActionRef,
+                candidate.schemaUrl(),
+                intentResolution.targetApp(),
+                intentResolution.targetComponentId(),
+                submitActionRef);
+    }
+
+    private String legacyHelpdeskMinimalFormPlanPrompt(String userPrompt) {
         return """
                 You are generating an internal Praxis MinimalFormPlan.
                 Return only one JSON object. Do not include Markdown.

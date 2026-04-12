@@ -23,6 +23,17 @@ public class AgenticAuthoringMinimalFormPlanValidator {
     );
 
     public List<String> validate(JsonNode plan) {
+        return validate(plan, null);
+    }
+
+    public List<String> validate(JsonNode plan, AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.selectedCandidate() == null) {
+            return validateLegacyHelpdeskPlan(plan);
+        }
+        return validateIntentBackedPlan(plan, intentResolution);
+    }
+
+    private List<String> validateLegacyHelpdeskPlan(JsonNode plan) {
         List<String> failures = new ArrayList<>();
         requireText(plan, "version", "1.0.0", failures);
         requireText(plan, "profileId", PROFILE_CREATE_MINIMAL_FORM, failures);
@@ -70,6 +81,62 @@ public class AgenticAuthoringMinimalFormPlanValidator {
             failures.add("sourceRefs must not be empty");
         }
         return List.copyOf(failures);
+    }
+
+    private List<String> validateIntentBackedPlan(JsonNode plan, AgenticAuthoringIntentResolutionResult intentResolution) {
+        List<String> failures = new ArrayList<>();
+        requireText(plan, "version", "1.0.0", failures);
+        requireText(plan, "profileId", PROFILE_CREATE_MINIMAL_FORM, failures);
+        requireText(plan, "targetApp", intentResolution.targetApp(), failures);
+        requireText(plan, "targetComponentId", intentResolution.targetComponentId(), failures);
+        AgenticAuthoringCandidate candidate = intentResolution.selectedCandidate();
+        requireText(plan, "submitActionRef", submitActionRef(candidate), failures);
+        if (text(plan, "apiUseCaseResolutionRef").isBlank()) {
+            failures.add("apiUseCaseResolutionRef is required");
+        }
+        if (text(plan, "fieldSelectionPlanRef").isBlank()) {
+            failures.add("fieldSelectionPlanRef is required");
+        }
+        JsonNode fields = plan.path("fields");
+        if (!fields.isArray() || fields.isEmpty()) {
+            failures.add("fields must not be empty");
+        } else {
+            for (JsonNode field : fields) {
+                String name = text(field, "name");
+                if (name.isBlank()) {
+                    failures.add("field name is required");
+                }
+                String label = text(field, "label");
+                if (label.isBlank()) {
+                    failures.add("field label is required: " + name);
+                }
+                String controlType = text(field, "controlType");
+                if (controlType.isBlank()) {
+                    failures.add("field controlType is required: " + name);
+                }
+                for (String blockedField : BLOCKED_FIELDS) {
+                    if (blockedField.equals(name)) {
+                        failures.add("blocked field present: " + blockedField);
+                    }
+                }
+            }
+        }
+        JsonNode clarification = plan.path("clarificationNeed");
+        if (clarification.isObject() && clarification.path("needed").asBoolean(false)
+                && "none".equals(text(clarification, "code"))) {
+            failures.add("clarificationNeed.code must explain why clarification is needed");
+        }
+        if (!plan.path("sourceRefs").isArray() || plan.path("sourceRefs").isEmpty()) {
+            failures.add("sourceRefs must not be empty");
+        }
+        return List.copyOf(failures);
+    }
+
+    private String submitActionRef(AgenticAuthoringCandidate candidate) {
+        String method = candidate.submitMethod() == null || candidate.submitMethod().isBlank()
+                ? candidate.operation()
+                : candidate.submitMethod();
+        return (method == null ? "POST" : method.toUpperCase()) + " " + candidate.submitUrl();
     }
 
     private void requireText(JsonNode node, String field, String expected, List<String> failures) {

@@ -23,6 +23,22 @@ public class AgenticAuthoringPreviewService {
             String tenantId,
             String userId,
             String environment) throws IOException {
+        AgenticAuthoringIntentResolutionResult intentResolution = request == null ? null : request.intentResolution();
+        List<String> intentFailures = validateIntentResolution(intentResolution);
+        if (!intentFailures.isEmpty()) {
+            List<String> warnings = new ArrayList<>();
+            if (intentResolution != null) {
+                warnings.addAll(intentResolution.warnings());
+            }
+            warnings.add("preview-skipped-invalid-intent-resolution");
+            return new AgenticAuthoringPreviewResult(
+                    false,
+                    List.copyOf(intentFailures),
+                    List.copyOf(warnings),
+                    MissingNode.getInstance(),
+                    MissingNode.getInstance()
+            );
+        }
         AgenticAuthoringPlanResult planResult =
                 planService.generateMinimalFormPlan(request, tenantId, userId, environment);
         List<String> failureCodes = new ArrayList<>(planResult.failureCodes());
@@ -39,7 +55,7 @@ public class AgenticAuthoringPreviewService {
         }
 
         AgenticAuthoringCompileResult compileResult =
-                patchCompilerService.compile(new AgenticAuthoringCompileRequest(planResult.minimalFormPlan()));
+                patchCompilerService.compile(new AgenticAuthoringCompileRequest(planResult.minimalFormPlan(), intentResolution));
         failureCodes.addAll(compileResult.failureCodes());
         warnings.addAll(compileResult.warnings());
         return new AgenticAuthoringPreviewResult(
@@ -49,5 +65,28 @@ public class AgenticAuthoringPreviewService {
                 planResult.minimalFormPlan(),
                 compileResult.compiledFormPatch()
         );
+    }
+
+    private List<String> validateIntentResolution(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
+            return List.of();
+        }
+        List<String> failures = new ArrayList<>();
+        if (!intentResolution.valid()) {
+            failures.add("intent-resolution-invalid");
+        }
+        if (intentResolution.gate() == null || !"eligible".equals(intentResolution.gate().status())) {
+            failures.add("intent-resolution-not-eligible");
+        }
+        if (intentResolution.selectedCandidate() == null) {
+            failures.add("intent-resolution-selected-candidate-required");
+        }
+        if (!"create".equals(intentResolution.operationKind())) {
+            failures.add("intent-resolution-operation-must-be-create");
+        }
+        if (!"form".equals(intentResolution.artifactKind())) {
+            failures.add("intent-resolution-artifact-must-be-form");
+        }
+        return List.copyOf(failures);
     }
 }

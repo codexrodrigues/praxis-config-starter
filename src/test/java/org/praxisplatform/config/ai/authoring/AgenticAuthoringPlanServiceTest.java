@@ -87,6 +87,40 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanUsesIntentResolutionAsPromptAndValidationContext() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan();
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Crie um formulario didatico para cadastrar funcionarios",
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key",
+                                funcionariosIntent()),
+                        "tenant",
+                        "user",
+                        "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.warnings()).contains("intent-resolution-applied");
+        assertThat(promptCaptor.getValue()).contains("/api/human-resources/funcionarios");
+        assertThat(promptCaptor.getValue()).contains("submitActionRef: POST /api/human-resources/funcionarios");
+    }
+
+    @Test
     void generateMinimalFormPlanRequiresConfiguredContractsDir() {
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
 
@@ -125,5 +159,54 @@ class AgenticAuthoringPlanServiceTest {
         clarification.put("code", "none");
         plan.putArray("sourceRefs").add("proofs/helpdesk-create-ticket-discovery.md");
         return plan;
+    }
+
+    private ObjectNode funcionariosPlan() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0.0");
+        plan.put("profileId", "create-minimal-form");
+        plan.put("targetApp", "praxis-ui-angular");
+        plan.put("targetComponentId", "praxis-dynamic-page-builder");
+        plan.put("apiUseCaseResolutionRef", "intent-resolution:/api/human-resources/funcionarios");
+        plan.put("fieldSelectionPlanRef", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        plan.put("submitActionRef", "POST /api/human-resources/funcionarios");
+        ArrayNode fields = plan.putArray("fields");
+        ObjectNode nome = fields.addObject();
+        nome.put("name", "nome");
+        nome.put("label", "Nome");
+        nome.put("controlType", "text");
+        nome.put("required", true);
+        ObjectNode clarification = plan.putObject("clarificationNeed");
+        clarification.put("needed", false);
+        clarification.put("code", "none");
+        plan.putArray("sourceRefs").add("intent-resolution").add("/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        return plan;
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionariosIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "form",
+                "create_minimal_form",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.95,
+                        "matched funcionarios",
+                        java.util.List.of("funcionarios")),
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                objectMapper.createObjectNode());
     }
 }
