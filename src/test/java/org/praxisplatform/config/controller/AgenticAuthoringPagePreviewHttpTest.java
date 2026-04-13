@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -25,6 +26,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverServ
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.springframework.http.MediaType;
@@ -94,6 +96,46 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(inputs.path("config").path("fieldMetadata")).isEmpty();
         assertThat(inputs.path("config").path("sections").toString()).doesNotContain("observacaoInterna");
         assertThat(inputs.path("submitUrl").asText()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
+    void pagePreviewCanReturnUiCompositionPlanWithoutMinimalFormPipeline() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Crie uma tela master detail de departamentos com funcionarios e folha");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("minimalFormPlan").isMissingNode() || body.path("minimalFormPlan").isNull()).isTrue();
+        assertThat(body.path("uiCompositionPlan").path("kind").asText()).isEqualTo("praxis.ui-composition-plan");
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
+        assertThat(body.path("uiCompositionPlan").path("bindings")).hasSize(5);
+        assertThat(body.path("compiledFormPatch").path("patch").isObject()).isTrue();
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains("compiled-form-patch-materialized-by-page-builder");
     }
 
     private AgenticAuthoringArtifactProperties properties() {

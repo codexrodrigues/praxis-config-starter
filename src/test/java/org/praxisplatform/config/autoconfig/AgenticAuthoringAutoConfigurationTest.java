@@ -15,6 +15,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerServi
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiTurnEventService;
@@ -39,6 +40,7 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context).hasSingleBean(AgenticAuthoringDryRunService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringIntentResolverService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringPatchCompilerService.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringUiCompositionPlanProvider.class);
             assertThat(context).hasSingleBean(AgenticAuthoringDryRunReportService.class);
             assertThat(context).doesNotHaveBean(AgenticAuthoringPlanService.class);
             assertThat(context).doesNotHaveBean(AgenticAuthoringPreviewService.class);

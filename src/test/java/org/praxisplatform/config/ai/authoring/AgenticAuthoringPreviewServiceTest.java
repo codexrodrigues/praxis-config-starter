@@ -125,6 +125,43 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("accepted-remove-local-field");
     }
 
+    @Test
+    void previewReturnsUiCompositionPlanFromHostProviderBeforeMinimalFormPipeline() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma tela master detail de departamentos",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key");
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.putArray("widgets").addObject().put("key", "department-master").put("componentId", "praxis-list");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.put("version", "1.0.0");
+        compiledFormPatch.putObject("patch");
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:quickstart-human-resources"),
+                        plan,
+                        compiledFormPatch));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider)).preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.minimalFormPlan().isMissingNode()).isTrue();
+        assertThat(result.uiCompositionPlan()).isSameAs(plan);
+        assertThat(result.compiledFormPatch()).isSameAs(compiledFormPatch);
+        assertThat(result.warnings()).contains(
+                "ui-composition-plan-provider:quickstart-human-resources",
+                "compiled-form-patch-materialized-by-page-builder");
+    }
+
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
     }

@@ -6,26 +6,38 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 public class AgenticAuthoringPreviewService {
 
     private final AgenticAuthoringPlanService planService;
     private final AgenticAuthoringPatchCompilerService patchCompilerService;
     private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
+    private final List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
             AgenticAuthoringPatchCompilerService patchCompilerService) {
-        this(planService, patchCompilerService, new ObjectMapper());
+        this(planService, patchCompilerService, new ObjectMapper(), List.of());
     }
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
             AgenticAuthoringPatchCompilerService patchCompilerService,
             ObjectMapper objectMapper) {
+        this(planService, patchCompilerService, objectMapper, List.of());
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
         this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
+        this.uiCompositionPlanProviders = List.copyOf(
+                uiCompositionPlanProviders == null ? List.of() : uiCompositionPlanProviders);
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -34,6 +46,10 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment) throws IOException {
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
+        Optional<AgenticAuthoringPreviewResult> uiCompositionPreview = previewUiCompositionPlan(effectiveRequest);
+        if (uiCompositionPreview.isPresent()) {
+            return uiCompositionPreview.get();
+        }
         AgenticAuthoringIntentResolutionResult intentResolution =
                 effectiveRequest == null ? null : effectiveRequest.intentResolution();
         List<String> intentFailures = validateIntentResolution(intentResolution);
@@ -83,6 +99,33 @@ public class AgenticAuthoringPreviewService {
                 compileResult.compiledFormPatch(),
                 diagnostics(intentResolution, List.copyOf(failureCodes), List.copyOf(warnings))
         );
+    }
+
+    private Optional<AgenticAuthoringPreviewResult> previewUiCompositionPlan(AgenticAuthoringPlanRequest request) {
+        if (request == null) {
+            return Optional.empty();
+        }
+        for (AgenticAuthoringUiCompositionPlanProvider provider : uiCompositionPlanProviders) {
+            Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(request);
+            if (result.isEmpty()) {
+                continue;
+            }
+            AgenticAuthoringUiCompositionPlanResult planResult = result.get();
+            List<String> failureCodes = planResult.failureCodes() == null ? List.of() : List.copyOf(planResult.failureCodes());
+            List<String> warnings = new ArrayList<>(
+                    planResult.warnings() == null ? List.of() : planResult.warnings());
+            warnings.add("compiled-form-patch-materialized-by-page-builder");
+            return Optional.of(new AgenticAuthoringPreviewResult(
+                    planResult.valid(),
+                    failureCodes,
+                    List.copyOf(warnings),
+                    MissingNode.getInstance(),
+                    planResult.compiledFormPatch() == null ? MissingNode.getInstance() : planResult.compiledFormPatch(),
+                    diagnostics(request.intentResolution(), failureCodes, List.copyOf(warnings)),
+                    planResult.uiCompositionPlan()
+            ));
+        }
+        return Optional.empty();
     }
 
     private AgenticAuthoringPlanRequest enrichRequest(AgenticAuthoringPlanRequest request) {

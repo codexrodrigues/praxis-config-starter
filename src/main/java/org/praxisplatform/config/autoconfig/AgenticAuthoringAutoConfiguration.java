@@ -10,11 +10,14 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverServ
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.UserConfigService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -67,13 +70,25 @@ public class AgenticAuthoringAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(name = "agenticAuthoringReferenceUiCompositionPlanProvider")
+    public AgenticAuthoringUiCompositionPlanProvider agenticAuthoringReferenceUiCompositionPlanProvider(
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper);
+    }
+
+    @Bean
     @ConditionalOnMissingBean
     @ConditionalOnBean({AgenticAuthoringPlanService.class, AgenticAuthoringPatchCompilerService.class})
     public AgenticAuthoringPreviewService agenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
             AgenticAuthoringPatchCompilerService patchCompilerService,
-            ObjectMapper objectMapper) {
-        return new AgenticAuthoringPreviewService(planService, patchCompilerService, objectMapper);
+            ObjectMapper objectMapper,
+            ObjectProvider<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders) {
+        return new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                uiCompositionPlanProviders.orderedStream().toList());
     }
 
     @Bean
