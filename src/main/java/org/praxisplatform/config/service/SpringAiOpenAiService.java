@@ -209,7 +209,7 @@ public class SpringAiOpenAiService implements AiProvider {
         try {
             ObjectNode root = objectMapper.createObjectNode();
             root.put("model", resolvedModel);
-            root.put("temperature", resolvedTemp);
+            putTemperature(root, resolvedModel, resolvedTemp);
             putTokenLimit(root, resolvedModel, resolvedMaxTokens);
             if (jsonMode) {
                 ObjectNode fmt = root.putObject("response_format");
@@ -267,7 +267,7 @@ public class SpringAiOpenAiService implements AiProvider {
         try {
             ObjectNode root = objectMapper.createObjectNode();
             root.put("model", resolvedModel);
-            root.put("temperature", resolvedTemp);
+            putTemperature(root, resolvedModel, resolvedTemp);
             putTokenLimit(root, resolvedModel, resolvedMaxTokens);
             root.put("stream", true);
             ArrayNode messages = root.putArray("messages");
@@ -376,6 +376,13 @@ public class SpringAiOpenAiService implements AiProvider {
         payload.put("max_tokens", maxTokens);
     }
 
+    private void putTemperature(ObjectNode payload, String modelName, double resolvedTemp) {
+        if (usesFixedDefaultTemperature(modelName)) {
+            return;
+        }
+        payload.put("temperature", resolvedTemp);
+    }
+
     private boolean requiresMaxCompletionTokens(String modelName) {
         if (modelName == null) {
             return false;
@@ -385,6 +392,10 @@ public class SpringAiOpenAiService implements AiProvider {
                 || normalized.startsWith("o1")
                 || normalized.startsWith("o3")
                 || normalized.startsWith("o4");
+    }
+
+    private boolean usesFixedDefaultTemperature(String modelName) {
+        return requiresMaxCompletionTokens(modelName);
     }
 
     private String extractOpenAiDelta(String data) {

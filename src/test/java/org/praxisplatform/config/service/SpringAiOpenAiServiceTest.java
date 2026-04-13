@@ -89,6 +89,7 @@ class SpringAiOpenAiServiceTest {
         assertEquals("pong", result);
         assertEquals(128, capturedRequest.get().path("max_completion_tokens").asInt());
         assertTrue(capturedRequest.get().path("max_tokens").isMissingNode());
+        assertTrue(capturedRequest.get().path("temperature").isMissingNode());
         } finally {
             server.stop(0);
         }
