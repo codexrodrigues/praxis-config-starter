@@ -72,6 +72,20 @@ class AgenticAuthoringApplyServiceTest {
                 eq("stale-etag"),
                 eq("author"));
         assertThat(payloadCaptor.getValue()).isEqualTo(savedPayload);
+        JsonNode persistedInputs = payloadCaptor.getValue()
+                .path("widgets")
+                .get(0)
+                .path("definition")
+                .path("inputs");
+        assertThat(persistedInputs.path("mode").asText()).isEqualTo("create");
+        assertThat(persistedInputs.path("schemaUrl").asText()).isEqualTo(
+                "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=request");
+        assertThat(persistedInputs.path("submitUrl").asText()).isEqualTo("/api/helpdesk/chamados");
+        assertThat(persistedInputs.path("submitMethod").asText()).isEqualTo("post");
+        assertThat(persistedInputs.path("responseSchemaUrl").asText()).isEqualTo(
+                "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=response");
+        assertThat(persistedInputs.path("formId").asText()).isEqualTo("ticket-form-minimal");
+        assertThat(persistedInputs.path("componentInstanceId").asText()).isEqualTo("ticket-form-minimal");
         assertThat(tagsCaptor.getValue().path("source").asText()).isEqualTo("agentic-authoring");
         assertThat(tagsCaptor.getValue().path("profileId").asText()).isEqualTo("create-minimal-form");
         assertThat(result.applied()).isTrue();
@@ -115,7 +129,15 @@ class AgenticAuthoringApplyServiceTest {
                           "id": "ticket-form",
                           "definition": {
                             "id": "praxis-dynamic-form",
-                            "inputs": {"submitUrl": "/api/helpdesk/chamados"}
+                            "inputs": {
+                              "mode": "create",
+                              "schemaUrl": "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=request",
+                              "submitUrl": "/api/helpdesk/chamados",
+                              "submitMethod": "post",
+                              "responseSchemaUrl": "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=response",
+                              "formId": "ticket-form-minimal",
+                              "componentInstanceId": "ticket-form-minimal"
+                            }
                           }
                         }
                       ]
