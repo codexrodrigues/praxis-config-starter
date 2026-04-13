@@ -72,6 +72,9 @@ public class AgenticAuthoringPlanService {
                 ? candidate.operation()
                 : candidate.submitMethod();
         String submitActionRef = (submitMethod == null ? "POST" : submitMethod.toUpperCase()) + " " + candidate.submitUrl();
+        String currentPageSummary = intentResolution.currentPageSummary() == null
+                ? "{}"
+                : intentResolution.currentPageSummary().toString();
         return """
                 You are generating an internal Praxis MinimalFormPlan.
                 Return only one JSON object. Do not include Markdown.
@@ -89,6 +92,9 @@ public class AgenticAuthoringPlanService {
                 - submitActionRef: %s
                 - requestSchemaUrl: %s
 
+                Current page summary:
+                %s
+
                 Hard constraints:
                 - version must be "1.0.0".
                 - profileId must be "create-minimal-form".
@@ -104,7 +110,12 @@ public class AgenticAuthoringPlanService {
                 - For operationKind=modify and changeKind=rename_or_relabel, fields must include only existing field names with the new desired labels.
                 - For operationKind=remove and changeKind=remove_field, fields must include only existing host-owned local/transient field names explicitly requested for removal.
                 - For remove/remove_field, do not include server-backed schema fields; removing schema-owned fields requires a future schema-aware hide flow.
-                - For operationKind=modify, do not repeat fields that are already in the current page summary.
+                - currentPageSummary.formWidgets[].fieldNames lists fields already customized in the page.
+                - currentPageSummary.formWidgets[].localFieldNames lists fields that are safe to remove with remove/remove_field.
+                - currentPageSummary.formWidgets[].serverBackedOverrideNames lists schema-backed field customizations such as relabels.
+                - For modify/add_field, do not repeat names from currentPageSummary.formWidgets[].fieldNames.
+                - For remove/remove_field, use only names from currentPageSummary.formWidgets[].localFieldNames.
+                - For rename_or_relabel, prefer existing field names from the current page summary or schema-backed fields from the request schema.
                 - Prefer the smallest didactic form or incremental change that can satisfy the user request.
                 - Do not include server-managed, audit, id, status, timestamp, owner or workflow fields unless the user explicitly asked for them.
                 - For host-owned helper fields in modify/add_field, choose normal Praxis control types such as text, textarea, checkbox or select.
@@ -121,6 +132,7 @@ public class AgenticAuthoringPlanService {
                 candidate.resourcePath(),
                 submitActionRef,
                 candidate.schemaUrl(),
+                currentPageSummary,
                 intentResolution.targetApp(),
                 intentResolution.targetComponentId(),
                 submitActionRef);

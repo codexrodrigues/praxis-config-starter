@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 public class AgenticAuthoringCurrentPageAnalyzer {
 
@@ -36,6 +38,7 @@ public class AgenticAuthoringCurrentPageAnalyzer {
             form.put("schemaUrl", text(inputs, "schemaUrl"));
             form.put("submitUrl", text(inputs, "submitUrl"));
             form.put("submitMethod", text(inputs, "submitMethod"));
+            summarizeFields(inputs, form);
         }
         return summary;
     }
@@ -109,6 +112,106 @@ public class AgenticAuthoringCurrentPageAnalyzer {
             return normalized;
         }
         return normalized.isBlank() ? "" : "/" + normalized;
+    }
+
+    private void summarizeFields(JsonNode inputs, ObjectNode form) {
+        JsonNode config = inputs.path("config");
+        JsonNode fieldMetadata = config.path("fieldMetadata");
+        ArrayNode fieldNames = form.putArray("fieldNames");
+        ArrayNode localFieldNames = form.putArray("localFieldNames");
+        ArrayNode serverBackedOverrideNames = form.putArray("serverBackedOverrideNames");
+        ArrayNode fieldSummaries = form.putArray("fieldMetadata");
+        Set<String> seenFieldNames = new LinkedHashSet<>();
+        Set<String> seenLocalNames = new LinkedHashSet<>();
+        Set<String> seenServerBackedNames = new LinkedHashSet<>();
+
+        if (fieldMetadata.isArray()) {
+            for (JsonNode field : fieldMetadata) {
+                String name = text(field, "name");
+                if (name.isBlank()) {
+                    continue;
+                }
+                appendUnique(fieldNames, seenFieldNames, name);
+                boolean local = isLocalTransientField(field);
+                if (local) {
+                    appendUnique(localFieldNames, seenLocalNames, name);
+                } else {
+                    appendUnique(serverBackedOverrideNames, seenServerBackedNames, name);
+                }
+
+                ObjectNode fieldSummary = fieldSummaries.addObject();
+                fieldSummary.put("name", name);
+                putTextIfPresent(fieldSummary, "label", field);
+                putTextIfPresent(fieldSummary, "controlType", field);
+                putTextIfPresent(fieldSummary, "source", field);
+                if (field.has("transient")) {
+                    fieldSummary.put("transient", field.path("transient").asBoolean(false));
+                }
+                putTextIfPresent(fieldSummary, "submitPolicy", field);
+                if (field.has("required")) {
+                    fieldSummary.put("required", field.path("required").asBoolean(false));
+                }
+                if (field.has("formHidden")) {
+                    fieldSummary.put("formHidden", field.path("formHidden").asBoolean(false));
+                }
+            }
+        }
+
+        ArrayNode layoutFieldNames = form.putArray("layoutFieldNames");
+        Set<String> seenLayoutNames = new LinkedHashSet<>();
+        collectLayoutFieldNames(config.path("sections"), layoutFieldNames, seenLayoutNames);
+        form.put("fieldCount", seenFieldNames.size());
+        form.put("localFieldCount", seenLocalNames.size());
+    }
+
+    private void collectLayoutFieldNames(JsonNode sections, ArrayNode target, Set<String> seen) {
+        if (!sections.isArray()) {
+            return;
+        }
+        for (JsonNode section : sections) {
+            JsonNode rows = section.path("rows");
+            if (!rows.isArray()) {
+                continue;
+            }
+            for (JsonNode row : rows) {
+                JsonNode columns = row.path("columns");
+                if (!columns.isArray()) {
+                    continue;
+                }
+                for (JsonNode column : columns) {
+                    JsonNode fields = column.path("fields");
+                    if (!fields.isArray()) {
+                        continue;
+                    }
+                    for (JsonNode field : fields) {
+                        String name = field.isTextual() ? field.asText().trim() : text(field, "name");
+                        appendUnique(target, seen, name);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isLocalTransientField(JsonNode field) {
+        String source = text(field, "source");
+        String submitPolicy = text(field, "submitPolicy");
+        return "local".equalsIgnoreCase(source)
+                || field.path("transient").asBoolean(false)
+                || "omit".equalsIgnoreCase(submitPolicy);
+    }
+
+    private void appendUnique(ArrayNode target, Set<String> seen, String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (!normalized.isBlank() && seen.add(normalized)) {
+            target.add(normalized);
+        }
+    }
+
+    private void putTextIfPresent(ObjectNode target, String fieldName, JsonNode source) {
+        String value = text(source, fieldName);
+        if (!value.isBlank()) {
+            target.put(fieldName, value);
+        }
     }
 
     private String text(JsonNode node, String field) {

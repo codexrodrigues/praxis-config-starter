@@ -118,6 +118,9 @@ class AgenticAuthoringPlanServiceTest {
         assertThat(result.warnings()).contains("intent-resolution-applied");
         assertThat(promptCaptor.getValue()).contains("/api/human-resources/funcionarios");
         assertThat(promptCaptor.getValue()).contains("submitActionRef: POST /api/human-resources/funcionarios");
+        assertThat(promptCaptor.getValue()).contains("Current page summary:");
+        assertThat(promptCaptor.getValue()).contains("\"fieldNames\":[\"observacaoInterna\"]");
+        assertThat(promptCaptor.getValue()).contains("\"localFieldNames\":[\"observacaoInterna\"]");
     }
 
     @Test
@@ -207,6 +210,17 @@ class AgenticAuthoringPlanServiceTest {
                 java.util.List.of(),
                 java.util.List.of(),
                 java.util.List.of(),
-                objectMapper.createObjectNode());
+                currentPageSummary());
+    }
+
+    private ObjectNode currentPageSummary() {
+        ObjectNode summary = objectMapper.createObjectNode();
+        var formWidgets = summary.putArray("formWidgets");
+        ObjectNode formWidget = formWidgets.addObject();
+        formWidget.put("widgetKey", "funcionarios-form");
+        formWidget.putArray("fieldNames").add("observacaoInterna");
+        formWidget.putArray("localFieldNames").add("observacaoInterna");
+        formWidget.putArray("serverBackedOverrideNames");
+        return summary;
     }
 }
