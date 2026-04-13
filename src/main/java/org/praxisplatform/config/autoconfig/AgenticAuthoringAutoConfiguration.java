@@ -71,8 +71,9 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnBean({AgenticAuthoringPlanService.class, AgenticAuthoringPatchCompilerService.class})
     public AgenticAuthoringPreviewService agenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
-            AgenticAuthoringPatchCompilerService patchCompilerService) {
-        return new AgenticAuthoringPreviewService(planService, patchCompilerService);
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringPreviewService(planService, patchCompilerService, objectMapper);
     }
 
     @Bean

@@ -80,6 +80,13 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("valid").asBoolean()).isTrue();
         assertThat(body.path("warnings")).extracting(JsonNode::asText)
                 .contains("current-page-summary-derived");
+        assertThat(body.path("diagnostics").path("derivedCurrentPageSummary").asBoolean()).isTrue();
+        assertThat(body.path("diagnostics").path("targetWidgetKey").asText())
+                .isEqualTo("api-human-resources-funcionarios-form");
+        assertThat(body.path("diagnostics").path("operationKind").asText()).isEqualTo("remove");
+        assertThat(body.path("diagnostics").path("changeKind").asText()).isEqualTo("remove_field");
+        assertThat(body.path("diagnostics").path("fieldScopeDecision").asText())
+                .isEqualTo("accepted-remove-local-field");
         assertThat(body.path("compiledFormPatch").path("warnings")).extracting(JsonNode::asText)
                 .contains("local-transient-fields-removed-only");
         JsonNode inputs = body.path("compiledFormPatch").path("patch").path("page")

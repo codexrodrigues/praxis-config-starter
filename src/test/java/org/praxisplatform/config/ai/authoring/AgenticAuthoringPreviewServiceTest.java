@@ -43,6 +43,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.warnings()).contains("minimal-form-plan-only", "compiled-from-minimal-form-plan");
         assertThat(result.minimalFormPlan()).isSameAs(plan);
         assertThat(result.compiledFormPatch()).isSameAs(patch);
+        assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("not-evaluated");
     }
 
     @Test
@@ -58,6 +59,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.failureCodes()).containsExactly("titulo is required");
         assertThat(result.warnings()).contains("compile-skipped-invalid-minimal-form-plan");
         assertThat(result.compiledFormPatch().isMissingNode()).isTrue();
+        assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("not-evaluated");
     }
 
     @Test
@@ -86,6 +88,10 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.compiledFormPatch()).isSameAs(patch);
         assertThat(result.warnings()).contains("compiled-as-current-page-modification");
+        assertThat(result.diagnostics().operationKind()).isEqualTo("modify");
+        assertThat(result.diagnostics().changeKind()).isEqualTo("add_field");
+        assertThat(result.diagnostics().targetWidgetKey()).isEqualTo("funcionarios-form");
+        assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("accepted-add-local-field");
     }
 
     @Test
@@ -114,6 +120,9 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.compiledFormPatch()).isSameAs(patch);
         assertThat(result.warnings()).contains("local-transient-fields-removed-only");
+        assertThat(result.diagnostics().operationKind()).isEqualTo("remove");
+        assertThat(result.diagnostics().changeKind()).isEqualTo("remove_field");
+        assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("accepted-remove-local-field");
     }
 
     private AgenticAuthoringPreviewService service() {

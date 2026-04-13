@@ -1,5 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -10,12 +11,21 @@ public class AgenticAuthoringPreviewService {
 
     private final AgenticAuthoringPlanService planService;
     private final AgenticAuthoringPatchCompilerService patchCompilerService;
+    private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
             AgenticAuthoringPatchCompilerService patchCompilerService) {
+        this(planService, patchCompilerService, new ObjectMapper());
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
+        this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -23,7 +33,9 @@ public class AgenticAuthoringPreviewService {
             String tenantId,
             String userId,
             String environment) throws IOException {
-        AgenticAuthoringIntentResolutionResult intentResolution = request == null ? null : request.intentResolution();
+        AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
+        AgenticAuthoringIntentResolutionResult intentResolution =
+                effectiveRequest == null ? null : effectiveRequest.intentResolution();
         List<String> intentFailures = validateIntentResolution(intentResolution);
         if (!intentFailures.isEmpty()) {
             List<String> warnings = new ArrayList<>();
@@ -36,11 +48,12 @@ public class AgenticAuthoringPreviewService {
                     List.copyOf(intentFailures),
                     List.copyOf(warnings),
                     MissingNode.getInstance(),
-                    MissingNode.getInstance()
+                    MissingNode.getInstance(),
+                    diagnostics(intentResolution, List.copyOf(intentFailures), List.copyOf(warnings))
             );
         }
         AgenticAuthoringPlanResult planResult =
-                planService.generateMinimalFormPlan(request, tenantId, userId, environment);
+                planService.generateMinimalFormPlan(effectiveRequest, tenantId, userId, environment);
         List<String> failureCodes = new ArrayList<>(planResult.failureCodes());
         List<String> warnings = new ArrayList<>(planResult.warnings());
         if (!planResult.valid()) {
@@ -50,14 +63,15 @@ public class AgenticAuthoringPreviewService {
                     List.copyOf(failureCodes),
                     List.copyOf(warnings),
                     planResult.minimalFormPlan(),
-                    MissingNode.getInstance()
+                    MissingNode.getInstance(),
+                    diagnostics(intentResolution, List.copyOf(failureCodes), List.copyOf(warnings))
             );
         }
 
         AgenticAuthoringCompileResult compileResult =
                 patchCompilerService.compile(new AgenticAuthoringCompileRequest(
                         planResult.minimalFormPlan(),
-                        request.currentPage(),
+                        effectiveRequest == null ? null : effectiveRequest.currentPage(),
                         intentResolution));
         failureCodes.addAll(compileResult.failureCodes());
         warnings.addAll(compileResult.warnings());
@@ -66,8 +80,72 @@ public class AgenticAuthoringPreviewService {
                 List.copyOf(failureCodes),
                 List.copyOf(warnings),
                 planResult.minimalFormPlan(),
-                compileResult.compiledFormPatch()
+                compileResult.compiledFormPatch(),
+                diagnostics(intentResolution, List.copyOf(failureCodes), List.copyOf(warnings))
         );
+    }
+
+    private AgenticAuthoringPlanRequest enrichRequest(AgenticAuthoringPlanRequest request) {
+        if (request == null) {
+            return null;
+        }
+        AgenticAuthoringIntentResolutionResult enrichedIntent =
+                intentResolutionContext.enrich(request.intentResolution(), request.currentPage());
+        if (enrichedIntent == request.intentResolution()) {
+            return request;
+        }
+        return new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                enrichedIntent);
+    }
+
+    private AgenticAuthoringPreviewDiagnostics diagnostics(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            List<String> failureCodes,
+            List<String> warnings) {
+        if (intentResolution == null) {
+            return new AgenticAuthoringPreviewDiagnostics(false, "", "", "", "not-evaluated");
+        }
+        String targetWidgetKey = intentResolution.target() == null ? "" : value(intentResolution.target().widgetKey());
+        boolean derived = warnings.contains("current-page-summary-derived")
+                || (intentResolution.warnings() != null && intentResolution.warnings().contains("current-page-summary-derived"));
+        return new AgenticAuthoringPreviewDiagnostics(
+                derived,
+                targetWidgetKey,
+                value(intentResolution.operationKind()),
+                value(intentResolution.changeKind()),
+                fieldScopeDecision(intentResolution, failureCodes));
+    }
+
+    private String fieldScopeDecision(AgenticAuthoringIntentResolutionResult intentResolution, List<String> failureCodes) {
+        if (failureCodes.stream().anyMatch(code -> code.startsWith("add_field duplicates existing field: "))) {
+            return "rejected-duplicate-field";
+        }
+        if (failureCodes.stream().anyMatch(code -> code.startsWith("remove_field requires current local/transient field: ")
+                || code.startsWith("remove_field requires local/transient field: "))) {
+            return "rejected-non-local-field-removal";
+        }
+        if ("modify".equals(intentResolution.operationKind()) && "add_field".equals(intentResolution.changeKind())) {
+            return "accepted-add-local-field";
+        }
+        if ("remove".equals(intentResolution.operationKind()) && "remove_field".equals(intentResolution.changeKind())) {
+            return "accepted-remove-local-field";
+        }
+        if ("modify".equals(intentResolution.operationKind()) && "rename_or_relabel".equals(intentResolution.changeKind())) {
+            return "accepted-relabel-server-backed-field";
+        }
+        if ("create".equals(intentResolution.operationKind())) {
+            return "accepted-create";
+        }
+        return "not-evaluated";
+    }
+
+    private String value(String value) {
+        return value == null ? "" : value;
     }
 
     private List<String> validateIntentResolution(AgenticAuthoringIntentResolutionResult intentResolution) {
