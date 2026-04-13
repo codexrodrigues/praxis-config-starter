@@ -37,8 +37,8 @@ public class AgenticAuthoringPatchCompilerService {
         List<String> failures = new ArrayList<>(planValidator.validate(plan, intentResolution));
         JsonNode catalog = readPageCreateCatalog();
         failures.addAll(validateCatalog(catalog));
-        if (isModifyAddField(intentResolution)) {
-            failures.addAll(validateModifyAddFieldRequest(request));
+        if (isSupportedModifyForm(intentResolution)) {
+            failures.addAll(validateModifyFormRequest(request));
         }
         JsonNode compiled = failures.isEmpty()
                 ? buildCompiledFormPatch(plan, catalog, request.currentPage(), intentResolution)
@@ -47,7 +47,7 @@ public class AgenticAuthoringPatchCompilerService {
         if (intentResolution != null) {
             warnings.add("compiled-from-intent-resolution");
         }
-        if (isModifyAddField(intentResolution)) {
+        if (isSupportedModifyForm(intentResolution)) {
             warnings.add("compiled-as-current-page-modification");
         }
         return new AgenticAuthoringCompileResult(
@@ -113,6 +113,9 @@ public class AgenticAuthoringPatchCompilerService {
         if (isModifyAddField(intentResolution)) {
             return buildModifyAddFieldPatch(plan, catalog, currentPage, intentResolution);
         }
+        if (isModifyRenameOrRelabel(intentResolution)) {
+            return buildModifyRenameOrRelabelPatch(plan, catalog, currentPage, intentResolution);
+        }
         AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
         String submitUrl = candidate == null ? text(catalog.path("evidence").path("operationRef"), "path") : candidate.submitUrl();
         String submitMethod = candidate == null ? text(catalog.path("evidence").path("operationRef"), "method") : candidate.submitMethod();
@@ -177,6 +180,46 @@ public class AgenticAuthoringPatchCompilerService {
         if (intentResolution != null) {
             warnings.add("compiled-from-intent-resolution");
         }
+        return root;
+    }
+
+    private JsonNode buildModifyRenameOrRelabelPatch(
+            JsonNode plan,
+            JsonNode catalog,
+            JsonNode currentPage,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        ObjectNode root = buildPatchEnvelope(plan, catalog, intentResolution, "modify-existing-form");
+        ObjectNode patch = root.putObject("patch");
+        ObjectNode page = currentPage.deepCopy();
+        ObjectNode widget = resolveTargetWidget(page, intentResolution);
+        ObjectNode inputs = object(widget.with("definition")).with("inputs");
+        ObjectNode config = object(inputs.with("config"));
+        ArrayNode fieldMetadata = array(config.withArray("fieldMetadata"));
+
+        for (JsonNode field : plan.path("fields")) {
+            String name = text(field, "name");
+            String label = text(field, "label");
+            if (name.isBlank() || label.isBlank()) {
+                continue;
+            }
+            ObjectNode configuredField = findFieldMetadata(fieldMetadata, name);
+            if (configuredField == null) {
+                configuredField = fieldMetadata.addObject();
+                configuredField.put("name", name);
+            }
+            configuredField.put("label", label);
+            if (!text(field, "controlType").isBlank() && !configuredField.has("controlType")) {
+                configuredField.put("controlType", normalizeControlType(text(field, "controlType")));
+            }
+            if (field.has("required") && !configuredField.has("required")) {
+                configuredField.put("required", field.path("required").asBoolean(false));
+            }
+        }
+
+        patch.set("page", page);
+        ArrayNode warnings = array(root.withArray("warnings"));
+        warnings.add("compiled-as-current-page-modification");
+        warnings.add("server-backed-field-labels-customized-locally");
         return root;
     }
 
@@ -257,19 +300,23 @@ public class AgenticAuthoringPatchCompilerService {
         return root;
     }
 
-    private List<String> validateModifyAddFieldRequest(AgenticAuthoringCompileRequest request) {
+    private List<String> validateModifyFormRequest(AgenticAuthoringCompileRequest request) {
         List<String> failures = new ArrayList<>();
         JsonNode currentPage = request.currentPage();
         if (currentPage == null || !currentPage.isObject()) {
-            failures.add("currentPage is required for modify add_field");
+            failures.add("currentPage is required for form modification");
             return failures;
         }
         ObjectNode page = currentPage.deepCopy();
         ObjectNode widget = resolveTargetWidget(page, request.intentResolution());
         if (widget == null) {
-            failures.add("target praxis-dynamic-form widget is required for modify add_field");
+            failures.add("target praxis-dynamic-form widget is required for form modification");
         }
         return failures;
+    }
+
+    private boolean isSupportedModifyForm(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return isModifyAddField(intentResolution) || isModifyRenameOrRelabel(intentResolution);
     }
 
     private boolean isModifyAddField(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -277,6 +324,13 @@ public class AgenticAuthoringPatchCompilerService {
                 && "modify".equals(intentResolution.operationKind())
                 && "form".equals(intentResolution.artifactKind())
                 && "add_field".equals(intentResolution.changeKind());
+    }
+
+    private boolean isModifyRenameOrRelabel(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return intentResolution != null
+                && "modify".equals(intentResolution.operationKind())
+                && "form".equals(intentResolution.artifactKind())
+                && "rename_or_relabel".equals(intentResolution.changeKind());
     }
 
     private ObjectNode resolveTargetWidget(ObjectNode page, AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -345,6 +399,15 @@ public class AgenticAuthoringPatchCompilerService {
             }
         }
         return false;
+    }
+
+    private ObjectNode findFieldMetadata(ArrayNode fieldMetadata, String name) {
+        for (JsonNode field : fieldMetadata) {
+            if (field.isObject() && name.equals(text(field, "name"))) {
+                return (ObjectNode) field;
+            }
+        }
+        return null;
     }
 
     private boolean containsText(ArrayNode values, String value) {

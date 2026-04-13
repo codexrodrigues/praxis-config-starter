@@ -99,10 +99,12 @@ public class AgenticAuthoringPlanService {
                 - fieldSelectionPlanRef must reference the resolved request schema URL.
                 - For operationKind=create, fields must include only fields that are truly necessary for the user request and the create request schema.
                 - For operationKind=modify and changeKind=add_field, fields must include only the newly requested host-owned fields to add to the existing form.
+                - For operationKind=modify and changeKind=rename_or_relabel, fields must include only existing field names with the new desired labels.
                 - For operationKind=modify, do not repeat fields that are already in the current page summary.
                 - Prefer the smallest didactic form or incremental change that can satisfy the user request.
                 - Do not include server-managed, audit, id, status, timestamp, owner or workflow fields unless the user explicitly asked for them.
                 - For host-owned helper fields in modify/add_field, choose normal Praxis control types such as text, textarea, checkbox or select.
+                - For rename_or_relabel, do not mark fields as local/transient; they remain server-backed label customizations.
                 - clarificationNeed.needed must be true only when the prompt cannot be satisfied safely from the resolved API candidate.
                 - sourceRefs must cite intent-resolution and the resolved schema URL.
                 """.formatted(

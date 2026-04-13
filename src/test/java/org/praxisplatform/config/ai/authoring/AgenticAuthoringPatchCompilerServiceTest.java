@@ -105,6 +105,33 @@ class AgenticAuthoringPatchCompilerServiceTest {
                 .path("columns").get(0).path("fields").get(0).asText()).isEqualTo("observacaoInterna");
     }
 
+    @Test
+    void compileRelabelsServerBackedFieldWithoutMakingItLocalForModifyIntent() throws Exception {
+        writeCatalog();
+        ObjectNode plan = funcionariosPlan();
+        ((ObjectNode) plan.path("fields").get(0)).put("name", "nome");
+        ((ObjectNode) plan.path("fields").get(0)).put("label", "Nome completo do colaborador");
+        ((ObjectNode) plan.path("fields").get(0)).put("controlType", "text");
+        ((ObjectNode) plan.path("fields").get(0)).put("required", true);
+
+        AgenticAuthoringCompileResult result = service()
+                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPage(), modifyRenameIntent()));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("compiled-as-current-page-modification");
+        ObjectNode inputs = (ObjectNode) result.compiledFormPatch().path("patch").path("page").path("widgets").get(0)
+                .path("definition").path("inputs");
+        JsonNode fieldMetadata = inputs.path("config").path("fieldMetadata");
+        assertThat(fieldMetadata).hasSize(1);
+        assertThat(fieldMetadata.get(0).path("name").asText()).isEqualTo("nome");
+        assertThat(fieldMetadata.get(0).path("label").asText()).isEqualTo("Nome completo do colaborador");
+        assertThat(fieldMetadata.get(0).has("source")).isFalse();
+        assertThat(fieldMetadata.get(0).has("transient")).isFalse();
+        assertThat(fieldMetadata.get(0).has("submitPolicy")).isFalse();
+        assertThat(inputs.path("schemaUrl").asText())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+    }
+
     private AgenticAuthoringPatchCompilerService service() {
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
         properties.setArtifactsDir(tempDir);
@@ -213,6 +240,39 @@ class AgenticAuthoringPatchCompilerServiceTest {
                 "modify",
                 "form",
                 "add_field",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "api-human-resources-funcionarios-form",
+                        "praxis-dynamic-form",
+                        "/api/human-resources/funcionarios",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "post"),
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.95,
+                        "matched funcionarios",
+                        java.util.List.of("funcionarios")),
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult modifyRenameIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "form",
+                "rename_or_relabel",
                 "create-minimal-form",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
