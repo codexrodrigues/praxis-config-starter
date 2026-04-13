@@ -84,8 +84,10 @@ public class AgenticAuthoringPreviewService {
         if (intentResolution.selectedCandidate() == null) {
             failures.add("intent-resolution-selected-candidate-required");
         }
-        if (!"create".equals(intentResolution.operationKind()) && !"modify".equals(intentResolution.operationKind())) {
-            failures.add("intent-resolution-operation-must-be-create-or-modify");
+        if (!"create".equals(intentResolution.operationKind())
+                && !"modify".equals(intentResolution.operationKind())
+                && !"remove".equals(intentResolution.operationKind())) {
+            failures.add("intent-resolution-operation-must-be-create-modify-or-remove");
         }
         if (!"form".equals(intentResolution.artifactKind())) {
             failures.add("intent-resolution-artifact-must-be-form");

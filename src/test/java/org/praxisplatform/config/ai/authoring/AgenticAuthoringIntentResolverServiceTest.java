@@ -105,6 +105,39 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void resolvesRemoveFieldAgainstExistingDynamicForm() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "funcionarios-form");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-dynamic-form");
+        ObjectNode inputs = definition.putObject("inputs");
+        inputs.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        inputs.put("submitUrl", "/api/human-resources/funcionarios");
+        inputs.put("submitMethod", "post");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Remova o campo observacaoInterna do formulario",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                "funcionarios-form",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("remove");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("remove_field");
+        assertThat(result.authoringProfile()).isEqualTo("create-minimal-form");
+        assertThat(result.target().widgetKey()).isEqualTo("funcionarios-form");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
     void asksClarificationWhenModifyHasNoTargetWidget() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Adicione prioridade no formulario",

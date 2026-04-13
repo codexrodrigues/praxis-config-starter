@@ -132,6 +132,47 @@ class AgenticAuthoringPatchCompilerServiceTest {
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
     }
 
+    @Test
+    void compileRemovesLocalTransientFieldFromExistingDynamicFormForRemoveIntent() throws Exception {
+        writeCatalog();
+        ObjectNode plan = funcionariosPlan();
+        ((ObjectNode) plan.path("fields").get(0)).put("name", "observacaoInterna");
+        ((ObjectNode) plan.path("fields").get(0)).put("label", "Observacao interna");
+        ((ObjectNode) plan.path("fields").get(0)).put("controlType", "textarea");
+        ((ObjectNode) plan.path("fields").get(0)).put("required", false);
+
+        AgenticAuthoringCompileResult result = service()
+                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPageWithLocalObservacao(), removeFieldIntent()));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.compiledFormPatch().path("warnings").toString())
+                .contains("local-transient-fields-removed-only");
+        ObjectNode inputs = (ObjectNode) result.compiledFormPatch().path("patch").path("page").path("widgets").get(0)
+                .path("definition").path("inputs");
+        JsonNode fieldMetadata = inputs.path("config").path("fieldMetadata");
+        assertThat(fieldMetadata).isEmpty();
+        JsonNode sections = inputs.path("config").path("sections");
+        assertThat(sections).isEmpty();
+        assertThat(inputs.path("schemaUrl").asText())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+    }
+
+    @Test
+    void compileRejectsRemovingServerBackedFieldWithoutLocalTransientSemantics() throws Exception {
+        writeCatalog();
+        ObjectNode plan = funcionariosPlan();
+        ((ObjectNode) plan.path("fields").get(0)).put("name", "nome");
+        ((ObjectNode) plan.path("fields").get(0)).put("label", "Nome");
+        ((ObjectNode) plan.path("fields").get(0)).put("controlType", "text");
+
+        AgenticAuthoringCompileResult result = service()
+                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPageWithServerBackedNome(), removeFieldIntent()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("remove_field requires local/transient field: nome");
+        assertThat(result.compiledFormPatch().isEmpty()).isTrue();
+    }
+
     private AgenticAuthoringPatchCompilerService service() {
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
         properties.setArtifactsDir(tempDir);
@@ -300,6 +341,39 @@ class AgenticAuthoringPatchCompilerServiceTest {
                 objectMapper.createObjectNode());
     }
 
+    private AgenticAuthoringIntentResolutionResult removeFieldIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "remove",
+                "form",
+                "remove_field",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "api-human-resources-funcionarios-form",
+                        "praxis-dynamic-form",
+                        "/api/human-resources/funcionarios",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "post"),
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.95,
+                        "matched funcionarios",
+                        java.util.List.of("funcionarios")),
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                objectMapper.createObjectNode());
+    }
+
     private ObjectNode currentFuncionariosPage() {
         ObjectNode page = objectMapper.createObjectNode();
         ObjectNode canvas = page.putObject("canvas");
@@ -339,6 +413,42 @@ class AgenticAuthoringPatchCompilerServiceTest {
         nome.put("source", "local");
         nome.put("transient", true);
         nome.put("submitPolicy", "omit");
+        return page;
+    }
+
+    private ObjectNode currentFuncionariosPageWithLocalObservacao() {
+        ObjectNode page = currentFuncionariosPage();
+        ObjectNode inputs = (ObjectNode) page.path("widgets").get(0).path("definition").path("inputs");
+        ObjectNode config = inputs.putObject("config");
+        ArrayNode fieldMetadata = config.putArray("fieldMetadata");
+        ObjectNode field = fieldMetadata.addObject();
+        field.put("name", "observacaoInterna");
+        field.put("label", "Observacao interna");
+        field.put("controlType", "textarea");
+        field.put("source", "local");
+        field.put("transient", true);
+        field.put("submitPolicy", "omit");
+        ObjectNode section = config.putArray("sections").addObject();
+        section.put("id", "agentic-local-fields");
+        section.put("title", "Campos adicionais");
+        ObjectNode row = section.putArray("rows").addObject();
+        row.put("id", "agentic-local-fields-row");
+        ObjectNode column = row.putArray("columns").addObject();
+        column.put("id", "agentic-local-fields-column");
+        column.put("span", 12);
+        column.putArray("fields").add("observacaoInterna");
+        return page;
+    }
+
+    private ObjectNode currentFuncionariosPageWithServerBackedNome() {
+        ObjectNode page = currentFuncionariosPage();
+        ObjectNode inputs = (ObjectNode) page.path("widgets").get(0).path("definition").path("inputs");
+        ObjectNode config = inputs.putObject("config");
+        ArrayNode fieldMetadata = config.putArray("fieldMetadata");
+        ObjectNode field = fieldMetadata.addObject();
+        field.put("name", "nome");
+        field.put("label", "Nome");
+        field.put("controlType", "text");
         return page;
     }
 }

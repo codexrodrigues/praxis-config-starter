@@ -65,7 +65,7 @@ public class AgenticAuthoringIntentResolverService {
         if (containsAny(prompt, "conectar", "ligar", "vincular", "relacionar")) {
             return "connect";
         }
-        if (containsAny(prompt, "remover", "remove", "excluir", "apagar", "retirar")) {
+        if (containsAny(prompt, "remover", "remova", "remove", "excluir", "exclua", "apagar", "apague", "retirar", "retire")) {
             return "remove";
         }
         if (containsAny(prompt, "alterar", "altere", "mudar", "mude", "trocar", "troque",
@@ -176,7 +176,9 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private String authoringProfile(String operationKind, String artifactKind) {
-        if ("form".equals(artifactKind) && ("create".equals(operationKind) || "modify".equals(operationKind))) {
+        if ("form".equals(artifactKind) && ("create".equals(operationKind)
+                || "modify".equals(operationKind)
+                || "remove".equals(operationKind))) {
             return "create-minimal-form";
         }
         return "generic-page-change";

@@ -37,7 +37,7 @@ public class AgenticAuthoringPatchCompilerService {
         List<String> failures = new ArrayList<>(planValidator.validate(plan, intentResolution));
         JsonNode catalog = readPageCreateCatalog();
         failures.addAll(validateCatalog(catalog));
-        if (isSupportedModifyForm(intentResolution)) {
+        if (isSupportedFormChange(intentResolution)) {
             failures.addAll(validateModifyFormRequest(request));
         }
         JsonNode compiled = failures.isEmpty()
@@ -47,7 +47,7 @@ public class AgenticAuthoringPatchCompilerService {
         if (intentResolution != null) {
             warnings.add("compiled-from-intent-resolution");
         }
-        if (isSupportedModifyForm(intentResolution)) {
+        if (isSupportedFormChange(intentResolution)) {
             warnings.add("compiled-as-current-page-modification");
         }
         return new AgenticAuthoringCompileResult(
@@ -116,6 +116,9 @@ public class AgenticAuthoringPatchCompilerService {
         if (isModifyRenameOrRelabel(intentResolution)) {
             return buildModifyRenameOrRelabelPatch(plan, catalog, currentPage, intentResolution);
         }
+        if (isRemoveField(intentResolution)) {
+            return buildRemoveFieldPatch(plan, catalog, currentPage, intentResolution);
+        }
         AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
         String submitUrl = candidate == null ? text(catalog.path("evidence").path("operationRef"), "path") : candidate.submitUrl();
         String submitMethod = candidate == null ? text(catalog.path("evidence").path("operationRef"), "method") : candidate.submitMethod();
@@ -180,6 +183,36 @@ public class AgenticAuthoringPatchCompilerService {
         if (intentResolution != null) {
             warnings.add("compiled-from-intent-resolution");
         }
+        return root;
+    }
+
+    private JsonNode buildRemoveFieldPatch(
+            JsonNode plan,
+            JsonNode catalog,
+            JsonNode currentPage,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        ObjectNode root = buildPatchEnvelope(plan, catalog, intentResolution, "modify-existing-form");
+        ObjectNode patch = root.putObject("patch");
+        ObjectNode page = currentPage.deepCopy();
+        ObjectNode widget = resolveTargetWidget(page, intentResolution);
+        ObjectNode inputs = object(widget.with("definition")).with("inputs");
+        ObjectNode config = object(inputs.with("config"));
+        ArrayNode fieldMetadata = array(config.withArray("fieldMetadata"));
+
+        for (JsonNode field : plan.path("fields")) {
+            String name = text(field, "name");
+            if (name.isBlank()) {
+                continue;
+            }
+            removeFieldMetadata(fieldMetadata, name);
+            removeFieldFromSections(config.path("sections"), name);
+        }
+        removeEmptyAgenticLocalSections(config.path("sections"));
+
+        patch.set("page", page);
+        ArrayNode warnings = array(root.withArray("warnings"));
+        warnings.add("compiled-as-current-page-modification");
+        warnings.add("local-transient-fields-removed-only");
         return root;
     }
 
@@ -312,12 +345,18 @@ public class AgenticAuthoringPatchCompilerService {
         ObjectNode widget = resolveTargetWidget(page, request.intentResolution());
         if (widget == null) {
             failures.add("target praxis-dynamic-form widget is required for form modification");
+            return failures;
+        }
+        if (isRemoveField(request.intentResolution())) {
+            failures.addAll(validateRemoveFields(request, widget));
         }
         return failures;
     }
 
-    private boolean isSupportedModifyForm(AgenticAuthoringIntentResolutionResult intentResolution) {
-        return isModifyAddField(intentResolution) || isModifyRenameOrRelabel(intentResolution);
+    private boolean isSupportedFormChange(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return isModifyAddField(intentResolution)
+                || isModifyRenameOrRelabel(intentResolution)
+                || isRemoveField(intentResolution);
     }
 
     private boolean isModifyAddField(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -332,6 +371,34 @@ public class AgenticAuthoringPatchCompilerService {
                 && "modify".equals(intentResolution.operationKind())
                 && "form".equals(intentResolution.artifactKind())
                 && "rename_or_relabel".equals(intentResolution.changeKind());
+    }
+
+    private boolean isRemoveField(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return intentResolution != null
+                && "remove".equals(intentResolution.operationKind())
+                && "form".equals(intentResolution.artifactKind())
+                && "remove_field".equals(intentResolution.changeKind());
+    }
+
+    private List<String> validateRemoveFields(
+            AgenticAuthoringCompileRequest request,
+            ObjectNode widget) {
+        List<String> failures = new ArrayList<>();
+        JsonNode fields = request.minimalFormPlan().path("fields");
+        ObjectNode inputs = object(widget.with("definition")).with("inputs");
+        ObjectNode config = object(inputs.with("config"));
+        ArrayNode fieldMetadata = array(config.withArray("fieldMetadata"));
+        for (JsonNode field : fields) {
+            String name = text(field, "name");
+            if (name.isBlank()) {
+                continue;
+            }
+            ObjectNode configuredField = findFieldMetadata(fieldMetadata, name);
+            if (configuredField == null || !isLocalTransientField(configuredField)) {
+                failures.add("remove_field requires local/transient field: " + name);
+            }
+        }
+        return failures;
     }
 
     private ObjectNode resolveTargetWidget(ObjectNode page, AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -409,6 +476,75 @@ public class AgenticAuthoringPatchCompilerService {
             }
         }
         return null;
+    }
+
+    private void removeFieldMetadata(ArrayNode fieldMetadata, String name) {
+        for (int i = fieldMetadata.size() - 1; i >= 0; i--) {
+            JsonNode field = fieldMetadata.get(i);
+            if (field.isObject() && name.equals(text(field, "name"))) {
+                fieldMetadata.remove(i);
+            }
+        }
+    }
+
+    private void removeFieldFromSections(JsonNode sections, String name) {
+        if (!sections.isArray()) {
+            return;
+        }
+        for (JsonNode section : sections) {
+            JsonNode rows = section.path("rows");
+            if (!rows.isArray()) {
+                continue;
+            }
+            for (JsonNode row : rows) {
+                JsonNode columns = row.path("columns");
+                if (!columns.isArray()) {
+                    continue;
+                }
+                for (JsonNode column : columns) {
+                    JsonNode fields = column.path("fields");
+                    if (!fields.isArray()) {
+                        continue;
+                    }
+                    ArrayNode array = (ArrayNode) fields;
+                    for (int i = array.size() - 1; i >= 0; i--) {
+                        if (name.equals(array.get(i).asText())) {
+                            array.remove(i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void removeEmptyAgenticLocalSections(JsonNode sections) {
+        if (!sections.isArray()) {
+            return;
+        }
+        ArrayNode array = (ArrayNode) sections;
+        for (int i = array.size() - 1; i >= 0; i--) {
+            JsonNode section = array.get(i);
+            if ("agentic-local-fields".equals(text(section, "id")) && !sectionContainsFields(section)) {
+                array.remove(i);
+            }
+        }
+    }
+
+    private boolean sectionContainsFields(JsonNode section) {
+        for (JsonNode row : section.path("rows")) {
+            for (JsonNode column : row.path("columns")) {
+                if (column.path("fields").isArray() && !column.path("fields").isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isLocalTransientField(JsonNode field) {
+        return "local".equals(text(field, "source"))
+                || field.path("transient").asBoolean(false)
+                || "omit".equals(text(field, "submitPolicy"));
     }
 
     private boolean containsText(ArrayNode values, String value) {

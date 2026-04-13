@@ -102,6 +102,8 @@ public class AgenticAuthoringPlanService {
                 - For modify/add_field, do not include schema-required fields just to make a submit payload valid; the current form already owns submit validity.
                 - For modify/add_field, if the user names a field explicitly, use a camelCase name derived from that requested field.
                 - For operationKind=modify and changeKind=rename_or_relabel, fields must include only existing field names with the new desired labels.
+                - For operationKind=remove and changeKind=remove_field, fields must include only existing host-owned local/transient field names explicitly requested for removal.
+                - For remove/remove_field, do not include server-backed schema fields; removing schema-owned fields requires a future schema-aware hide flow.
                 - For operationKind=modify, do not repeat fields that are already in the current page summary.
                 - Prefer the smallest didactic form or incremental change that can satisfy the user request.
                 - Do not include server-managed, audit, id, status, timestamp, owner or workflow fields unless the user explicitly asked for them.
