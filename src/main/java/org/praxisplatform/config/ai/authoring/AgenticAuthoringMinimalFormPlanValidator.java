@@ -1,6 +1,7 @@
 package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -119,6 +120,7 @@ public class AgenticAuthoringMinimalFormPlanValidator {
                         failures.add("blocked field present: " + blockedField);
                     }
                 }
+                validateCurrentPageFieldScope(name, intentResolution, failures);
             }
         }
         JsonNode clarification = plan.path("clarificationNeed");
@@ -130,6 +132,46 @@ public class AgenticAuthoringMinimalFormPlanValidator {
             failures.add("sourceRefs must not be empty");
         }
         return List.copyOf(failures);
+    }
+
+    private void validateCurrentPageFieldScope(
+            String fieldName,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            List<String> failures) {
+        if (fieldName.isBlank()) {
+            return;
+        }
+        JsonNode formSummary = targetFormSummary(intentResolution);
+        String operationKind = intentResolution.operationKind();
+        String changeKind = intentResolution.changeKind();
+        if ("modify".equals(operationKind) && "add_field".equals(changeKind)
+                && containsText(formSummary.path("fieldNames"), fieldName)) {
+            failures.add("add_field duplicates existing field: " + fieldName);
+        }
+        if ("remove".equals(operationKind) && "remove_field".equals(changeKind)
+                && !containsText(formSummary.path("localFieldNames"), fieldName)) {
+            failures.add("remove_field requires current local/transient field: " + fieldName);
+        }
+    }
+
+    private JsonNode targetFormSummary(AgenticAuthoringIntentResolutionResult intentResolution) {
+        JsonNode currentPageSummary = intentResolution.currentPageSummary();
+        if (currentPageSummary == null) {
+            return MissingNode.getInstance();
+        }
+        JsonNode formWidgets = currentPageSummary.path("formWidgets");
+        if (!formWidgets.isArray() || formWidgets.isEmpty()) {
+            return MissingNode.getInstance();
+        }
+        AgenticAuthoringTarget target = intentResolution.target();
+        if (target != null && target.widgetKey() != null && !target.widgetKey().isBlank()) {
+            for (JsonNode formWidget : formWidgets) {
+                if (target.widgetKey().equals(text(formWidget, "widgetKey"))) {
+                    return formWidget;
+                }
+            }
+        }
+        return formWidgets.get(0);
     }
 
     private String submitActionRef(AgenticAuthoringCandidate candidate) {
@@ -149,6 +191,18 @@ public class AgenticAuthoringMinimalFormPlanValidator {
     private boolean containsField(JsonNode fields, String fieldName) {
         for (JsonNode field : fields) {
             if (fieldName.equals(text(field, "name"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsText(JsonNode values, String expected) {
+        if (!values.isArray()) {
+            return false;
+        }
+        for (JsonNode value : values) {
+            if (expected.equals(value.asText(""))) {
                 return true;
             }
         }

@@ -142,7 +142,10 @@ class AgenticAuthoringPatchCompilerServiceTest {
         ((ObjectNode) plan.path("fields").get(0)).put("required", false);
 
         AgenticAuthoringCompileResult result = service()
-                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPageWithLocalObservacao(), removeFieldIntent()));
+                .compile(new AgenticAuthoringCompileRequest(
+                        plan,
+                        currentFuncionariosPageWithLocalObservacao(),
+                        removeFieldIntent(currentPageSummaryWithLocalObservacao())));
 
         assertThat(result.valid()).isTrue();
         assertThat(result.compiledFormPatch().path("warnings").toString())
@@ -166,10 +169,13 @@ class AgenticAuthoringPatchCompilerServiceTest {
         ((ObjectNode) plan.path("fields").get(0)).put("controlType", "text");
 
         AgenticAuthoringCompileResult result = service()
-                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPageWithServerBackedNome(), removeFieldIntent()));
+                .compile(new AgenticAuthoringCompileRequest(
+                        plan,
+                        currentFuncionariosPageWithServerBackedNome(),
+                        removeFieldIntent(currentPageSummaryWithServerBackedNome())));
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.failureCodes()).contains("remove_field requires local/transient field: nome");
+        assertThat(result.failureCodes()).contains("remove_field requires current local/transient field: nome");
         assertThat(result.compiledFormPatch().isEmpty()).isTrue();
     }
 
@@ -341,7 +347,7 @@ class AgenticAuthoringPatchCompilerServiceTest {
                 objectMapper.createObjectNode());
     }
 
-    private AgenticAuthoringIntentResolutionResult removeFieldIntent() {
+    private AgenticAuthoringIntentResolutionResult removeFieldIntent(JsonNode currentPageSummary) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
                 "remove",
@@ -371,7 +377,27 @@ class AgenticAuthoringPatchCompilerServiceTest {
                 java.util.List.of(),
                 java.util.List.of(),
                 java.util.List.of(),
-                objectMapper.createObjectNode());
+                currentPageSummary);
+    }
+
+    private ObjectNode currentPageSummaryWithLocalObservacao() {
+        ObjectNode summary = objectMapper.createObjectNode();
+        ObjectNode formWidget = summary.putArray("formWidgets").addObject();
+        formWidget.put("widgetKey", "api-human-resources-funcionarios-form");
+        formWidget.putArray("fieldNames").add("observacaoInterna");
+        formWidget.putArray("localFieldNames").add("observacaoInterna");
+        formWidget.putArray("serverBackedOverrideNames");
+        return summary;
+    }
+
+    private ObjectNode currentPageSummaryWithServerBackedNome() {
+        ObjectNode summary = objectMapper.createObjectNode();
+        ObjectNode formWidget = summary.putArray("formWidgets").addObject();
+        formWidget.put("widgetKey", "api-human-resources-funcionarios-form");
+        formWidget.putArray("fieldNames").add("nome");
+        formWidget.putArray("localFieldNames");
+        formWidget.putArray("serverBackedOverrideNames").add("nome");
+        return summary;
     }
 
     private ObjectNode currentFuncionariosPage() {

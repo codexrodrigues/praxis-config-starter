@@ -124,6 +124,56 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanRejectsDuplicateAddFieldFromCurrentPageSummary() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("observacaoInterna", "Observacao interna", "textarea");
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Adicione o campo observacaoInterna",
+                                null,
+                                null,
+                                null,
+                                funcionariosIntent("modify", "add_field")),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("add_field duplicates existing field: observacaoInterna");
+    }
+
+    @Test
+    void generateMinimalFormPlanRejectsRemoveFieldOutsideLocalFieldNames() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("nome", "Nome", "text");
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Remova o campo nome",
+                                null,
+                                null,
+                                null,
+                                funcionariosIntent("remove", "remove_field")),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("remove_field requires current local/transient field: nome");
+    }
+
+    @Test
     void generateMinimalFormPlanRequiresConfiguredContractsDir() {
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
 
@@ -165,6 +215,10 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     private ObjectNode funcionariosPlan() {
+        return funcionariosPlan("nome", "Nome", "text");
+    }
+
+    private ObjectNode funcionariosPlan(String fieldName, String fieldLabel, String controlType) {
         ObjectNode plan = objectMapper.createObjectNode();
         plan.put("version", "1.0.0");
         plan.put("profileId", "create-minimal-form");
@@ -174,11 +228,11 @@ class AgenticAuthoringPlanServiceTest {
         plan.put("fieldSelectionPlanRef", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
         plan.put("submitActionRef", "POST /api/human-resources/funcionarios");
         ArrayNode fields = plan.putArray("fields");
-        ObjectNode nome = fields.addObject();
-        nome.put("name", "nome");
-        nome.put("label", "Nome");
-        nome.put("controlType", "text");
-        nome.put("required", true);
+        ObjectNode field = fields.addObject();
+        field.put("name", fieldName);
+        field.put("label", fieldLabel);
+        field.put("controlType", controlType);
+        field.put("required", true);
         ObjectNode clarification = plan.putObject("clarificationNeed");
         clarification.put("needed", false);
         clarification.put("code", "none");
@@ -187,11 +241,15 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     private AgenticAuthoringIntentResolutionResult funcionariosIntent() {
+        return funcionariosIntent("create", "create_minimal_form");
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionariosIntent(String operationKind, String changeKind) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
-                "create",
+                operationKind,
                 "form",
-                "create_minimal_form",
+                changeKind,
                 "create-minimal-form",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
