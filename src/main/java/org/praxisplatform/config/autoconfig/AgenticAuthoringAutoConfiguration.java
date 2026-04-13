@@ -61,8 +61,9 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnBean(AiProviderManagementService.class)
     public AgenticAuthoringPlanService agenticAuthoringPlanService(
             AiProviderManagementService providerManagementService,
-            AgenticAuthoringArtifactProperties properties) {
-        return new AgenticAuthoringPlanService(providerManagementService, properties);
+            AgenticAuthoringArtifactProperties properties,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringPlanService(providerManagementService, properties, objectMapper);
     }
 
     @Bean

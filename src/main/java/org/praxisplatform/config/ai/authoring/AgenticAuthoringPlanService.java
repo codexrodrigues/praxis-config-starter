@@ -1,9 +1,11 @@
 package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import org.praxisplatform.config.service.AiCallConfig;
@@ -15,13 +17,22 @@ public class AgenticAuthoringPlanService {
     private final AiProviderManagementService providerManagementService;
     private final AgenticAuthoringArtifactProperties properties;
     private final AgenticAuthoringMinimalFormPlanValidator validator;
+    private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
 
     public AgenticAuthoringPlanService(
             AiProviderManagementService providerManagementService,
             AgenticAuthoringArtifactProperties properties) {
+        this(providerManagementService, properties, new ObjectMapper());
+    }
+
+    public AgenticAuthoringPlanService(
+            AiProviderManagementService providerManagementService,
+            AgenticAuthoringArtifactProperties properties,
+            ObjectMapper objectMapper) {
         this.providerManagementService = Objects.requireNonNull(providerManagementService, "providerManagementService must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.validator = new AgenticAuthoringMinimalFormPlanValidator();
+        this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
     }
 
     public AgenticAuthoringPlanResult generateMinimalFormPlan(
@@ -32,13 +43,14 @@ public class AgenticAuthoringPlanService {
         if (request == null || request.userPrompt() == null || request.userPrompt().isBlank()) {
             throw new IllegalArgumentException("userPrompt must not be blank.");
         }
+        AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         JsonNode plan = providerManagementService.generateJson(
-                minimalFormPlanPrompt(request),
+                minimalFormPlanPrompt(effectiveRequest),
                 AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
                 AiCallConfig.builder()
-                        .provider(request.provider())
-                        .model(request.model())
-                        .apiKey(request.apiKey())
+                        .provider(effectiveRequest.provider())
+                        .model(effectiveRequest.model())
+                        .apiKey(effectiveRequest.apiKey())
                         .temperature(0.0d)
                         .maxTokens(2048)
                         .build(),
@@ -46,20 +58,42 @@ public class AgenticAuthoringPlanService {
                 userId,
                 environment
         );
-        List<String> failures = validator.validate(plan, request.intentResolution());
+        List<String> failures = validator.validate(plan, effectiveRequest.intentResolution());
         return new AgenticAuthoringPlanResult(
                 failures.isEmpty(),
                 failures,
-                warnings(request.intentResolution()),
+                warnings(effectiveRequest.intentResolution()),
                 plan
         );
+    }
+
+    private AgenticAuthoringPlanRequest enrichRequest(AgenticAuthoringPlanRequest request) {
+        AgenticAuthoringIntentResolutionResult enrichedIntent =
+                intentResolutionContext.enrich(request.intentResolution(), request.currentPage());
+        if (enrichedIntent == request.intentResolution()) {
+            return request;
+        }
+        return new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                enrichedIntent);
     }
 
     private List<String> warnings(AgenticAuthoringIntentResolutionResult intentResolution) {
         if (intentResolution == null) {
             return List.of("minimal-form-plan-only", "patch-compilation-not-run");
         }
-        return List.of("minimal-form-plan-only", "patch-compilation-not-run", "intent-resolution-applied");
+        List<String> warnings = new ArrayList<>(List.of(
+                "minimal-form-plan-only",
+                "patch-compilation-not-run",
+                "intent-resolution-applied"));
+        if (intentResolution.warnings() != null) {
+            warnings.addAll(intentResolution.warnings());
+        }
+        return List.copyOf(warnings);
     }
 
     private String minimalFormPlanPrompt(AgenticAuthoringPlanRequest request) {

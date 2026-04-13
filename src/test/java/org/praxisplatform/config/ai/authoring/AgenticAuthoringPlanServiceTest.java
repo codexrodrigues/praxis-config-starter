@@ -124,6 +124,39 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanDerivesCurrentPageSummaryWhenIntentIsIncomplete() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("observacaoInterna", "Observacao interna", "textarea");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Adicione o campo observacaoInterna",
+                                null,
+                                null,
+                                null,
+                                currentPageWithLocalObservacao(),
+                                funcionariosIntent("remove", "remove_field", objectMapper.createObjectNode())),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("intent-resolution-applied", "current-page-summary-derived");
+        assertThat(promptCaptor.getValue()).contains("\"localFieldNames\":[\"observacaoInterna\"]");
+    }
+
+    @Test
     void generateMinimalFormPlanRejectsDuplicateAddFieldFromCurrentPageSummary() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
@@ -245,6 +278,13 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     private AgenticAuthoringIntentResolutionResult funcionariosIntent(String operationKind, String changeKind) {
+        return funcionariosIntent(operationKind, changeKind, currentPageSummary());
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionariosIntent(
+            String operationKind,
+            String changeKind,
+            ObjectNode currentPageSummary) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
                 operationKind,
@@ -268,7 +308,7 @@ class AgenticAuthoringPlanServiceTest {
                 java.util.List.of(),
                 java.util.List.of(),
                 java.util.List.of(),
-                currentPageSummary());
+                currentPageSummary);
     }
 
     private ObjectNode currentPageSummary() {
@@ -280,5 +320,27 @@ class AgenticAuthoringPlanServiceTest {
         formWidget.putArray("localFieldNames").add("observacaoInterna");
         formWidget.putArray("serverBackedOverrideNames");
         return summary;
+    }
+
+    private ObjectNode currentPageWithLocalObservacao() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "funcionarios-form");
+        ObjectNode inputs = widget.putObject("definition")
+                .put("id", "praxis-dynamic-form")
+                .putObject("inputs");
+        inputs.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        inputs.put("submitUrl", "/api/human-resources/funcionarios");
+        inputs.put("submitMethod", "post");
+        ObjectNode config = inputs.putObject("config");
+        ObjectNode field = config.putArray("fieldMetadata").addObject();
+        field.put("name", "observacaoInterna");
+        field.put("label", "Observacao interna");
+        field.put("controlType", "textarea");
+        field.put("source", "local");
+        field.put("transient", true);
+        field.put("submitPolicy", "omit");
+        return page;
     }
 }

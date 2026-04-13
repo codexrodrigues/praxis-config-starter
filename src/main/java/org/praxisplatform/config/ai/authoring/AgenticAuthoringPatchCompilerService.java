@@ -19,6 +19,7 @@ public class AgenticAuthoringPatchCompilerService {
     private final AgenticAuthoringArtifactProperties properties;
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringMinimalFormPlanValidator planValidator;
+    private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
 
     public AgenticAuthoringPatchCompilerService(
             AgenticAuthoringArtifactProperties properties,
@@ -26,6 +27,7 @@ public class AgenticAuthoringPatchCompilerService {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.planValidator = new AgenticAuthoringMinimalFormPlanValidator();
+        this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
     }
 
     public AgenticAuthoringCompileResult compile(AgenticAuthoringCompileRequest request) throws IOException {
@@ -33,15 +35,20 @@ public class AgenticAuthoringPatchCompilerService {
             throw new IllegalArgumentException("minimalFormPlan is required.");
         }
         JsonNode plan = request.minimalFormPlan();
-        AgenticAuthoringIntentResolutionResult intentResolution = request.intentResolution();
+        AgenticAuthoringIntentResolutionResult intentResolution =
+                intentResolutionContext.enrich(request.intentResolution(), request.currentPage());
+        AgenticAuthoringCompileRequest effectiveRequest = new AgenticAuthoringCompileRequest(
+                plan,
+                request.currentPage(),
+                intentResolution);
         List<String> failures = new ArrayList<>(planValidator.validate(plan, intentResolution));
         JsonNode catalog = readPageCreateCatalog();
         failures.addAll(validateCatalog(catalog));
         if (isSupportedFormChange(intentResolution)) {
-            failures.addAll(validateModifyFormRequest(request));
+            failures.addAll(validateModifyFormRequest(effectiveRequest));
         }
         JsonNode compiled = failures.isEmpty()
-                ? buildCompiledFormPatch(plan, catalog, request.currentPage(), intentResolution)
+                ? buildCompiledFormPatch(plan, catalog, effectiveRequest.currentPage(), intentResolution)
                 : objectMapper.createObjectNode();
         List<String> warnings = new ArrayList<>(List.of("round-trip-not-run", "compiled-from-minimal-form-plan"));
         if (intentResolution != null) {
