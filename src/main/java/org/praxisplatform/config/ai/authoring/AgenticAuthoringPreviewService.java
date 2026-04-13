@@ -55,7 +55,10 @@ public class AgenticAuthoringPreviewService {
         }
 
         AgenticAuthoringCompileResult compileResult =
-                patchCompilerService.compile(new AgenticAuthoringCompileRequest(planResult.minimalFormPlan(), intentResolution));
+                patchCompilerService.compile(new AgenticAuthoringCompileRequest(
+                        planResult.minimalFormPlan(),
+                        request.currentPage(),
+                        intentResolution));
         failureCodes.addAll(compileResult.failureCodes());
         warnings.addAll(compileResult.warnings());
         return new AgenticAuthoringPreviewResult(
@@ -81,8 +84,8 @@ public class AgenticAuthoringPreviewService {
         if (intentResolution.selectedCandidate() == null) {
             failures.add("intent-resolution-selected-candidate-required");
         }
-        if (!"create".equals(intentResolution.operationKind())) {
-            failures.add("intent-resolution-operation-must-be-create");
+        if (!"create".equals(intentResolution.operationKind()) && !"modify".equals(intentResolution.operationKind())) {
+            failures.add("intent-resolution-operation-must-be-create-or-modify");
         }
         if (!"form".equals(intentResolution.artifactKind())) {
             failures.add("intent-resolution-artifact-must-be-form");

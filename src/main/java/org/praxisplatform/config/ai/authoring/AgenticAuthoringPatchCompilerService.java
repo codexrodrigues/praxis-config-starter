@@ -37,10 +37,18 @@ public class AgenticAuthoringPatchCompilerService {
         List<String> failures = new ArrayList<>(planValidator.validate(plan, intentResolution));
         JsonNode catalog = readPageCreateCatalog();
         failures.addAll(validateCatalog(catalog));
-        JsonNode compiled = failures.isEmpty() ? buildCompiledFormPatch(plan, catalog, intentResolution) : objectMapper.createObjectNode();
+        if (isModifyAddField(intentResolution)) {
+            failures.addAll(validateModifyAddFieldRequest(request));
+        }
+        JsonNode compiled = failures.isEmpty()
+                ? buildCompiledFormPatch(plan, catalog, request.currentPage(), intentResolution)
+                : objectMapper.createObjectNode();
         List<String> warnings = new ArrayList<>(List.of("round-trip-not-run", "compiled-from-minimal-form-plan"));
         if (intentResolution != null) {
             warnings.add("compiled-from-intent-resolution");
+        }
+        if (isModifyAddField(intentResolution)) {
+            warnings.add("compiled-as-current-page-modification");
         }
         return new AgenticAuthoringCompileResult(
                 failures.isEmpty(),
@@ -100,7 +108,11 @@ public class AgenticAuthoringPatchCompilerService {
     private JsonNode buildCompiledFormPatch(
             JsonNode plan,
             JsonNode catalog,
+            JsonNode currentPage,
             AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (isModifyAddField(intentResolution)) {
+            return buildModifyAddFieldPatch(plan, catalog, currentPage, intentResolution);
+        }
         AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
         String submitUrl = candidate == null ? text(catalog.path("evidence").path("operationRef"), "path") : candidate.submitUrl();
         String submitMethod = candidate == null ? text(catalog.path("evidence").path("operationRef"), "method") : candidate.submitMethod();
@@ -166,6 +178,194 @@ public class AgenticAuthoringPatchCompilerService {
             warnings.add("compiled-from-intent-resolution");
         }
         return root;
+    }
+
+    private JsonNode buildModifyAddFieldPatch(
+            JsonNode plan,
+            JsonNode catalog,
+            JsonNode currentPage,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        ObjectNode root = buildPatchEnvelope(plan, catalog, intentResolution, "modify-existing-form");
+        ObjectNode patch = root.putObject("patch");
+        ObjectNode page = currentPage.deepCopy();
+        ObjectNode widget = resolveTargetWidget(page, intentResolution);
+        ObjectNode inputs = object(widget.with("definition")).with("inputs");
+        ObjectNode config = object(inputs.with("config"));
+        ArrayNode fieldMetadata = array(config.withArray("fieldMetadata"));
+        ArrayNode sections = array(config.withArray("sections"));
+        ObjectNode section = ensureLocalSection(sections);
+        ObjectNode row = ensureLocalRow(section);
+        ArrayNode columns = array(row.withArray("columns"));
+        ObjectNode column = ensureLocalColumn(columns);
+        ArrayNode columnFields = array(column.withArray("fields"));
+
+        for (JsonNode field : plan.path("fields")) {
+            String name = text(field, "name");
+            if (name.isBlank() || containsField(fieldMetadata, name)) {
+                continue;
+            }
+            ObjectNode localField = fieldMetadata.addObject();
+            localField.put("name", name);
+            localField.put("label", text(field, "label"));
+            localField.put("controlType", normalizeControlType(text(field, "controlType")));
+            localField.put("required", field.path("required").asBoolean(false));
+            localField.put("source", "local");
+            localField.put("transient", true);
+            localField.put("submitPolicy", "omit");
+            if (field.has("defaultValue")) {
+                localField.set("defaultValue", field.path("defaultValue"));
+            }
+            if (!containsText(columnFields, name)) {
+                columnFields.add(name);
+            }
+        }
+
+        patch.set("page", page);
+        ArrayNode warnings = array(root.withArray("warnings"));
+        warnings.add("compiled-as-current-page-modification");
+        warnings.add("local-fields-omit-submit-by-default");
+        return root;
+    }
+
+    private ObjectNode buildPatchEnvelope(
+            JsonNode plan,
+            JsonNode catalog,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            String profileId) {
+        String targetApp = text(plan, "targetApp");
+        String targetComponentId = text(plan, "targetComponentId");
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("version", "1.0.0");
+        root.put("profileId", profileId);
+        root.put("targetComponentId", targetComponentId.isBlank() ? text(catalog, "targetComponent") : targetComponentId);
+        root.put("catalogReleaseId", catalogReleaseId(catalog, targetApp, intentResolution));
+        ArrayNode sourceRefs = root.putArray("sourceRefs");
+        for (JsonNode sourceRef : plan.path("sourceRefs")) {
+            sourceRefs.add(sourceRef.asText());
+        }
+        ObjectNode compatibility = root.putObject("compatibility");
+        compatibility.put("aiHttpContract", "v1.1");
+        compatibility.put("publicResponseKind", "patch");
+        compatibility.put("requiresV12", false);
+        root.put("builderVersion", BUILDER_VERSION);
+        ArrayNode warnings = root.putArray("warnings");
+        warnings.add("round-trip-not-run");
+        warnings.add("compiled-from-minimal-form-plan");
+        if (intentResolution != null) {
+            warnings.add("compiled-from-intent-resolution");
+        }
+        return root;
+    }
+
+    private List<String> validateModifyAddFieldRequest(AgenticAuthoringCompileRequest request) {
+        List<String> failures = new ArrayList<>();
+        JsonNode currentPage = request.currentPage();
+        if (currentPage == null || !currentPage.isObject()) {
+            failures.add("currentPage is required for modify add_field");
+            return failures;
+        }
+        ObjectNode page = currentPage.deepCopy();
+        ObjectNode widget = resolveTargetWidget(page, request.intentResolution());
+        if (widget == null) {
+            failures.add("target praxis-dynamic-form widget is required for modify add_field");
+        }
+        return failures;
+    }
+
+    private boolean isModifyAddField(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return intentResolution != null
+                && "modify".equals(intentResolution.operationKind())
+                && "form".equals(intentResolution.artifactKind())
+                && "add_field".equals(intentResolution.changeKind());
+    }
+
+    private ObjectNode resolveTargetWidget(ObjectNode page, AgenticAuthoringIntentResolutionResult intentResolution) {
+        String targetWidgetKey = intentResolution == null || intentResolution.target() == null
+                ? ""
+                : intentResolution.target().widgetKey();
+        JsonNode widgets = page.path("widgets");
+        if (!widgets.isArray()) {
+            return null;
+        }
+        ObjectNode firstDynamicForm = null;
+        for (JsonNode widget : widgets) {
+            if (!widget.isObject()) {
+                continue;
+            }
+            ObjectNode object = (ObjectNode) widget;
+            if (targetWidgetKey != null && !targetWidgetKey.isBlank() && targetWidgetKey.equals(text(object, "key"))) {
+                return object;
+            }
+            if (WIDGET_DYNAMIC_FORM.equals(text(object.path("definition"), "id")) && firstDynamicForm == null) {
+                firstDynamicForm = object;
+            }
+        }
+        return firstDynamicForm;
+    }
+
+    private ObjectNode ensureLocalSection(ArrayNode sections) {
+        for (JsonNode section : sections) {
+            if (section.isObject() && "agentic-local-fields".equals(text(section, "id"))) {
+                return (ObjectNode) section;
+            }
+        }
+        ObjectNode section = sections.addObject();
+        section.put("id", "agentic-local-fields");
+        section.put("title", "Campos adicionais");
+        section.putArray("rows");
+        return section;
+    }
+
+    private ObjectNode ensureLocalRow(ObjectNode section) {
+        ArrayNode rows = array(section.withArray("rows"));
+        if (!rows.isEmpty() && rows.get(0).isObject()) {
+            return (ObjectNode) rows.get(0);
+        }
+        ObjectNode row = rows.addObject();
+        row.put("id", "agentic-local-fields-row");
+        row.putArray("columns");
+        return row;
+    }
+
+    private ObjectNode ensureLocalColumn(ArrayNode columns) {
+        if (!columns.isEmpty() && columns.get(0).isObject()) {
+            return (ObjectNode) columns.get(0);
+        }
+        ObjectNode column = columns.addObject();
+        column.put("id", "agentic-local-fields-column");
+        column.put("span", 12);
+        column.putArray("fields");
+        return column;
+    }
+
+    private boolean containsField(ArrayNode fieldMetadata, String name) {
+        for (JsonNode field : fieldMetadata) {
+            if (name.equals(text(field, "name"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsText(ArrayNode values, String value) {
+        for (JsonNode item : values) {
+            if (value.equals(item.asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String normalizeControlType(String controlType) {
+        return controlType == null || controlType.isBlank() ? "text" : controlType;
+    }
+
+    private ObjectNode object(JsonNode node) {
+        return (ObjectNode) node;
+    }
+
+    private ArrayNode array(JsonNode node) {
+        return (ArrayNode) node;
     }
 
     private String responseSchemaUrl(String requestSchemaUrl) {

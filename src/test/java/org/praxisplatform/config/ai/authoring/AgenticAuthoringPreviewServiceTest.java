@@ -60,7 +60,68 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.compiledFormPatch().isMissingNode()).isTrue();
     }
 
+    @Test
+    void previewAllowsModifyIntentAndPassesCurrentPageToCompiler() throws Exception {
+        ObjectNode currentPage = objectMapper.createObjectNode();
+        currentPage.putArray("widgets");
+        AgenticAuthoringIntentResolutionResult intent = modifyAddFieldIntent();
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Adicione observacao interna",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                currentPage,
+                intent);
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("profileId", "create-minimal-form");
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.put("profileId", "modify-existing-form");
+        when(planService.generateMinimalFormPlan(request, "tenant", "user", "local"))
+                .thenReturn(new AgenticAuthoringPlanResult(true, List.of(), List.of(), plan));
+        when(patchCompilerService.compile(new AgenticAuthoringCompileRequest(plan, currentPage, intent)))
+                .thenReturn(new AgenticAuthoringCompileResult(true, List.of(), List.of("compiled-as-current-page-modification"), patch));
+
+        AgenticAuthoringPreviewResult result = service().preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.compiledFormPatch()).isSameAs(patch);
+        assertThat(result.warnings()).contains("compiled-as-current-page-modification");
+    }
+
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
+    }
+
+    private AgenticAuthoringIntentResolutionResult modifyAddFieldIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "form",
+                "add_field",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "funcionarios-form",
+                        "praxis-dynamic-form",
+                        "/api/human-resources/funcionarios",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "post"),
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.95,
+                        "matched funcionarios",
+                        List.of("funcionarios")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
     }
 }

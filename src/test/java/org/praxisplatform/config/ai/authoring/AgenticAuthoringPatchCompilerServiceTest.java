@@ -2,6 +2,7 @@ package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -72,6 +73,36 @@ class AgenticAuthoringPatchCompilerServiceTest {
         assertThat(result.compiledFormPatch().path("catalogReleaseId").asText())
                 .isEqualTo("praxis-ui-angular.create-minimal-form.intent-resolution.v0.1.0");
         assertThat(result.warnings()).contains("compiled-from-intent-resolution");
+    }
+
+    @Test
+    void compileAddsLocalTransientFieldToExistingDynamicFormForModifyIntent() throws Exception {
+        writeCatalog();
+        ObjectNode plan = funcionariosPlan();
+        ((ObjectNode) plan.path("fields").get(0)).put("name", "observacaoInterna");
+        ((ObjectNode) plan.path("fields").get(0)).put("label", "Observacao interna");
+        ((ObjectNode) plan.path("fields").get(0)).put("controlType", "textarea");
+        ((ObjectNode) plan.path("fields").get(0)).put("required", false);
+
+        AgenticAuthoringCompileResult result = service()
+                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPage(), modifyAddFieldIntent()));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("compiled-as-current-page-modification");
+        assertThat(result.compiledFormPatch().path("profileId").asText()).isEqualTo("modify-existing-form");
+        ObjectNode page = (ObjectNode) result.compiledFormPatch().path("patch").path("page");
+        ObjectNode inputs = (ObjectNode) page.path("widgets").get(0).path("definition").path("inputs");
+        assertThat(inputs.path("schemaUrl").asText())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        assertThat(inputs.path("submitUrl").asText()).isEqualTo("/api/human-resources/funcionarios");
+        JsonNode fieldMetadata = inputs.path("config").path("fieldMetadata");
+        assertThat(fieldMetadata).hasSize(1);
+        assertThat(fieldMetadata.get(0).path("name").asText()).isEqualTo("observacaoInterna");
+        assertThat(fieldMetadata.get(0).path("source").asText()).isEqualTo("local");
+        assertThat(fieldMetadata.get(0).path("transient").asBoolean()).isTrue();
+        assertThat(fieldMetadata.get(0).path("submitPolicy").asText()).isEqualTo("omit");
+        assertThat(inputs.path("config").path("sections").get(0).path("rows").get(0)
+                .path("columns").get(0).path("fields").get(0).asText()).isEqualTo("observacaoInterna");
     }
 
     private AgenticAuthoringPatchCompilerService service() {
@@ -174,5 +205,65 @@ class AgenticAuthoringPatchCompilerServiceTest {
                 java.util.List.of(),
                 java.util.List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult modifyAddFieldIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "form",
+                "add_field",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "api-human-resources-funcionarios-form",
+                        "praxis-dynamic-form",
+                        "/api/human-resources/funcionarios",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "post"),
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.95,
+                        "matched funcionarios",
+                        java.util.List.of("funcionarios")),
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private ObjectNode currentFuncionariosPage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode canvas = page.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.putObject("items").putObject("api-human-resources-funcionarios-form")
+                .put("col", 1)
+                .put("row", 1)
+                .put("colSpan", 12)
+                .put("rowSpan", 4);
+        ArrayNode widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "api-human-resources-funcionarios-form");
+        ObjectNode inputs = widget.putObject("definition")
+                .put("id", "praxis-dynamic-form")
+                .putObject("inputs");
+        inputs.put("mode", "create");
+        inputs.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        inputs.put("submitUrl", "/api/human-resources/funcionarios");
+        inputs.put("submitMethod", "post");
+        inputs.put("responseSchemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=response");
+        inputs.put("formId", "api-human-resources-funcionarios-minimal");
+        inputs.put("componentInstanceId", "api-human-resources-funcionarios-minimal");
+        page.putObject("composition").putArray("links");
+        return page;
     }
 }
