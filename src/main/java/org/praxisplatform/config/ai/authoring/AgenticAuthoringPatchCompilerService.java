@@ -208,6 +208,7 @@ public class AgenticAuthoringPatchCompilerService {
                 configuredField.put("name", name);
             }
             configuredField.put("label", label);
+            configuredField.remove(List.of("source", "transient", "submitPolicy"));
             if (!text(field, "controlType").isBlank() && !configuredField.has("controlType")) {
                 configuredField.put("controlType", normalizeControlType(text(field, "controlType")));
             }

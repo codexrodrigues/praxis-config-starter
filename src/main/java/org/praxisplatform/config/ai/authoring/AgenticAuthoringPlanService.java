@@ -99,6 +99,8 @@ public class AgenticAuthoringPlanService {
                 - fieldSelectionPlanRef must reference the resolved request schema URL.
                 - For operationKind=create, fields must include only fields that are truly necessary for the user request and the create request schema.
                 - For operationKind=modify and changeKind=add_field, fields must include only the newly requested host-owned fields to add to the existing form.
+                - For modify/add_field, do not include schema-required fields just to make a submit payload valid; the current form already owns submit validity.
+                - For modify/add_field, if the user names a field explicitly, use a camelCase name derived from that requested field.
                 - For operationKind=modify and changeKind=rename_or_relabel, fields must include only existing field names with the new desired labels.
                 - For operationKind=modify, do not repeat fields that are already in the current page summary.
                 - Prefer the smallest didactic form or incremental change that can satisfy the user request.

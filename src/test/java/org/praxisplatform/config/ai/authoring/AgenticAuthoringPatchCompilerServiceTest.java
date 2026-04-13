@@ -115,7 +115,7 @@ class AgenticAuthoringPatchCompilerServiceTest {
         ((ObjectNode) plan.path("fields").get(0)).put("required", true);
 
         AgenticAuthoringCompileResult result = service()
-                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPage(), modifyRenameIntent()));
+                .compile(new AgenticAuthoringCompileRequest(plan, currentFuncionariosPageWithLocalNome(), modifyRenameIntent()));
 
         assertThat(result.valid()).isTrue();
         assertThat(result.warnings()).contains("compiled-as-current-page-modification");
@@ -324,6 +324,21 @@ class AgenticAuthoringPatchCompilerServiceTest {
         inputs.put("formId", "api-human-resources-funcionarios-minimal");
         inputs.put("componentInstanceId", "api-human-resources-funcionarios-minimal");
         page.putObject("composition").putArray("links");
+        return page;
+    }
+
+    private ObjectNode currentFuncionariosPageWithLocalNome() {
+        ObjectNode page = currentFuncionariosPage();
+        ObjectNode inputs = (ObjectNode) page.path("widgets").get(0).path("definition").path("inputs");
+        ObjectNode config = inputs.putObject("config");
+        ArrayNode fieldMetadata = config.putArray("fieldMetadata");
+        ObjectNode nome = fieldMetadata.addObject();
+        nome.put("name", "nome");
+        nome.put("label", "Nome");
+        nome.put("controlType", "text");
+        nome.put("source", "local");
+        nome.put("transient", true);
+        nome.put("submitPolicy", "omit");
         return page;
     }
 }

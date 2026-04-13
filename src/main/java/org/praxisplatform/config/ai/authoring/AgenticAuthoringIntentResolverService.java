@@ -109,12 +109,13 @@ public class AgenticAuthoringIntentResolverService {
         if ("remove".equals(operationKind) && containsAny(prompt, "campo", "campos")) {
             return "remove_field";
         }
+        if ("modify".equals(operationKind) && containsAny(prompt,
+                "renomear", "renomeie", "label", "rotulo", "titulo")) {
+            return "rename_or_relabel";
+        }
         if ("modify".equals(operationKind) && containsAny(prompt, "adicionar", "adicione",
                 "incluir", "inclua", "acrescentar", "acrescente", "campo", "campos")) {
             return "add_field";
-        }
-        if ("modify".equals(operationKind) && containsAny(prompt, "renomear", "label", "rotulo", "titulo")) {
-            return "rename_or_relabel";
         }
         if ("modify".equals(operationKind) && containsAny(prompt, "etapa", "etapas", "passo", "passos", "dividir")) {
             return "split_into_steps";
