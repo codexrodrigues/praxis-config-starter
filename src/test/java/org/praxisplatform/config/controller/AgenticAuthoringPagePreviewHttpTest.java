@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
@@ -40,6 +42,33 @@ class AgenticAuthoringPagePreviewHttpTest {
     private Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void componentCapabilitiesReturnsExecutableCatalogs() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                mock(AgenticAuthoringPreviewService.class),
+                mock(AgenticAuthoringApplyService.class),
+                new AgenticAuthoringComponentCapabilitiesService())).build();
+
+        String response = mockMvc.perform(get("/api/praxis/config/ai/authoring/component-capabilities"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("version").asText()).isEqualTo("0.1.0");
+        assertThat(body.path("catalogs")).extracting(node -> node.path("componentId").asText())
+                .containsExactly("praxis-dynamic-form", "praxis-table", "praxis-chart");
+        JsonNode formCatalog = body.path("catalogs").get(0);
+        assertThat(formCatalog.path("capabilities")).extracting(node -> node.path("changeKind").asText())
+                .containsExactly("add_field", "rename_or_relabel", "remove_field");
+    }
 
     @Test
     void pagePreviewDerivesCurrentPageSummaryForIncompleteIntent() throws Exception {
@@ -68,7 +97,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 planService,
                 compilerService,
                 previewService,
-                mock(AgenticAuthoringApplyService.class))).build();
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
 
         String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -114,7 +144,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 planService,
                 compilerService,
                 previewService,
-                mock(AgenticAuthoringApplyService.class))).build();
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
 
         ObjectNode request = objectMapper.createObjectNode();
         request.put("userPrompt", "Use um chart para criar drill down da folha por departamento");
@@ -155,7 +186,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 planService,
                 compilerService,
                 previewService,
-                mock(AgenticAuthoringApplyService.class))).build();
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
 
         ObjectNode request = objectMapper.createObjectNode();
         request.put("userPrompt", "Sim, crie uma tabela operacional de folhas de pagamento");
@@ -197,7 +229,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 planService,
                 compilerService,
                 previewService,
-                mock(AgenticAuthoringApplyService.class))).build();
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
 
         ObjectNode request = objectMapper.createObjectNode();
         request.put("userPrompt", "Crie uma tela master detail de departamentos com funcionarios e folha");

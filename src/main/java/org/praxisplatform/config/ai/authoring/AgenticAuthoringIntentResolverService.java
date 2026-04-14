@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 
 public class AgenticAuthoringIntentResolverService {
 
@@ -16,6 +17,9 @@ public class AgenticAuthoringIntentResolverService {
     private final AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer;
     private final AgenticAuthoringCandidateEligibilityGate eligibilityGate;
     private final AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog;
+    private final AgenticAuthoringFormCapabilityCatalog formCapabilityCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
+    private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
+    private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
 
     public AgenticAuthoringIntentResolverService(ObjectMapper objectMapper) {
         this(objectMapper, null);
@@ -36,10 +40,10 @@ public class AgenticAuthoringIntentResolverService {
         }
         String prompt = normalize(request.userPrompt());
         JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage());
-        String operationKind = resolveOperationKind(prompt);
-        String artifactKind = resolveArtifactKind(prompt, currentPageSummary);
-        String changeKind = resolveChangeKind(prompt, operationKind, artifactKind);
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(request.currentPage(), request.selectedWidgetKey());
+        String operationKind = resolveOperationKind(prompt);
+        String artifactKind = resolveArtifactKind(prompt, currentPageSummary, target);
+        String changeKind = resolveChangeKind(prompt, operationKind, artifactKind);
         List<AgenticAuthoringCandidate> candidates = discoverCandidates(prompt, artifactKind, target);
         AgenticAuthoringCandidate selectedCandidate = selectCandidate(candidates, target);
         AgenticAuthoringGateResult gate = eligibilityGate.evaluate(
@@ -79,7 +83,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (containsAny(prompt, "alterar", "altere", "mudar", "mude", "trocar", "troque",
                 "adicionar", "adicione", "incluir", "inclua", "acrescentar", "acrescente",
-                "dividir", "divida", "renomear", "renomeie")) {
+                "dividir", "divida", "renomear", "renomeie", "formatar", "formate", "formatacao")) {
             return "modify";
         }
         if (isExplicitCreateConfirmation(prompt)) {
@@ -91,6 +95,15 @@ public class AgenticAuthoringIntentResolverService {
         if (containsAny(prompt, "criar", "crie", "gerar", "gere", "montar", "monte",
                 "construir", "construa", "novo", "nova", "cadastrar", "abrir")) {
             return "create";
+        }
+        if (tableCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
+            return "modify";
+        }
+        if (chartCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
+            return "modify";
+        }
+        if (formCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
+            return "modify";
         }
         if (containsAny(prompt, "explicar", "explique", "porque", "por que")) {
             return "explain";
@@ -114,9 +127,23 @@ public class AgenticAuthoringIntentResolverService {
                 "departamento", "departamentos");
     }
 
-    private String resolveArtifactKind(String prompt, JsonNode currentPageSummary) {
+    private String resolveArtifactKind(String prompt, JsonNode currentPageSummary, AgenticAuthoringTarget target) {
         if (containsAny(prompt, "formulario", "form", "campo", "campos", "cadastrar", "cadastro", "abrir chamado")) {
             return "form";
+        }
+        if (target != null && "praxis-dynamic-form".equals(target.componentId())
+                && ("modify".equals(resolveOperationKind(prompt))
+                || "remove".equals(resolveOperationKind(prompt))
+                || formCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
+            return "form";
+        }
+        if (target != null && "praxis-table".equals(target.componentId())
+                && ("modify".equals(resolveOperationKind(prompt)) || tableCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
+            return "table";
+        }
+        if (target != null && "praxis-chart".equals(target.componentId())
+                && ("modify".equals(resolveOperationKind(prompt)) || chartCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
+            return "dashboard";
         }
         if (isTablePrompt(prompt)) {
             return "table";
@@ -143,7 +170,25 @@ public class AgenticAuthoringIntentResolverService {
             return "connect_widgets";
         }
         if ("remove".equals(operationKind) && containsAny(prompt, "campo", "campos")) {
-            return "remove_field";
+            return formCapabilityCatalog.resolveChangeKind(prompt).orElse("remove_field");
+        }
+        if ("modify".equals(operationKind) && "form".equals(artifactKind)) {
+            Optional<String> formChangeKind = formCapabilityCatalog.resolveChangeKind(prompt);
+            if (formChangeKind.isPresent()) {
+                return formChangeKind.orElseThrow();
+            }
+        }
+        if ("modify".equals(operationKind) && "table".equals(artifactKind)) {
+            Optional<String> tableChangeKind = tableCapabilityCatalog.resolveChangeKind(prompt);
+            if (tableChangeKind.isPresent()) {
+                return tableChangeKind.orElseThrow();
+            }
+        }
+        if ("modify".equals(operationKind) && "dashboard".equals(artifactKind)) {
+            Optional<String> chartChangeKind = chartCapabilityCatalog.resolveChangeKind(prompt);
+            if (chartChangeKind.isPresent()) {
+                return chartChangeKind.orElseThrow();
+            }
         }
         if ("modify".equals(operationKind) && containsAny(prompt,
                 "renomear", "renomeie", "label", "rotulo", "titulo")) {
@@ -181,7 +226,15 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringTarget target) {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
         if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()) {
-            candidates.add(candidate(target.resourcePath(), 0.95d, "resource resolved from current target widget", "current-page"));
+            String operation = target.submitMethod() == null || target.submitMethod().isBlank()
+                    ? "post"
+                    : target.submitMethod();
+            candidates.add(candidate(
+                    target.resourcePath(),
+                    operation,
+                    0.95d,
+                    "resource resolved from current target widget",
+                    "current-page"));
         }
         List<AgenticAuthoringCandidate> metadataCandidates = apiMetadataCandidateCatalog == null
                 ? List.of()
@@ -228,9 +281,6 @@ public class AgenticAuthoringIntentResolverService {
                     0.72d,
                     "approximate payroll collection endpoint match",
                     "known-quickstart-resource"));
-        }
-        if (containsAny(prompt, "chamado", "chamados", "helpdesk", "notebook", "tela quebrada", "incidente")) {
-            candidates.add(candidate("/api/helpdesk/chamados", 0.92d, "prompt mentions chamado/helpdesk incident", "known-helpdesk-resource"));
         }
         return candidates;
     }

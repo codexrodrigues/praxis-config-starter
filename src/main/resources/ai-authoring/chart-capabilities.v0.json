@@ -1,0 +1,54 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.component-capability-catalog",
+  "componentId": "praxis-chart",
+  "capabilities": [
+    {
+      "id": "praxis-chart.type.set@0.1.0",
+      "changeKind": "set_chart_type",
+      "triggerTerms": ["tipo", "chart", "grafico", "barra", "bar", "linha", "line", "pizza", "donut"],
+      "fieldAliases": [
+        { "field": "bar", "aliases": ["barra", "bar"] },
+        { "field": "line", "aliases": ["linha", "line"] },
+        { "field": "donut", "aliases": ["donut", "pizza"] }
+      ]
+    },
+    {
+      "id": "praxis-chart.metric.set@0.1.0",
+      "changeKind": "set_chart_metric",
+      "triggerTerms": ["metrica", "metric", "medida", "eixo y", "serie", "series"],
+      "fieldAliases": [
+        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido", "folha liquida"] },
+        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
+        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] }
+      ]
+    },
+    {
+      "id": "praxis-chart.dimension.set@0.1.0",
+      "changeKind": "set_chart_dimension",
+      "triggerTerms": ["dimensao", "dimension", "eixo x", "agrupar", "agrupe"],
+      "fieldAliases": [
+        { "field": "departamento", "aliases": ["departamento", "departamentos"] },
+        { "field": "competencia", "aliases": ["competencia", "mes", "ano"] },
+        { "field": "funcionario", "aliases": ["funcionario", "colaborador"] }
+      ]
+    },
+    {
+      "id": "praxis-chart.value-format.currency-brl@0.1.0",
+      "changeKind": "set_chart_value_format",
+      "triggerTerms": ["formatar", "formate", "formatacao", "valor", "valores", "moeda", "reais", "brl"],
+      "fieldAliases": [
+        { "field": "BRL|symbol|2", "aliases": ["moeda", "reais", "brl"] }
+      ]
+    },
+    {
+      "id": "praxis-chart.drilldown.enable@0.1.0",
+      "changeKind": "enable_chart_drilldown",
+      "triggerTerms": ["drill down", "drill-down", "drilldown", "detalhar", "detalhe", "aprofundar"],
+      "fieldAliases": [
+        { "field": "selectionChange", "aliases": ["selecao", "selecionar", "clique", "click"] },
+        { "field": "queryContext", "aliases": ["filtro", "filtrar", "cross filter", "detalhe"] }
+      ]
+    }
+  ]
+}

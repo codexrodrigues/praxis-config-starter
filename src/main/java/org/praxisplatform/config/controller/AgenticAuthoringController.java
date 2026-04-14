@@ -6,6 +6,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunErrorResponse;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
@@ -24,6 +26,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -44,6 +47,12 @@ public class AgenticAuthoringController {
     private final AgenticAuthoringPatchCompilerService patchCompilerService;
     private final AgenticAuthoringPreviewService previewService;
     private final AgenticAuthoringApplyService applyService;
+    private final AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService;
+
+    @GetMapping("/component-capabilities")
+    public ResponseEntity<AgenticAuthoringComponentCapabilitiesResult> listComponentCapabilities() {
+        return ResponseEntity.ok(componentCapabilitiesService.listCapabilities());
+    }
 
     @PostMapping("/dry-run")
     public ResponseEntity<?> runDryRun() {

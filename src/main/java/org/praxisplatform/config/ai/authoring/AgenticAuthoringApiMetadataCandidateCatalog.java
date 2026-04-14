@@ -29,7 +29,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return List.of();
         }
         String expectedMethod = expectedMethod(artifactKind);
-        List<String> tokens = meaningfulTokens(normalizedPrompt);
+        List<String> tokens = meaningfulTokens(expandDomainSynonyms(normalizedPrompt));
         if (tokens.isEmpty()) {
             return List.of();
         }
@@ -149,6 +149,28 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             tokens.add(rawToken);
         }
         return new ArrayList<>(tokens);
+    }
+
+    private String expandDomainSynonyms(String normalizedPrompt) {
+        if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
+            return "";
+        }
+        StringBuilder expanded = new StringBuilder(normalizedPrompt);
+        if (containsAny(normalizedPrompt, "chamado", "chamados", "helpdesk", "notebook", "notebooks",
+                "tela quebrada", "quebrada", "quebrado", "manutencao", "incidente", "incidentes")) {
+            expanded.append(" alerta alertas socorro incidente incidentes equipamento equipamentos")
+                    .append(" operacional triagem ocorrencia ocorrencias");
+        }
+        return expanded.toString();
+    }
+
+    private boolean containsAny(String value, String... tokens) {
+        for (String token : tokens) {
+            if (token != null && !token.isBlank() && value.contains(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String expectedMethod(String artifactKind) {

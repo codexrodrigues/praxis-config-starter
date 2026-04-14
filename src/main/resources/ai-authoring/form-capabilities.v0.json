@@ -1,0 +1,34 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.component-capability-catalog",
+  "componentId": "praxis-dynamic-form",
+  "capabilities": [
+    {
+      "id": "praxis-dynamic-form.field.add-local@0.1.0",
+      "changeKind": "add_field",
+      "triggerTerms": ["adicionar", "adicione", "incluir", "inclua", "acrescentar", "acrescente"],
+      "fieldAliases": [
+        { "field": "observacaoInterna", "aliases": ["observacao interna", "observacaointerna", "observacao"] }
+      ]
+    },
+    {
+      "id": "praxis-dynamic-form.field.relabel@0.1.0",
+      "changeKind": "rename_or_relabel",
+      "triggerTerms": ["renomear", "renomeie", "label", "rotulo", "titulo"],
+      "fieldAliases": [
+        { "field": "nomeCompleto", "aliases": ["nome completo", "nome do funcionario", "nome funcionario"] },
+        { "field": "nome", "aliases": ["nome", "nome completo do colaborador"] }
+      ]
+    },
+    {
+      "id": "praxis-dynamic-form.field.remove-local@0.1.0",
+      "changeKind": "remove_field",
+      "triggerTerms": ["remover", "remova", "remove", "excluir", "exclua", "apagar", "apague", "retirar", "retire", "campo", "campos"],
+      "fieldAliases": [
+        { "field": "observacaoInterna", "aliases": ["observacao interna", "observacaointerna", "observacao"] },
+        { "field": "nome", "aliases": ["nome"] },
+        { "field": "nomeCompleto", "aliases": ["nome completo", "nome do funcionario", "nome funcionario"] }
+      ]
+    }
+  ]
+}

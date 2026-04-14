@@ -133,6 +133,44 @@ class AgenticAuthoringPatchCompilerServiceTest {
     }
 
     @Test
+    void compileRelabelPreservesUnrelatedLocalTransientFieldsFromExistingDynamicForm() throws Exception {
+        writeCatalog();
+        ObjectNode plan = funcionariosPlan();
+        ((ObjectNode) plan.path("fields").get(0)).put("name", "nome");
+        ((ObjectNode) plan.path("fields").get(0)).put("label", "Nome completo do colaborador");
+        ArrayNode fields = (ArrayNode) plan.path("fields");
+        ObjectNode observacao = fields.addObject();
+        observacao.put("name", "observacaoInterna");
+        observacao.put("label", "Observacao interna");
+        observacao.put("controlType", "textarea");
+        observacao.put("required", false);
+        observacao.put("schemaPointer", "/properties/observacaoInterna");
+
+        ObjectNode currentPage = currentFuncionariosPageWithLocalObservacao();
+        ObjectNode inputs = (ObjectNode) currentPage.path("widgets").get(0).path("definition").path("inputs");
+        ObjectNode config = (ObjectNode) inputs.path("config");
+        ObjectNode nome = ((ArrayNode) config.path("fieldMetadata")).insertObject(0);
+        nome.put("name", "nome");
+        nome.put("label", "Nome");
+        nome.put("controlType", "text");
+
+        AgenticAuthoringCompileResult result = service()
+                .compile(new AgenticAuthoringCompileRequest(plan, currentPage, modifyRenameIntent()));
+
+        assertThat(result.valid()).isTrue();
+        JsonNode fieldMetadata = result.compiledFormPatch().path("patch").path("page").path("widgets").get(0)
+                .path("definition").path("inputs").path("config").path("fieldMetadata");
+        assertThat(fieldMetadata).hasSize(2);
+        assertThat(fieldMetadata.get(0).path("name").asText()).isEqualTo("nome");
+        assertThat(fieldMetadata.get(0).path("label").asText()).isEqualTo("Nome completo do colaborador");
+        assertThat(fieldMetadata.get(0).has("source")).isFalse();
+        assertThat(fieldMetadata.get(1).path("name").asText()).isEqualTo("observacaoInterna");
+        assertThat(fieldMetadata.get(1).path("source").asText()).isEqualTo("local");
+        assertThat(fieldMetadata.get(1).path("transient").asBoolean()).isTrue();
+        assertThat(fieldMetadata.get(1).path("submitPolicy").asText()).isEqualTo("omit");
+    }
+
+    @Test
     void compileRemovesLocalTransientFieldFromExistingDynamicFormForRemoveIntent() throws Exception {
         writeCatalog();
         ObjectNode plan = funcionariosPlan();
@@ -247,6 +285,7 @@ class AgenticAuthoringPatchCompilerServiceTest {
         nome.put("label", "Nome");
         nome.put("controlType", "text");
         nome.put("required", true);
+        nome.put("schemaPointer", "/properties/nome");
         ObjectNode clarification = plan.putObject("clarificationNeed");
         clarification.put("needed", false);
         clarification.put("code", "none");

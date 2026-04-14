@@ -52,13 +52,14 @@ public class AgenticAuthoringCurrentPageAnalyzer {
             return null;
         }
         JsonNode inputs = selected.path("definition").path("inputs");
+        String componentId = text(selected.path("definition"), "id");
         return new AgenticAuthoringTarget(
                 text(selected, "key"),
-                text(selected.path("definition"), "id"),
+                componentId,
                 resolveResourcePath(inputs),
                 text(inputs, "schemaUrl"),
                 text(inputs, "submitUrl"),
-                text(inputs, "submitMethod")
+                resolveSubmitMethod(componentId, inputs)
         );
     }
 
@@ -93,6 +94,10 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         if (!resourcePath.isBlank()) {
             return normalizeResourcePath(resourcePath);
         }
+        String chartDataSourceResourcePath = text(inputs.path("config").path("dataSource"), "resourcePath");
+        if (!chartDataSourceResourcePath.isBlank()) {
+            return normalizeResourcePath(chartDataSourceResourcePath);
+        }
         String schemaUrl = text(inputs, "schemaUrl");
         int marker = schemaUrl.indexOf("path=");
         if (marker < 0) {
@@ -104,6 +109,21 @@ public class AgenticAuthoringCurrentPageAnalyzer {
             value = value.substring(0, end);
         }
         return normalizeResourcePath(value.replace("%2F", "/").replace("%2f", "/"));
+    }
+
+    private String resolveSubmitMethod(String componentId, JsonNode inputs) {
+        String submitMethod = text(inputs, "submitMethod");
+        if (!submitMethod.isBlank()) {
+            return submitMethod;
+        }
+        if ("praxis-table".equals(componentId) && !text(inputs, "resourcePath").isBlank()) {
+            return "get";
+        }
+        if ("praxis-chart".equals(componentId)
+                && !text(inputs.path("config").path("dataSource"), "resourcePath").isBlank()) {
+            return "get";
+        }
+        return "";
     }
 
     private String normalizeResourcePath(String value) {

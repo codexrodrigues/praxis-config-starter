@@ -16,6 +16,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunErrorResponse;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
@@ -56,6 +58,29 @@ class AgenticAuthoringControllerTest {
 
     @Mock
     private AgenticAuthoringApplyService applyService;
+
+    @Mock
+    private AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService;
+
+    @Test
+    void componentCapabilitiesReturnsDeclarativeCatalogs() {
+        AgenticAuthoringComponentCapabilitiesResult expected = new AgenticAuthoringComponentCapabilitiesResult(
+                "0.1.0",
+                List.of(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
+                        "praxis-dynamic-form",
+                        "0.1.0",
+                        List.of(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
+                                "praxis-dynamic-form.field.add-local@0.1.0",
+                                "add_field",
+                                List.of("adicione"),
+                                List.of())))));
+        when(componentCapabilitiesService.listCapabilities()).thenReturn(expected);
+
+        ResponseEntity<AgenticAuthoringComponentCapabilitiesResult> response = controller().listComponentCapabilities();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isSameAs(expected);
+    }
 
     @Test
     void dryRunReturnsConfiguredArtifactResult() throws Exception {
@@ -226,6 +251,14 @@ class AgenticAuthoringControllerTest {
     }
 
     private AgenticAuthoringController controller() {
-        return new AgenticAuthoringController(dryRunService, artifactSource, intentResolverService, planService, patchCompilerService, previewService, applyService);
+        return new AgenticAuthoringController(
+                dryRunService,
+                artifactSource,
+                intentResolverService,
+                planService,
+                patchCompilerService,
+                previewService,
+                applyService,
+                componentCapabilitiesService);
     }
 }

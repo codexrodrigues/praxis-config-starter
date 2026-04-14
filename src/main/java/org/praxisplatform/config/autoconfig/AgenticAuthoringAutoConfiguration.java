@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiMetadataCandidateCatalog;
@@ -60,6 +61,12 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectMapper objectMapper,
             AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog) {
         return new AgenticAuthoringIntentResolverService(objectMapper, apiMetadataCandidateCatalog);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringComponentCapabilitiesService agenticAuthoringComponentCapabilitiesService() {
+        return new AgenticAuthoringComponentCapabilitiesService();
     }
 
     @Bean

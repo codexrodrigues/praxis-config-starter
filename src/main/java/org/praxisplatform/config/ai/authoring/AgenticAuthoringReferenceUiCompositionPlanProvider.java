@@ -1,5 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,6 +24,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     private static final String PAYROLL = "/api/human-resources/folhas-pagamento";
 
     private final ObjectMapper objectMapper;
+    private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
+    private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
 
     public AgenticAuthoringReferenceUiCompositionPlanProvider(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -30,6 +33,26 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
 
     @Override
     public Optional<AgenticAuthoringUiCompositionPlanResult> plan(AgenticAuthoringPlanRequest request) {
+        Optional<AgenticAuthoringUiCompositionPlanResult> chartModification = chartModification(request);
+        if (chartModification.isPresent()) {
+            return chartModification;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnOrderModification = tableColumnOrderModification(request);
+        if (tableColumnOrderModification.isPresent()) {
+            return tableColumnOrderModification;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnVisibilityModification = tableColumnVisibilityModification(request);
+        if (tableColumnVisibilityModification.isPresent()) {
+            return tableColumnVisibilityModification;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnFormatModification = tableColumnFormatModification(request);
+        if (tableColumnFormatModification.isPresent()) {
+            return tableColumnFormatModification;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> tableTitleModification = tableTitleModification(request);
+        if (tableTitleModification.isPresent()) {
+            return tableTitleModification;
+        }
         if (supportsChartDrillDown(request)) {
             return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                     true,
@@ -82,6 +105,194 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         boolean asksForTable = containsAny(prompt, "tabela", "grid", "lista", "listagem", "listar", "liste", "relacao");
         boolean referencesPayroll = containsAny(prompt, "folha", "pagamento", "pagamentos", "salario", "salarios");
         return asksToCreate && asksForTable && referencesPayroll;
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> tableTitleModification(AgenticAuthoringPlanRequest request) {
+        if (!supportsTableTitleModification(request)) {
+            return Optional.empty();
+        }
+        String title = extractTitleAfterPara(request.userPrompt());
+        if (title.isBlank()) {
+            return Optional.empty();
+        }
+        ObjectNode page = request.currentPage().deepCopy();
+        ObjectNode tableWidget = findWidget(page, request.intentResolution().target().widgetKey());
+        if (tableWidget == null || !"praxis-table".equals(tableWidget.path("definition").path("id").asText())) {
+            return Optional.empty();
+        }
+        ObjectNode inputs = tableWidget.with("definition").with("inputs");
+        inputs.put("title", title);
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:quickstart-table-title-modification"),
+                null,
+                compiledPagePatch(page, "modify-existing-table")));
+    }
+
+    private boolean supportsTableTitleModification(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.userPrompt() == null || request.currentPage() == null
+                || request.intentResolution() == null || request.intentResolution().target() == null) {
+            return false;
+        }
+        String prompt = normalize(request.userPrompt());
+        return "modify".equals(request.intentResolution().operationKind())
+                && "table".equals(request.intentResolution().artifactKind())
+                && "rename_or_relabel".equals(request.intentResolution().changeKind())
+                && tableCapabilityCatalog.supports("rename_or_relabel", prompt)
+                && containsAny(prompt, "tabela", "grid", "lista", "listagem");
+    }
+
+    private String extractTitleAfterPara(String prompt) {
+        String normalized = prompt == null ? "" : prompt.trim();
+        String lower = normalize(normalized);
+        int index = lower.lastIndexOf(" para ");
+        if (index < 0) {
+            return "";
+        }
+        return normalized.substring(index + " para ".length()).trim().replaceAll("[.?!]+$", "").trim();
+    }
+
+    private ObjectNode findWidget(ObjectNode page, String widgetKey) {
+        if (widgetKey == null || widgetKey.isBlank()) {
+            return null;
+        }
+        JsonNode widgets = page.path("widgets");
+        if (!widgets.isArray()) {
+            return null;
+        }
+        for (JsonNode widget : widgets) {
+            if (widget.isObject() && widgetKey.equals(widget.path("key").asText())) {
+                return (ObjectNode) widget;
+            }
+        }
+        return null;
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> chartModification(AgenticAuthoringPlanRequest request) {
+        if (!supportsChartModification(request)) {
+            return Optional.empty();
+        }
+        ObjectNode page = request.currentPage().deepCopy();
+        ObjectNode chartWidget = findWidget(page, request.intentResolution().target().widgetKey());
+        if (chartWidget == null || !"praxis-chart".equals(chartWidget.path("definition").path("id").asText())) {
+            return Optional.empty();
+        }
+        ObjectNode config = chartWidget.with("definition").with("inputs").with("config");
+        String prompt = normalize(request.userPrompt());
+        String changeKind = request.intentResolution().changeKind();
+        boolean changed = switch (changeKind) {
+            case "set_chart_type" -> applyChartType(config, prompt);
+            case "set_chart_metric" -> applyChartMetric(config, prompt);
+            case "set_chart_dimension" -> applyChartDimension(config, prompt);
+            case "set_chart_value_format" -> applyChartValueFormat(config, prompt);
+            case "enable_chart_drilldown" -> applyChartDrillDown(config);
+            default -> false;
+        };
+        if (!changed) {
+            return Optional.empty();
+        }
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:quickstart-chart-modification"),
+                null,
+                compiledPagePatch(page, "modify-existing-chart")));
+    }
+
+    private boolean supportsChartModification(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.userPrompt() == null || request.currentPage() == null
+                || request.intentResolution() == null || request.intentResolution().target() == null) {
+            return false;
+        }
+        String prompt = normalize(request.userPrompt());
+        return "modify".equals(request.intentResolution().operationKind())
+                && "dashboard".equals(request.intentResolution().artifactKind())
+                && "praxis-chart".equals(request.intentResolution().target().componentId())
+                && chartCapabilityCatalog.supports(request.intentResolution().changeKind(), prompt);
+    }
+
+    private boolean applyChartType(ObjectNode config, String prompt) {
+        String type = chartCapabilityCatalog.resolveField("set_chart_type", prompt).orElse("");
+        if (type.isBlank()) {
+            return false;
+        }
+        config.put("type", type);
+        ArrayNode series = config.withArray("series");
+        if (!series.isEmpty() && series.get(0).isObject()) {
+            ((ObjectNode) series.get(0)).put("type", type);
+        }
+        return true;
+    }
+
+    private boolean applyChartMetric(ObjectNode config, String prompt) {
+        String field = chartCapabilityCatalog.resolveField("set_chart_metric", prompt).orElse("");
+        if (field.isBlank()) {
+            return false;
+        }
+        config.with("axes").with("y").put("field", field);
+        ObjectNode series = firstSeries(config);
+        series.with("metric").put("field", field);
+        series.with("metric").put("aggregation", "sum");
+        ObjectNode queryMetric = firstQueryMetric(config);
+        queryMetric.put("field", field);
+        queryMetric.put("aggregation", "sum");
+        queryMetric.put("alias", field);
+        return true;
+    }
+
+    private boolean applyChartDimension(ObjectNode config, String prompt) {
+        String field = chartCapabilityCatalog.resolveField("set_chart_dimension", prompt).orElse("");
+        if (field.isBlank()) {
+            return false;
+        }
+        config.with("axes").with("x").put("field", field);
+        firstSeries(config).put("categoryField", field);
+        ArrayNode dimensions = config.with("dataSource").with("query").withArray("dimensions");
+        dimensions.removeAll();
+        dimensions.add(field);
+        return true;
+    }
+
+    private boolean applyChartValueFormat(ObjectNode config, String prompt) {
+        String format = chartCapabilityCatalog.resolveField("set_chart_value_format", prompt).orElse("");
+        if (format.isBlank()) {
+            return false;
+        }
+        config.with("axes").with("y").with("labels").put("format", format);
+        firstSeries(config).with("labels").put("format", format);
+        return true;
+    }
+
+    private boolean applyChartDrillDown(ObjectNode config) {
+        ObjectNode interactions = config.with("interactions");
+        interactions.put("selection", true);
+        interactions.put("crossFilter", true);
+        ObjectNode eventActions = interactions.with("eventActions");
+        ObjectNode selection = eventActions.with("selectionChange");
+        selection.put("action", "emit");
+        if (selection.path("mapping").isMissingNode()) {
+            selection.putObject("mapping");
+        }
+        return true;
+    }
+
+    private ObjectNode firstSeries(ObjectNode config) {
+        ArrayNode series = config.withArray("series");
+        if (series.isEmpty() || !series.get(0).isObject()) {
+            ObjectNode created = series.addObject();
+            created.put("id", "series-1");
+            return created;
+        }
+        return (ObjectNode) series.get(0);
+    }
+
+    private ObjectNode firstQueryMetric(ObjectNode config) {
+        ArrayNode metrics = config.with("dataSource").with("query").withArray("metrics");
+        if (metrics.isEmpty() || !metrics.get(0).isObject()) {
+            return metrics.addObject();
+        }
+        return (ObjectNode) metrics.get(0);
     }
 
     private boolean supports(AgenticAuthoringPlanRequest request) {
@@ -166,9 +377,179 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         inputs.put("resourcePath", PAYROLL);
         inputs.put("tableId", "payroll-table");
         inputs.put("title", "Folhas de pagamento");
+        addPayrollTableColumns(inputs.putObject("config").putArray("columns"));
 
         plan.putArray("bindings");
         return plan;
+    }
+
+    private void addPayrollTableColumns(ArrayNode columns) {
+        addTableColumn(columns, "id", "ID", "number");
+        addTableColumn(columns, "ano", "Ano", "number");
+        addTableColumn(columns, "mes", "Mes", "number");
+        addTableColumn(columns, "salarioBruto", "Salario bruto", "number");
+        addTableColumn(columns, "totalDescontos", "Total descontos", "number");
+        addTableColumn(columns, "salarioLiquido", "Salario liquido", "number");
+        addTableColumn(columns, "dataPagamento", "Data de pagamento", "date");
+        addTableColumn(columns, "funcionarioId", "Funcionario", "number");
+    }
+
+    private void addTableColumn(ArrayNode columns, String field, String header, String type) {
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        column.put("header", header);
+        column.put("type", type);
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnFormatModification(AgenticAuthoringPlanRequest request) {
+        if (!supportsTableColumnFormatModification(request)) {
+            return Optional.empty();
+        }
+        String field = resolveFormatField(request.userPrompt());
+        if (field.isBlank()) {
+            return Optional.empty();
+        }
+        ObjectNode page = request.currentPage().deepCopy();
+        ObjectNode tableWidget = findWidget(page, request.intentResolution().target().widgetKey());
+        if (tableWidget == null || !"praxis-table".equals(tableWidget.path("definition").path("id").asText())) {
+            return Optional.empty();
+        }
+        ObjectNode inputs = tableWidget.with("definition").with("inputs");
+        ObjectNode config = inputs.with("config");
+        ArrayNode columns = config.withArray("columns");
+        ObjectNode column = findColumn(columns, field);
+        if (column == null) {
+            return Optional.empty();
+        }
+        column.put("format", "BRL|symbol|2");
+        column.put("type", "currency");
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:quickstart-table-column-format"),
+                null,
+                compiledPagePatch(page, "modify-existing-table")));
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnVisibilityModification(AgenticAuthoringPlanRequest request) {
+        if (!supportsTableColumnVisibilityModification(request)) {
+            return Optional.empty();
+        }
+        String field = resolveVisibilityField(request.userPrompt());
+        if (field.isBlank()) {
+            return Optional.empty();
+        }
+        ObjectNode page = request.currentPage().deepCopy();
+        ObjectNode tableWidget = findWidget(page, request.intentResolution().target().widgetKey());
+        if (tableWidget == null || !"praxis-table".equals(tableWidget.path("definition").path("id").asText())) {
+            return Optional.empty();
+        }
+        ArrayNode columns = tableWidget.with("definition").with("inputs").with("config").withArray("columns");
+        ObjectNode column = findColumn(columns, field);
+        if (column == null) {
+            return Optional.empty();
+        }
+        column.put("visible", false);
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:quickstart-table-column-visibility"),
+                null,
+                compiledPagePatch(page, "modify-existing-table")));
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnOrderModification(AgenticAuthoringPlanRequest request) {
+        if (!supportsTableColumnOrderModification(request)) {
+            return Optional.empty();
+        }
+        String field = resolveOrderField(request.userPrompt());
+        if (field.isBlank()) {
+            return Optional.empty();
+        }
+        ObjectNode page = request.currentPage().deepCopy();
+        ObjectNode tableWidget = findWidget(page, request.intentResolution().target().widgetKey());
+        if (tableWidget == null || !"praxis-table".equals(tableWidget.path("definition").path("id").asText())) {
+            return Optional.empty();
+        }
+        ArrayNode columns = tableWidget.with("definition").with("inputs").with("config").withArray("columns");
+        ObjectNode target = findColumn(columns, field);
+        if (target == null) {
+            return Optional.empty();
+        }
+        int order = 0;
+        target.put("order", order++);
+        for (JsonNode column : columns) {
+            if (column.isObject() && column != target) {
+                ((ObjectNode) column).put("order", order++);
+            }
+        }
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:quickstart-table-column-order"),
+                null,
+                compiledPagePatch(page, "modify-existing-table")));
+    }
+
+    private boolean supportsTableColumnFormatModification(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.userPrompt() == null || request.currentPage() == null
+                || request.intentResolution() == null || request.intentResolution().target() == null) {
+            return false;
+        }
+        return "modify".equals(request.intentResolution().operationKind())
+                && "table".equals(request.intentResolution().artifactKind())
+                && "set_column_format".equals(request.intentResolution().changeKind())
+                && tableCapabilityCatalog.supports("set_column_format", normalize(request.userPrompt()));
+    }
+
+    private boolean supportsTableColumnVisibilityModification(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.userPrompt() == null || request.currentPage() == null
+                || request.intentResolution() == null || request.intentResolution().target() == null) {
+            return false;
+        }
+        return "modify".equals(request.intentResolution().operationKind())
+                && "table".equals(request.intentResolution().artifactKind())
+                && "set_column_visibility".equals(request.intentResolution().changeKind())
+                && tableCapabilityCatalog.supports("set_column_visibility", normalize(request.userPrompt()));
+    }
+
+    private boolean supportsTableColumnOrderModification(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.userPrompt() == null || request.currentPage() == null
+                || request.intentResolution() == null || request.intentResolution().target() == null) {
+            return false;
+        }
+        String prompt = normalize(request.userPrompt());
+        return "modify".equals(request.intentResolution().operationKind())
+                && "table".equals(request.intentResolution().artifactKind())
+                && "set_column_order".equals(request.intentResolution().changeKind())
+                && tableCapabilityCatalog.supports("set_column_order", prompt);
+    }
+
+    private String resolveFormatField(String prompt) {
+        return tableCapabilityCatalog.resolveField(
+                "set_column_format",
+                normalize(prompt == null ? "" : prompt)).orElse("");
+    }
+
+    private String resolveVisibilityField(String prompt) {
+        return tableCapabilityCatalog.resolveField(
+                "set_column_visibility",
+                normalize(prompt == null ? "" : prompt)).orElse("");
+    }
+
+    private String resolveOrderField(String prompt) {
+        return tableCapabilityCatalog.resolveField(
+                "set_column_order",
+                normalize(prompt == null ? "" : prompt)).orElse("");
+    }
+
+    private ObjectNode findColumn(ArrayNode columns, String field) {
+        for (JsonNode column : columns) {
+            if (column.isObject() && field.equals(column.path("field").asText())) {
+                return (ObjectNode) column;
+            }
+        }
+        return null;
     }
 
     private void addPayrollDrillDownChart(ArrayNode widgets) {
@@ -447,6 +828,21 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 .put("requiresV12", false);
         patch.put("builderVersion", "ui-composition-plan-provider@0.1.0-draft");
         patch.putArray("warnings").add("compiled-form-patch-materialized-by-page-builder");
+        return patch;
+    }
+
+    private ObjectNode compiledPagePatch(ObjectNode page, String profileId) {
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.put("version", "1.0.0");
+        patch.put("profileId", profileId);
+        patch.put("targetComponentId", "praxis-dynamic-page-builder");
+        patch.putObject("patch").set("page", page);
+        patch.putObject("compatibility")
+                .put("aiHttpContract", "v1.1")
+                .put("publicResponseKind", "patch")
+                .put("requiresV12", false);
+        patch.put("builderVersion", "ui-composition-plan-provider@0.1.0-draft");
+        patch.putArray("warnings").add("compiled-as-current-page-modification");
         return patch;
     }
 

@@ -236,10 +236,12 @@ public class AgenticAuthoringPatchCompilerService {
         ObjectNode config = object(inputs.with("config"));
         ArrayNode fieldMetadata = array(config.withArray("fieldMetadata"));
 
+        int fieldIndex = 0;
         for (JsonNode field : plan.path("fields")) {
             String name = text(field, "name");
             String label = text(field, "label");
             if (name.isBlank() || label.isBlank()) {
+                fieldIndex++;
                 continue;
             }
             ObjectNode configuredField = findFieldMetadata(fieldMetadata, name);
@@ -248,13 +250,16 @@ public class AgenticAuthoringPatchCompilerService {
                 configuredField.put("name", name);
             }
             configuredField.put("label", label);
-            configuredField.remove(List.of("source", "transient", "submitPolicy"));
+            if (!isLocalTransientField(configuredField) || (fieldIndex == 0 && hasSchemaPointer(field))) {
+                configuredField.remove(List.of("source", "transient", "submitPolicy"));
+            }
             if (!text(field, "controlType").isBlank() && !configuredField.has("controlType")) {
                 configuredField.put("controlType", normalizeControlType(text(field, "controlType")));
             }
             if (field.has("required") && !configuredField.has("required")) {
                 configuredField.put("required", field.path("required").asBoolean(false));
             }
+            fieldIndex++;
         }
 
         patch.set("page", page);
@@ -552,6 +557,10 @@ public class AgenticAuthoringPatchCompilerService {
         return "local".equals(text(field, "source"))
                 || field.path("transient").asBoolean(false)
                 || "omit".equals(text(field, "submitPolicy"));
+    }
+
+    private boolean hasSchemaPointer(JsonNode field) {
+        return !text(field, "schemaPointer").isBlank();
     }
 
     private boolean containsText(ArrayNode values, String value) {

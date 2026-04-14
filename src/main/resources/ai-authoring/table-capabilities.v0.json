@@ -1,0 +1,58 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.component-capability-catalog",
+  "componentId": "praxis-table",
+  "capabilities": [
+    {
+      "id": "praxis-table.title.rename@0.1.0",
+      "changeKind": "rename_or_relabel",
+      "triggerTerms": ["renomear", "renomeie", "label", "rotulo", "titulo", "title"],
+      "fieldAliases": []
+    },
+    {
+      "id": "praxis-table.column.format.currency-brl@0.1.0",
+      "changeKind": "set_column_format",
+      "triggerTerms": ["formatar", "formate", "formatacao", "moeda", "reais", "brl"],
+      "fieldAliases": [
+        { "field": "id", "aliases": ["codigo", "identificador"] },
+        { "field": "ano", "aliases": ["ano", "exercicio"] },
+        { "field": "mes", "aliases": ["mes", "competencia"] },
+        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
+        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] },
+        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido"] },
+        { "field": "dataPagamento", "aliases": ["data pagamento", "data de pagamento"] },
+        { "field": "funcionarioId", "aliases": ["funcionario", "colaborador"] }
+      ]
+    },
+    {
+      "id": "praxis-table.column.visibility@0.1.0",
+      "changeKind": "set_column_visibility",
+      "triggerTerms": ["ocultar", "oculte", "esconder", "esconda"],
+      "fieldAliases": [
+        { "field": "id", "aliases": ["codigo", "identificador"] },
+        { "field": "ano", "aliases": ["ano", "exercicio"] },
+        { "field": "mes", "aliases": ["mes", "competencia"] },
+        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
+        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] },
+        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido"] },
+        { "field": "dataPagamento", "aliases": ["data pagamento", "data de pagamento"] },
+        { "field": "funcionarioId", "aliases": ["funcionario", "colaborador"] }
+      ]
+    },
+    {
+      "id": "praxis-table.column.order@0.1.0",
+      "changeKind": "set_column_order",
+      "triggerTerms": ["mover", "mova", "reordenar", "reordene", "primeira", "inicio"],
+      "fieldAliases": [
+        { "field": "id", "aliases": ["codigo", "identificador"] },
+        { "field": "ano", "aliases": ["ano", "exercicio"] },
+        { "field": "mes", "aliases": ["mes", "competencia"] },
+        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
+        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] },
+        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido"] },
+        { "field": "dataPagamento", "aliases": ["data pagamento", "data de pagamento"] },
+        { "field": "funcionarioId", "aliases": ["funcionario", "colaborador"] }
+      ]
+    }
+  ]
+}

@@ -220,6 +220,149 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void resolvesSelectedTableTitleModificationAgainstExistingPage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "payroll-table");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-table");
+        ObjectNode inputs = definition.putObject("inputs");
+        inputs.put("resourcePath", "/api/human-resources/folhas-pagamento");
+        inputs.put("tableId", "payroll-table");
+        inputs.put("title", "Folhas de pagamento");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Altere o titulo da tabela para Folha operacional revisada",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                "payroll-table",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("rename_or_relabel");
+        assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
+        assertThat(result.target().componentId()).isEqualTo("praxis-table");
+        assertThat(result.target().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void resolvesSelectedTableCurrencyFormatModificationAgainstExistingPage() {
+        ObjectNode page = payrollTablePage();
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Formate a coluna salario liquido da tabela como moeda em reais",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                "payroll-table",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("set_column_format");
+        assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void resolvesSelectedTableVisibilityModificationAgainstExistingPage() {
+        ObjectNode page = payrollTablePage();
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Oculte a coluna total descontos da tabela",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                "payroll-table",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("set_column_visibility");
+        assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void resolvesSelectedTableOrderModificationAgainstExistingPage() {
+        ObjectNode page = payrollTablePage();
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Mova a coluna salario liquido da tabela para o inicio",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                "payroll-table",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("set_column_order");
+        assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void resolvesSelectedChartTypeModificationAgainstExistingPage() {
+        ObjectNode page = payrollChartPage();
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Troque o grafico para linha",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                "payroll-chart",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("set_chart_type");
+        assertThat(result.target().widgetKey()).isEqualTo("payroll-chart");
+        assertThat(result.target().componentId()).isEqualTo("praxis-chart");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
     void asksForBreakdownWhenPayrollDashboardCreationLacksAnalyticsDimension() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um dashboard de folha de pagamento",
@@ -413,6 +556,91 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void doesNotSelectLegacyHelpdeskEndpointWhenQuickstartMetadataDoesNotExposeIt() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .doesNotContain("/api/helpdesk/chamados");
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes()).containsExactly("resource-candidate-required");
+        assertThat(result.clarificationQuestions()).containsExactly("Qual recurso de negocio deve alimentar esta tela?");
+    }
+
+    @Test
+    void metadataBackedHelpdeskLikePromptSuggestsQuickstartApproximateResourcesBeforePreview() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/operations/sinais-socorro",
+                        "POST",
+                        "operations,socorro,alertas",
+                        "Cadastrar sinal de socorro",
+                        "Cadastra novo alerta para triagem operacional de incidentes e ocorrencias",
+                        "createSinaisSocorro",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/operations/incidentes",
+                        "POST",
+                        "operations,incidentes,triagem,operacional",
+                        "Cadastrar incidente de missao",
+                        "Cadastra ocorrencia operacional para triagem de alertas e sinais de socorro",
+                        "createIncidente",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .containsExactly(
+                        "/api/operations/sinais-socorro",
+                        "/api/operations/incidentes");
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes()).containsExactly("resource-candidate-ambiguous");
+        assertThat(result.clarificationQuestions())
+                .containsExactly("Encontrei recursos proximos: /api/operations/sinais-socorro (POST), /api/operations/incidentes (POST). Qual deles voce quer usar?");
+    }
+
+    @Test
     void resolvesModifyAddFieldAgainstExistingDynamicForm() {
         ObjectNode page = objectMapper.createObjectNode();
         var widgets = page.putArray("widgets");
@@ -444,6 +672,40 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.target().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.currentPageSummary().path("formWidgets").size()).isEqualTo(1);
+    }
+
+    private ObjectNode payrollTablePage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "payroll-table");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-table");
+        ObjectNode inputs = definition.putObject("inputs");
+        inputs.put("resourcePath", "/api/human-resources/folhas-pagamento");
+        inputs.put("tableId", "payroll-table");
+        inputs.put("title", "Folhas de pagamento");
+        return page;
+    }
+
+    private ObjectNode payrollChartPage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "payroll-chart");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject()
+                .put("id", "salario-liquido")
+                .put("categoryField", "departamento")
+                .putObject("metric")
+                .put("field", "salarioLiquido");
+        config.putObject("dataSource")
+                .put("kind", "remote")
+                .put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
+        return page;
     }
 
     @Test

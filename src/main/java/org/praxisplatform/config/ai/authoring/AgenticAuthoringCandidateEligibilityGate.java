@@ -26,7 +26,8 @@ public class AgenticAuthoringCandidateEligibilityGate {
                 messages.add("target-widget-required");
             }
         }
-        if ("create".equals(operationKind) && selectedCandidate == null) {
+        boolean hasCandidates = candidates != null && !candidates.isEmpty();
+        if ("create".equals(operationKind) && selectedCandidate == null && !hasCandidates) {
             messages.add("resource-candidate-required");
         }
         if (selectedCandidate == null && candidates != null && candidates.size() > 1) {
