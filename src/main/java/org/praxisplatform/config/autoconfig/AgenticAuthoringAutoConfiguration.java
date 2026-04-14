@@ -6,6 +6,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiMetadataCandidateCatalog;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
@@ -16,6 +17,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanP
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiTurnEventService;
+import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationRunner;
@@ -47,8 +49,17 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public AgenticAuthoringIntentResolverService agenticAuthoringIntentResolverService(ObjectMapper objectMapper) {
-        return new AgenticAuthoringIntentResolverService(objectMapper);
+    public AgenticAuthoringApiMetadataCandidateCatalog agenticAuthoringApiMetadataCandidateCatalog(
+            ObjectProvider<ApiMetadataRepository> apiMetadataRepository) {
+        return new AgenticAuthoringApiMetadataCandidateCatalog(apiMetadataRepository.getIfAvailable());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringIntentResolverService agenticAuthoringIntentResolverService(
+            ObjectMapper objectMapper,
+            AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog) {
+        return new AgenticAuthoringIntentResolverService(objectMapper, apiMetadataCandidateCatalog);
     }
 
     @Bean

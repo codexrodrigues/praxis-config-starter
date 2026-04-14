@@ -157,6 +157,38 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanCompletesRemoveFieldFromLocalCurrentPageSummaryWhenProviderReturnsEmptyFields() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("observacaoInterna", "Observacao interna", "textarea");
+        plan.putArray("fields");
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Remova o campo observacaoInterna do formulario",
+                                null,
+                                null,
+                                null,
+                                currentPageWithLocalObservacao(),
+                                funcionariosIntent("remove", "remove_field", objectMapper.createObjectNode())),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.minimalFormPlan().path("fields")).hasSize(1);
+        assertThat(result.minimalFormPlan().path("fields").get(0).path("name").asText())
+                .isEqualTo("observacaoInterna");
+        assertThat(result.minimalFormPlan().path("fields").get(0).path("controlType").asText())
+                .isEqualTo("textarea");
+    }
+
+    @Test
     void generateMinimalFormPlanRejectsDuplicateAddFieldFromCurrentPageSummary() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();

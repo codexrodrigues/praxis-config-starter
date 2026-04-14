@@ -443,6 +443,11 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+        componentEditPlan:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Plano declarativo opcional retornado quando contextHints.authoringContract.preferredResponse=componentEditPlan. O adaptador do componente valida e compila o plano antes de aplicar.
         diff:
           type: array
           nullable: true

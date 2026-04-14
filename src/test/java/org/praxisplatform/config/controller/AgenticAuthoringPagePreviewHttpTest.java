@@ -99,6 +99,89 @@ class AgenticAuthoringPagePreviewHttpTest {
     }
 
     @Test
+    void pagePreviewCanReturnChartDrillDownUiCompositionPlan() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Use um chart para criar drill down da folha por departamento");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
+                .isEqualTo("chart-drilldown-dashboard");
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(3);
+        assertThat(body.path("uiCompositionPlan").path("widgets").get(0).path("componentId").asText())
+                .isEqualTo("praxis-chart");
+        assertThat(body.path("uiCompositionPlan").path("bindings")).hasSize(3);
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
+    }
+
+    @Test
+    void pagePreviewCanReturnPayrollTableUiCompositionPlan() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Sim, crie uma tabela operacional de folhas de pagamento");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
+                .isEqualTo("single-table-page");
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(1);
+        JsonNode table = body.path("uiCompositionPlan").path("widgets").get(0);
+        assertThat(table.path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(table.path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains("ui-composition-plan-provider:quickstart-payroll-table");
+    }
+
+    @Test
     void pagePreviewCanReturnUiCompositionPlanWithoutMinimalFormPipeline() throws Exception {
         AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
         AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);

@@ -310,6 +310,7 @@ public class AiOrchestratorService {
                         request.getRuntimeState(),
                         request.getContextHints())),
                 maxRuntimeMetadataChars);
+        JsonNode authoringContract = extractAuthoringContract(request.getContextHints());
         List<ColumnDescriptor> uiColumnDescriptors = extractColumnDescriptors(currentState);
         List<ColumnDescriptor> columnDescriptors = mergeColumnDescriptors(uiColumnDescriptors, request.getDataProfile());
         List<String> columnNames = extractColumnNames(columnDescriptors);
@@ -871,6 +872,7 @@ public class AiOrchestratorService {
                 schemaContext,
                 resolvedSchema,
                 runtimeMetadata,
+                authoringContract,
                 ragHintsBlock,
                 intentPlanJson,
                 null);
@@ -928,6 +930,7 @@ public class AiOrchestratorService {
                         schemaContext,
                         resolvedSchema,
                         retryRuntimeMetadata,
+                        authoringContract,
                         ragHintsBlock,
                         intentPlanJson,
                         null);
@@ -976,6 +979,9 @@ public class AiOrchestratorService {
         }
         if (result != null && result.has("patch") && result.has("clarification")) {
             warnings.add("clarification ignorado: patch e clarification nao podem coexistir na mesma resposta.");
+        }
+        if (result != null && result.get("patch") == null && hasComponentEditPlan(result)) {
+            return finalizeResponse(componentEditPlanResponse(result, request, warnings), memoryContext);
         }
         if (result == null || result.get("patch") == null) {
             return finalizeResponse(error("Nenhum patch gerado."), memoryContext);
@@ -1087,6 +1093,7 @@ public class AiOrchestratorService {
                     schemaContext,
                     resolvedSchema,
                     runtimeMetadata,
+                    authoringContract,
                     ragHintsBlock,
                     intentPlanJson,
                     completenessHints);
@@ -7589,6 +7596,7 @@ public class AiOrchestratorService {
             AiSchemaContext schemaContext,
             JsonNode schema,
             String runtimeMetadata,
+            JsonNode authoringContract,
             String ragHints,
             String intentPlan,
             String completenessHints) {
@@ -7612,6 +7620,10 @@ public class AiOrchestratorService {
                 schema != null ? schema.toPrettyString() : "N/A",
                 maxSchemaChars);
         String metadataJson = safeMetadata(runtimeMetadata);
+        String authoringContractBlock = truncateBlock(
+                "authoring_contract",
+                formatAuthoringContract(authoringContract),
+                maxCapabilityNotesChars);
         String ragBlock = truncateBlock("rag_hints",
                 safeMetadata(ragHints),
                 maxRagHintsChars);
@@ -7656,6 +7668,7 @@ public class AiOrchestratorService {
                         Map.entry("RAG_HINTS", ragBlock),
                         Map.entry("SCHEMA_JSON", schemaJson),
                         Map.entry("RUNTIME_METADATA", metadataJson),
+                        Map.entry("AUTHORING_CONTRACT", authoringContractBlock),
                         Map.entry("INTENT_PLAN", intentPlanBlock),
                         Map.entry("COMPLETENESS_HINTS", completenessBlock),
                         Map.entry("CONTRACT_DSL", AiPromptTemplates.CONTRACT_DSL),
@@ -8385,6 +8398,21 @@ public class AiOrchestratorService {
             return text == null || text.isBlank() ? "N/A" : text;
         }
         return contextHints.toPrettyString();
+    }
+
+    private JsonNode extractAuthoringContract(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode authoringContract = contextHints.get("authoringContract");
+        return authoringContract != null && authoringContract.isObject() ? authoringContract : null;
+    }
+
+    private String formatAuthoringContract(JsonNode authoringContract) {
+        if (authoringContract == null || authoringContract.isNull() || authoringContract.isMissingNode()) {
+            return "N/A";
+        }
+        return authoringContract.toPrettyString();
     }
 
     private String safeMetadata(String metadata) {
@@ -13568,6 +13596,27 @@ public class AiOrchestratorService {
                 .type("info")
                 .message(message)
                 .explanation(message)
+                .build();
+    }
+
+    private boolean hasComponentEditPlan(JsonNode result) {
+        return result != null
+                && result.has("componentEditPlan")
+                && result.get("componentEditPlan") != null
+                && !result.get("componentEditPlan").isNull();
+    }
+
+    private AiOrchestratorResponse componentEditPlanResponse(
+            JsonNode result,
+            AiOrchestratorRequest request,
+            List<String> warnings) {
+        return AiOrchestratorResponse.builder()
+                .type("patch")
+                .componentId(request != null ? request.getComponentId() : null)
+                .componentType(request != null ? request.getComponentType() : null)
+                .componentEditPlan(result.get("componentEditPlan"))
+                .explanation(textOrNull(result.get("explanation")))
+                .warnings(warnings == null || warnings.isEmpty() ? null : List.copyOf(warnings))
                 .build();
     }
 

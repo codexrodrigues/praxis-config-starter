@@ -2,6 +2,8 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +20,7 @@ public class AgenticAuthoringPlanService {
     private final AgenticAuthoringArtifactProperties properties;
     private final AgenticAuthoringMinimalFormPlanValidator validator;
     private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
+    private final ObjectMapper objectMapper;
 
     public AgenticAuthoringPlanService(
             AiProviderManagementService providerManagementService,
@@ -31,6 +34,7 @@ public class AgenticAuthoringPlanService {
             ObjectMapper objectMapper) {
         this.providerManagementService = Objects.requireNonNull(providerManagementService, "providerManagementService must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.validator = new AgenticAuthoringMinimalFormPlanValidator();
         this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
     }
@@ -58,6 +62,7 @@ public class AgenticAuthoringPlanService {
                 userId,
                 environment
         );
+        plan = completeDeterministicEditPlan(plan, effectiveRequest);
         List<String> failures = validator.validate(plan, effectiveRequest.intentResolution());
         return new AgenticAuthoringPlanResult(
                 failures.isEmpty(),
@@ -65,6 +70,82 @@ public class AgenticAuthoringPlanService {
                 warnings(effectiveRequest.intentResolution()),
                 plan
         );
+    }
+
+    private JsonNode completeDeterministicEditPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {
+        if (!isRemoveFieldIntent(request.intentResolution()) || plan == null || !plan.isObject()) {
+            return plan;
+        }
+        JsonNode fields = plan.path("fields");
+        if (fields.isArray() && !fields.isEmpty()) {
+            return plan;
+        }
+        JsonNode formSummary = targetFormSummary(request.intentResolution());
+        JsonNode localFieldNames = formSummary.path("localFieldNames");
+        if (!localFieldNames.isArray() || localFieldNames.isEmpty()) {
+            return plan;
+        }
+        String normalizedPrompt = normalizeForMatch(request.userPrompt());
+        ObjectNode completed = ((ObjectNode) plan).deepCopy();
+        ArrayNode completedFields = completed.putArray("fields");
+        for (JsonNode localFieldName : localFieldNames) {
+            String name = localFieldName.asText("");
+            if (name.isBlank() || !normalizedPrompt.contains(normalizeForMatch(name))) {
+                continue;
+            }
+            ObjectNode field = completedFields.addObject();
+            field.put("name", name);
+            JsonNode fieldSummary = findFieldSummary(formSummary.path("fieldMetadata"), name);
+            String label = text(fieldSummary, "label");
+            String controlType = text(fieldSummary, "controlType");
+            field.put("label", label.isBlank() ? name : label);
+            field.put("controlType", controlType.isBlank() ? "text" : controlType);
+            if (fieldSummary.has("required")) {
+                field.put("required", fieldSummary.path("required").asBoolean(false));
+            } else {
+                field.put("required", false);
+            }
+        }
+        return completed;
+    }
+
+    private boolean isRemoveFieldIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return intentResolution != null
+                && "remove".equals(intentResolution.operationKind())
+                && "form".equals(intentResolution.artifactKind())
+                && "remove_field".equals(intentResolution.changeKind());
+    }
+
+    private JsonNode targetFormSummary(AgenticAuthoringIntentResolutionResult intentResolution) {
+        JsonNode currentPageSummary = intentResolution == null ? null : intentResolution.currentPageSummary();
+        if (currentPageSummary == null) {
+            return objectMapper.createObjectNode();
+        }
+        JsonNode formWidgets = currentPageSummary.path("formWidgets");
+        if (!formWidgets.isArray() || formWidgets.isEmpty()) {
+            return objectMapper.createObjectNode();
+        }
+        AgenticAuthoringTarget target = intentResolution.target();
+        if (target != null && target.widgetKey() != null && !target.widgetKey().isBlank()) {
+            for (JsonNode formWidget : formWidgets) {
+                if (target.widgetKey().equals(text(formWidget, "widgetKey"))) {
+                    return formWidget;
+                }
+            }
+        }
+        return formWidgets.get(0);
+    }
+
+    private JsonNode findFieldSummary(JsonNode fields, String fieldName) {
+        if (!fields.isArray()) {
+            return objectMapper.createObjectNode();
+        }
+        for (JsonNode field : fields) {
+            if (fieldName.equals(text(field, "name"))) {
+                return field;
+            }
+        }
+        return objectMapper.createObjectNode();
     }
 
     private AgenticAuthoringPlanRequest enrichRequest(AgenticAuthoringPlanRequest request) {
@@ -220,6 +301,19 @@ public class AgenticAuthoringPlanService {
             throw new IllegalStateException("MinimalFormPlan schema not found: " + schema);
         }
         return Files.readString(schema);
+    }
+
+    private String normalizeForMatch(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.toLowerCase()
+                .replaceAll("[^a-z0-9]+", "");
+    }
+
+    private String text(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.path(field);
+        return value != null && value.isTextual() ? value.asText() : "";
     }
 
 }

@@ -16,7 +16,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.praxisplatform.config.dto.AiContextDTO;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
+import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
@@ -42,6 +44,15 @@ class AiOrchestratorServiceContextHintsTest {
                 mock(AiApiKeyCryptoService.class),
                 mock(AiThreadService.class),
                 mock(AiMessageService.class));
+        ReflectionTestUtils.setField(service, "maxConfigChars", 12000);
+        ReflectionTestUtils.setField(service, "maxSchemaChars", 12000);
+        ReflectionTestUtils.setField(service, "maxTemplateConfigChars", 8000);
+        ReflectionTestUtils.setField(service, "maxTemplateMetaChars", 4000);
+        ReflectionTestUtils.setField(service, "maxCapabilitiesChars", 12000);
+        ReflectionTestUtils.setField(service, "maxCapabilityNotesChars", 3000);
+        ReflectionTestUtils.setField(service, "maxRuntimeMetadataChars", 4000);
+        ReflectionTestUtils.setField(service, "maxRagHintsChars", 2000);
+        ReflectionTestUtils.setField(service, "maxConceptsChars", 4000);
     }
 
     @Test
@@ -116,5 +127,93 @@ class AiOrchestratorServiceContextHintsTest {
         assertThat(warnings).containsExactly("SCHEMA_CONTEXT_DEGRADED: SCHEMA_PLATFORM_UNAVAILABLE");
         verify(schemaRetrievalService, times(2)).fetchSchemaResult(any(), nullable(String.class));
         verify(schemaRetrievalService, never()).fetchSchema(any(), nullable(String.class));
+    }
+
+    @Test
+    void buildExecutionPromptPromotesAuthoringContractAsDedicatedBlock() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "authoringContract": {
+                    "kind": "praxis.component-authoring-context",
+                    "preferredResponse": "componentEditPlan",
+                    "componentEditPlan": {
+                      "kind": "praxis.table.component-edit-plan",
+                      "batchKind": "praxis.table.component-edit-plan.batch",
+                      "schemaId": "https://praxisui.dev/schemas/table/component-edit-plan.v1.schema.json",
+                      "allowedChangeKinds": ["set_column_header"]
+                    }
+                  }
+                }
+                """);
+        JsonNode authoringContract = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractAuthoringContract",
+                contextHints);
+
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .aiMode("assist")
+                .componentDefinition(objectMapper.createObjectNode())
+                .currentState(objectMapper.createObjectNode())
+                .build();
+
+        String prompt = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildExecutionPrompt",
+                "Renomeie a coluna status para Situação",
+                context,
+                objectMapper.createObjectNode(),
+                List.of(),
+                "",
+                "",
+                null,
+                null,
+                "N/A",
+                authoringContract,
+                "N/A",
+                "N/A",
+                null);
+
+        assertThat(prompt).contains("CONTRATO DECLARATIVO DE AUTORIA");
+        assertThat(prompt).contains("\"preferredResponse\" : \"componentEditPlan\"");
+        assertThat(prompt).contains("component-edit-plan.v1.schema.json");
+        assertThat(prompt).contains("retorne componentEditPlan em vez de patch livre");
+    }
+
+    @Test
+    void componentEditPlanResponsePreservesDeclarativePlanForFrontendAdapter() throws Exception {
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "kind": "praxis.table.component-edit-plan",
+                    "version": "1.0",
+                    "componentId": "praxis-table",
+                    "changeKind": "set_column_header",
+                    "capabilityPath": "columns[].header",
+                    "field": "status",
+                    "value": "Situação"
+                  },
+                  "explanation": "Renomeei a coluna."
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-contract-used"));
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        assertThat(response.getComponentEditPlan().path("changeKind").asText())
+                .isEqualTo("set_column_header");
+        assertThat(response.getPatch()).isNull();
+        assertThat(response.getWarnings()).containsExactly("authoring-contract-used");
     }
 }

@@ -284,6 +284,9 @@ SCHEMA (se disponível):
 METADADOS (somente leitura):
 {{RUNTIME_METADATA}}
 
+CONTRATO DECLARATIVO DE AUTORIA (se fornecido):
+{{AUTHORING_CONTRACT}}
+
 INTENT PLAN (se fornecido):
 {{INTENT_PLAN}}
 
@@ -306,6 +309,8 @@ INSTRUÇÕES:
 2. Gere um merge patch (objeto parcial) que satisfaça o pedido, usando SOMENTE chaves listadas em CAPABILITIES PERMITIDAS.
    - PROIBIDO: JSON Patch (RFC6902), JSON Pointer, índices numéricos ou ops/path.
    - Use patch semântico com identidade (ex.: columns[].field).
+   - Se CONTRATO DECLARATIVO DE AUTORIA indicar preferredResponse="componentEditPlan" e o pedido couber no componentEditPlan permitido, retorne componentEditPlan em vez de patch livre.
+   - Para várias alterações declarativas no mesmo componente, use o batchKind informado no contrato de autoria.
 3. O patch será aplicado via "Smart Merge".
    - Para arrays com identidade conhecida (ex.: columns[].field, fieldMetadata[].name), use a chave para atualizar itens existentes.
    - Se a identidade do array não estiver clara, peça confirmação.
@@ -315,6 +320,12 @@ INSTRUÇÕES:
 SAÍDA ESPERADA (JSON):
 {
   "patch": { ... },
+  "explanation": "Resumo curto do que foi feito."
+}
+
+OU (QUANDO USAR CONTRATO DECLARATIVO DE AUTORIA):
+{
+  "componentEditPlan": { ... },
   "explanation": "Resumo curto do que foi feito."
 }
 

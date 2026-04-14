@@ -15,6 +15,9 @@ public class AgenticAuthoringCandidateEligibilityGate {
         if ("unknown".equals(operationKind)) {
             messages.add("intent-operation-unknown");
         }
+        if ("explore".equals(operationKind)) {
+            messages.add("intent-confirmation-required");
+        }
         if ("unknown".equals(artifactKind)) {
             messages.add("intent-artifact-unknown");
         }

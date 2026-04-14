@@ -229,6 +229,7 @@ export interface AiOrchestratorResponseContract {
   contractVersion?: string | null;
   schemaHash?: string | null;
   patch?: AiJsonObject | null;
+  componentEditPlan?: AiJsonObject | null;
   diff?: AiPatchDiffContract[] | null;
   explanation?: string | null;
   warnings?: string[] | null;

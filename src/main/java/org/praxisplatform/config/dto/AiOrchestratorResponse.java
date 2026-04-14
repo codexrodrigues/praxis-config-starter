@@ -19,6 +19,7 @@ public class AiOrchestratorResponse {
     private String contractVersion;
     private String schemaHash;
     private JsonNode patch;
+    private JsonNode componentEditPlan;
     private List<AiPatchDiff> diff;
     private String explanation;
     private List<String> warnings;
