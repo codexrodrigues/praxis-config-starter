@@ -16,6 +16,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.AiThread;
@@ -50,6 +51,8 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, Set<SseEmitter>> emittersByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> replayCursorByStream = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> replayTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledFuture<?>> processingTimeoutTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
@@ -64,6 +67,9 @@ public class AgenticAuthoringTurnStreamService {
 
     @Value("${praxis.ai.stream.processing-poll-seconds:1}")
     private long processingPollSeconds;
+
+    @Value("${praxis.ai.stream.processing-timeout-seconds:45}")
+    private long processingTimeoutSeconds;
 
     public StartResult start(
             AgenticAuthoringTurnStreamRequest request,
@@ -103,6 +109,7 @@ public class AgenticAuthoringTurnStreamService {
                 "message", "Agentic authoring stream started.",
                 "requestHash", stableUuid("agentic-authoring-request", request.userPrompt() + "|" + request.clientTurnId()).toString(),
                 "expiresAt", expiresAt.toString()));
+        scheduleProcessingTimeout(principalContext, streamId, threadId, turnId);
         executor.submit(() -> process(principalContext, streamId, threadId, turnId, request));
         return new StartResult(startResponse(streamId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
     }
@@ -143,9 +150,18 @@ public class AgenticAuthoringTurnStreamService {
                     .message("Stream already reached terminal state.")
                     .build();
         }
-        appendAndEmit(principalContext, streamId, ownership.threadId(), ownership.turnId(), "cancelled", Map.of(
+        StreamAppendResult cancelResult = appendAndEmit(principalContext, streamId, ownership.threadId(), ownership.turnId(), "cancelled", Map.of(
                 "message", "Agentic authoring stream cancelled.",
                 "phase", "cancelled"));
+        if (!appendedType(cancelResult, "cancelled")) {
+            return AiPatchStreamCancelResponse.builder()
+                    .streamId(streamId)
+                    .threadId(ownership.threadId())
+                    .turnId(ownership.turnId())
+                    .terminalState("completed")
+                    .message("Stream already reached terminal state.")
+                    .build();
+        }
         turnService.cancelTurn(ownership.threadId(), ownership.turnId());
         return AiPatchStreamCancelResponse.builder()
                 .streamId(streamId)
@@ -175,6 +191,9 @@ public class AgenticAuthoringTurnStreamService {
                     principalContext.tenantId(),
                     principalContext.userId(),
                     principalContext.environment());
+            if (terminalReached(streamId)) {
+                return;
+            }
             if (intentResolution.failureCodes() != null && intentResolution.failureCodes().contains("resource-candidate-ambiguous")) {
                 appendAndEmit(principalContext, streamId, threadId, turnId, "thought.step", Map.of(
                         "phase", "resource.discovery",
@@ -194,19 +213,25 @@ public class AgenticAuthoringTurnStreamService {
                         "phase", "preview.compile",
                         "summary", "Compiled preview payload."));
             }
-            appendAndEmit(principalContext, streamId, threadId, turnId, "result", Map.of(
+            StreamAppendResult terminalResult = appendAndEmit(principalContext, streamId, threadId, turnId, "result", Map.of(
                     "intentResolution", intentResolution,
                     "preview", preview != null ? preview : objectMapper.createObjectNode(),
                     "assistantMessage", safeText(intentResolution.assistantMessage()),
                     "quickReplies", intentResolution.quickReplies() != null ? intentResolution.quickReplies() : List.of(),
                     "canApply", preview != null && preview.valid()));
-            turnService.completeTurn(threadId, turnId);
+            if (appendedType(terminalResult, "result")) {
+                turnService.completeTurn(threadId, turnId);
+            }
         } catch (Exception ex) {
             log.warn("[AgenticAuthoringTurnStreamService] Stream processing failed: {}", ex.getMessage());
-            appendAndEmit(principalContext, streamId, threadId, turnId, "error", Map.of(
+            StreamAppendResult terminalResult = appendAndEmit(principalContext, streamId, threadId, turnId, "error", Map.of(
                     "message", ex.getMessage() != null ? ex.getMessage() : "Agentic authoring stream failed.",
+                    "assistantMessage", "The assistant could not finish this authoring request. Try again or ask support to review the diagnostics.",
+                    "code", "agentic-authoring-processing-failed",
                     "phase", "agentic-authoring"));
-            turnService.expireTurn(threadId, turnId);
+            if (appendedType(terminalResult, "error")) {
+                turnService.expireTurn(threadId, turnId);
+            }
         } finally {
             complete(streamId);
         }
@@ -249,19 +274,56 @@ public class AgenticAuthoringTurnStreamService {
                 request.contextHints());
     }
 
-    private AiTurnEventEnvelope appendAndEmit(
+    private StreamAppendResult appendAndEmit(
             AiPrincipalContext principalContext,
             UUID streamId,
             UUID threadId,
             UUID turnId,
             String type,
             Object payload) {
+        AiTurnEventEnvelope lastEvent = turnEventService.findLastEvent(streamId).orElse(null);
+        if (lastEvent != null && turnEventService.isTerminalType(lastEvent.getType())) {
+            return new StreamAppendResult(lastEvent, false);
+        }
+        AtomicBoolean terminal = terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
+        if (terminal.get()) {
+            return new StreamAppendResult(turnEventService.findLastEvent(streamId).orElse(null), false);
+        }
+        if (turnEventService.isTerminalType(type) && !terminal.compareAndSet(false, true)) {
+            return new StreamAppendResult(turnEventService.findLastEvent(streamId).orElse(null), false);
+        }
         AiTurnEventEnvelope event = turnEventService.appendEvent(principalContext, streamId, threadId, turnId, type, payload);
         emittersByStream.getOrDefault(streamId, Set.of()).forEach(emitter -> send(emitter, event));
         if (turnEventService.isTerminalType(type)) {
             complete(streamId);
         }
-        return event;
+        return new StreamAppendResult(event, true);
+    }
+
+    private void scheduleProcessingTimeout(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId) {
+        long timeoutSeconds = Math.max(1, processingTimeoutSeconds);
+        ScheduledFuture<?> task = scheduler.schedule(() -> {
+            try {
+                StreamAppendResult terminalResult = appendAndEmit(principalContext, streamId, threadId, turnId, "error", Map.of(
+                        "message", "Agentic authoring stream timed out before producing a final response.",
+                        "assistantMessage", "The assistant took too long to finish this request. Try again with a narrower request or review the active context.",
+                        "code", "agentic-authoring-timeout",
+                        "phase", "agentic-authoring",
+                        "timeoutSeconds", timeoutSeconds));
+                if (appendedType(terminalResult, "error")) {
+                    turnService.expireTurn(threadId, turnId);
+                }
+            } catch (Exception ex) {
+                log.warn("[AgenticAuthoringTurnStreamService] Failed to append timeout event: {}", ex.getMessage());
+            } finally {
+                complete(streamId);
+            }
+        }, timeoutSeconds, TimeUnit.SECONDS);
+        processingTimeoutTasks.put(streamId, task);
     }
 
     private void ensureReplay(UUID streamId, AiPrincipalContext principalContext) {
@@ -304,6 +366,10 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private void complete(UUID streamId) {
+        ScheduledFuture<?> processingTimeoutTask = processingTimeoutTasks.remove(streamId);
+        if (processingTimeoutTask != null) {
+            processingTimeoutTask.cancel(false);
+        }
         ScheduledFuture<?> replayTask = replayTasks.remove(streamId);
         if (replayTask != null) {
             replayTask.cancel(false);
@@ -313,6 +379,23 @@ public class AgenticAuthoringTurnStreamService {
             emitters.forEach(SseEmitter::complete);
         }
         replayCursorByStream.remove(streamId);
+        terminalByStream.remove(streamId);
+    }
+
+    private boolean appendedType(StreamAppendResult result, String type) {
+        return result != null
+                && result.appended()
+                && result.event() != null
+                && type.equalsIgnoreCase(result.event().getType());
+    }
+
+    private boolean terminalReached(UUID streamId) {
+        return turnEventService.findLastEvent(streamId)
+                .map(event -> turnEventService.isTerminalType(event.getType()))
+                .orElse(false);
+    }
+
+    private record StreamAppendResult(AiTurnEventEnvelope event, boolean appended) {
     }
 
     private AgenticAuthoringTurnStreamStartResponse startResponse(

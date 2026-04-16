@@ -377,8 +377,16 @@ The recommended downstream validation target is `praxis-api-quickstart`.
 
 Validated release pattern:
 - the quickstart must prove that `/api/praxis/config/ai/patch` propagates typed schema outcomes from the starter;
+- the quickstart must prove that `/api/praxis/config/ai/authoring/turn/stream/start` and `/probe` work with real signed stream tokens in browser-compatible `signed-url-token` mode;
 - CI must not depend on shared database, pgvector, external embedding quota or dynamic OpenAPI self-calls for this check;
-- the downstream smoke may isolate host-only concerns with mocks, as long as it still exercises the real AI patch endpoint and validates the HTTP contract returned to the client.
+- downstream smokes may isolate host-only concerns with mocks, as long as they still exercise the real config starter HTTP controllers and validate the HTTP contract returned to the client.
+
+Recommended downstream commands:
+
+```powershell
+mvn "-Dtest=AiPatchSchemaResolutionIsolatedIntegrationTest" test
+mvn "-Dtest=AgenticAuthoringStreamIsolatedIntegrationTest" test
+```
 
 ### Usage Example (Java)
 

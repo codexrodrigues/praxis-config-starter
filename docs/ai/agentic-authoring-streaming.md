@@ -72,6 +72,15 @@ O resultado terminal entrega o mesmo contrato funcional que o frontend hoje obte
 pela combinacao de `intent-resolution` e `page-preview`, preservando fallback
 sincrono para clientes que ainda nao consomem SSE via `fallbackAuthoringUrl`.
 
+Quando `praxis.ai.stream.auth.mode=signed-url-token`, o token emitido no `start`
+e a identidade canonica do `GET` de SSE e do `probe` quando o cliente nao envia
+headers de tenant/usuario. Isso e necessario porque o browser `EventSource` nao
+permite headers customizados. Se o caller enviar headers explicitos de identidade,
+o backend ainda valida o token contra esse escopo antes de abrir o stream.
+Nesse modo, `praxis.ai.stream.auth.token-secret` e obrigatorio e deve conter ao
+menos 32 bytes para evitar tokens assinados com segredo fraco em ambientes
+corporativos.
+
 ## Eventos recomendados
 
 Os eventos devem usar os tipos existentes sempre que possivel:
@@ -82,8 +91,20 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 | `thought.step` | `phase`, `tool`, `summary`, `diagnostics` seguro |
 | `heartbeat` | metadados de keep-alive |
 | `result` | `intentResolution`, `preview`, `assistantMessage`, `quickReplies`, `canApply` |
-| `error` | `message`, `code`, `phase` |
+| `error` | `code`, `assistantMessage`, `message`, `phase` |
 | `cancelled` | `message`, `phase` |
+
+O processamento assincrono do turno deve respeitar
+`praxis.ai.stream.processing-timeout-seconds` para evitar que o cliente fique
+preso em estados intermediarios quando retrieval, provider LLM ou compilacao de
+preview nao concluem. Ao estourar esse limite, o backend emite `error` terminal
+com `code=agentic-authoring-timeout` e expira a reserva do turno.
+
+Erros terminais devem separar texto de usuario e diagnostico tecnico. `code`
+deve ser estavel para i18n e tratamento no cliente; `assistantMessage` deve ser
+seguro para exibir na conversa; `message` pode conter detalhe tecnico para
+diagnostico restrito. Falhas inesperadas de processamento usam
+`code=agentic-authoring-processing-failed`.
 
 Fases recomendadas para authoring:
 

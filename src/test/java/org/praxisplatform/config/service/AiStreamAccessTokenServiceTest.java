@@ -19,13 +19,15 @@ import org.springframework.web.server.ResponseStatusException;
 @Tag("unit")
 class AiStreamAccessTokenServiceTest {
 
+    private static final String TEST_SECRET = "super-secret-for-tests-at-least-32-bytes";
+
     private AiStreamAccessTokenService service;
 
     @BeforeEach
     void setUp() {
         service = new AiStreamAccessTokenService();
         ReflectionTestUtils.setField(service, "authMode", "signed-url-token");
-        ReflectionTestUtils.setField(service, "tokenSecret", "super-secret-for-tests");
+        ReflectionTestUtils.setField(service, "tokenSecret", TEST_SECRET);
         ReflectionTestUtils.setField(service, "tokenTtlSeconds", 900L);
         ReflectionTestUtils.setField(service, "allowLegacySignedToken", false);
     }
@@ -114,6 +116,15 @@ class AiStreamAccessTokenServiceTest {
                 .hasMessageContaining("token-secret");
     }
 
+    @Test
+    void shouldFailFastWhenSignedModeSecretIsTooShort() {
+        ReflectionTestUtils.setField(service, "tokenSecret", "short-secret");
+
+        assertThatThrownBy(() -> service.validateConfiguration())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("at least 32 bytes");
+    }
+
     private String createLegacyToken(UUID streamId, String tenantId, String userId, String environment, Instant expiresAt) {
         String payload = String.join(
                 "|",
@@ -131,7 +142,7 @@ class AiStreamAccessTokenServiceTest {
     private String sign(String payload) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec("super-secret-for-tests".getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(TEST_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             byte[] signature = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(signature);
         } catch (Exception ex) {

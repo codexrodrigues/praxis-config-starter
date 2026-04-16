@@ -375,6 +375,55 @@ class AgenticAuthoringControllerTest {
         verify(turnStreamService).probe(streamId, tokenContext);
     }
 
+    @Test
+    void signedUrlStreamProbeUsesTokenIdentityWhenEventSourceCannotSendIdentityHeaders() {
+        UUID streamId = UUID.randomUUID();
+        String accessToken = "signed-token";
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        AiPrincipalContext ambientContext = new AiPrincipalContext("demo", "demo", "local", true);
+        AiPrincipalContext tokenContext = new AiPrincipalContext("desenv", "demo", "local", true);
+        when(principalContextResolver.resolve(servletRequest, null, null, null))
+                .thenReturn(ambientContext);
+        when(streamAccessTokenService.isSignedUrlTokenMode()).thenReturn(true);
+        when(streamAccessTokenService.resolvePrincipalContext(eq(streamId), eq(accessToken), isNull()))
+                .thenReturn(tokenContext);
+
+        ResponseEntity<Void> response = controller().probeTurnStream(
+                streamId,
+                servletRequest,
+                accessToken,
+                null,
+                null,
+                null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(turnStreamService).probe(streamId, tokenContext);
+    }
+
+    @Test
+    void signedUrlStreamProbePreservesExplicitIdentityHeadersForScopeValidation() {
+        UUID streamId = UUID.randomUUID();
+        String accessToken = "signed-token";
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        AiPrincipalContext explicitContext = new AiPrincipalContext("desenv", "demo", "local", true);
+        when(principalContextResolver.resolve(servletRequest, "desenv", "demo", "local"))
+                .thenReturn(explicitContext);
+        when(streamAccessTokenService.isSignedUrlTokenMode()).thenReturn(true);
+        when(streamAccessTokenService.resolvePrincipalContext(eq(streamId), eq(accessToken), same(explicitContext)))
+                .thenReturn(explicitContext);
+
+        ResponseEntity<Void> response = controller().probeTurnStream(
+                streamId,
+                servletRequest,
+                accessToken,
+                "desenv",
+                "demo",
+                "local");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(turnStreamService).probe(streamId, explicitContext);
+    }
+
     private AgenticAuthoringController controller() {
         return new AgenticAuthoringController(
                 dryRunService,

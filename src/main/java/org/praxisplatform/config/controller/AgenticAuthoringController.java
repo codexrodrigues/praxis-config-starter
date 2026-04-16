@@ -332,11 +332,24 @@ public class AgenticAuthoringController {
         if (streamAccessTokenService.isSignedUrlTokenMode()
                 && accessToken != null
                 && !accessToken.isBlank()
-                && principalContext != null
-                && !principalContext.resolvedFromServerPrincipal()) {
+                && shouldUseSignedTokenPrincipalContext(tenantId, userId, environment, principalContext)) {
             principalContext = null;
         }
         return streamAccessTokenService.resolvePrincipalContext(streamId, accessToken, principalContext);
+    }
+
+    private boolean shouldUseSignedTokenPrincipalContext(
+            String tenantId,
+            String userId,
+            String environment,
+            AiPrincipalContext principalContext) {
+        if (principalContext == null) {
+            return true;
+        }
+        if (!principalContext.resolvedFromServerPrincipal()) {
+            return true;
+        }
+        return firstNonBlank(tenantId, userId, environment, null) == null;
     }
 
     private void requireTurnStreamSupport() {

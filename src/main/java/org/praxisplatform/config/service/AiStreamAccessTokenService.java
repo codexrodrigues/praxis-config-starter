@@ -30,6 +30,7 @@ public class AiStreamAccessTokenService {
     private static final String AUTH_MODE_COOKIE = "cookie";
     private static final String AUTH_MODE_SIGNED_URL = "signed-url-token";
     private static final String ENCRYPTED_TOKEN_PREFIX = "enc1";
+    private static final int MIN_TOKEN_SECRET_BYTES = 32;
     private static final int GCM_NONCE_BYTES = 12;
     private static final int GCM_TAG_BITS = 128;
     private static final Base64.Encoder URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
@@ -53,9 +54,14 @@ public class AiStreamAccessTokenService {
         if (!isSignedUrlMode()) {
             return;
         }
-        if (normalize(tokenSecret) == null) {
+        String normalizedSecret = normalize(tokenSecret);
+        if (normalizedSecret == null) {
             throw new IllegalStateException(
                     "praxis.ai.stream.auth.token-secret is required when praxis.ai.stream.auth.mode=signed-url-token");
+        }
+        if (normalizedSecret.getBytes(StandardCharsets.UTF_8).length < MIN_TOKEN_SECRET_BYTES) {
+            throw new IllegalStateException(
+                    "praxis.ai.stream.auth.token-secret must contain at least 32 bytes when signed-url-token mode is enabled");
         }
         if (tokenTtlSeconds <= 0) {
             throw new IllegalStateException(
@@ -227,10 +233,12 @@ public class AiStreamAccessTokenService {
     }
 
     private void requireSecret() {
-        if (normalize(tokenSecret) == null) {
+        String normalizedSecret = normalize(tokenSecret);
+        if (normalizedSecret == null
+                || normalizedSecret.getBytes(StandardCharsets.UTF_8).length < MIN_TOKEN_SECRET_BYTES) {
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,
-                    "praxis.ai.stream.auth.token-secret is required for signed-url-token mode.");
+                    "praxis.ai.stream.auth.token-secret with at least 32 bytes is required for signed-url-token mode.");
         }
     }
 
