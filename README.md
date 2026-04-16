@@ -353,6 +353,25 @@ Corporate recommendation:
 - if the use case depends materially on structural schema, fail explicitly;
 - if schema is only contextual enrichment, allow best-effort continuation but surface warnings in logs, metrics and client UX.
 
+### Authoring turn stream
+The agentic authoring turn stream is published by the config starter under
+`/api/praxis/config/ai/authoring/turn/stream/**`.
+
+Canonical flow:
+1. `POST /api/praxis/config/ai/authoring/turn/stream/start` creates the turn, returns the `streamId`, and, when configured, returns a signed `streamUrl`.
+2. `GET /api/praxis/config/ai/authoring/turn/stream/{streamId}` replays and follows turn events as Server-Sent Events.
+3. `GET /api/praxis/config/ai/authoring/turn/stream/{streamId}/probe` validates that the client can open the stream before the UI commits to streaming.
+4. `POST /api/praxis/config/ai/authoring/turn/stream/{streamId}/cancel` cancels a running turn.
+
+Authentication modes:
+- `cookie`: use when the browser already has the corporate principal in cookies/session state.
+- `signed-url-token`: use for local or browser-only `EventSource` flows where the client cannot attach custom identity headers to the SSE request.
+
+Important:
+- `EventSource` cannot send custom request headers, so local authoring streams should use `PRAXIS_AI_STREAM_AUTH_MODE=signed-url-token` unless the host provides cookie/session authentication.
+- Signed stream tokens carry the resolved tenant/user/environment for that stream. When a valid signed token is present and the request has no server-authenticated principal, token identity is authoritative over local fallback identity.
+- The host must set a stable `PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET`; do not use a production secret in local examples or docs.
+
 ### Downstream validation before release
 The recommended downstream validation target is `praxis-api-quickstart`.
 

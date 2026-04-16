@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -347,6 +348,31 @@ class AgenticAuthoringControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PRECONDITION_FAILED);
         assertThat(response.getBody()).isEqualTo("stale configuration");
+    }
+
+    @Test
+    void signedUrlStreamProbeUsesTokenIdentityWhenOnlyLocalDefaultsAreResolved() {
+        UUID streamId = UUID.randomUUID();
+        String accessToken = "signed-token";
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        AiPrincipalContext localDefaultContext = new AiPrincipalContext("demo", "demo", "local", false);
+        AiPrincipalContext tokenContext = new AiPrincipalContext("desenv", "demo", "local", true);
+        when(principalContextResolver.resolve(servletRequest, null, null, null))
+                .thenReturn(localDefaultContext);
+        when(streamAccessTokenService.isSignedUrlTokenMode()).thenReturn(true);
+        when(streamAccessTokenService.resolvePrincipalContext(eq(streamId), eq(accessToken), isNull()))
+                .thenReturn(tokenContext);
+
+        ResponseEntity<Void> response = controller().probeTurnStream(
+                streamId,
+                servletRequest,
+                accessToken,
+                null,
+                null,
+                null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(turnStreamService).probe(streamId, tokenContext);
     }
 
     private AgenticAuthoringController controller() {

@@ -329,6 +329,13 @@ public class AgenticAuthoringController {
                 throw ex;
             }
         }
+        if (streamAccessTokenService.isSignedUrlTokenMode()
+                && accessToken != null
+                && !accessToken.isBlank()
+                && principalContext != null
+                && !principalContext.resolvedFromServerPrincipal()) {
+            principalContext = null;
+        }
         return streamAccessTokenService.resolvePrincipalContext(streamId, accessToken, principalContext);
     }
 

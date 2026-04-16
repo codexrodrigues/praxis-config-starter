@@ -257,8 +257,9 @@ public class AiPatchStreamController {
             String userId,
             String environment,
             String accessToken) {
+        AiPrincipalContext principalContext;
         try {
-            return principalContextResolver.resolve(servletRequest, tenantId, userId, environment);
+            principalContext = principalContextResolver.resolve(servletRequest, tenantId, userId, environment);
         } catch (ResponseStatusException ex) {
             HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
             boolean identityStatus = HttpStatus.FORBIDDEN.equals(status) || HttpStatus.UNAUTHORIZED.equals(status);
@@ -269,6 +270,14 @@ public class AiPatchStreamController {
             }
             throw ex;
         }
+        if (streamAccessTokenService.isSignedUrlTokenMode()
+                && accessToken != null
+                && !accessToken.isBlank()
+                && principalContext != null
+                && !principalContext.resolvedFromServerPrincipal()) {
+            return null;
+        }
+        return principalContext;
     }
 
     private <T> T withRequestCorrelation(String requestId, Supplier<T> action) {
