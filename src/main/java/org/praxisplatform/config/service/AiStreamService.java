@@ -102,6 +102,7 @@ public class AiStreamService {
             "variantId",
             "apiMethod",
             "apiTags",
+            "ragReleaseId",
             "apiSearchLimit");
 
     private final AiThreadService threadService;
@@ -191,6 +192,7 @@ public class AiStreamService {
         }
         request.setSessionId(threadId);
         String requestHash = requestHash(request);
+        String legacyRequestHash = legacyRequestHashIgnoringInternalStreamFlags(request);
         String startKey = threadId + ":" + turnId;
         ReentrantLock lock = startLocks.computeIfAbsent(startKey, ignored -> new ReentrantLock());
         lock.lock();
@@ -198,7 +200,7 @@ public class AiStreamService {
                 AiTurnEventService.StreamStartMetadata existingMetadata = turnEventService.findStartMetadata(threadId, turnId)
                         .orElse(null);
                 if (existingMetadata != null) {
-                    validateIdempotentRequest(existingMetadata.requestHash(), requestHash);
+                    validateIdempotentRequest(existingMetadata.requestHash(), requestHash, legacyRequestHash);
                     turnEventService.requireOwnership(existingMetadata.streamId(), principalContext);
                     AiTurnEventEnvelope tail = turnEventService.findLastEvent(existingMetadata.streamId()).orElse(null);
                     if (tail == null || !turnEventService.isTerminalType(tail.getType())) {
@@ -1169,15 +1171,18 @@ public class AiStreamService {
         }
     }
 
-    private void validateIdempotentRequest(String storedHash, String incomingHash) {
-        if (storedHash == null || incomingHash == null) {
+    private void validateIdempotentRequest(String storedHash, String... incomingHashes) {
+        if (storedHash == null || incomingHashes == null || incomingHashes.length == 0) {
             return;
         }
-        if (!storedHash.equals(incomingHash)) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "clientTurnId already exists with a different payload.");
+        for (String incomingHash : incomingHashes) {
+            if (storedHash.equals(incomingHash)) {
+                return;
+            }
         }
+        throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "clientTurnId already exists with a different payload.");
     }
 
     private String resolveTerminalState(AiTurnEventEnvelope terminalEvent) {
@@ -1224,6 +1229,19 @@ public class AiStreamService {
                 }
             }
             byte[] raw = objectMapper.writeValueAsBytes(canonicalNode);
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(raw));
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to hash request.", ex);
+        }
+    }
+
+    private String legacyRequestHashIgnoringInternalStreamFlags(AiOrchestratorRequest request) {
+        try {
+            ObjectNode legacyNode = objectMapper.valueToTree(request);
+            legacyNode.remove("streamTransport");
+            legacyNode.remove("streamTurnPreclaimed");
+            byte[] raw = objectMapper.writeValueAsBytes(legacyNode);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(raw));
         } catch (Exception ex) {

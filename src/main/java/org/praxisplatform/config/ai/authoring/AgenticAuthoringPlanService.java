@@ -1,5 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -20,6 +21,7 @@ public class AgenticAuthoringPlanService {
     private final AgenticAuthoringArtifactProperties properties;
     private final AgenticAuthoringMinimalFormPlanValidator validator;
     private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
+    private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator;
     private final ObjectMapper objectMapper;
 
     public AgenticAuthoringPlanService(
@@ -37,6 +39,7 @@ public class AgenticAuthoringPlanService {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.validator = new AgenticAuthoringMinimalFormPlanValidator();
         this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
+        this.conversationTurnOrchestrator = new AgenticAuthoringConversationTurnOrchestrator();
     }
 
     public AgenticAuthoringPlanResult generateMinimalFormPlan(
@@ -48,6 +51,7 @@ public class AgenticAuthoringPlanService {
             throw new IllegalArgumentException("userPrompt must not be blank.");
         }
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
+        effectiveRequest = withEffectivePrompt(effectiveRequest);
         JsonNode plan = providerManagementService.generateJson(
                 minimalFormPlanPrompt(effectiveRequest),
                 AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
@@ -73,7 +77,13 @@ public class AgenticAuthoringPlanService {
     }
 
     private JsonNode completeDeterministicEditPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {
-        if (!isRemoveFieldIntent(request.intentResolution()) || plan == null || !plan.isObject()) {
+        if (plan == null || !plan.isObject()) {
+            return plan;
+        }
+        if (isRenameOrRelabelIntent(request.intentResolution())) {
+            return completeRenameOrRelabelPlan(plan, request);
+        }
+        if (!isRemoveFieldIntent(request.intentResolution())) {
             return plan;
         }
         JsonNode fields = plan.path("fields");
@@ -109,11 +119,79 @@ public class AgenticAuthoringPlanService {
         return completed;
     }
 
+    private JsonNode completeRenameOrRelabelPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {
+        String fieldName = relabelFieldName(request.userPrompt());
+        String label = relabelFieldLabel(request.userPrompt());
+        if (fieldName.isBlank() || label.isBlank()) {
+            return plan;
+        }
+
+        ObjectNode completed = ((ObjectNode) plan).deepCopy();
+        ArrayNode fields = completed.withArray("fields");
+        ObjectNode existing = null;
+        for (JsonNode field : fields) {
+            if (field.isObject() && fieldName.equals(text(field, "name"))) {
+                existing = (ObjectNode) field;
+                break;
+            }
+        }
+        if (existing == null) {
+            existing = fields.addObject();
+            existing.put("name", fieldName);
+        }
+        existing.put("label", label);
+        if (!existing.has("controlType")) {
+            existing.put("controlType", "text");
+        }
+        if (!existing.has("required")) {
+            existing.put("required", false);
+        }
+        return completed;
+    }
+
+    private String relabelFieldName(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "";
+        }
+        String normalized = prompt.toLowerCase();
+        int fieldMarker = normalized.indexOf("campo ");
+        int labelMarker = normalized.indexOf(" para ", fieldMarker < 0 ? 0 : fieldMarker);
+        if (fieldMarker < 0 || labelMarker <= fieldMarker) {
+            return "";
+        }
+        String candidate = normalized.substring(fieldMarker + "campo ".length(), labelMarker)
+                .replaceAll("[^a-z0-9_]+", " ")
+                .trim();
+        if (candidate.isBlank()) {
+            return "";
+        }
+        return candidate.split("\\s+")[0];
+    }
+
+    private String relabelFieldLabel(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "";
+        }
+        String lower = prompt.toLowerCase();
+        int labelMarker = lower.lastIndexOf(" para ");
+        if (labelMarker < 0) {
+            return "";
+        }
+        return prompt.substring(labelMarker + " para ".length()).trim();
+    }
+
     private boolean isRemoveFieldIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
         return intentResolution != null
                 && "remove".equals(intentResolution.operationKind())
                 && "form".equals(intentResolution.artifactKind())
                 && "remove_field".equals(intentResolution.changeKind());
+    }
+
+    private boolean isRenameOrRelabelIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return intentResolution != null
+                && "modify".equals(intentResolution.operationKind())
+                && "form".equals(intentResolution.artifactKind())
+                && "rename_or_relabel".equals(intentResolution.changeKind());
     }
 
     private JsonNode targetFormSummary(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -160,7 +238,54 @@ public class AgenticAuthoringPlanService {
                 request.model(),
                 request.apiKey(),
                 request.currentPage(),
-                enrichedIntent);
+                enrichedIntent,
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints());
+    }
+
+    private AgenticAuthoringPlanRequest withEffectivePrompt(AgenticAuthoringPlanRequest request) {
+        String intentEffectivePrompt = request.intentResolution() == null
+                ? ""
+                : valueOrEmpty(request.intentResolution().effectivePrompt());
+        if (!intentEffectivePrompt.isBlank()) {
+            if (Objects.equals(intentEffectivePrompt, request.userPrompt())) {
+                return request;
+            }
+            return withUserPrompt(request, intentEffectivePrompt);
+        }
+        AgenticAuthoringConversationTurn turn = conversationTurnOrchestrator.resolve(
+                request.userPrompt(),
+                request.conversationMessages(),
+                request.pendingClarification());
+        String effectivePrompt = turn.effectivePrompt();
+        if (Objects.equals(effectivePrompt, request.userPrompt())) {
+            return request;
+        }
+        return withUserPrompt(request, effectivePrompt);
+    }
+
+    private AgenticAuthoringPlanRequest withUserPrompt(AgenticAuthoringPlanRequest request, String userPrompt) {
+        return new AgenticAuthoringPlanRequest(
+                userPrompt,
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                request.intentResolution(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints());
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private List<String> warnings(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -180,7 +305,7 @@ public class AgenticAuthoringPlanService {
     private String minimalFormPlanPrompt(AgenticAuthoringPlanRequest request) {
         AgenticAuthoringIntentResolutionResult intentResolution = request.intentResolution();
         if (intentResolution == null || intentResolution.selectedCandidate() == null) {
-            return legacyHelpdeskMinimalFormPlanPrompt(request.userPrompt());
+            return legacyHelpdeskMinimalFormPlanPrompt(request);
         }
         AgenticAuthoringCandidate candidate = intentResolution.selectedCandidate();
         String submitMethod = candidate.submitMethod() == null || candidate.submitMethod().isBlank()
@@ -190,11 +315,15 @@ public class AgenticAuthoringPlanService {
         String currentPageSummary = intentResolution.currentPageSummary() == null
                 ? "{}"
                 : intentResolution.currentPageSummary().toString();
+        String attachmentSummaries = attachmentSummariesJson(request);
         return """
                 You are generating an internal Praxis MinimalFormPlan.
                 Return only one JSON object. Do not include Markdown.
 
                 User request:
+                %s
+
+                Attachment summaries:
                 %s
 
                 Resolved intent:
@@ -235,10 +364,12 @@ public class AgenticAuthoringPlanService {
                 - Do not include server-managed, audit, id, status, timestamp, owner or workflow fields unless the user explicitly asked for them.
                 - For host-owned helper fields in modify/add_field, choose normal Praxis control types such as text, textarea, checkbox or select.
                 - For rename_or_relabel, do not mark fields as local/transient; they remain server-backed label customizations.
+                - Attachment summaries are metadata-only context. Do not assume access to file bytes, base64, local blob URLs or image pixels.
                 - clarificationNeed.needed must be true only when the prompt cannot be satisfied safely from the resolved API candidate.
                 - sourceRefs must cite intent-resolution and the resolved schema URL.
                 """.formatted(
                 request.userPrompt().trim(),
+                attachmentSummaries,
                 intentResolution.operationKind(),
                 intentResolution.artifactKind(),
                 intentResolution.changeKind(),
@@ -253,12 +384,45 @@ public class AgenticAuthoringPlanService {
                 submitActionRef);
     }
 
-    private String legacyHelpdeskMinimalFormPlanPrompt(String userPrompt) {
+    private String attachmentSummariesJson(AgenticAuthoringPlanRequest request) {
+        List<AgenticAuthoringAttachmentSummary> attachmentSummaries = attachmentSummaries(request);
+        if (attachmentSummaries.isEmpty()) {
+            return "[]";
+        }
+        return objectMapper.valueToTree(attachmentSummaries).toString();
+    }
+
+    private List<AgenticAuthoringAttachmentSummary> attachmentSummaries(AgenticAuthoringPlanRequest request) {
+        if (request.attachmentSummaries() != null && !request.attachmentSummaries().isEmpty()) {
+            return request.attachmentSummaries();
+        }
+        JsonNode diagnostics = request.pendingClarification() == null
+                ? null
+                : request.pendingClarification().diagnostics();
+        JsonNode summaries = diagnostics == null ? null : diagnostics.path("attachmentSummaries");
+        if (summaries == null || !summaries.isArray() || summaries.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.convertValue(
+                    summaries,
+                    new TypeReference<List<AgenticAuthoringAttachmentSummary>>() {
+                    });
+        } catch (IllegalArgumentException ex) {
+            return List.of();
+        }
+    }
+
+    private String legacyHelpdeskMinimalFormPlanPrompt(AgenticAuthoringPlanRequest request) {
+        String attachmentSummaries = attachmentSummariesJson(request);
         return """
                 You are generating an internal Praxis MinimalFormPlan.
                 Return only one JSON object. Do not include Markdown.
 
                 User request:
+                %s
+
+                Attachment summaries:
                 %s
 
                 Hard constraints:
@@ -276,8 +440,9 @@ public class AgenticAuthoringPlanService {
                   grupoResponsavelId, responsavelId or dataLimite.
                 - clarificationNeed.needed must be false and clarificationNeed.code must be "none" when the request
                   can be satisfied with titulo and descricao.
+                - Attachment summaries are metadata-only context. Do not assume access to file bytes, base64 content, blob URLs, or image pixels.
                 - sourceRefs must cite the discovery proof, page-create catalog and examples governance manifest.
-                """.formatted(userPrompt.trim());
+                """.formatted(request.userPrompt().trim(), attachmentSummaries);
     }
 
     private String readMinimalFormPlanSchema() throws IOException {

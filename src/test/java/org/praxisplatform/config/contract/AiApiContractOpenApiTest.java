@@ -45,7 +45,12 @@ class AiApiContractOpenApiTest {
                 "/api/praxis/config/ai/patch/stream/start",
                 "/api/praxis/config/ai/patch/stream/{streamId}",
                 "/api/praxis/config/ai/patch/stream/{streamId}/probe",
-                "/api/praxis/config/ai/patch/stream/{streamId}/cancel");
+                "/api/praxis/config/ai/patch/stream/{streamId}/cancel",
+                "/api/praxis/config/ai/authoring/component-capabilities",
+                "/api/praxis/config/ai/authoring/resource-candidates",
+                "/api/praxis/config/ai/authoring/intent-resolution",
+                "/api/praxis/config/ai/authoring/page-preview",
+                "/api/praxis/config/ai/authoring/page-apply");
 
         Map<String, Object> components = (Map<String, Object>) document.get("components");
         assertThat(components).isNotNull();
@@ -57,7 +62,86 @@ class AiApiContractOpenApiTest {
                 "AiOrchestratorResponse",
                 "AiPatchStreamStartResponse",
                 "AiPatchStreamCancelResponse",
-                "AiTurnEventEnvelope");
+                "AiTurnEventEnvelope",
+                "AgenticAuthoringIntentResolutionRequest",
+                "AgenticAuthoringIntentResolutionResult",
+                "AgenticAuthoringPlanRequest",
+                "AgenticAuthoringAttachmentSummary",
+                "AgenticAuthoringPendingClarification",
+                "AgenticAuthoringConversationMessage",
+                "AgenticAuthoringQuickReply",
+                "AgenticAuthoringComponentCapabilitiesResult",
+                "AgenticAuthoringComponentCapabilityCatalog",
+                "AgenticAuthoringComponentCapability",
+                "AgenticAuthoringComponentFieldAlias",
+                "AgenticAuthoringComponentCapabilityExample",
+                "AgenticAuthoringResourceCandidatesRequest",
+                "AgenticAuthoringResourceCandidatesResult",
+                "AgenticAuthoringCandidate",
+                "AgenticAuthoringPreviewResult",
+                "AgenticAuthoringApplyRequest");
+
+        Map<String, Object> conversationContext = (Map<String, Object>) schemas.get("AgenticAuthoringConversationContext");
+        assertThat(conversationContext).isNotNull();
+        Map<String, Object> conversationContextProperties = (Map<String, Object>) conversationContext.get("properties");
+        assertThat(conversationContextProperties).containsKeys(
+                "sessionId",
+                "clientTurnId",
+                "conversationMessages",
+                "pendingClarification",
+                "attachmentSummaries");
+
+        Map<String, Object> conversationMessages =
+                (Map<String, Object>) conversationContextProperties.get("conversationMessages");
+        assertThat((Map<String, Object>) conversationMessages.get("items"))
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringConversationMessage");
+        Map<String, Object> pendingClarificationRef =
+                (Map<String, Object>) conversationContextProperties.get("pendingClarification");
+        assertThat(pendingClarificationRef)
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringPendingClarification");
+        Map<String, Object> attachmentSummaries =
+                (Map<String, Object>) conversationContextProperties.get("attachmentSummaries");
+        assertThat((Map<String, Object>) attachmentSummaries.get("items"))
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringAttachmentSummary");
+
+        Map<String, Object> pendingClarification =
+                (Map<String, Object>) schemas.get("AgenticAuthoringPendingClarification");
+        Map<String, Object> pendingClarificationProperties =
+                (Map<String, Object>) pendingClarification.get("properties");
+        assertThat(pendingClarificationProperties).containsKeys(
+                "sourcePrompt",
+                "questions",
+                "assistantMessage",
+                "clientTurnId",
+                "diagnostics");
+
+        Map<String, Object> intentResolutionRequest =
+                (Map<String, Object>) schemas.get("AgenticAuthoringIntentResolutionRequest");
+        assertThat((List<Object>) intentResolutionRequest.get("allOf"))
+                .anySatisfy(entry -> assertThat((Map<String, Object>) entry)
+                        .containsEntry("$ref", "#/components/schemas/AgenticAuthoringConversationContext"));
+        Map<String, Object> planRequest = (Map<String, Object>) schemas.get("AgenticAuthoringPlanRequest");
+        assertThat((List<Object>) planRequest.get("allOf"))
+                .anySatisfy(entry -> assertThat((Map<String, Object>) entry)
+                        .containsEntry("$ref", "#/components/schemas/AgenticAuthoringConversationContext"));
+
+        Map<String, Object> intentResolution =
+                (Map<String, Object>) schemas.get("AgenticAuthoringIntentResolutionResult");
+        Map<String, Object> intentResolutionProperties =
+                (Map<String, Object>) intentResolution.get("properties");
+        assertThat(intentResolutionProperties).containsKeys(
+                "effectivePrompt",
+                "assistantMessage",
+                "quickReplies",
+                "pendingClarification",
+                "clarificationQuestions");
+        Map<String, Object> quickReplies = (Map<String, Object>) intentResolutionProperties.get("quickReplies");
+        assertThat((Map<String, Object>) quickReplies.get("items"))
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringQuickReply");
+        Map<String, Object> nextPendingClarification =
+                (Map<String, Object>) intentResolutionProperties.get("pendingClarification");
+        assertThat(nextPendingClarification)
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringPendingClarification");
 
         Map<String, Object> parameters = (Map<String, Object>) components.get("parameters");
         assertThat(parameters).isNotNull();

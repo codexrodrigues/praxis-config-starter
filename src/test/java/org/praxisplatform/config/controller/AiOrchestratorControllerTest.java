@@ -33,8 +33,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 @Tag("unit")
 class AiOrchestratorControllerTest {
 
-    private static final String HASH =
-            "51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26";
+    private static final String HASH = AiOrchestratorController.DEFAULT_CONTRACT_SCHEMA_HASH;
 
     @Mock
     private AiOrchestratorService orchestratorService;

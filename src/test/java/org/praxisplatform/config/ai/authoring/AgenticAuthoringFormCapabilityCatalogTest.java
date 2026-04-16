@@ -11,8 +11,10 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("unit")
 class AgenticAuthoringFormCapabilityCatalogTest {
 
     private final AgenticAuthoringFormCapabilityCatalog catalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
@@ -66,12 +68,37 @@ class AgenticAuthoringFormCapabilityCatalogTest {
     }
 
     @Test
+    void exposesUsageExamplesForEveryFormCapability() {
+        for (AgenticAuthoringComponentCapabilityCatalog.ComponentCapability capability : catalog.capabilities()) {
+            assertThat(capability.examples())
+                    .as("examples for %s", capability.id())
+                    .isNotEmpty();
+            assertThat(capability.examples().get(0).prompt()).isNotBlank();
+            assertThat(capability.examples().get(0).intent()).isNotBlank();
+            assertThat(capability.examples().get(0).configHints()).isNotEmpty();
+        }
+    }
+
+    @Test
     void resolvesFormChangeKindFromDeclarativeTriggers() {
         assertThat(catalog.resolveChangeKind("adicione o campo observacao interna"))
                 .contains("add_field");
         assertThat(catalog.resolveChangeKind("renomeie o campo nome completo"))
                 .contains("rename_or_relabel");
         assertThat(catalog.resolveChangeKind("remova o campo observacao interna"))
+                .contains("remove_field");
+    }
+
+    @Test
+    void resolvesFormChangeKindsFromLongDocumentationStylePrompts() {
+        assertThat(catalog.resolveChangeKind(
+                "No praxis-dynamic-form, use a capacidade de adicionar campo para incluir observacao interna no final do formulario sem mexer nos campos obrigatorios atuais."))
+                .contains("add_field");
+        assertThat(catalog.resolveChangeKind(
+                "Ajuste o label exibido para o usuario: o campo nome completo deve aparecer como nome do funcionario nas telas de cadastro e revisao."))
+                .contains("rename_or_relabel");
+        assertThat(catalog.resolveChangeKind(
+                "remova observacao interna do formulario porque esse dado deixou de fazer parte do processo documentado para abertura do registro."))
                 .contains("remove_field");
     }
 

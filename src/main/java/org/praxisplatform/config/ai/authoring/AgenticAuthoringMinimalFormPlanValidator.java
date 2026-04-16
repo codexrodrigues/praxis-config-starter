@@ -28,6 +28,9 @@ public class AgenticAuthoringMinimalFormPlanValidator {
     }
 
     public List<String> validate(JsonNode plan, AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (plan == null || plan.isNull()) {
+            return List.of("minimalFormPlan is required");
+        }
         if (intentResolution == null || intentResolution.selectedCandidate() == null) {
             return validateLegacyHelpdeskPlan(plan);
         }
@@ -210,6 +213,9 @@ public class AgenticAuthoringMinimalFormPlanValidator {
     }
 
     private String text(JsonNode node, String field) {
+        if (node == null || node.isNull()) {
+            return "";
+        }
         JsonNode value = node.path(field);
         return value.isTextual() ? value.asText() : value.asText("");
     }

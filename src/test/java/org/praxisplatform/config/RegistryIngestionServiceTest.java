@@ -76,6 +76,24 @@ class RegistryIngestionServiceTest {
     @MockBean
     private org.praxisplatform.config.repository.ConfigEntryRepository configEntryRepository;
 
+    @MockBean
+    private org.praxisplatform.config.repository.AiThreadRepository aiThreadRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiTurnRepository aiTurnRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiTurnEventRepository aiTurnEventRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiMessageRepository aiMessageRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiActionRepository aiActionRepository;
+
+    @MockBean(name = "transactionManager")
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     // Use MockBean for the model to ensure we control it fully, assuming it's not already mocked by TestAiConfig
     @MockBean
     private GoogleGenAiTextEmbeddingModel googleGenAiTextEmbeddingModel;

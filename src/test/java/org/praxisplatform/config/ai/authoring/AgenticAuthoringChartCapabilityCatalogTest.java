@@ -11,8 +11,10 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("unit")
 class AgenticAuthoringChartCapabilityCatalogTest {
 
     private final AgenticAuthoringComponentCapabilityCatalog catalog =
@@ -69,6 +71,18 @@ class AgenticAuthoringChartCapabilityCatalogTest {
     }
 
     @Test
+    void exposesUsageExamplesForEveryChartCapability() {
+        for (AgenticAuthoringComponentCapabilityCatalog.ComponentCapability capability : catalog.capabilities()) {
+            assertThat(capability.examples())
+                    .as("examples for %s", capability.id())
+                    .isNotEmpty();
+            assertThat(capability.examples().get(0).prompt()).isNotBlank();
+            assertThat(capability.examples().get(0).intent()).isNotBlank();
+            assertThat(capability.examples().get(0).configHints()).isNotEmpty();
+        }
+    }
+
+    @Test
     void resolvesChartChangeKindsFromDeclarativeTriggers() {
         assertThat(catalog.resolveChangeKind("troque o grafico para barra"))
                 .contains("set_chart_type");
@@ -80,6 +94,25 @@ class AgenticAuthoringChartCapabilityCatalogTest {
                 .contains("set_chart_value_format");
         assertThat(catalog.resolveChangeKind("crie drill down para filtrar o detalhe"))
                 .contains("enable_chart_drilldown");
+    }
+
+    @Test
+    void resolvesChartChangeKindsFromLongDocumentationStylePrompts() {
+        assertThat(catalog.resolveChangeKind(
+                "No componente praxis-chart, use a capacidade documentada de drill down para que o clique no departamento atualize a tabela de detalhes e mantenha o filtro cruzado da folha."))
+                .contains("enable_chart_drilldown");
+        assertThat(catalog.resolveChangeKind(
+                "Para o dashboard executivo, configure o grafico para agrupar os dados da folha por departamento, porque o usuario precisa comparar centros de custo antes de abrir o detalhe."))
+                .contains("set_chart_dimension");
+        assertThat(catalog.resolveChangeKind(
+                "Ajuste a metrica principal do chart para salario liquido, mantendo o restante da composicao sem alterar a tabela de detalhamento."))
+                .contains("set_chart_metric");
+    }
+
+    @Test
+    void prefersSpecificValueFormatCapabilityOverGenericChartTypeTrigger() {
+        assertThat(catalog.resolveChangeKind("no grafico selecionado, formate o eixo y e os valores em moeda brl"))
+                .contains("set_chart_value_format");
     }
 
     @Test

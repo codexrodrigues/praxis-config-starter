@@ -67,6 +67,24 @@ class DatabaseConnectionTest {
     @MockBean
     private org.praxisplatform.config.repository.AiRegistryRepository aiRegistryRepository;
 
+    @MockBean
+    private org.praxisplatform.config.repository.AiThreadRepository aiThreadRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiTurnRepository aiTurnRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiTurnEventRepository aiTurnEventRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiMessageRepository aiMessageRepository;
+
+    @MockBean
+    private org.praxisplatform.config.repository.AiActionRepository aiActionRepository;
+
+    @MockBean(name = "transactionManager")
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     @Test
     void shouldConnectAndPersistConfigEntry() throws Exception {
         // Mock DB behavior since we don't have a real DB

@@ -4,13 +4,15 @@ info:
   version: v1.1
   description: |
     Fonte unica de contrato para endpoints corporativos de patch e streaming SSE.
-    Cobre /patch retrocompativel e /patch/stream/{start,connect,probe,cancel}.
+    Cobre /patch retrocompativel, /patch/stream/{start,connect,probe,cancel}
+    e /authoring/turn/stream/{start,connect,probe,cancel}.
 servers:
   - url: /
 
 tags:
   - name: ai-patch
   - name: ai-stream
+  - name: ai-authoring
 
 paths:
   /api/praxis/config/ai/patch:
@@ -259,6 +261,300 @@ paths:
               schema:
                 $ref: '#/components/schemas/AiPatchStreamCancelResponse'
 
+  /api/praxis/config/ai/authoring/component-capabilities:
+    get:
+      tags: [ai-authoring]
+      operationId: listAgenticAuthoringComponentCapabilities
+      summary: Lista capacidades executaveis por componente para authoring agentico
+      responses:
+        '200':
+          description: Catalogo de capacidades de componentes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringComponentCapabilitiesResult'
+
+  /api/praxis/config/ai/authoring/resource-candidates:
+    post:
+      tags: [ai-authoring]
+      operationId: searchAgenticAuthoringResourceCandidates
+      summary: Busca recursos de API candidatos para alimentar uma tela ou componente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgenticAuthoringResourceCandidatesRequest'
+      responses:
+        '200':
+          description: Recursos candidatos recuperados do catalogo de APIs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringResourceCandidatesResult'
+
+  /api/praxis/config/ai/authoring/turn/stream/start:
+    post:
+      tags: [ai-authoring]
+      operationId: startAgenticAuthoringTurnStream
+      summary: Inicia stream SSE de turno do authoring agentico
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgenticAuthoringTurnStreamRequest'
+      responses:
+        '201':
+          description: Stream de turno criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringTurnStreamStartResponse'
+        '200':
+          description: Start idempotente reutilizando stream existente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringTurnStreamStartResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '403':
+          description: Escopo de identidade nao autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '503':
+          description: Stream de authoring nao configurado ou executor indisponivel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/authoring/turn/stream/{streamId}:
+    get:
+      tags: [ai-authoring]
+      operationId: connectAgenticAuthoringTurnStream
+      summary: Conecta no stream SSE do turno de authoring
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/LastEventIdHeader'
+        - $ref: '#/components/parameters/LastEventIdQuery'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+      responses:
+        '200':
+          description: Stream SSE ativo
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                thoughtStep:
+                  summary: Evento de progresso de authoring
+                  value: |
+                    id: 94c6fdb6-1aef-49a6-89fe-1437a0023be4
+                    event: thought.step
+                    data: {"eventId":"94c6fdb6-1aef-49a6-89fe-1437a0023be4","streamId":"3f1c7d4c-32ab-4ae4-b7de-d1ae11f5db66","threadId":"34a1a6b9-09b4-4b85-81aa-66b7a95f9356","turnId":"6e9f398a-5bc0-4da5-840e-af5ad78b6bb8","seq":2,"eventSchemaVersion":"v1","timestamp":"2026-04-15T21:10:00Z","type":"thought.step","payload":{"phase":"intent.resolve","summary":"Resolving authoring intent."}}
+        '400':
+          description: Last-Event-ID invalido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '403':
+          description: Stream ou Last-Event-ID fora do escopo autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Stream inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '410':
+          description: Stream expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/authoring/turn/stream/{streamId}/probe:
+    get:
+      tags: [ai-authoring]
+      operationId: probeAgenticAuthoringTurnStream
+      summary: Probe de autorizacao/disponibilidade do stream de authoring
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+      responses:
+        '204':
+          description: Stream acessivel
+        '403':
+          description: Escopo nao autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Stream inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '410':
+          description: Stream expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/authoring/turn/stream/{streamId}/cancel:
+    post:
+      tags: [ai-authoring]
+      operationId: cancelAgenticAuthoringTurnStream
+      summary: Cancela stream de authoring em andamento
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - $ref: '#/components/parameters/AccessTokenQuery'
+      responses:
+        '200':
+          description: Cancel aplicado ou stream ja terminal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiPatchStreamCancelResponse'
+        '403':
+          description: Escopo nao autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Stream nao encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiPatchStreamCancelResponse'
+
+  /api/praxis/config/ai/authoring/intent-resolution:
+    post:
+      tags: [ai-authoring]
+      operationId: resolveAgenticAuthoringIntent
+      summary: Resolve intencao de authoring com contexto conversacional opcional
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgenticAuthoringIntentResolutionRequest'
+      responses:
+        '200':
+          description: Intencao resolvida ou clarificacao requerida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringIntentResolutionResult'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/authoring/page-preview:
+    post:
+      tags: [ai-authoring]
+      operationId: previewAgenticAuthoringPage
+      summary: Gera preview de pagina usando plano LLM ou UiCompositionPlan deterministico
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgenticAuthoringPlanRequest'
+      responses:
+        '200':
+          description: Preview validado para revisao no frontend
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringPreviewResult'
+        '400':
+          description: Requisicao invalida ou configuracao incompleta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/authoring/page-apply:
+    post:
+      tags: [ai-authoring]
+      operationId: applyAgenticAuthoringPage
+      summary: Persiste pagina revisada pelo fluxo de authoring agentico
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: X-Updated-By
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgenticAuthoringApplyRequest'
+      responses:
+        '200':
+          description: Configuracao persistida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringApplyResult'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '412':
+          description: ETag divergente
+          content:
+            text/plain:
+              schema:
+                type: string
+
 components:
   parameters:
     StreamIdPath:
@@ -305,7 +601,7 @@ components:
       required: false
       schema:
         type: string
-        default: 51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26
+        default: dacaba8fa7ec21ee9ae31bab7057614837d2d1320d784d0ee61fb840efe55a35
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -335,9 +631,556 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26
+        example: dacaba8fa7ec21ee9ae31bab7057614837d2d1320d784d0ee61fb840efe55a35
 
   schemas:
+    AgenticAuthoringConversationMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [user, assistant, system]
+        text:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    AgenticAuthoringPendingClarification:
+      type: object
+      properties:
+        sourcePrompt:
+          type: string
+          nullable: true
+        questions:
+          type: array
+          items:
+            type: string
+        assistantMessage:
+          type: string
+          nullable: true
+        clientTurnId:
+          type: string
+          nullable: true
+        diagnostics:
+          type: object
+          nullable: true
+          description: Diagnosticos opacos do estado pendente. Quando houver anexos no turno que originou a clarificacao, pode transportar attachmentSummaries para continuidade conversacional sem reenviar bytes, File, base64 ou URLs blob.
+          additionalProperties: true
+      additionalProperties: false
+
+    AgenticAuthoringAttachmentSummary:
+      type: object
+      description: Resumo seguro de anexos do turno conversacional. Nao transporta bytes, File, base64 nem URLs locais blob.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        source:
+          type: string
+          nullable: true
+          description: Origem declarada pelo cliente, por exemplo paste, file-picker ou host.
+        hasPreview:
+          type: boolean
+          description: Indica se o cliente possui preview local, sem expor a URL local ao backend.
+      additionalProperties: false
+
+    AgenticAuthoringConversationContext:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          nullable: true
+        clientTurnId:
+          type: string
+          nullable: true
+        conversationMessages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringConversationMessage'
+        pendingClarification:
+          $ref: '#/components/schemas/AgenticAuthoringPendingClarification'
+        attachmentSummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringAttachmentSummary'
+
+    AgenticAuthoringIntentResolutionRequest:
+      allOf:
+        - $ref: '#/components/schemas/AgenticAuthoringConversationContext'
+        - type: object
+          required:
+            - userPrompt
+          properties:
+            userPrompt:
+              type: string
+            targetApp:
+              type: string
+              nullable: true
+            targetComponentId:
+              type: string
+              nullable: true
+            currentRoute:
+              type: string
+              nullable: true
+            currentPage:
+              type: object
+              nullable: true
+              additionalProperties: true
+            selectedWidgetKey:
+              type: string
+              nullable: true
+            provider:
+              type: string
+              nullable: true
+            model:
+              type: string
+              nullable: true
+            apiKey:
+              type: string
+              nullable: true
+            contextHints:
+              type: object
+              nullable: true
+              additionalProperties: true
+              description: Dados estruturados preservados de acoes do assistente, como chips de recurso.
+
+    AgenticAuthoringPlanRequest:
+      allOf:
+        - $ref: '#/components/schemas/AgenticAuthoringConversationContext'
+        - type: object
+          required:
+            - userPrompt
+          properties:
+            userPrompt:
+              type: string
+            provider:
+              type: string
+              nullable: true
+            model:
+              type: string
+              nullable: true
+            apiKey:
+              type: string
+              nullable: true
+            currentPage:
+              type: object
+              nullable: true
+              additionalProperties: true
+            intentResolution:
+              $ref: '#/components/schemas/AgenticAuthoringIntentResolutionResult'
+            contextHints:
+              type: object
+              nullable: true
+              additionalProperties: true
+              description: Dados estruturados preservados de acoes do assistente, como chips de recurso.
+
+    AgenticAuthoringTurnStreamRequest:
+      allOf:
+        - $ref: '#/components/schemas/AgenticAuthoringConversationContext'
+        - type: object
+          required:
+            - userPrompt
+            - clientTurnId
+          properties:
+            userPrompt:
+              type: string
+            targetApp:
+              type: string
+              nullable: true
+            targetComponentId:
+              type: string
+              nullable: true
+            currentRoute:
+              type: string
+              nullable: true
+            currentPage:
+              type: object
+              nullable: true
+              additionalProperties: true
+            selectedWidgetKey:
+              type: string
+              nullable: true
+            provider:
+              type: string
+              nullable: true
+            model:
+              type: string
+              nullable: true
+            apiKey:
+              type: string
+              nullable: true
+            contextHints:
+              type: object
+              nullable: true
+              additionalProperties: true
+            componentCapabilities:
+              $ref: '#/components/schemas/AgenticAuthoringComponentCapabilitiesResult'
+
+    AgenticAuthoringApplyRequest:
+      type: object
+      required:
+        - componentType
+        - componentId
+        - payload
+      properties:
+        componentType:
+          type: string
+        componentId:
+          type: string
+        scope:
+          type: string
+          nullable: true
+        payload:
+          type: object
+          additionalProperties: true
+        tags:
+          type: object
+          nullable: true
+          additionalProperties: true
+      additionalProperties: true
+
+    AgenticAuthoringComponentCapabilitiesResult:
+      type: object
+      properties:
+        version:
+          type: string
+        catalogs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringComponentCapabilityCatalog'
+      additionalProperties: true
+
+    AgenticAuthoringComponentCapabilityCatalog:
+      type: object
+      properties:
+        componentId:
+          type: string
+        version:
+          type: string
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringComponentCapability'
+      additionalProperties: true
+
+    AgenticAuthoringComponentCapability:
+      type: object
+      properties:
+        id:
+          type: string
+        changeKind:
+          type: string
+        triggerTerms:
+          type: array
+          items:
+            type: string
+        fieldAliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringComponentFieldAlias'
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringComponentCapabilityExample'
+      additionalProperties: true
+
+    AgenticAuthoringComponentFieldAlias:
+      type: object
+      properties:
+        field:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    AgenticAuthoringComponentCapabilityExample:
+      type: object
+      properties:
+        prompt:
+          type: string
+        intent:
+          type: string
+        configHints:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    AgenticAuthoringResourceCandidatesRequest:
+      type: object
+      properties:
+        retrievalQuery:
+          type: string
+          nullable: true
+          description: Consulta semantica enviada pela LLM ou pelo chip de ferramenta.
+        userPrompt:
+          type: string
+          nullable: true
+          description: Prompt bruto usado como fallback quando retrievalQuery nao for informado.
+        artifactKind:
+          type: string
+          nullable: true
+          description: Tipo de artefato alvo, como dashboard, table, form ou unknown.
+        limit:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 20
+
+    AgenticAuthoringCandidate:
+      type: object
+      properties:
+        resourcePath:
+          type: string
+        operation:
+          type: string
+        schemaUrl:
+          type: string
+        submitUrl:
+          type: string
+        submitMethod:
+          type: string
+        score:
+          type: number
+          format: double
+        reason:
+          type: string
+        evidence:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    AgenticAuthoringResourceCandidatesResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        tool:
+          type: string
+          enum: [searchApiResources]
+        retrievalQuery:
+          type: string
+        artifactKind:
+          type: string
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringCandidate'
+        warnings:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    AgenticAuthoringIntentResolutionResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        operationKind:
+          type: string
+          description: Tipo canonico da operacao conversacional. Para perguntas sobre catalogo de APIs, usar explore sem iniciar preview/aplicacao de pagina.
+        artifactKind:
+          type: string
+          description: Artefato alvo da operacao. api_catalog representa perguntas sobre endpoints, schemas, actions, filtros, APIs relacionadas ou escolha de API antes da geracao de pagina.
+        changeKind:
+          type: string
+          description: Tipo canonico da mudanca ou resposta. answer_api_catalog_question representa resposta consultiva sobre catalogo de APIs.
+        selectedCandidate:
+          type: object
+          nullable: true
+          additionalProperties: true
+        candidates:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        gate:
+          type: object
+          nullable: true
+          additionalProperties: true
+        effectivePrompt:
+          type: string
+          nullable: true
+          description: Prompt efetivo usado pelo backend depois de resolver resposta curta, clarificacao pendente e contexto conversacional.
+        assistantMessage:
+          type: string
+          nullable: true
+          description: Mensagem consultiva ou explicativa que o cliente deve renderizar diretamente quando presente, incluindo respostas de API Catalog Q&A sobre endpoints, schemas, actions, filtros, APIs relacionadas e escolha de API.
+        apiCatalogAnswer:
+          $ref: '#/components/schemas/AgenticAuthoringApiCatalogAnswer'
+          nullable: true
+        quickReplies:
+          type: array
+          description: Chips canonicos sugeridos pelo backend para o proximo turno.
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringQuickReply'
+        pendingClarification:
+          $ref: '#/components/schemas/AgenticAuthoringPendingClarification'
+          nullable: true
+          description: Estado canonico que o cliente deve reenviar no proximo turno quando a resposta exigir clarificacao.
+        clarificationQuestions:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        failureCodes:
+          type: array
+          items:
+            type: string
+        llmDiagnostics:
+          type: object
+          nullable: true
+          description: Diagnostico opaco e opt-in do prompt/contextBundle enviado ao resolvedor LLM quando contextHints.includeLlmDiagnostics=true. Pode conter contexto de pagina e catalogo suficiente para auditoria, portanto clientes nao devem solicitar em fluxo normal de usuario final.
+          additionalProperties: true
+      additionalProperties: true
+
+    AgenticAuthoringApiCatalogAnswer:
+      type: object
+      nullable: true
+      description: Payload estruturado de API Catalog Q&A para renderizacao sem parsear assistantMessage.
+      properties:
+        questionType:
+          type: string
+          description: Tipo da pergunta de catalogo, como endpoints, schema, actions, filters, related_apis ou api_choice.
+        selectedApi:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: API principal selecionada ou recomendada.
+        candidateApis:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        relatedApis:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        schemaFields:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        filterParameters:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        actions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        recommendations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+
+    AgenticAuthoringQuickReply:
+      type: object
+      required:
+        - id
+        - kind
+        - label
+        - prompt
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: Tipo visual/semantico do chip, como suggestion, confirm, revise ou cancel.
+        label:
+          type: string
+        prompt:
+          type: string
+          description: Prompt completo que deve ser enviado se o usuario selecionar o chip.
+        description:
+          type: string
+          nullable: true
+          description: Texto curto opcional para renderizacao rica do chip sem parsear assistantMessage.
+        icon:
+          type: string
+          nullable: true
+          description: Chave de icone semantico sugerida pelo backend para chips renderizaveis.
+        tone:
+          type: string
+          nullable: true
+          description: Tom visual semantico opcional, por exemplo primary, analytics, resource, warning ou neutral.
+        contextHints:
+          type: object
+          nullable: true
+          description: Payload opaco e seguro para preservar contexto estruturado da opcao selecionavel.
+          additionalProperties: true
+      additionalProperties: true
+
+    AgenticAuthoringPreviewResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        warnings:
+          type: array
+          items:
+            type: string
+        minimalFormPlan:
+          type: object
+          nullable: true
+          additionalProperties: true
+        compiledFormPatch:
+          type: object
+          nullable: true
+          additionalProperties: true
+        uiCompositionPlan:
+          type: object
+          nullable: true
+          additionalProperties: true
+        diagnostics:
+          type: object
+          nullable: true
+          additionalProperties: true
+      additionalProperties: true
+
+    AgenticAuthoringApplyResult:
+      type: object
+      properties:
+        applied:
+          type: boolean
+        etag:
+          type: string
+          nullable: true
+      additionalProperties: true
+
     AiOrchestratorRequest:
       type: object
       required:
@@ -406,7 +1249,7 @@ components:
           default: v1.1
         schemaHash:
           type: string
-          default: 51b7901f1df633d89fc019a2e41f675cc5b87b135dfc8335aa96e53205034b26
+          default: 2853423fce747f620266750bcf7f1387278afc7c94dee3a33d96da1a3f40f511
         schemaContext:
           $ref: '#/components/schemas/AiSchemaContext'
         variantId:
@@ -656,6 +1499,42 @@ components:
           type: string
           format: date-time
         fallbackPatchUrl:
+          type: string
+      additionalProperties: false
+
+    AgenticAuthoringTurnStreamStartResponse:
+      type: object
+      required:
+        - streamId
+        - threadId
+        - turnId
+        - eventSchemaVersion
+        - expiresAt
+        - fallbackAuthoringUrl
+      properties:
+        streamId:
+          type: string
+          format: uuid
+        threadId:
+          type: string
+          format: uuid
+        turnId:
+          type: string
+          format: uuid
+        eventSchemaVersion:
+          type: string
+          example: v1
+        streamAuthMode:
+          type: string
+          enum: [cookie, signed_url_token]
+          nullable: true
+        streamAccessToken:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+        fallbackAuthoringUrl:
           type: string
       additionalProperties: false
 

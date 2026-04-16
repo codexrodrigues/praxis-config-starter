@@ -1,5 +1,7 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import java.io.IOException;
@@ -12,7 +14,9 @@ public class AgenticAuthoringPreviewService {
 
     private final AgenticAuthoringPlanService planService;
     private final AgenticAuthoringPatchCompilerService patchCompilerService;
+    private final ObjectMapper objectMapper;
     private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
+    private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator;
     private final List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders;
 
     public AgenticAuthoringPreviewService(
@@ -35,7 +39,9 @@ public class AgenticAuthoringPreviewService {
             List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
-        this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(this.objectMapper);
+        this.conversationTurnOrchestrator = new AgenticAuthoringConversationTurnOrchestrator();
         this.uiCompositionPlanProviders = List.copyOf(
                 uiCompositionPlanProviders == null ? List.of() : uiCompositionPlanProviders);
     }
@@ -132,6 +138,7 @@ public class AgenticAuthoringPreviewService {
         if (request == null) {
             return null;
         }
+        request = withEffectivePrompt(request);
         AgenticAuthoringIntentResolutionResult enrichedIntent =
                 intentResolutionContext.enrich(request.intentResolution(), request.currentPage());
         if (enrichedIntent == request.intentResolution()) {
@@ -143,7 +150,71 @@ public class AgenticAuthoringPreviewService {
                 request.model(),
                 request.apiKey(),
                 request.currentPage(),
-                enrichedIntent);
+                enrichedIntent,
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                attachmentSummaries(request),
+                request.contextHints());
+    }
+
+    private AgenticAuthoringPlanRequest withEffectivePrompt(AgenticAuthoringPlanRequest request) {
+        String intentEffectivePrompt = request.intentResolution() == null
+                ? ""
+                : value(request.intentResolution().effectivePrompt()).trim();
+        if (!intentEffectivePrompt.isBlank()) {
+            if (Objects.equals(intentEffectivePrompt, request.userPrompt())) {
+                return request;
+            }
+            return withUserPrompt(request, intentEffectivePrompt);
+        }
+        AgenticAuthoringConversationTurn turn = conversationTurnOrchestrator.resolve(
+                request.userPrompt(),
+                request.conversationMessages(),
+                request.pendingClarification());
+        String effectivePrompt = turn.effectivePrompt();
+        if (Objects.equals(effectivePrompt, request.userPrompt())) {
+            return request;
+        }
+        return withUserPrompt(request, effectivePrompt);
+    }
+
+    private AgenticAuthoringPlanRequest withUserPrompt(AgenticAuthoringPlanRequest request, String userPrompt) {
+        return new AgenticAuthoringPlanRequest(
+                userPrompt,
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                request.intentResolution(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                attachmentSummaries(request),
+                request.contextHints());
+    }
+
+    private List<AgenticAuthoringAttachmentSummary> attachmentSummaries(AgenticAuthoringPlanRequest request) {
+        if (request.attachmentSummaries() != null && !request.attachmentSummaries().isEmpty()) {
+            return request.attachmentSummaries();
+        }
+        JsonNode diagnostics = request.pendingClarification() == null
+                ? null
+                : request.pendingClarification().diagnostics();
+        JsonNode summaries = diagnostics == null ? null : diagnostics.path("attachmentSummaries");
+        if (summaries == null || !summaries.isArray() || summaries.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.convertValue(
+                    summaries,
+                    new TypeReference<List<AgenticAuthoringAttachmentSummary>>() {
+                    });
+        } catch (IllegalArgumentException ex) {
+            return List.of();
+        }
     }
 
     private AgenticAuthoringPreviewDiagnostics diagnostics(

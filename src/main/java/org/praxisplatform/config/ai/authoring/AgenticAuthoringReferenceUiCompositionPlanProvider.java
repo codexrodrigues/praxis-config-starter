@@ -22,6 +22,20 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     private static final String EMPLOYEES = "/api/human-resources/funcionarios";
     private static final String PAYROLL_ANALYTICS = "/api/human-resources/vw-analytics-folha-pagamento";
     private static final String PAYROLL = "/api/human-resources/folhas-pagamento";
+    private static final PayrollBreakdown DEPARTMENT_BREAKDOWN =
+            new PayrollBreakdown("departamento", "Departamento", "department", "selectedDepartment", "group-by", "bar");
+    private static final PayrollBreakdown COMPETENCE_BREAKDOWN =
+            new PayrollBreakdown("competencia", "Competencia", "competence", "selectedCompetence", "timeseries", "line");
+    private static final PayrollBreakdown STATUS_BREAKDOWN =
+            new PayrollBreakdown("composicaoFolha", "Status", "status", "selectedPayrollStatus", "group-by", "bar");
+    private static final PayrollBreakdown ROLE_BREAKDOWN =
+            new PayrollBreakdown("cargo", "Cargo", "role", "selectedPayrollRole", "group-by", "bar");
+    private static final PayrollBreakdown TEAM_BREAKDOWN =
+            new PayrollBreakdown("equipe", "Equipe", "team", "selectedPayrollTeam", "group-by", "bar");
+    private static final PayrollBreakdown BASE_BREAKDOWN =
+            new PayrollBreakdown("base", "Base", "base", "selectedPayrollBase", "group-by", "bar");
+    private static final PayrollBreakdown PROFILE_BREAKDOWN =
+            new PayrollBreakdown("payrollProfile", "Perfil", "profile", "selectedPayrollProfile", "group-by", "bar");
 
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
@@ -53,12 +67,27 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (tableTitleModification.isPresent()) {
             return tableTitleModification;
         }
+        Optional<AgenticAuthoringUiCompositionPlanResult> dashboardWidgetAddition = dashboardWidgetAddition(request);
+        if (dashboardWidgetAddition.isPresent()) {
+            return dashboardWidgetAddition;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> selectedPayrollTable = selectedPayrollTable(request);
+        if (selectedPayrollTable.isPresent()) {
+            return selectedPayrollTable;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceDashboard = selectedResourceDashboard(request);
+        if (selectedResourceDashboard.isPresent()) {
+            return selectedResourceDashboard;
+        }
         if (supportsChartDrillDown(request)) {
+            PayrollBreakdown breakdown = resolvePayrollBreakdown(request.userPrompt());
             return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                     true,
                     List.of(),
-                    List.of("ui-composition-plan-provider:quickstart-payroll-chart-drilldown"),
-                    chartDrillDownPlan(),
+                    List.of(
+                            "ui-composition-plan-provider:quickstart-payroll-chart-drilldown",
+                            "ui-composition-plan-provider:quickstart-payroll-chart-drilldown:" + breakdown.field()),
+                    chartDrillDownPlan(breakdown),
                     emptyCompiledFormPatch()));
         }
         if (supportsPayrollTable(request)) {
@@ -84,16 +113,53 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (request == null || request.userPrompt() == null) {
             return false;
         }
+        if (isResolvedTableCreateIntent(request)) {
+            return false;
+        }
         String prompt = normalize(request.userPrompt());
+        boolean asksForTable = containsAny(prompt, "tabela", "grid", "lista", "listagem", "listar", "liste", "relacao");
+        boolean rejectsDashboard = containsAny(prompt, "ignore", "ignorar", "desconsidere")
+                && containsAny(prompt, "dashboard", "painel");
+        if (asksForTable && rejectsDashboard) {
+            return false;
+        }
         boolean asksForChart = containsAny(prompt, "chart", "grafico", "bar", "barra", "donut", "pizza");
         boolean asksForDashboard = containsAny(prompt, "dashboard", "painel");
         boolean asksForDrillDown = containsAny(prompt, "drill down", "drill-down", "drilldown", "detalhar", "detalhe", "aprofundar");
         boolean referencesPayrollOrDepartment = containsAny(prompt,
-                "folha", "pagamento", "salario", "salarios", "departamento", "departamentos", "funcionario", "funcionarios");
-        boolean referencesPayrollByDepartment = containsAny(prompt, "departamento", "departamentos")
+                "folha", "pagamento", "salario", "salarios", "departamento", "departamentos",
+                "funcionario", "funcionarios", "cargo", "cargos", "equipe", "equipes", "base", "bases",
+                "perfil", "perfis");
+        boolean referencesPayrollByBreakdown = containsAny(prompt,
+                "departamento", "departamentos", "competencia", "competencias", "mes", "mensal",
+                "status", "situacao", "cargo", "cargos", "equipe", "equipes", "base", "bases",
+                "perfil", "perfis", "profile")
                 && containsAny(prompt, "folha", "pagamento", "salario", "salarios");
         return (asksForChart && asksForDrillDown && referencesPayrollOrDepartment)
-                || (asksForDashboard && referencesPayrollByDepartment);
+                || (asksForDashboard && referencesPayrollByBreakdown);
+    }
+
+    private PayrollBreakdown resolvePayrollBreakdown(String prompt) {
+        String normalized = normalize(prompt);
+        if (containsAny(normalized, "competencia", "competencias", "mes", "mensal")) {
+            return COMPETENCE_BREAKDOWN;
+        }
+        if (containsAny(normalized, "status", "situacao", "composicao")) {
+            return STATUS_BREAKDOWN;
+        }
+        if (containsAny(normalized, "cargo", "cargos", "funcao", "funcoes")) {
+            return ROLE_BREAKDOWN;
+        }
+        if (containsAny(normalized, "equipe", "equipes", "time", "times")) {
+            return TEAM_BREAKDOWN;
+        }
+        if (containsAny(normalized, "base", "bases", "localidade", "localidades")) {
+            return BASE_BREAKDOWN;
+        }
+        if (containsAny(normalized, "perfil", "perfis", "profile", "payroll profile")) {
+            return PROFILE_BREAKDOWN;
+        }
+        return DEPARTMENT_BREAKDOWN;
     }
 
     private boolean supportsPayrollTable(AgenticAuthoringPlanRequest request) {
@@ -105,6 +171,14 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         boolean asksForTable = containsAny(prompt, "tabela", "grid", "lista", "listagem", "listar", "liste", "relacao");
         boolean referencesPayroll = containsAny(prompt, "folha", "pagamento", "pagamentos", "salario", "salarios");
         return asksToCreate && asksForTable && referencesPayroll;
+    }
+
+    private boolean isResolvedTableCreateIntent(AgenticAuthoringPlanRequest request) {
+        AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
+        return intent != null
+                && intent.valid()
+                && "create".equals(intent.operationKind())
+                && "table".equals(intent.artifactKind());
     }
 
     private Optional<AgenticAuthoringUiCompositionPlanResult> tableTitleModification(AgenticAuthoringPlanRequest request) {
@@ -151,6 +225,212 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
             return "";
         }
         return normalized.substring(index + " para ".length()).trim().replaceAll("[.?!]+$", "").trim();
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> dashboardWidgetAddition(AgenticAuthoringPlanRequest request) {
+        if (!supportsDashboardWidgetAddition(request)) {
+            return Optional.empty();
+        }
+        ObjectNode page = request.currentPage().deepCopy();
+        String key = nextAvailableWidgetKey(page, "payroll-executive-summary");
+        addExecutiveSummaryPageWidget(page, key);
+        addCanvasItemForAppendedWidget(page, key, 1, nextCanvasRow(page), 12, 2);
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:quickstart-dashboard-widget-addition"),
+                null,
+                compiledPagePatch(page, "add-dashboard-widget")));
+    }
+
+    private boolean supportsDashboardWidgetAddition(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.userPrompt() == null || request.currentPage() == null
+                || request.intentResolution() == null) {
+            return false;
+        }
+        String prompt = normalize(request.userPrompt());
+        return "modify".equals(request.intentResolution().operationKind())
+                && "dashboard".equals(request.intentResolution().artifactKind())
+                && "add_dashboard_widget".equals(request.intentResolution().changeKind())
+                && containsAny(prompt, "resumo", "executivo", "kpi", "indicador", "indicadores", "total", "media", "media salarial")
+                && containsAny(prompt, "folha", "pagamento", "salario", "salarios", "descontos");
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceDashboard(AgenticAuthoringPlanRequest request) {
+        if (!supportsSelectedResourceDashboard(request)) {
+            return Optional.empty();
+        }
+        AgenticAuthoringCandidate candidate = request.intentResolution().selectedCandidate();
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:selected-resource-dashboard"),
+                selectedResourceDashboardPlan(candidate),
+                emptyCompiledFormPatch()));
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> selectedPayrollTable(AgenticAuthoringPlanRequest request) {
+        if (!supportsSelectedPayrollTable(request)) {
+            return Optional.empty();
+        }
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:quickstart-payroll-table:selected-intent"),
+                payrollTablePlan(),
+                emptyCompiledFormPatch()));
+    }
+
+    private boolean supportsSelectedPayrollTable(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.intentResolution() == null) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
+        String resourcePath = valueOrEmpty(candidate == null ? null : candidate.resourcePath());
+        return intent.valid()
+                && "create".equals(intent.operationKind())
+                && "table".equals(intent.artifactKind())
+                && (resourcePath.equals(PAYROLL) || resourcePath.startsWith(PAYROLL + "/"));
+    }
+
+    private boolean supportsSelectedResourceDashboard(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.intentResolution() == null
+                || request.intentResolution().selectedCandidate() == null) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
+        return intent.valid()
+                && "create".equals(intent.operationKind())
+                && "dashboard".equals(intent.artifactKind())
+                && "create_artifact".equals(intent.changeKind())
+                && candidate.resourcePath() != null
+                && !candidate.resourcePath().isBlank();
+    }
+
+    private ObjectNode selectedResourceDashboardPlan(AgenticAuthoringCandidate candidate) {
+        String widgetKey = resourceWidgetKey(candidate.resourcePath());
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.put("layoutPreset", "resource-dashboard");
+
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "96px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        canvas.put("collisionPolicy", "block");
+        ObjectNode items = canvas.putObject("items");
+        addCanvasItem(items, widgetKey, 1, 1, 12, 6);
+        addCanvasItem(items, widgetKey + "-summary", 1, 7, 12, 2);
+
+        ArrayNode widgets = plan.putArray("widgets");
+        addSelectedResourceTable(widgets, candidate, widgetKey);
+        addSelectedResourceSummary(widgets, candidate, widgetKey + "-summary");
+        plan.putArray("bindings");
+        return plan;
+    }
+
+    private void addSelectedResourceTable(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", widgetKey);
+        widget.put("componentId", "praxis-table");
+        widget.put("role", "main");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", candidate.resourcePath());
+        inputs.put("tableId", widgetKey);
+        inputs.put("title", titleFromResourcePath(candidate.resourcePath()));
+        if (candidate.submitUrl() != null && !candidate.submitUrl().isBlank()) {
+            inputs.put("submitUrl", candidate.submitUrl());
+        }
+        if (candidate.submitMethod() != null && !candidate.submitMethod().isBlank()) {
+            inputs.put("submitMethod", candidate.submitMethod());
+        }
+        inputs.putObject("config").putArray("columns");
+    }
+
+    private void addSelectedResourceSummary(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", widgetKey);
+        widget.put("componentId", "praxis-rich-content");
+        widget.put("role", "supporting");
+        ObjectNode document = widget.putObject("inputs").putObject("document");
+        document.put("kind", "praxis.rich-content.document");
+        document.put("version", "1.0.0");
+        ObjectNode text = document.putArray("nodes").addObject();
+        text.put("type", "text");
+        text.put("text", "Dashboard criado a partir de " + candidate.resourcePath() + ".");
+    }
+
+    private String resourceWidgetKey(String resourcePath) {
+        String normalized = normalize(resourcePath == null ? "resource" : resourcePath)
+                .replace("/api/", "")
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-+|-+$)", "");
+        return normalized.isBlank() ? "resource-dashboard-table" : normalized + "-table";
+    }
+
+    private String titleFromResourcePath(String resourcePath) {
+        if (resourcePath == null || resourcePath.isBlank()) {
+            return "Dashboard";
+        }
+        String lastSegment = resourcePath.substring(resourcePath.lastIndexOf('/') + 1)
+                .replace("vw-", "")
+                .replace('-', ' ')
+                .trim();
+        if (lastSegment.isBlank()) {
+            return "Dashboard";
+        }
+        return Character.toUpperCase(lastSegment.charAt(0)) + lastSegment.substring(1);
+    }
+
+    private String nextAvailableWidgetKey(ObjectNode page, String baseKey) {
+        if (findWidget(page, baseKey) == null) {
+            return baseKey;
+        }
+        int suffix = 2;
+        while (findWidget(page, baseKey + "-" + suffix) != null) {
+            suffix++;
+        }
+        return baseKey + "-" + suffix;
+    }
+
+    private void addExecutiveSummaryPageWidget(ObjectNode page, String key) {
+        ArrayNode widgets = page.withArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-rich-content");
+        ObjectNode document = definition.putObject("inputs").putObject("document");
+        document.put("kind", "praxis.rich-content.document");
+        document.put("version", "1.0.0");
+        ObjectNode text = document.putArray("nodes").addObject();
+        text.put("type", "text");
+        text.put("text", "Resumo executivo: total de salarios, total de descontos e media salarial por departamento.");
+    }
+
+    private void addCanvasItemForAppendedWidget(ObjectNode page, String key, int col, int row, int colSpan, int rowSpan) {
+        JsonNode items = page.path("canvas").path("items");
+        if (!items.isObject()) {
+            return;
+        }
+        addCanvasItem((ObjectNode) items, key, col, row, colSpan, rowSpan);
+    }
+
+    private int nextCanvasRow(ObjectNode page) {
+        JsonNode items = page.path("canvas").path("items");
+        if (!items.isObject()) {
+            return 1;
+        }
+        int row = 1;
+        for (JsonNode item : items) {
+            int itemEnd = item.path("row").asInt(1) + item.path("rowSpan").asInt(1);
+            row = Math.max(row, itemEnd);
+        }
+        return row;
     }
 
     private ObjectNode findWidget(ObjectNode page, String widgetKey) {
@@ -230,14 +510,12 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (field.isBlank()) {
             return false;
         }
+        String dimension = firstText(config.path("dataSource").path("query").path("dimensions"), config.path("axes").path("x").path("field").asText("departamento"));
         config.with("axes").with("y").put("field", field);
         ObjectNode series = firstSeries(config);
         series.with("metric").put("field", field);
         series.with("metric").put("aggregation", "sum");
-        ObjectNode queryMetric = firstQueryMetric(config);
-        queryMetric.put("field", field);
-        queryMetric.put("aggregation", "sum");
-        queryMetric.put("alias", field);
+        configureGroupByStatsQuery(config, dimension, field);
         return true;
     }
 
@@ -248,9 +526,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         }
         config.with("axes").with("x").put("field", field);
         firstSeries(config).put("categoryField", field);
-        ArrayNode dimensions = config.with("dataSource").with("query").withArray("dimensions");
-        dimensions.removeAll();
-        dimensions.add(field);
+        String metricField = firstSeries(config).path("metric").path("field").asText("salarioLiquido");
+        configureGroupByStatsQuery(config, field, metricField);
         return true;
     }
 
@@ -313,24 +590,55 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private ObjectNode chartDrillDownPlan() {
+        return chartDrillDownPlan(DEPARTMENT_BREAKDOWN);
+    }
+
+    private ObjectNode chartDrillDownPlan(PayrollBreakdown breakdown) {
         ObjectNode plan = objectMapper.createObjectNode();
         plan.put("version", "1.0");
         plan.put("kind", "praxis.ui-composition-plan");
         plan.put("layoutPreset", "chart-drilldown-dashboard");
 
         ObjectNode values = plan.putObject("state").putObject("values");
-        values.putNull("selectedDepartment");
+        values.putNull(breakdown.statePath());
+        addPayrollDrillDownCanvas(plan, breakdown);
 
         ArrayNode widgets = plan.putArray("widgets");
-        addPayrollDrillDownChart(widgets);
+        addPayrollDrillDownChart(widgets, breakdown);
         addPayrollDrillDownTable(widgets);
-        addPayrollDrillDownSummary(widgets);
+        addPayrollDrillDownSummary(widgets, breakdown);
 
         ArrayNode bindings = plan.putArray("bindings");
-        addChartSelectionStateBinding(bindings);
-        addChartStateQueryContextBinding(bindings);
-        addChartStateSummaryBinding(bindings);
+        addChartSelectionStateBinding(bindings, breakdown);
+        addChartStateQueryContextBinding(bindings, breakdown);
+        addChartStateSummaryBinding(bindings, breakdown);
         return plan;
+    }
+
+    private void addPayrollDrillDownCanvas(ObjectNode plan) {
+        addPayrollDrillDownCanvas(plan, DEPARTMENT_BREAKDOWN);
+    }
+
+    private void addPayrollDrillDownCanvas(ObjectNode plan, PayrollBreakdown breakdown) {
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "96px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        canvas.put("collisionPolicy", "block");
+        ObjectNode items = canvas.putObject("items");
+        addCanvasItem(items, breakdown.chartKey(), 1, 1, 12, 4);
+        addCanvasItem(items, "payroll-drilldown-table", 1, 5, 8, 7);
+        addCanvasItem(items, "payroll-drilldown-summary", 9, 5, 4, 2);
+    }
+
+    private void addCanvasItem(ObjectNode items, String key, int col, int row, int colSpan, int rowSpan) {
+        ObjectNode item = items.putObject(key);
+        item.put("col", col);
+        item.put("row", row);
+        item.put("colSpan", colSpan);
+        item.put("rowSpan", rowSpan);
     }
 
     private ObjectNode masterDetailPlan() {
@@ -394,6 +702,26 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         addTableColumn(columns, "funcionarioId", "Funcionario", "number");
     }
 
+    private void addPayrollAnalyticsTableColumns(ArrayNode columns) {
+        addTableColumn(columns, "nomeCompleto", "Nome completo", "text");
+        addTableColumn(columns, "universo", "Universo", "text");
+        addTableColumn(columns, "cargo", "Cargo", "text");
+        addTableColumn(columns, "codinome", "Codinome", "text");
+        addTableColumn(columns, "exposicaoPublica", "Exposicao publica", "boolean");
+        addTableColumn(columns, "departamento", "Departamento", "text");
+        addTableColumn(columns, "equipe", "Equipe", "text");
+        addTableColumn(columns, "base", "Base", "text");
+        addTableColumn(columns, "ano", "Ano", "number");
+        addTableColumn(columns, "mes", "Mes", "number");
+        addTableColumn(columns, "competencia", "Competencia", "text");
+        addTableColumn(columns, "dataPagamento", "Data pagamento", "date");
+        addTableColumn(columns, "salarioBruto", "Salario bruto", "number");
+        addTableColumn(columns, "totalDescontos", "Total descontos", "number");
+        addTableColumn(columns, "salarioLiquido", "Salario liquido", "number");
+        addTableColumn(columns, "perfilFolha", "Perfil folha", "text");
+        addTableColumn(columns, "composicaoFolha", "Composicao folha", "text");
+    }
+
     private void addTableColumn(ArrayNode columns, String field, String header, String type) {
         ObjectNode column = columns.addObject();
         column.put("field", field);
@@ -417,6 +745,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode inputs = tableWidget.with("definition").with("inputs");
         ObjectNode config = inputs.with("config");
         ArrayNode columns = config.withArray("columns");
+        materializeKnownTableColumnsIfEmpty(inputs, columns);
         ObjectNode column = findColumn(columns, field);
         if (column == null) {
             return Optional.empty();
@@ -444,7 +773,9 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (tableWidget == null || !"praxis-table".equals(tableWidget.path("definition").path("id").asText())) {
             return Optional.empty();
         }
-        ArrayNode columns = tableWidget.with("definition").with("inputs").with("config").withArray("columns");
+        ObjectNode inputs = tableWidget.with("definition").with("inputs");
+        ArrayNode columns = inputs.with("config").withArray("columns");
+        materializeKnownTableColumnsIfEmpty(inputs, columns);
         ObjectNode column = findColumn(columns, field);
         if (column == null) {
             return Optional.empty();
@@ -471,7 +802,9 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (tableWidget == null || !"praxis-table".equals(tableWidget.path("definition").path("id").asText())) {
             return Optional.empty();
         }
-        ArrayNode columns = tableWidget.with("definition").with("inputs").with("config").withArray("columns");
+        ObjectNode inputs = tableWidget.with("definition").with("inputs");
+        ArrayNode columns = inputs.with("config").withArray("columns");
+        materializeKnownTableColumnsIfEmpty(inputs, columns);
         ObjectNode target = findColumn(columns, field);
         if (target == null) {
             return Optional.empty();
@@ -552,47 +885,57 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         return null;
     }
 
+    private void materializeKnownTableColumnsIfEmpty(ObjectNode inputs, ArrayNode columns) {
+        if (!columns.isEmpty()) {
+            return;
+        }
+        String resourcePath = inputs.path("resourcePath").asText("");
+        if (PAYROLL_ANALYTICS.equals(resourcePath)) {
+            addPayrollAnalyticsTableColumns(columns);
+        } else if (PAYROLL.equals(resourcePath)) {
+            addPayrollTableColumns(columns);
+        }
+    }
+
     private void addPayrollDrillDownChart(ArrayNode widgets) {
+        addPayrollDrillDownChart(widgets, DEPARTMENT_BREAKDOWN);
+    }
+
+    private void addPayrollDrillDownChart(ArrayNode widgets, PayrollBreakdown breakdown) {
         ObjectNode widget = widgets.addObject();
-        widget.put("key", "payroll-by-department-chart");
+        widget.put("key", breakdown.chartKey());
         widget.put("componentId", "praxis-chart");
         widget.put("role", "master");
         ObjectNode config = widget.putObject("inputs").putObject("config");
-        config.put("id", "payroll-by-department-chart");
-        config.put("type", "bar");
-        config.put("title", "Folha por departamento");
+        config.put("id", breakdown.chartKey());
+        config.put("type", breakdown.chartType());
+        config.put("title", "Folha por " + breakdown.label().toLowerCase(Locale.ROOT));
         ObjectNode axes = config.putObject("axes");
-        axes.putObject("x").put("field", "departamento").put("label", "Departamento").put("type", "category");
+        axes.putObject("x").put("field", breakdown.field()).put("label", breakdown.label()).put("type", "category");
         axes.putObject("y").put("field", "salarioLiquido").put("label", "Salario liquido").put("type", "value");
         ObjectNode series = config.putArray("series").addObject();
         series.put("id", "salario-liquido");
         series.put("name", "Salario liquido");
-        series.put("categoryField", "departamento");
+        series.put("type", breakdown.chartType());
+        series.put("categoryField", breakdown.field());
         ObjectNode metric = series.putObject("metric");
         metric.put("field", "salarioLiquido");
         metric.put("aggregation", "sum");
         ObjectNode dataSource = config.putObject("dataSource");
         dataSource.put("kind", "remote");
         dataSource.put("resourcePath", PAYROLL_ANALYTICS);
-        ObjectNode query = dataSource.putObject("query");
-        query.put("sourceKind", "praxis.stats");
-        query.put("statsOperation", "group-by");
-        query.putArray("dimensions").add("departamento");
-        ObjectNode queryMetric = query.putArray("metrics").addObject();
-        queryMetric.put("field", "salarioLiquido");
-        queryMetric.put("aggregation", "sum");
-        queryMetric.put("alias", "salarioLiquido");
+        configurePayrollBreakdownStatsQuery(config, breakdown);
         ObjectNode interactions = config.putObject("interactions");
         interactions.put("selection", true);
         interactions.put("crossFilter", true);
         ObjectNode eventActions = interactions.putObject("eventActions");
         ObjectNode selection = eventActions.putObject("selectionChange");
         selection.put("action", "emit");
-        selection.putObject("mapping").put("departamento", "departamento");
+        selection.putObject("mapping").put(breakdown.field(), breakdown.field());
         ObjectNode crossFilter = eventActions.putObject("crossFilter");
         crossFilter.put("action", "filter-widget");
         crossFilter.put("target", "payroll-drilldown-table");
-        crossFilter.putObject("mapping").put("departamento", "departamento");
+        crossFilter.putObject("mapping").put(breakdown.field(), breakdown.field());
     }
 
     private void addPayrollDrillDownTable(ArrayNode widgets) {
@@ -603,9 +946,14 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", PAYROLL_ANALYTICS);
         inputs.put("tableId", "payroll-drilldown-table");
+        addPayrollAnalyticsTableColumns(inputs.putObject("config").putArray("columns"));
     }
 
     private void addPayrollDrillDownSummary(ArrayNode widgets) {
+        addPayrollDrillDownSummary(widgets, DEPARTMENT_BREAKDOWN);
+    }
+
+    private void addPayrollDrillDownSummary(ArrayNode widgets, PayrollBreakdown breakdown) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", "payroll-drilldown-summary");
         widget.put("componentId", "praxis-rich-content");
@@ -615,42 +963,132 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         document.put("version", "1.0.0");
         ObjectNode text = document.putArray("nodes").addObject();
         text.put("type", "text");
-        text.put("text", "Clique em uma barra do grafico para detalhar a folha daquele departamento.");
+        text.put("text", "Clique em uma barra do grafico para detalhar a folha daquele recorte.");
+    }
+
+    private void configureGroupByStatsQuery(ObjectNode config, String dimensionField, String metricField) {
+        ObjectNode dataSource = config.with("dataSource");
+        dataSource.put("kind", "remote");
+        dataSource.put("resourcePath", PAYROLL_ANALYTICS);
+
+        ObjectNode query = dataSource.with("query");
+        query.put("sourceKind", "praxis.stats");
+        query.put("statsOperation", "group-by");
+        query.put("statsPath", PAYROLL_ANALYTICS + "/stats/group-by");
+
+        ArrayNode dimensions = query.withArray("dimensions");
+        dimensions.removeAll();
+        dimensions.add(dimensionField);
+
+        ObjectNode queryMetric = firstQueryMetric(config);
+        queryMetric.put("field", metricField);
+        queryMetric.put("aggregation", "sum");
+        queryMetric.put("alias", metricField);
+
+        ObjectNode statsRequest = query.putObject("statsRequest");
+        statsRequest.putObject("filter");
+        statsRequest.put("field", dimensionField);
+        statsRequest.put("limit", 10);
+        ObjectNode requestMetric = statsRequest.putObject("metric");
+        requestMetric.put("operation", "SUM");
+        requestMetric.put("field", metricField);
+        requestMetric.put("alias", metricField);
+    }
+
+    private void configurePayrollBreakdownStatsQuery(ObjectNode config, PayrollBreakdown breakdown) {
+        if ("timeseries".equals(breakdown.statsOperation())) {
+            configureTimeSeriesStatsQuery(config, breakdown.field(), "salarioLiquido");
+        } else {
+            configureGroupByStatsQuery(config, breakdown.field(), "salarioLiquido");
+        }
+    }
+
+    private void configureTimeSeriesStatsQuery(ObjectNode config, String timeField, String metricField) {
+        ObjectNode dataSource = config.with("dataSource");
+        dataSource.put("kind", "remote");
+        dataSource.put("resourcePath", PAYROLL_ANALYTICS);
+
+        ObjectNode query = dataSource.with("query");
+        query.put("sourceKind", "praxis.stats");
+        query.put("statsOperation", "timeseries");
+        query.put("statsPath", PAYROLL_ANALYTICS + "/stats/timeseries");
+        query.put("granularity", "month");
+        query.put("fillGaps", true);
+
+        ArrayNode dimensions = query.withArray("dimensions");
+        dimensions.removeAll();
+        dimensions.add(timeField);
+
+        ObjectNode queryMetric = firstQueryMetric(config);
+        queryMetric.put("field", metricField);
+        queryMetric.put("aggregation", "sum");
+        queryMetric.put("alias", metricField);
+
+        ObjectNode statsRequest = query.putObject("statsRequest");
+        statsRequest.putObject("filter");
+        statsRequest.put("field", timeField);
+        statsRequest.put("granularity", "MONTH");
+        statsRequest.put("fillGaps", true);
+        ObjectNode requestMetric = statsRequest.putObject("metric");
+        requestMetric.put("operation", "SUM");
+        requestMetric.put("field", metricField);
+        requestMetric.put("alias", metricField);
+    }
+
+    private String firstText(JsonNode node, String fallback) {
+        if (node != null && node.isArray() && !node.isEmpty()) {
+            String value = node.get(0).asText("");
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return fallback;
     }
 
     private void addChartSelectionStateBinding(ArrayNode bindings) {
-        ObjectNode binding = baseBinding(bindings, "payroll-by-department-chart.selectionChange->state.selectedDepartment", "state-write");
+        addChartSelectionStateBinding(bindings, DEPARTMENT_BREAKDOWN);
+    }
+
+    private void addChartSelectionStateBinding(ArrayNode bindings, PayrollBreakdown breakdown) {
+        ObjectNode binding = baseBinding(bindings, breakdown.chartKey() + ".selectionChange->state." + breakdown.statePath(), "state-write");
         ObjectNode from = binding.putObject("from");
         from.put("kind", "component-port");
-        from.put("widget", "payroll-by-department-chart");
+        from.put("widget", breakdown.chartKey());
         from.put("port", "selectionChange");
         from.put("direction", "output");
         ObjectNode to = binding.putObject("to");
         to.put("kind", "state");
-        to.put("path", "selectedDepartment");
+        to.put("path", breakdown.statePath());
         ObjectNode transform = binding.putObject("transform");
         transform.put("kind", "pick-path");
-        transform.put("id", "pick-selected-department");
-        transform.put("path", "filters.departamento");
+        transform.put("id", "pick-" + breakdown.keySuffix());
+        transform.put("inputSource", "payload");
+        transform.put("path", "filters." + breakdown.field());
         addMetadata(binding, "chart-drilldown");
     }
 
     private void addChartStateQueryContextBinding(ArrayNode bindings) {
-        ObjectNode binding = baseBinding(bindings, "state.selectedDepartment->payroll-drilldown-table.queryContext", "state-read");
+        addChartStateQueryContextBinding(bindings, DEPARTMENT_BREAKDOWN);
+    }
+
+    private void addChartStateQueryContextBinding(ArrayNode bindings, PayrollBreakdown breakdown) {
+        ObjectNode binding = baseBinding(bindings, "state." + breakdown.statePath() + "->payroll-drilldown-table.queryContext", "state-read");
         ObjectNode from = binding.putObject("from");
         from.put("kind", "state");
-        from.put("path", "selectedDepartment");
+        from.put("path", breakdown.statePath());
         ObjectNode to = binding.putObject("to");
         to.put("kind", "component-port");
         to.put("widget", "payroll-drilldown-table");
         to.put("port", "queryContext");
         to.put("direction", "input");
         ObjectNode condition = binding.putObject("condition");
-        condition.putArray("!!").addObject().put("var", "state.selectedDepartment");
+        condition.putArray("!!").addObject().put("var", "state." + breakdown.statePath());
         ObjectNode transform = binding.putObject("transform");
         transform.put("kind", "query-context");
-        transform.put("id", "department-text-filter");
-        transform.put("field", "departamento");
+        transform.put("id", breakdown.keySuffix() + "-text-filter");
+        transform.put("field", breakdown.field());
+        transform.put("inputSource", "payload");
+        transform.put("valueVar", "payload");
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
         policy.put("distinctBy", "value");
@@ -659,27 +1097,30 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private void addChartStateSummaryBinding(ArrayNode bindings) {
-        ObjectNode binding = baseBinding(bindings, "state.selectedDepartment->payroll-drilldown-summary.document", "state-read");
+        addChartStateSummaryBinding(bindings, DEPARTMENT_BREAKDOWN);
+    }
+
+    private void addChartStateSummaryBinding(ArrayNode bindings, PayrollBreakdown breakdown) {
+        ObjectNode binding = baseBinding(bindings, "state." + breakdown.statePath() + "->payroll-drilldown-summary.document", "state-read");
         ObjectNode from = binding.putObject("from");
         from.put("kind", "state");
-        from.put("path", "selectedDepartment");
+        from.put("path", breakdown.statePath());
         ObjectNode to = binding.putObject("to");
         to.put("kind", "component-port");
         to.put("widget", "payroll-drilldown-summary");
         to.put("port", "document");
         to.put("direction", "input");
-        binding.putObject("condition").putArray("!!").addObject().put("var", "state.selectedDepartment");
+        binding.putObject("condition").putArray("!!").addObject().put("var", "state." + breakdown.statePath());
         ObjectNode transform = binding.putObject("transform");
         transform.put("kind", "template");
         transform.put("id", "payroll-drilldown-summary-document");
+        transform.put("inputSource", "payload");
         ObjectNode template = transform.putObject("template");
         template.put("kind", "praxis.rich-content.document");
         template.put("version", "1.0.0");
         ObjectNode node = template.putArray("nodes").addObject();
         node.put("type", "text");
-        ArrayNode concat = node.putObject("text").putArray("concat");
-        concat.add("Detalhando folha do departamento: ");
-        concat.addObject().put("var", "value");
+        node.put("text", "Detalhando folha por " + breakdown.label().toLowerCase(Locale.ROOT) + ": ${payload}");
         addMetadata(binding, "rich-content");
     }
 
@@ -770,6 +1211,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         transform.put("kind", "query-context");
         transform.put("id", transformId);
         transform.put("field", field);
+        transform.put("inputSource", "payload");
+        transform.put("valueVar", "payload");
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
         policy.put("missingValuePolicy", "skip");
@@ -790,14 +1233,13 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode transform = binding.putObject("transform");
         transform.put("kind", "template");
         transform.put("id", "department-summary-document");
+        transform.put("inputSource", "payload");
         ObjectNode template = transform.putObject("template");
         template.put("kind", "praxis.rich-content.document");
         template.put("version", "1.0.0");
         ObjectNode node = template.putArray("nodes").addObject();
         node.put("type", "text");
-        ArrayNode concat = node.putObject("text").putArray("concat");
-        concat.add("Departamento selecionado: ");
-        concat.addObject().put("var", "value");
+        node.put("text", "Departamento selecionado: ${payload}");
         addMetadata(binding, "rich-content");
     }
 
@@ -814,6 +1256,18 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ArrayNode tags = metadata.putArray("tags");
         tags.add("composition");
         tags.add(tag);
+    }
+
+    private record PayrollBreakdown(
+            String field,
+            String label,
+            String keySuffix,
+            String statePath,
+            String statsOperation,
+            String chartType) {
+        String chartKey() {
+            return "payroll-by-" + keySuffix + "-chart";
+        }
     }
 
     private ObjectNode emptyCompiledFormPatch() {
@@ -859,5 +1313,9 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "");
         return normalized.toLowerCase(Locale.ROOT).trim();
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 }

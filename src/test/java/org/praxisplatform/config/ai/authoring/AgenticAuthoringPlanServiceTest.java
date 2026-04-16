@@ -124,6 +124,224 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanIncludesPendingClarificationContextInPrompt() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = minimalPlan();
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
+
+        service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "folha de pagamento",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                "session-1",
+                                "turn-2",
+                                java.util.List.of(new AgenticAuthoringConversationMessage(
+                                        "m1",
+                                        "user",
+                                        "Crie um dashboard",
+                                        null)),
+                                new AgenticAuthoringPendingClarification(
+                                        "Crie um dashboard",
+                                        java.util.List.of("Qual tema do dashboard?"),
+                                        "Qual tema do dashboard?",
+                                        "turn-1",
+                                        objectMapper.createObjectNode())),
+                        null,
+                        null,
+                        null);
+
+        assertThat(promptCaptor.getValue()).contains("User request:");
+        assertThat(promptCaptor.getValue()).contains("Crie um dashboard");
+        assertThat(promptCaptor.getValue()).contains("Confirmed: folha de pagamento");
+    }
+
+    @Test
+    void generateMinimalFormPlanPrefersIntentEffectivePromptOverPendingClarificationRecomposition() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = minimalPlan();
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
+        String rawPrompt = "Com base nisso, agora crie uma tabela operacional de folhas de pagamento";
+
+        service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                rawPrompt,
+                                null,
+                                null,
+                                null,
+                                null,
+                                new AgenticAuthoringIntentResolutionResult(
+                                        true,
+                                        "create",
+                                        "table",
+                                        "create_artifact",
+                                        "generic-page-change",
+                                        "praxis-ui-angular",
+                                        "praxis-dynamic-page-builder",
+                                        null,
+                                        new AgenticAuthoringCandidate(
+                                                "/api/human-resources/folhas-pagamento",
+                                                "get",
+                                                "/schemas/filtered?path=/api/human-resources/folhas-pagamento/all&operation=get&schemaType=response",
+                                                "/api/human-resources/folhas-pagamento/all",
+                                                "GET",
+                                                0.94,
+                                                "matched payroll table",
+                                                java.util.List.of("payroll")),
+                                        java.util.List.of(),
+                                        new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                                        rawPrompt,
+                                        "Vou criar uma tabela operacional.",
+                                        java.util.List.of(),
+                                        java.util.List.of(),
+                                        java.util.List.of("llm-intent-resolution-used"),
+                                        java.util.List.of(),
+                                        objectMapper.createObjectNode()),
+                                "session-1",
+                                "turn-2",
+                                java.util.List.of(new AgenticAuthoringConversationMessage(
+                                        "m1",
+                                        "user",
+                                        "Crie um dashboard de folha de pagamento",
+                                        null)),
+                                new AgenticAuthoringPendingClarification(
+                                        "Crie um dashboard de folha de pagamento",
+                                        java.util.List.of("Qual recorte do dashboard de folha de pagamento voce quer usar?"),
+                                        "Qual recorte do dashboard de folha de pagamento voce quer usar?",
+                                        "turn-1",
+                                        objectMapper.createObjectNode())),
+                        null,
+                        null,
+                        null);
+
+        assertThat(promptCaptor.getValue()).contains("User request:");
+        assertThat(promptCaptor.getValue()).contains(rawPrompt);
+        assertThat(promptCaptor.getValue()).doesNotContain("Confirmed:");
+    }
+
+    @Test
+    void generateMinimalFormPlanIncludesOnlyAttachmentSummariesInPrompt() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = minimalPlan();
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
+
+        service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Use a imagem anexada como referencia",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                "session-1",
+                                "turn-1",
+                                java.util.List.of(),
+                                null,
+                                java.util.List.of(new AgenticAuthoringAttachmentSummary(
+                                        "attachment-1",
+                                        "referencia.png",
+                                        "image",
+                                        "image/png",
+                                        12345L,
+                                        "paste",
+                                        true))),
+                        null,
+                        null,
+                        null);
+
+        assertThat(promptCaptor.getValue()).contains("Attachment summaries:");
+        assertThat(promptCaptor.getValue()).contains("\"name\":\"referencia.png\"");
+        assertThat(promptCaptor.getValue()).contains("\"mimeType\":\"image/png\"");
+        assertThat(promptCaptor.getValue()).contains("Do not assume access to file bytes, base64 content, blob URLs, or image pixels");
+        assertThat(promptCaptor.getValue()).doesNotContain("blob:");
+    }
+
+    @Test
+    void generateMinimalFormPlanRestoresAttachmentSummariesFromPendingClarificationDiagnostics() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = minimalPlan();
+        ObjectNode diagnostics = objectMapper.createObjectNode();
+        diagnostics.set("attachmentSummaries", objectMapper.valueToTree(java.util.List.of(
+                new AgenticAuthoringAttachmentSummary(
+                        "attachment-1",
+                        "referencia.png",
+                        "image",
+                        "image/png",
+                        12345L,
+                        "paste",
+                        true))));
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
+
+        service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "por departamento",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                "session-1",
+                                "turn-2",
+                                java.util.List.of(),
+                                new AgenticAuthoringPendingClarification(
+                                        "Crie um dashboard usando a imagem anexada",
+                                        java.util.List.of("Qual recorte?"),
+                                        "Qual recorte?",
+                                        "turn-1",
+                                        diagnostics)),
+                        null,
+                        null,
+                        null);
+
+        assertThat(promptCaptor.getValue()).contains("\"name\":\"referencia.png\"");
+        assertThat(promptCaptor.getValue()).contains("\"source\":\"paste\"");
+        assertThat(promptCaptor.getValue()).doesNotContain("blob:");
+    }
+
+    @Test
     void generateMinimalFormPlanDerivesCurrentPageSummaryWhenIntentIsIncomplete() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
@@ -186,6 +404,37 @@ class AgenticAuthoringPlanServiceTest {
                 .isEqualTo("observacaoInterna");
         assertThat(result.minimalFormPlan().path("fields").get(0).path("controlType").asText())
                 .isEqualTo("textarea");
+    }
+
+    @Test
+    void generateMinimalFormPlanCompletesRelabelFieldFromPromptWhenProviderMissesServerBackedField() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("observacaoInterna", "Observacao interna", "textarea");
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Renomeie o campo nome para Nome completo do colaborador",
+                                null,
+                                null,
+                                null,
+                                currentPageWithLocalObservacao(),
+                                funcionariosIntent("modify", "rename_or_relabel", objectMapper.createObjectNode())),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.minimalFormPlan().path("fields"))
+                .anySatisfy(field -> {
+                    assertThat(field.path("name").asText()).isEqualTo("nome");
+                    assertThat(field.path("label").asText()).isEqualTo("Nome completo do colaborador");
+                });
     }
 
     @Test

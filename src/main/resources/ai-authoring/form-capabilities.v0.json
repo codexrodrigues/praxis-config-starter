@@ -9,6 +9,13 @@
       "triggerTerms": ["adicionar", "adicione", "incluir", "inclua", "acrescentar", "acrescente"],
       "fieldAliases": [
         { "field": "observacaoInterna", "aliases": ["observacao interna", "observacaointerna", "observacao"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Adicione um campo local de observacao interna.",
+          "intent": "Criar campo auxiliar no formulario sem enviar ao backend.",
+          "configHints": ["field.source=local", "field.transient=true", "submitPolicy.includeInPayload=false"]
+        }
       ]
     },
     {
@@ -18,6 +25,13 @@
       "fieldAliases": [
         { "field": "nomeCompleto", "aliases": ["nome completo", "nome do funcionario", "nome funcionario"] },
         { "field": "nome", "aliases": ["nome", "nome completo do colaborador"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Renomeie o campo nome para Nome completo.",
+          "intent": "Alterar apenas o rotulo visivel preservando o campo de dados.",
+          "configHints": ["field.name preservado", "field.label=Nome completo"]
+        }
       ]
     },
     {
@@ -28,6 +42,13 @@
         { "field": "observacaoInterna", "aliases": ["observacao interna", "observacaointerna", "observacao"] },
         { "field": "nome", "aliases": ["nome"] },
         { "field": "nomeCompleto", "aliases": ["nome completo", "nome do funcionario", "nome funcionario"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Remova o campo local de observacao interna.",
+          "intent": "Remover somente campos criados localmente pelo autor.",
+          "configHints": ["permitir remocao quando field.source=local", "bloquear remocao de campo vindo do schema remoto"]
+        }
       ]
     }
   ]

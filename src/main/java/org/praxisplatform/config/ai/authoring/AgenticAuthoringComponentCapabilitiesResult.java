@@ -16,7 +16,14 @@ public record AgenticAuthoringComponentCapabilitiesResult(
             String id,
             String changeKind,
             List<String> triggerTerms,
-            List<ComponentFieldAlias> fieldAliases) {
+            List<ComponentFieldAlias> fieldAliases,
+            List<ComponentCapabilityExample> examples) {
+    }
+
+    public record ComponentCapabilityExample(
+            String prompt,
+            String intent,
+            List<String> configHints) {
     }
 
     public record ComponentFieldAlias(

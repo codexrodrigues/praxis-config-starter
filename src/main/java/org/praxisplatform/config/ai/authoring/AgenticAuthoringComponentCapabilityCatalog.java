@@ -48,10 +48,16 @@ final class AgenticAuthoringComponentCapabilityCatalog {
     }
 
     Optional<String> resolveChangeKind(String normalizedPrompt) {
-        return capabilities.stream()
-                .filter(capability -> capability.matches(normalizedPrompt))
-                .map(ComponentCapability::changeKind)
-                .findFirst();
+        ComponentCapability bestCapability = null;
+        int bestScore = 0;
+        for (ComponentCapability capability : capabilities) {
+            int score = capability.matchScore(normalizedPrompt);
+            if (score > bestScore) {
+                bestCapability = capability;
+                bestScore = score;
+            }
+        }
+        return bestCapability == null ? Optional.empty() : Optional.of(bestCapability.changeKind());
     }
 
     boolean supports(String changeKind, String normalizedPrompt) {
@@ -91,7 +97,22 @@ final class AgenticAuthoringComponentCapabilityCatalog {
                     requiredText(node, "id"),
                     requiredText(node, "changeKind"),
                     parseStringList(node.path("triggerTerms")),
-                    parseFieldAliases(node.path("fieldAliases"))));
+                    parseFieldAliases(node.path("fieldAliases")),
+                    parseExamples(node.path("examples"))));
+        }
+        return parsed;
+    }
+
+    private static List<ComponentCapabilityExample> parseExamples(JsonNode nodes) {
+        if (!nodes.isArray()) {
+            return List.of();
+        }
+        List<ComponentCapabilityExample> parsed = new ArrayList<>();
+        for (JsonNode node : nodes) {
+            parsed.add(new ComponentCapabilityExample(
+                    requiredText(node, "prompt"),
+                    requiredText(node, "intent"),
+                    parseStringList(node.path("configHints"))));
         }
         return parsed;
     }
@@ -135,17 +156,40 @@ final class AgenticAuthoringComponentCapabilityCatalog {
             String id,
             String changeKind,
             List<String> triggerTerms,
-            List<ComponentFieldAlias> fieldAliases) {
+            List<ComponentFieldAlias> fieldAliases,
+            List<ComponentCapabilityExample> examples) {
 
         boolean matches(String normalizedPrompt) {
             return containsAny(normalizedPrompt, triggerTerms);
         }
+
+        int matchScore(String normalizedPrompt) {
+            int score = matchCount(normalizedPrompt, triggerTerms);
+            if (score == 0) {
+                return 0;
+            }
+            for (ComponentFieldAlias alias : fieldAliases) {
+                score += alias.matchScore(normalizedPrompt);
+            }
+            return score;
+        }
+    }
+
+    record ComponentCapabilityExample(
+            String prompt,
+            String intent,
+            List<String> configHints) {
     }
 
     record ComponentFieldAlias(String field, List<String> aliases) {
 
         boolean matches(String normalizedPrompt) {
             return containsAny(normalizedPrompt, aliases);
+        }
+
+        int matchScore(String normalizedPrompt) {
+            int count = matchCount(normalizedPrompt, aliases);
+            return count == 0 ? 0 : 100 + count;
         }
     }
 
@@ -156,5 +200,15 @@ final class AgenticAuthoringComponentCapabilityCatalog {
             }
         }
         return false;
+    }
+
+    private static int matchCount(String value, List<String> terms) {
+        int count = 0;
+        for (String term : terms) {
+            if (value.contains(term)) {
+                count++;
+            }
+        }
+        return count;
     }
 }

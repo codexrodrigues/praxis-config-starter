@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -162,6 +163,82 @@ class AgenticAuthoringPreviewServiceTest {
                 "compiled-form-patch-materialized-by-page-builder");
     }
 
+    @Test
+    void previewProviderReceivesIntentEffectivePromptInsteadOfRecomposedPendingClarification() throws Exception {
+        String rawPrompt = "Com base nisso, agora crie uma tabela operacional de folhas de pagamento";
+        AtomicReference<AgenticAuthoringPlanRequest> capturedRequest = new AtomicReference<>();
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("layoutPreset", "single-table-page");
+        plan.putArray("widgets").addObject().put("key", "payroll-table").put("componentId", "praxis-table");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.putObject("patch");
+        AgenticAuthoringUiCompositionPlanProvider provider = request -> {
+            capturedRequest.set(request);
+            return java.util.Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    List.of("ui-composition-plan-provider:single-table"),
+                    plan,
+                    compiledFormPatch));
+        };
+
+        new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider)).preview(new AgenticAuthoringPlanRequest(
+                        rawPrompt,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        payrollTableIntent(rawPrompt),
+                        "session-1",
+                        "turn-2",
+                        List.of(new AgenticAuthoringConversationMessage(
+                                "m1",
+                                "user",
+                                "Crie um dashboard de folha de pagamento",
+                                null)),
+                        new AgenticAuthoringPendingClarification(
+                                "Crie um dashboard de folha de pagamento",
+                                List.of("Qual recorte do dashboard de folha de pagamento voce quer usar?"),
+                                "Qual recorte do dashboard de folha de pagamento voce quer usar?",
+                                "turn-1",
+                                objectMapper.createObjectNode())), "tenant", "user", "local");
+
+        assertThat(capturedRequest.get()).isNotNull();
+        assertThat(capturedRequest.get().userPrompt()).isEqualTo(rawPrompt);
+    }
+
+    @Test
+    void previewReturnsSelectedResourceDashboardPlanInsteadOfRejectingNonFormArtifact() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard Confirmed: usar /api/human-resources/vw-ranking-reputacao",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                selectedDashboardIntent());
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("intent-resolution-artifact-must-be-form");
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-dashboard");
+        assertThat(result.uiCompositionPlan().path("widgets").get(0).path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-ranking-reputacao");
+        assertThat(result.warnings()).contains(
+                "ui-composition-plan-provider:selected-resource-dashboard",
+                "compiled-form-patch-materialized-by-page-builder");
+        assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("accepted-create");
+    }
+
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
     }
@@ -195,6 +272,63 @@ class AgenticAuthoringPreviewServiceTest {
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
                 List.of(),
                 List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult selectedDashboardIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-ranking-reputacao",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-ranking-reputacao/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-ranking-reputacao/filter/cursor",
+                        "POST",
+                        0.94d,
+                        "user selected a dashboard resource candidate",
+                        List.of("quick-reply")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult payrollTableIntent(String effectivePrompt) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "table",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/folhas-pagamento",
+                        "get",
+                        "/schemas/filtered?path=/api/human-resources/folhas-pagamento/all&operation=get&schemaType=response",
+                        "/api/human-resources/folhas-pagamento/all",
+                        "GET",
+                        0.94d,
+                        "matched payroll table",
+                        List.of("payroll")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                effectivePrompt,
+                "Vou criar uma tabela operacional.",
+                List.of(),
+                List.of(),
+                List.of("llm-intent-resolution-used"),
                 List.of(),
                 objectMapper.createObjectNode());
     }

@@ -19,15 +19,22 @@ import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringCandidate;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
@@ -53,7 +60,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),
                 mock(AgenticAuthoringApplyService.class),
-                new AgenticAuthoringComponentCapabilitiesService())).build();
+                new AgenticAuthoringComponentCapabilitiesService(),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
 
         String response = mockMvc.perform(get("/api/praxis/config/ai/authoring/component-capabilities"))
                 .andExpect(status().isOk())
@@ -68,6 +76,57 @@ class AgenticAuthoringPagePreviewHttpTest {
         JsonNode formCatalog = body.path("catalogs").get(0);
         assertThat(formCatalog.path("capabilities")).extracting(node -> node.path("changeKind").asText())
                 .containsExactly("add_field", "rename_or_relabel", "remove_field");
+    }
+
+    @Test
+    void resourceCandidatesEndpointReturnsToolPayload() throws Exception {
+        AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
+                mock(AgenticAuthoringResourceDiscoveryService.class);
+        when(resourceDiscoveryService.search(any()))
+                .thenReturn(new AgenticAuthoringResourceCandidatesResult(
+                        true,
+                        "searchApiResources",
+                        "Quais APIs analiticas podem alimentar graficos de folha?",
+                        "dashboard",
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                "get",
+                                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response",
+                                "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                                "post",
+                                0.9d,
+                                "api_metadata broad artifact discovery",
+                                List.of("api-metadata"))),
+                        List.of()));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                mock(AgenticAuthoringPreviewService.class),
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                resourceDiscoveryService)).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("retrievalQuery", "Quais APIs analiticas podem alimentar graficos de folha?");
+        request.put("artifactKind", "dashboard");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/resource-candidates")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("tool").asText()).isEqualTo("searchApiResources");
+        assertThat(body.path("artifactKind").asText()).isEqualTo("dashboard");
+        assertThat(body.path("candidates")).hasSize(1);
+        assertThat(body.path("candidates").get(0).path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
     }
 
     @Test
@@ -98,7 +157,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 compilerService,
                 previewService,
                 mock(AgenticAuthoringApplyService.class),
-                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
 
         String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -145,7 +205,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 compilerService,
                 previewService,
                 mock(AgenticAuthoringApplyService.class),
-                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
 
         ObjectNode request = objectMapper.createObjectNode();
         request.put("userPrompt", "Use um chart para criar drill down da folha por departamento");
@@ -171,6 +232,452 @@ class AgenticAuthoringPagePreviewHttpTest {
     }
 
     @Test
+    void intentResolutionUsesPendingClarificationContextOverHttp() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                new AgenticAuthoringIntentResolverService(objectMapper),
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                mock(AgenticAuthoringPreviewService.class),
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "folha de pagamento");
+        request.put("sessionId", "session-1");
+        request.put("clientTurnId", "turn-2");
+        request.putArray("conversationMessages")
+                .addObject()
+                .put("id", "message-1")
+                .put("role", "user")
+                .put("text", "Crie um dashboard")
+                .put("createdAt", "2026-04-14T20:00:00Z");
+        ObjectNode pendingClarification = request.putObject("pendingClarification");
+        pendingClarification.put("sourcePrompt", "Crie um dashboard");
+        pendingClarification.putArray("questions")
+                .add("Qual recurso de negocio deve alimentar esta tela?");
+        pendingClarification.put("assistantMessage", "Qual recurso de negocio deve alimentar esta tela?");
+        pendingClarification.put("clientTurnId", "turn-1");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/intent-resolution")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isFalse();
+        assertThat(body.path("operationKind").asText()).isEqualTo("create");
+        assertThat(body.path("artifactKind").asText()).isEqualTo("dashboard");
+        assertThat(body.path("selectedCandidate").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(body.path("failureCodes")).extracting(JsonNode::asText)
+                .contains("analytics-breakdown-required");
+        assertThat(body.path("pendingClarification").path("sourcePrompt").asText())
+                .isEqualTo("Crie um dashboard\n\nConfirmed: folha de pagamento");
+        assertThat(body.path("pendingClarification").path("questions")).extracting(JsonNode::asText)
+                .containsExactly("Qual recorte do dashboard de folha de pagamento voce quer usar: por departamento, competencia, status ou outro?");
+        assertThat(body.path("pendingClarification").path("clientTurnId").asText()).isEqualTo("turn-2");
+    }
+
+    @Test
+    void intentResolutionCarriesAttachmentSummariesInPendingClarificationDiagnosticsOverHttp() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                new AgenticAuthoringIntentResolverService(objectMapper),
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                mock(AgenticAuthoringPreviewService.class),
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Crie um dashboard usando a imagem anexada");
+        request.put("sessionId", "session-1");
+        request.put("clientTurnId", "turn-1");
+        ObjectNode attachment = request.putArray("attachmentSummaries").addObject();
+        attachment.put("id", "attachment-1");
+        attachment.put("name", "referencia.png");
+        attachment.put("kind", "image");
+        attachment.put("mimeType", "image/png");
+        attachment.put("sizeBytes", 12345L);
+        attachment.put("source", "paste");
+        attachment.put("hasPreview", true);
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/intent-resolution")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        JsonNode diagnostics = body.path("pendingClarification").path("diagnostics");
+        assertThat(body.path("valid").asBoolean()).isFalse();
+        assertThat(body.path("failureCodes")).extracting(JsonNode::asText)
+                .contains("resource-candidate-required");
+        assertThat(diagnostics.path("attachmentSummaries")).hasSize(1);
+        assertThat(diagnostics.path("attachmentSummaries").get(0).path("name").asText())
+                .isEqualTo("referencia.png");
+        assertThat(diagnostics.path("attachmentSummaries").get(0).path("mimeType").asText())
+                .isEqualTo("image/png");
+        assertThat(diagnostics.toString()).doesNotContain("blob:");
+    }
+
+    @Test
+    void intentResolutionUsesConversationHistoryWhenPendingClarificationIsMissingOverHttp() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                new AgenticAuthoringIntentResolverService(objectMapper),
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                mock(AgenticAuthoringPreviewService.class),
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "por departamento");
+        request.put("sessionId", "session-1");
+        request.put("clientTurnId", "turn-3");
+        ArrayNode messages = request.putArray("conversationMessages");
+        messages.addObject()
+                .put("id", "message-1")
+                .put("role", "user")
+                .put("text", "Crie um dashboard")
+                .put("createdAt", "2026-04-14T20:00:00Z");
+        messages.addObject()
+                .put("id", "message-2")
+                .put("role", "assistant")
+                .put("text", "Qual recurso de negocio deve alimentar esta tela?")
+                .put("createdAt", "2026-04-14T20:00:01Z");
+        messages.addObject()
+                .put("id", "message-3")
+                .put("role", "user")
+                .put("text", "folha de pagamento")
+                .put("createdAt", "2026-04-14T20:01:00Z");
+        messages.addObject()
+                .put("id", "message-4")
+                .put("role", "assistant")
+                .put("text", "Qual recorte do dashboard de folha de pagamento voce quer usar: por departamento, competencia, status ou outro?")
+                .put("createdAt", "2026-04-14T20:01:01Z");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/intent-resolution")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("effectivePrompt").asText())
+                .isEqualTo("Crie um dashboard\n\nConfirmed: folha de pagamento\n\nConfirmed: por departamento");
+        assertThat(body.path("selectedCandidate").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void intentResolutionReturnsConsultativeCatalogSuggestionsForLongPromptOverHttp() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                new AgenticAuthoringIntentResolverService(objectMapper),
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                mock(AgenticAuthoringPreviewService.class),
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put(
+                "userPrompt",
+                "Estou montando uma pagina executiva para RH e ainda nao sei se devo usar chart, tabela, cards ou resumo. Com base no catalogo de componentes, quais opcoes voce recomenda para analisar folha de pagamento por departamento, descontos e salario liquido antes de criar qualquer coisa?");
+        request.put("sessionId", "session-consultative-catalog");
+        request.put("clientTurnId", "turn-1");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/intent-resolution")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isFalse();
+        assertThat(body.path("operationKind").asText()).isEqualTo("explore");
+        assertThat(body.path("artifactKind").asText()).isEqualTo("dashboard");
+        assertThat(body.path("changeKind").asText()).isEqualTo("recommend_dashboard_visualization");
+        assertThat(body.path("selectedCandidate").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(body.path("assistantMessage").asText()).contains("melhores opcoes");
+        assertThat(body.path("quickReplies")).extracting(reply -> reply.path("id").asText())
+                .containsExactly(
+                        "payroll-executive-dashboard",
+                        "payroll-department-drilldown",
+                        "payroll-detail-table");
+        assertThat(body.path("pendingClarification").path("questions")).extracting(JsonNode::asText)
+                .containsExactly("Posso criar um dashboard de folha de pagamento com grafico por departamento, indicadores e detalhamento?");
+    }
+
+    @Test
+    void pagePreviewUsesAccumulatedPendingClarificationContextOverHttp() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "por departamento");
+        request.put("sessionId", "session-1");
+        request.put("clientTurnId", "turn-3");
+        request.putArray("conversationMessages")
+                .addObject()
+                .put("id", "message-2")
+                .put("role", "user")
+                .put("text", "folha de pagamento")
+                .put("createdAt", "2026-04-14T20:01:00Z");
+        ObjectNode pendingClarification = request.putObject("pendingClarification");
+        pendingClarification.put("sourcePrompt", "Crie um dashboard\n\nConfirmed: folha de pagamento");
+        pendingClarification.putArray("questions")
+                .add("Qual recorte do dashboard de folha de pagamento voce quer usar: por departamento, competencia, status ou outro?");
+        pendingClarification.put("assistantMessage",
+                "Qual recorte do dashboard de folha de pagamento voce quer usar: por departamento, competencia, status ou outro?");
+        pendingClarification.put("clientTurnId", "turn-2");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
+                .isEqualTo("chart-drilldown-dashboard");
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(3);
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
+    }
+
+    @Test
+    void pagePreviewPreservesAttachmentSummariesWhenConversationContextIsEnrichedOverHttp() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        ArgumentCaptor<AgenticAuthoringPlanRequest> requestCaptor =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        when(planService.generateMinimalFormPlan(requestCaptor.capture(), any(), any(), any()))
+                .thenReturn(new AgenticAuthoringPlanResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode()));
+        when(compilerService.compile(any()))
+                .thenReturn(new AgenticAuthoringCompileResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode()));
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of());
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "folha de pagamento");
+        request.put("sessionId", "session-1");
+        request.put("clientTurnId", "turn-2");
+        ObjectNode pendingClarification = request.putObject("pendingClarification");
+        pendingClarification.put("sourcePrompt", "Crie um dashboard");
+        pendingClarification.putArray("questions")
+                .add("Qual recurso de negocio deve alimentar esta tela?");
+        pendingClarification.put("assistantMessage", "Qual recurso de negocio deve alimentar esta tela?");
+        pendingClarification.put("clientTurnId", "turn-1");
+        ObjectNode attachment = request.putArray("attachmentSummaries").addObject();
+        attachment.put("id", "attachment-1");
+        attachment.put("name", "referencia.png");
+        attachment.put("kind", "image");
+        attachment.put("mimeType", "image/png");
+        attachment.put("sizeBytes", 12345L);
+        attachment.put("source", "paste");
+        attachment.put("hasPreview", true);
+
+        mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+
+        AgenticAuthoringPlanRequest capturedRequest = requestCaptor.getValue();
+        assertThat(capturedRequest.userPrompt())
+                .isEqualTo("Crie um dashboard\n\nConfirmed: folha de pagamento");
+        assertThat(capturedRequest.attachmentSummaries()).hasSize(1);
+        assertThat(capturedRequest.attachmentSummaries().get(0).name()).isEqualTo("referencia.png");
+        assertThat(capturedRequest.attachmentSummaries().get(0).mimeType()).isEqualTo("image/png");
+    }
+
+    @Test
+    void pagePreviewRestoresAttachmentSummariesFromPendingClarificationDiagnosticsOverHttp() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        ArgumentCaptor<AgenticAuthoringPlanRequest> requestCaptor =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        when(planService.generateMinimalFormPlan(requestCaptor.capture(), any(), any(), any()))
+                .thenReturn(new AgenticAuthoringPlanResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode()));
+        when(compilerService.compile(any()))
+                .thenReturn(new AgenticAuthoringCompileResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode()));
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of());
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "por departamento");
+        ObjectNode pendingClarification = request.putObject("pendingClarification");
+        pendingClarification.put("sourcePrompt", "Crie um dashboard usando a imagem anexada");
+        pendingClarification.putArray("questions").add("Qual recorte?");
+        pendingClarification.put("assistantMessage", "Qual recorte?");
+        ObjectNode diagnostics = pendingClarification.putObject("diagnostics");
+        ObjectNode attachment = diagnostics.putArray("attachmentSummaries").addObject();
+        attachment.put("id", "attachment-1");
+        attachment.put("name", "referencia.png");
+        attachment.put("kind", "image");
+        attachment.put("mimeType", "image/png");
+        attachment.put("sizeBytes", 12345L);
+        attachment.put("source", "paste");
+        attachment.put("hasPreview", true);
+
+        mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+
+        AgenticAuthoringPlanRequest capturedRequest = requestCaptor.getValue();
+        assertThat(capturedRequest.userPrompt())
+                .isEqualTo("Crie um dashboard usando a imagem anexada\n\nConfirmed: por departamento");
+        assertThat(capturedRequest.attachmentSummaries()).hasSize(1);
+        assertThat(capturedRequest.attachmentSummaries().get(0).name()).isEqualTo("referencia.png");
+    }
+
+    @Test
+    void pagePreviewUsesConversationHistoryWhenPendingClarificationIsMissingOverHttp() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "por departamento");
+        request.put("sessionId", "session-1");
+        request.put("clientTurnId", "turn-3");
+        ArrayNode messages = request.putArray("conversationMessages");
+        messages.addObject()
+                .put("id", "message-1")
+                .put("role", "user")
+                .put("text", "Crie um dashboard")
+                .put("createdAt", "2026-04-14T20:00:00Z");
+        messages.addObject()
+                .put("id", "message-2")
+                .put("role", "assistant")
+                .put("text", "Qual recurso de negocio deve alimentar esta tela?")
+                .put("createdAt", "2026-04-14T20:00:01Z");
+        messages.addObject()
+                .put("id", "message-3")
+                .put("role", "user")
+                .put("text", "folha de pagamento")
+                .put("createdAt", "2026-04-14T20:01:00Z");
+        messages.addObject()
+                .put("id", "message-4")
+                .put("role", "assistant")
+                .put("text", "Qual recorte do dashboard de folha de pagamento voce quer usar: por departamento, competencia, status ou outro?")
+                .put("createdAt", "2026-04-14T20:01:01Z");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
+                .isEqualTo("chart-drilldown-dashboard");
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(3);
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
+    }
+
+    @Test
     void pagePreviewCanReturnPayrollTableUiCompositionPlan() throws Exception {
         AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
         AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
@@ -187,7 +694,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 compilerService,
                 previewService,
                 mock(AgenticAuthoringApplyService.class),
-                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
 
         ObjectNode request = objectMapper.createObjectNode();
         request.put("userPrompt", "Sim, crie uma tabela operacional de folhas de pagamento");
@@ -230,7 +738,8 @@ class AgenticAuthoringPagePreviewHttpTest {
                 compilerService,
                 previewService,
                 mock(AgenticAuthoringApplyService.class),
-                mock(AgenticAuthoringComponentCapabilitiesService.class))).build();
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
 
         ObjectNode request = objectMapper.createObjectNode();
         request.put("userPrompt", "Crie uma tela master detail de departamentos com funcionarios e folha");

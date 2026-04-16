@@ -11,8 +11,10 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("unit")
 class AgenticAuthoringTableCapabilityCatalogTest {
 
     private final AgenticAuthoringTableCapabilityCatalog catalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
@@ -67,12 +69,37 @@ class AgenticAuthoringTableCapabilityCatalogTest {
     }
 
     @Test
+    void exposesUsageExamplesForEveryTableCapability() {
+        for (AgenticAuthoringComponentCapabilityCatalog.ComponentCapability capability : catalog.capabilities()) {
+            assertThat(capability.examples())
+                    .as("examples for %s", capability.id())
+                    .isNotEmpty();
+            assertThat(capability.examples().get(0).prompt()).isNotBlank();
+            assertThat(capability.examples().get(0).intent()).isNotBlank();
+            assertThat(capability.examples().get(0).configHints()).isNotEmpty();
+        }
+    }
+
+    @Test
     void resolvesTableChangeKindFromDeclarativeTriggers() {
         assertThat(catalog.resolveChangeKind("formate a coluna salario liquido como moeda em reais"))
                 .contains("set_column_format");
         assertThat(catalog.resolveChangeKind("oculte a coluna total descontos da tabela"))
                 .contains("set_column_visibility");
         assertThat(catalog.resolveChangeKind("mova a coluna salario liquido para o inicio"))
+                .contains("set_column_order");
+    }
+
+    @Test
+    void resolvesTableChangeKindsFromLongDocumentationStylePrompts() {
+        assertThat(catalog.resolveChangeKind(
+                "Na praxis-table gerada pelo dashboard de folha, aplique o recurso documentado de formatacao para exibir salario liquido como moeda em reais sem alterar a origem de dados."))
+                .contains("set_column_format");
+        assertThat(catalog.resolveChangeKind(
+                "Para reduzir ruido no detalhamento, esconda a coluna de total de descontos quando o gestor estiver olhando o drill down por departamento."))
+                .contains("set_column_visibility");
+        assertThat(catalog.resolveChangeKind(
+                "reordene a tabela de detalhes para colocar salario bruto antes de descontos e liquido, preservando as demais colunas do componente."))
                 .contains("set_column_order");
     }
 

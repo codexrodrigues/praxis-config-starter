@@ -11,6 +11,13 @@
         { "field": "bar", "aliases": ["barra", "bar"] },
         { "field": "line", "aliases": ["linha", "line"] },
         { "field": "donut", "aliases": ["donut", "pizza"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Troque o grafico para barras por departamento.",
+          "intent": "Alterar o tipo visual do chart mantendo a mesma fonte de dados.",
+          "configHints": ["inputs.type=bar", "preservar resourcePath e data bindings existentes"]
+        }
       ]
     },
     {
@@ -21,6 +28,13 @@
         { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido", "folha liquida"] },
         { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
         { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Use salario liquido como metrica principal.",
+          "intent": "Selecionar o campo numerico que alimenta a serie do grafico.",
+          "configHints": ["inputs.metricField=salarioLiquido", "manter dimensionField atual quando existir"]
+        }
       ]
     },
     {
@@ -31,6 +45,13 @@
         { "field": "departamento", "aliases": ["departamento", "departamentos"] },
         { "field": "competencia", "aliases": ["competencia", "mes", "ano"] },
         { "field": "funcionario", "aliases": ["funcionario", "colaborador"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Agrupe o grafico por departamento.",
+          "intent": "Definir a dimensao usada no eixo ou agrupamento.",
+          "configHints": ["inputs.dimensionField=departamento", "preferir campos categoricos"]
+        }
       ]
     },
     {
@@ -39,6 +60,13 @@
       "triggerTerms": ["formatar", "formate", "formatacao", "valor", "valores", "moeda", "reais", "brl"],
       "fieldAliases": [
         { "field": "BRL|symbol|2", "aliases": ["moeda", "reais", "brl"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Formate os valores do grafico em reais.",
+          "intent": "Aplicar formatacao monetaria aos valores exibidos.",
+          "configHints": ["inputs.valueFormat.currency=BRL", "inputs.valueFormat.maximumFractionDigits=2"]
+        }
       ]
     },
     {
@@ -48,6 +76,13 @@
       "fieldAliases": [
         { "field": "selectionChange", "aliases": ["selecao", "selecionar", "clique", "click"] },
         { "field": "queryContext", "aliases": ["filtro", "filtrar", "cross filter", "detalhe"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Ao clicar em um departamento, filtre a tabela de detalhes.",
+          "intent": "Publicar selecao do chart para outro componente da pagina.",
+          "configHints": ["outputs.selectionChange=departamento", "page.connections chart -> table queryContext"]
+        }
       ]
     }
   ]

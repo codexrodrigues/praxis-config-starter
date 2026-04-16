@@ -35,7 +35,16 @@ public class AgenticAuthoringComponentCapabilitiesService {
                 capability.id(),
                 capability.changeKind(),
                 capability.triggerTerms(),
-                capability.fieldAliases().stream().map(this::toFieldAlias).toList());
+                capability.fieldAliases().stream().map(this::toFieldAlias).toList(),
+                capability.examples().stream().map(this::toExample).toList());
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample toExample(
+            AgenticAuthoringComponentCapabilityCatalog.ComponentCapabilityExample example) {
+        return new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample(
+                example.prompt(),
+                example.intent(),
+                example.configHints());
     }
 
     private AgenticAuthoringComponentCapabilitiesResult.ComponentFieldAlias toFieldAlias(
