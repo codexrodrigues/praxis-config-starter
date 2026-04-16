@@ -1,0 +1,60 @@
+{
+  "version": "1.0.0",
+  "profileId": "create-minimal-form",
+  "targetComponentId": "praxis-dynamic-page-builder",
+  "catalogReleaseId": "praxis-helpdesk-ui.create-minimal-form.page-create.v0.2026-04-12",
+  "sourceRefs": [
+    "docs/ai/agentic-authoring/proofs/helpdesk-create-ticket-discovery.md",
+    "docs/ai/agentic-authoring/proofs/page-create-catalog.v0.json",
+    "docs/ai/agentic-authoring/proofs/examples-governance-manifest.v0.json"
+  ],
+  "patch": {
+    "page": {
+      "canvas": {
+        "mode": "grid",
+        "columns": 12,
+        "rowUnit": "80px",
+        "gap": "16px",
+        "autoRows": "content",
+        "items": {
+          "helpdesk-ticket-form": {
+            "col": 1,
+            "row": 1,
+            "colSpan": 12,
+            "rowSpan": 4
+          }
+        }
+      },
+      "widgets": [
+        {
+          "key": "helpdesk-ticket-form",
+          "definition": {
+            "id": "praxis-dynamic-form",
+            "inputs": {
+              "mode": "create",
+              "schemaUrl": "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=request",
+              "submitUrl": "/api/helpdesk/chamados",
+              "submitMethod": "post",
+              "responseSchemaUrl": "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=response",
+              "formId": "helpdesk-create-ticket-minimal",
+              "componentInstanceId": "helpdesk-create-ticket-minimal"
+            }
+          }
+        }
+      ],
+      "composition": {
+        "links": []
+      }
+    }
+  },
+  "compatibility": {
+    "aiHttpContract": "v1.1",
+    "publicResponseKind": "patch",
+    "requiresV12": false
+  },
+  "builderVersion": "compiled-form-patch-builder@0.1.0-draft",
+  "warnings": [
+    "browser-round-trip-verified-2026-04-12",
+    "helpdesk-operational-ddl-pending"
+  ]
+}

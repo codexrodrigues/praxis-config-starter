@@ -8,7 +8,6 @@ import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
 import java.io.InputStream;
-import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Tag;
@@ -23,13 +22,9 @@ class AgenticAuthoringChartCapabilityCatalogTest {
 
     @Test
     void chartCapabilityCatalogConformsToPublicSchema() throws Exception {
-        JsonNode schemaNode = objectMapper.readTree(Path.of(
-                "..",
-                "docs",
-                "ai",
-                "agentic-authoring",
-                "contracts",
-                "component-capability-catalog.v1.schema.json").toFile());
+        JsonNode schemaNode = objectMapper.readTree(AgenticAuthoringTestPaths
+                .contract("component-capability-catalog.v1.schema.json")
+                .toFile());
         JsonNode catalogNode;
         try (InputStream inputStream = getClass().getClassLoader()
                 .getResourceAsStream("ai-authoring/chart-capabilities.v0.json")) {

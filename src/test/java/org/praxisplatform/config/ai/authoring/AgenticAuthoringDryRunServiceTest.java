@@ -6,11 +6,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -168,14 +167,10 @@ class AgenticAuthoringDryRunServiceTest {
     }
 
     private Path docsPath(String fileName) {
-        return proofsDir().resolve(fileName);
+        return AgenticAuthoringTestPaths.proof(fileName);
     }
 
     private Path proofsDir() {
-        Path fromModuleDir = Path.of("..", "docs", "ai", "agentic-authoring", "proofs");
-        if (Files.exists(fromModuleDir)) {
-            return fromModuleDir;
-        }
-        return Path.of("docs", "ai", "agentic-authoring", "proofs");
+        return AgenticAuthoringTestPaths.proofsDir();
     }
 }

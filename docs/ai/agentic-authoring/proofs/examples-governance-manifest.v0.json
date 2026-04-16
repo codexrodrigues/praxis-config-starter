@@ -1,0 +1,177 @@
+{
+  "version": "1.0.0",
+  "examplesPolicyVersion": "0.1.0",
+  "generatedAt": "2026-04-12T00:00:00-03:00",
+  "targetProfiles": [
+    "create-minimal-form"
+  ],
+  "entries": [
+    {
+      "id": "page-builder-json-logic-lab",
+      "path": "praxis-ui-angular/src/app/features/page-builder-json-logic-lab",
+      "classification": "reference-only",
+      "eligibleForPrompt": false,
+      "eligibleForRag": false,
+      "allowedProfiles": [],
+      "blockedProfiles": [
+        "create-minimal-form"
+      ],
+      "evidence": {
+        "catalogReleaseId": null,
+        "profileId": null,
+        "roundTripStatus": "not-run",
+        "schemaHash": null,
+        "sourceScope": {
+          "targetApp": "praxis-ui-angular",
+          "apiGroup": null,
+          "environment": "dev"
+        }
+      },
+      "risks": [
+        "free-json-risk",
+        "unvalidated-round-trip"
+      ],
+      "owner": "praxis-ui-angular",
+      "notes": "Usar para estudar composicao, eventos e json logic. Nao copiar shape bruto para o MVP."
+    },
+    {
+      "id": "payroll-analytics-lab",
+      "path": "praxis-ui-angular/src/app/features/payroll-analytics-lab",
+      "classification": "reference-only",
+      "eligibleForPrompt": false,
+      "eligibleForRag": false,
+      "allowedProfiles": [],
+      "blockedProfiles": [
+        "create-minimal-form"
+      ],
+      "evidence": {
+        "catalogReleaseId": null,
+        "profileId": null,
+        "roundTripStatus": "not-run",
+        "schemaHash": null,
+        "sourceScope": {
+          "targetApp": "praxis-ui-angular",
+          "apiGroup": null,
+          "environment": "dev"
+        }
+      },
+      "risks": [
+        "wrong-profile",
+        "unvalidated-round-trip"
+      ],
+      "owner": "praxis-ui-angular",
+      "notes": "Relevante para fase futura de dashboards e analytics, fora do profile inicial."
+    },
+    {
+      "id": "charts-showcase",
+      "path": "praxis-ui-angular/src/app/features/charts-showcase",
+      "classification": "reference-only",
+      "eligibleForPrompt": false,
+      "eligibleForRag": false,
+      "allowedProfiles": [],
+      "blockedProfiles": [
+        "create-minimal-form"
+      ],
+      "evidence": {
+        "catalogReleaseId": null,
+        "profileId": null,
+        "roundTripStatus": "not-run",
+        "schemaHash": null,
+        "sourceScope": {
+          "targetApp": "praxis-ui-angular",
+          "apiGroup": null,
+          "environment": "dev"
+        }
+      },
+      "risks": [
+        "wrong-profile",
+        "runtime-only"
+      ],
+      "owner": "praxis-ui-angular",
+      "notes": "Nao alimentar o MVP de formulario minimo com exemplos de chart."
+    },
+    {
+      "id": "ai-recipes",
+      "path": "praxis-ui-angular/examples/ai-recipes",
+      "classification": "migration-fixture",
+      "eligibleForPrompt": false,
+      "eligibleForRag": false,
+      "allowedProfiles": [],
+      "blockedProfiles": [
+        "create-minimal-form"
+      ],
+      "evidence": {
+        "catalogReleaseId": null,
+        "profileId": null,
+        "roundTripStatus": "not-run",
+        "schemaHash": null,
+        "sourceScope": {
+          "targetApp": "praxis-ui-angular",
+          "apiGroup": null,
+          "environment": "dev"
+        }
+      },
+      "risks": [
+        "legacy-shape",
+        "missing-catalog-release",
+        "unvalidated-round-trip"
+      ],
+      "owner": "praxis-ui-angular",
+      "notes": "Cada recipe precisa classificacao individual antes de entrar no corpus."
+    },
+    {
+      "id": "page-create-catalog-v0-proof",
+      "path": "docs/ai/agentic-authoring/proofs/page-create-catalog-v0.md",
+      "classification": "prompt-example",
+      "eligibleForPrompt": true,
+      "eligibleForRag": true,
+      "allowedProfiles": [
+        "create-minimal-form"
+      ],
+      "blockedProfiles": [],
+      "evidence": {
+        "catalogReleaseId": "page-create-catalog@0.1.0-draft",
+        "profileId": "create-minimal-form",
+        "roundTripStatus": "not-run",
+        "schemaHash": null,
+        "sourceScope": {
+          "targetApp": "praxis-helpdesk-ui",
+          "apiGroup": "helpdesk",
+          "environment": "dev"
+        }
+      },
+      "risks": [
+        "unvalidated-round-trip"
+      ],
+      "owner": "docs-ai",
+      "notes": "Permitido como exemplo de politica/catalogo, ainda nao como golden fixture de JSON final."
+    },
+    {
+      "id": "helpdesk-create-ticket-discovery-proof",
+      "path": "docs/ai/agentic-authoring/proofs/helpdesk-create-ticket-discovery.md",
+      "classification": "prompt-example",
+      "eligibleForPrompt": true,
+      "eligibleForRag": true,
+      "allowedProfiles": [
+        "create-minimal-form"
+      ],
+      "blockedProfiles": [],
+      "evidence": {
+        "catalogReleaseId": null,
+        "profileId": "create-minimal-form",
+        "roundTripStatus": "not-applicable",
+        "schemaHash": "ae6e69c0d65cc4d0fd92631a82e4c0a86924f7539ee3645decafb66ca72c99ce",
+        "sourceScope": {
+          "targetApp": "praxis-helpdesk-ui",
+          "apiGroup": "helpdesk",
+          "environment": "dev"
+        }
+      },
+      "risks": [
+        "missing-catalog-release"
+      ],
+      "owner": "docs-ai",
+      "notes": "Elegivel para ensinar discovery e field selection. Precisa nova prova HTTP apos restart do service para atualizar o schemaHash do statusAtualId hidden."
+    }
+  ]
+}

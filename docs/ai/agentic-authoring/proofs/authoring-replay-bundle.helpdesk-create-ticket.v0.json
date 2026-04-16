@@ -1,0 +1,90 @@
+{
+  "version": "1.0.0",
+  "profileId": "create-minimal-form",
+  "promptProfileVersion": "create-minimal-form@0.1.0-draft",
+  "promptHash": "f97f18379352f39e15b0dc7c0be289e666ee13a5032dc1119d7a2722a182d8d3",
+  "sourceScope": {
+    "targetApp": "praxis-helpdesk-ui",
+    "tenantId": "455a3b19-9c2f-4015-afda-8bf7c328b68f",
+    "environment": "dev",
+    "ragReleaseId": "examples-governance@0.1.0-draft",
+    "apiCatalogReleaseId": "helpdesk-http-discovery@2026-04-12"
+  },
+  "schemaHash": "ae6e69c0d65cc4d0fd92631a82e4c0a86924f7539ee3645decafb66ca72c99ce",
+  "etag": "\"ae6e69c0d65cc4d0fd92631a82e4c0a86924f7539ee3645decafb66ca72c99ce\"",
+  "catalogReleaseId": "praxis-helpdesk-ui.create-minimal-form.page-create.v0.2026-04-12",
+  "builderVersion": "compiled-form-patch-builder@0.1.0-draft",
+  "validatorVersion": "agentic-authoring-gates@0.1.0-draft",
+  "artifactRefs": {
+    "intentResolution": "docs/ai/agentic-authoring/proofs/helpdesk-create-ticket-discovery.md#intent",
+    "apiUseCaseResolution": "docs/ai/agentic-authoring/proofs/helpdesk-create-ticket-discovery.md#operacao-create-confirmada",
+    "fieldSelectionPlan": "docs/ai/agentic-authoring/proofs/helpdesk-create-ticket-discovery.md#fieldselectionplan-preliminar",
+    "pageCreateCatalog": "docs/ai/agentic-authoring/proofs/page-create-catalog.v0.json",
+    "examplesGovernanceManifest": "docs/ai/agentic-authoring/proofs/examples-governance-manifest.v0.json",
+    "compiledFormPatch": "docs/ai/agentic-authoring/proofs/compiled-form-patch.helpdesk-create-ticket.v0.json"
+  },
+  "gateResults": [
+    {
+      "gateId": "candidate-eligibility",
+      "status": "passed",
+      "validatorVersion": "manual-proof@2026-04-12",
+      "notes": [
+        "targetApp praxis-helpdesk-ui",
+        "allowedApiGroups contains helpdesk",
+        "operationRef confirmed as post /api/helpdesk/chamados"
+      ]
+    },
+    {
+      "gateId": "examples-governance",
+      "status": "passed",
+      "validatorVersion": "Validate-ExamplesGovernance.ps1@0.1.0-draft",
+      "notes": [
+        "6 entries validated",
+        "reference-only labs blocked for create-minimal-form"
+      ]
+    },
+    {
+      "gateId": "page-create-catalog",
+      "status": "passed",
+      "validatorVersion": "Validate-PageCreateCatalog.ps1@0.1.0-draft",
+      "notes": [
+        "praxis-dynamic-form is the only eligible widget",
+        "backend metadata-driven inputs required"
+      ]
+    },
+    {
+      "gateId": "compiled-form-patch",
+      "status": "passed",
+      "validatorVersion": "Validate-CompiledFormPatch.ps1@0.1.0-draft",
+      "notes": [
+        "patch.page is v1.1-compatible",
+        "blocked legacy shapes absent"
+      ]
+    },
+    {
+      "gateId": "round-trip",
+      "status": "not-run",
+      "validatorVersion": "round-trip-gate@not-implemented",
+      "notes": [
+        "requires runtime/editor execution in praxis-helpdesk-ui"
+      ]
+    }
+  ],
+  "failureCodes": [],
+  "clarificationCodes": [
+    "business-default-prioridade-pending"
+  ],
+  "finalValidationSummary": {
+    "status": "valid",
+    "notes": [
+      "Compiled patch is structurally valid against the page-create catalog.",
+      "HTTP schema proof against 8091 still needs service restart to publish statusAtualId hidden.",
+      "Runtime/editor round-trip has not been executed yet."
+    ]
+  },
+  "warnings": [
+    "round-trip-not-run",
+    "helpdesk-http-schema-restart-pending",
+    "prioridade-business-rule-pending"
+  ]
+}

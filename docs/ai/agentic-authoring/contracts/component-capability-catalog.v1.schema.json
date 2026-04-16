@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxis.local/ai/agentic-authoring/component-capability-catalog.v1.schema.json",
+  "title": "ComponentCapabilityCatalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "kind",
+    "componentId",
+    "capabilities"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "kind": {
+      "const": "praxis.ai-authoring.component-capability-catalog"
+    },
+    "componentId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/capability" }
+    }
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "changeKind",
+        "triggerTerms",
+        "fieldAliases"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9.-]+@[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "changeKind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "triggerTerms": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonBlankString" },
+          "uniqueItems": true
+        },
+        "fieldAliases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/fieldAlias" }
+        },
+        "examples": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/capabilityExample" }
+        }
+      }
+    },
+    "capabilityExample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt",
+        "intent",
+        "configHints"
+      ],
+      "properties": {
+        "prompt": { "$ref": "#/$defs/nonBlankString" },
+        "intent": { "$ref": "#/$defs/nonBlankString" },
+        "configHints": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonBlankString" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "fieldAlias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "aliases"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aliases": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonBlankString" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "nonBlankString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": ".*\\S.*"
+    }
+  }
+}
