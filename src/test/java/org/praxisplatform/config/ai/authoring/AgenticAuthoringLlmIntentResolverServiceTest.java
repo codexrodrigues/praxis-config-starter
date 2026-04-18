@@ -42,6 +42,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "artifactKind": "dashboard",
                   "changeKind": "create_chart",
                   "selectedResourcePath": "/api/vendas/pedidos",
+                  "resourceSearchQuery": "pedidos de vendas para graficos",
                   "followUpKind": "none",
                   "assistantMessage": "Encontrei pedidos como base para o grafico. Quer usar esse recurso?",
                   "quickReplies": [],
@@ -102,6 +103,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("\"searchApiResources\"");
         assertThat(prompt).contains("/api/praxis/config/ai/authoring/resource-candidates");
         assertThat(prompt).contains("Avoid terse labels such as \"alimentar tela\"");
+        assertThat(prompt).contains("resourceSearchQuery");
     }
 
     @Test
@@ -135,6 +137,136 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .isEqualTo("Angular Praxis Page Builder assistant");
         assertThat(diagnostics.path("contextBundle").path("toolCatalog").path("searchApiResources").path("endpoint").asText())
                 .isEqualTo("/api/praxis/config/ai/authoring/resource-candidates");
+    }
+
+    @Test
+    void replacesRedactedQuickReplyPromptWithHumanLabel() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "dashboard",
+                  "changeKind": "create_dashboard",
+                  "selectedResourcePath": "/api/human-resources/vw-analytics-folha-pagamento",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "assistantMessage": "Escolha a fonte de dados.",
+                  "quickReplies": [
+                    {
+                      "id": "use-analytics-view",
+                      "kind": "resource",
+                      "label": "Usar visão analítica de folha",
+                      "prompt": "[REDACTED]",
+                      "contextHints": {
+                        "resourcePath": "/api/human-resources/vw-analytics-folha-pagamento"
+                      }
+                    }
+                  ],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution resolution = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "quero um painel de pagamentos",
+                                "page-builder",
+                                "praxis-dynamic-page-builder",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "quero um painel de pagamentos",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.quickReplies()).hasSize(1);
+        assertThat(resolution.quickReplies().get(0).prompt()).isEqualTo("Usar visão analítica de folha");
+        assertThat(resolution.quickReplies().get(0).contextHints().path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void keepsUnresolvedLlmGuidanceWhenItContainsActionableContext() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": false,
+                  "operationKind": "create",
+                  "artifactKind": "form",
+                  "changeKind": "create_minimal_form",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": "api de cadastro de funcionario para formulario de RH",
+                  "followUpKind": "none",
+                  "assistantMessage": "Entendi que você quer uma ficha de cadastro. Vou buscar recursos de criação para funcionário.",
+                  "quickReplies": [
+                    {
+                      "id": "search-form-resources",
+                      "kind": "suggestion",
+                      "label": "Buscar APIs de cadastro",
+                      "prompt": "Buscar APIs de cadastro de funcionário",
+                      "contextHints": {
+                        "tool": "searchApiResources",
+                        "artifactKind": "form"
+                      }
+                    }
+                  ],
+                  "clarificationQuestions": [],
+                  "warnings": ["resource-selection-required"]
+                }
+                """));
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution resolution = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "preciso monta uma ficha pra cadastra funsionario",
+                                "page-builder",
+                                "praxis-dynamic-page-builder",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "preciso monta uma ficha pra cadastra funsionario",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.resolved()).isFalse();
+        assertThat(resolution.operationKind()).isEqualTo("create");
+        assertThat(resolution.artifactKind()).isEqualTo("form");
+        assertThat(resolution.resourceSearchQuery())
+                .isEqualTo("api de cadastro de funcionario para formulario de RH");
+        assertThat(resolution.quickReplies()).hasSize(1);
+        assertThat(resolution.warnings()).contains("resource-selection-required");
     }
 
     private AgenticAuthoringComponentCapabilitiesResult componentCapabilities() {

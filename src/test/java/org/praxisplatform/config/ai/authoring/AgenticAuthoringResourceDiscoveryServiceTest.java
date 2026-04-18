@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,8 @@ import org.praxisplatform.config.repository.ApiMetadataRepository;
 
 @Tag("unit")
 class AgenticAuthoringResourceDiscoveryServiceTest {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void searchReturnsCandidatesFromApiMetadataCatalog() {
@@ -43,7 +46,8 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         null)));
         AgenticAuthoringResourceDiscoveryService service =
                 new AgenticAuthoringResourceDiscoveryService(
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper);
 
         AgenticAuthoringResourceCandidatesResult result = service.search(
                 new AgenticAuthoringResourceCandidatesRequest(
@@ -58,13 +62,26 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.candidates())
                 .extracting(AgenticAuthoringCandidate::resourcePath)
                 .containsExactly("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.assistantMessage()).contains("Encontrei APIs");
+        assertThat(result.quickReplies()).hasSize(1);
+        assertThat(result.quickReplies().get(0).id())
+                .isEqualTo("resource-api-human-resources-vw-analytics-folha-pagamento");
+        assertThat(result.quickReplies().get(0).label()).isEqualTo("analytics folha pagamento");
+        assertThat(result.quickReplies().get(0).prompt())
+                .isEqualTo("Usar /api/human-resources/vw-analytics-folha-pagamento como fonte de dados.");
+        assertThat(result.quickReplies().get(0).description())
+                .isEqualTo("GET /api/human-resources/vw-analytics-folha-pagamento/all");
+        assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.quickReplies().get(0).contextHints().path("artifactKind").asText())
+                .isEqualTo("dashboard");
         assertThat(result.warnings()).isEmpty();
     }
 
     @Test
     void searchRequiresQueryBeforeCallingCatalog() {
         AgenticAuthoringResourceDiscoveryService service =
-                new AgenticAuthoringResourceDiscoveryService(null);
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper);
 
         AgenticAuthoringResourceCandidatesResult result = service.search(
                 new AgenticAuthoringResourceCandidatesRequest(null, "  ", null, null));
@@ -72,7 +89,9 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.valid()).isFalse();
         assertThat(result.tool()).isEqualTo("searchApiResources");
         assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.assistantMessage()).contains("descricao do dado de negocio");
         assertThat(result.candidates()).isEmpty();
+        assertThat(result.quickReplies()).isEmpty();
         assertThat(result.warnings()).containsExactly("resource-discovery-query-required");
     }
 }

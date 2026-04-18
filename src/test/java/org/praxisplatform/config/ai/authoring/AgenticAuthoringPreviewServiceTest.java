@@ -1,6 +1,10 @@
 package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +26,9 @@ class AgenticAuthoringPreviewServiceTest {
 
     @Mock
     private AgenticAuthoringPatchCompilerService patchCompilerService;
+
+    @Mock
+    private AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -233,10 +240,48 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-dashboard");
         assertThat(result.uiCompositionPlan().path("widgets").get(0).path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-ranking-reputacao");
+        assertThat(result.assistantMessage())
+                .contains("Criei uma pre-visualizacao usando \"Ranking reputacao\" como fonte de dados");
+        assertThat(result.assistantMessage())
+                .contains("A tabela foi conectada ao recurso e ja pode carregar schema/dados");
         assertThat(result.warnings()).contains(
                 "ui-composition-plan-provider:selected-resource-dashboard",
                 "compiled-form-patch-materialized-by-page-builder");
         assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("accepted-create");
+    }
+
+    @Test
+    void previewUsesLlmSynthesizedAssistantMessageWhenAvailable() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard Confirmed: usar /api/human-resources/vw-ranking-reputacao",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                selectedDashboardIntent());
+        when(messageSynthesizer.synthesize(
+                any(AgenticAuthoringPlanRequest.class),
+                any(AgenticAuthoringIntentResolutionResult.class),
+                any(),
+                eq(true),
+                anyList(),
+                anyList(),
+                anyString(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Usei a fonte Ranking reputacao para montar a pre-visualizacao. A tabela esta conectada ao recurso e voce ja pode revisar, pedir um grafico ou salvar.");
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)),
+                messageSynthesizer)
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.assistantMessage()).contains("Usei a fonte Ranking reputacao");
     }
 
     private AgenticAuthoringPreviewService service() {

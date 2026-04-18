@@ -8,8 +8,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class AgenticAuthoringIntentResolverService {
 
@@ -27,6 +29,11 @@ public class AgenticAuthoringIntentResolverService {
     private final AgenticAuthoringFormCapabilityCatalog formCapabilityCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
+    private final AgenticAuthoringKeywordFallbackResolver keywordFallbackResolver =
+            new AgenticAuthoringKeywordFallbackResolver(
+                    formCapabilityCatalog,
+                    tableCapabilityCatalog,
+                    chartCapabilityCatalog);
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator =
             new AgenticAuthoringConversationTurnOrchestrator();
 
@@ -79,14 +86,25 @@ public class AgenticAuthoringIntentResolverService {
                 request.conversationMessages(),
                 request.pendingClarification());
         String rawPrompt = request.userPrompt().trim();
-        String effectivePrompt = turn.effectivePrompt();
+        boolean hasLlmIntentResolver = llmIntentResolverService != null;
+        String effectivePrompt = hasLlmIntentResolver ? rawPrompt : turn.effectivePrompt();
         String prompt = normalize(effectivePrompt);
+        String discoveryPrompt = normalize(turn.answeredPendingClarification() ? turn.effectivePrompt() : effectivePrompt);
         JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage());
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(request.currentPage(), request.selectedWidgetKey());
-        String operationKind = resolveOperationKind(prompt);
-        String artifactKind = resolveArtifactKind(prompt, currentPageSummary, target);
-        String changeKind = resolveChangeKind(prompt, operationKind, artifactKind);
-        List<AgenticAuthoringCandidate> candidates = discoverCandidates(prompt, artifactKind, target);
+        AgenticAuthoringKeywordFallbackResolution fallbackResolution =
+                keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
+        String operationKind = fallbackResolution.operationKind();
+        String artifactKind = fallbackResolution.artifactKind();
+        String changeKind = fallbackResolution.changeKind();
+        List<AgenticAuthoringCandidate> candidates = hasLlmIntentResolver
+                ? discoverInitialCandidates(discoveryPrompt, target)
+                : discoverCandidates(discoveryPrompt, artifactKind, target);
+        candidates = withContextHintCandidates(request, candidates);
+        AgenticAuthoringCandidate contextHintCandidate = contextHintCandidate(request, artifactKind, candidates);
+        if (contextHintCandidate != null) {
+            candidates = withPriorityCandidate(candidates, contextHintCandidate);
+        }
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilities();
         AgenticAuthoringLlmIntentResolution llmIntent = resolveLlmIntent(
                 request,
@@ -105,26 +123,107 @@ public class AgenticAuthoringIntentResolverService {
                 target,
                 candidates,
                 componentCapabilities);
+        boolean llmTreatsPendingAsContinuation = turn.answeredPendingClarification()
+                && (isLlmFollowUpKind(llmIntent, "clarification_answer")
+                || isLlmFollowUpKind(llmIntent, "refinement"));
         boolean llmTreatsPendingAsNewInstruction = turn.answeredPendingClarification()
                 && isLlmFollowUpKind(llmIntent, "new_instruction");
-        if (llmTreatsPendingAsNewInstruction) {
+        boolean llmSecondPassUsed = false;
+        boolean deterministicFallbackApplied = !hasLlmIntentResolver;
+        if (llmTreatsPendingAsContinuation) {
+            effectivePrompt = turn.effectivePrompt();
+            prompt = normalize(effectivePrompt);
+            fallbackResolution = keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
+            if (!hasLlmIntentResolver || llmIntent == null || !llmIntent.resolved()) {
+                operationKind = fallbackResolution.operationKind();
+                artifactKind = fallbackResolution.artifactKind();
+                changeKind = fallbackResolution.changeKind();
+                deterministicFallbackApplied = true;
+            }
+            candidates = hasLlmIntentResolver
+                    ? discoverInitialCandidates(prompt, target)
+                    : discoverCandidates(prompt, artifactKind, target);
+            candidates = withContextHintCandidates(request, candidates);
+            contextHintCandidate = contextHintCandidate(request, artifactKind, candidates);
+            if (contextHintCandidate != null) {
+                candidates = withPriorityCandidate(candidates, contextHintCandidate);
+            }
+        } else if (llmTreatsPendingAsNewInstruction) {
             effectivePrompt = rawPrompt;
             prompt = normalize(effectivePrompt);
-            operationKind = resolveOperationKind(prompt);
-            artifactKind = resolveArtifactKind(prompt, currentPageSummary, target);
-            changeKind = resolveChangeKind(prompt, operationKind, artifactKind);
-            candidates = discoverCandidates(prompt, artifactKind, target);
+            fallbackResolution = keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
+            if (!hasLlmIntentResolver || llmIntent == null || !llmIntent.resolved()) {
+                operationKind = fallbackResolution.operationKind();
+                artifactKind = fallbackResolution.artifactKind();
+                changeKind = fallbackResolution.changeKind();
+                deterministicFallbackApplied = true;
+            }
+            candidates = hasLlmIntentResolver
+                    ? discoverInitialCandidates(prompt, target)
+                    : discoverCandidates(prompt, artifactKind, target);
+            candidates = withContextHintCandidates(request, candidates);
+            contextHintCandidate = contextHintCandidate(request, artifactKind, candidates);
+            if (contextHintCandidate != null) {
+                candidates = withPriorityCandidate(candidates, contextHintCandidate);
+            }
         }
-        if (llmIntent != null) {
-            operationKind = valueOrDefault(llmIntent.operationKind(), operationKind);
-            artifactKind = valueOrDefault(llmIntent.artifactKind(), artifactKind);
-            changeKind = valueOrDefault(llmIntent.changeKind(), changeKind);
-            if (candidates.isEmpty()) {
+        if (llmIntent != null && llmIntent.resolved()) {
+            String previousArtifactKind = artifactKind;
+            operationKind = valueOrUnknown(llmIntent.operationKind());
+            artifactKind = valueOrUnknown(llmIntent.artifactKind());
+            changeKind = valueOrUnknown(llmIntent.changeKind());
+            String llmResourceSearchQuery = valueOrDefault(llmIntent.resourceSearchQuery(), "").trim();
+            if (!Objects.equals(previousArtifactKind, artifactKind) || !llmResourceSearchQuery.isBlank()) {
+                List<AgenticAuthoringCandidate> refinedCandidates = new ArrayList<>(candidates);
+                refinedCandidates.addAll(discoverCandidates(
+                        llmResourceSearchQuery.isBlank() ? prompt : normalize(llmResourceSearchQuery),
+                        artifactKind,
+                        target));
+                refinedCandidates.addAll(contextHintCandidates(request));
+                candidates = deduplicateCandidates(refinedCandidates);
+                contextHintCandidate = contextHintCandidate(request, artifactKind, candidates);
+                if (contextHintCandidate != null) {
+                    candidates = withPriorityCandidate(candidates, contextHintCandidate);
+                }
+                AgenticAuthoringLlmIntentResolution refinedLlmIntent = resolveLlmIntentAfterCandidateRefinement(
+                        request,
+                        effectivePrompt,
+                        currentPageSummary,
+                        target,
+                        candidates,
+                        componentCapabilities,
+                        llmIntent,
+                        tenantId,
+                        userId,
+                        environment);
+                if (refinedLlmIntent != llmIntent) {
+                    llmIntent = refinedLlmIntent;
+                    llmSecondPassUsed = true;
+                    operationKind = valueOrUnknown(llmIntent.operationKind());
+                    artifactKind = valueOrUnknown(llmIntent.artifactKind());
+                    changeKind = valueOrUnknown(llmIntent.changeKind());
+                }
+            } else if (candidates.isEmpty()) {
                 candidates = discoverCandidates(prompt, artifactKind, target);
+            }
+        } else if (llmIntent != null) {
+            operationKind = fallbackResolution.operationKind();
+            artifactKind = fallbackResolution.artifactKind();
+            changeKind = fallbackResolution.changeKind();
+            deterministicFallbackApplied = true;
+            if (candidates.isEmpty() || isBroadArtifactDiscoveryOnly(candidates)) {
+                candidates = discoverCandidates(prompt, artifactKind, target);
+                candidates = withContextHintCandidates(request, candidates);
+                contextHintCandidate = contextHintCandidate(request, artifactKind, candidates);
+                if (contextHintCandidate != null) {
+                    candidates = withPriorityCandidate(candidates, contextHintCandidate);
+                }
             }
         }
         AgenticAuthoringCandidate selectedCandidate = selectCandidate(candidates, target, artifactKind);
+        selectedCandidate = selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
         selectedCandidate = selectLlmCandidate(llmIntent, candidates, selectedCandidate);
+        selectedCandidate = selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
         AgenticAuthoringGateResult gate = eligibilityGate.evaluate(
                 operationKind,
                 artifactKind,
@@ -134,6 +233,7 @@ public class AgenticAuthoringIntentResolverService {
                 candidates);
         gate = withPromptSpecificGateMessages(gate, prompt, operationKind, artifactKind, selectedCandidate);
         List<String> questions = clarificationQuestions(gate, operationKind, artifactKind, selectedCandidate, candidates);
+        questions = llmClarificationQuestions(llmIntent, gate, questions);
         boolean answeredBareDomainClarification = turn.answeredPendingClarification()
                 && !llmTreatsPendingAsNewInstruction
                 && isBareDomainPrompt(turn.sourcePrompt());
@@ -167,12 +267,24 @@ public class AgenticAuthoringIntentResolverService {
                 questions,
                 candidates,
                 answeredBareDomainClarification);
-        if (llmIntent != null && llmIntent.quickReplies() != null && !llmIntent.quickReplies().isEmpty()) {
+        boolean contextHintSelectionApplied = contextHintCandidate != null
+                && selectedCandidate != null
+                && "eligible".equals(gate.status());
+        if (llmIntent != null
+                && llmIntent.quickReplies() != null
+                && !llmIntent.quickReplies().isEmpty()
+                && !contextHintSelectionApplied) {
             quickReplies = llmIntent.quickReplies();
         }
         List<String> warnings = warnings(llmIntent);
         if (llmTreatsPendingAsNewInstruction) {
             warnings = withWarning(warnings, "llm-follow-up-kind-new-instruction");
+        }
+        if (llmSecondPassUsed) {
+            warnings = withWarning(warnings, "llm-intent-resolution-second-pass-used");
+        }
+        if (deterministicFallbackApplied) {
+            warnings = withWarning(warnings, "keyword-fallback-applied");
         }
         return new AgenticAuthoringIntentResolutionResult(
                 "eligible".equals(gate.status()),
@@ -225,6 +337,39 @@ public class AgenticAuthoringIntentResolverService {
                 .orElse(null);
     }
 
+    private AgenticAuthoringLlmIntentResolution resolveLlmIntentAfterCandidateRefinement(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            JsonNode currentPageSummary,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            AgenticAuthoringLlmIntentResolution previousLlmIntent,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (llmIntentResolverService == null
+                || previousLlmIntent == null
+                || !previousLlmIntent.resolved()
+                || previousLlmIntent.resourceSearchQuery() == null
+                || previousLlmIntent.resourceSearchQuery().isBlank()
+                || candidates == null
+                || candidates.isEmpty()) {
+            return previousLlmIntent;
+        }
+        Optional<AgenticAuthoringLlmIntentResolution> next = llmIntentResolverService.resolve(
+                request,
+                effectivePrompt,
+                currentPageSummary,
+                target,
+                candidates,
+                componentCapabilities,
+                tenantId,
+                userId,
+                environment);
+        return next.orElse(previousLlmIntent);
+    }
+
     private AgenticAuthoringComponentCapabilitiesResult componentCapabilities() {
         return componentCapabilitiesService == null
                 ? new AgenticAuthoringComponentCapabilitiesService().listCapabilities()
@@ -263,6 +408,131 @@ public class AgenticAuthoringIntentResolverService {
         return contextHints != null && contextHints.path("includeLlmDiagnostics").asBoolean(false);
     }
 
+    private AgenticAuthoringCandidate contextHintCandidate(
+            AgenticAuthoringIntentResolutionRequest request,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        JsonNode contextHints = request == null ? null : request.contextHints();
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        String resourcePath = jsonText(contextHints, "resourcePath");
+        if (resourcePath.isBlank()) {
+            return null;
+        }
+        String submitUrl = valueOrDefault(jsonText(contextHints, "submitUrl"), resourcePath);
+        String operation = valueOrDefault(jsonText(contextHints, "operation"), jsonText(contextHints, "submitMethod"));
+        if (operation.isBlank()) {
+            operation = "form".equals(artifactKind) ? "post" : "get";
+        }
+        List<AgenticAuthoringCandidate> usableCandidates = candidates == null ? List.of() : candidates;
+        String normalizedResourcePath = normalizePath(resourcePath);
+        String normalizedSubmitUrl = normalizePath(submitUrl);
+        Optional<AgenticAuthoringCandidate> existing = usableCandidates.stream()
+                .filter(candidate -> normalizedResourcePath.equals(normalizePath(candidate.resourcePath()))
+                        || normalizedSubmitUrl.equals(normalizePath(candidate.submitUrl())))
+                .findFirst();
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        return candidate(
+                resourcePath,
+                submitUrl,
+                operation,
+                1.0d,
+                "resource selected from assistant quick reply context",
+                "quick-reply-context");
+    }
+
+    private List<AgenticAuthoringCandidate> withContextHintCandidates(
+            AgenticAuthoringIntentResolutionRequest request,
+            List<AgenticAuthoringCandidate> candidates) {
+        List<AgenticAuthoringCandidate> contextCandidates = contextHintCandidates(request);
+        if (contextCandidates.isEmpty()) {
+            return candidates == null ? List.of() : candidates;
+        }
+        List<AgenticAuthoringCandidate> merged = new ArrayList<>(candidates == null ? List.of() : candidates);
+        merged.addAll(contextCandidates);
+        return deduplicateCandidates(merged);
+    }
+
+    private List<AgenticAuthoringCandidate> contextHintCandidates(AgenticAuthoringIntentResolutionRequest request) {
+        JsonNode contextHints = request == null ? null : request.contextHints();
+        JsonNode candidateNodes = contextHints == null ? null : contextHints.path("resourceDiscovery").path("candidates");
+        if (candidateNodes == null || !candidateNodes.isArray() || candidateNodes.isEmpty()) {
+            return List.of();
+        }
+        List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
+        for (JsonNode candidateNode : candidateNodes) {
+            if (candidateNode == null || !candidateNode.isObject()) {
+                continue;
+            }
+            String resourcePath = jsonText(candidateNode, "resourcePath");
+            if (resourcePath.isBlank()) {
+                continue;
+            }
+            String operation = valueOrDefault(jsonText(candidateNode, "operation"), jsonText(candidateNode, "submitMethod"));
+            if (operation.isBlank()) {
+                operation = "post";
+            }
+            String submitUrl = valueOrDefault(jsonText(candidateNode, "submitUrl"), resourcePath);
+            String submitMethod = valueOrDefault(jsonText(candidateNode, "submitMethod"), operation);
+            String schemaUrl = valueOrDefault(jsonText(candidateNode, "schemaUrl"), candidate(resourcePath, submitUrl, operation, 1.0d, "", "").schemaUrl());
+            double score = candidateNode.path("score").isNumber() ? candidateNode.path("score").asDouble() : 1.0d;
+            String reason = valueOrDefault(jsonText(candidateNode, "reason"), "resource discovered by backend tool");
+            List<String> evidence = new ArrayList<>();
+            JsonNode evidenceNode = candidateNode.path("evidence");
+            if (evidenceNode.isArray()) {
+                evidenceNode.forEach(item -> {
+                    if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                        evidence.add(item.asText());
+                    }
+                });
+            }
+            evidence.add("tool-search-api-resources");
+            candidates.add(new AgenticAuthoringCandidate(
+                    resourcePath,
+                    operation,
+                    schemaUrl,
+                    submitUrl,
+                    submitMethod,
+                    score,
+                    reason,
+                    List.copyOf(evidence)));
+        }
+        return deduplicateCandidates(candidates);
+    }
+
+    private List<AgenticAuthoringCandidate> withPriorityCandidate(
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringCandidate priorityCandidate) {
+        if (priorityCandidate == null) {
+            return candidates == null ? List.of() : candidates;
+        }
+        List<AgenticAuthoringCandidate> next = new ArrayList<>();
+        next.add(priorityCandidate);
+        if (candidates != null) {
+            next.addAll(candidates);
+        }
+        return deduplicateCandidates(next);
+    }
+
+    private AgenticAuthoringCandidate selectContextHintCandidate(
+            AgenticAuthoringCandidate contextHintCandidate,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringCandidate fallback) {
+        if (contextHintCandidate == null) {
+            return fallback;
+        }
+        String normalizedResourcePath = normalizePath(contextHintCandidate.resourcePath());
+        String normalizedSubmitUrl = normalizePath(contextHintCandidate.submitUrl());
+        return (candidates == null ? List.<AgenticAuthoringCandidate>of() : candidates).stream()
+                .filter(candidate -> normalizedResourcePath.equals(normalizePath(candidate.resourcePath()))
+                        || normalizedSubmitUrl.equals(normalizePath(candidate.submitUrl())))
+                .findFirst()
+                .orElse(contextHintCandidate);
+    }
+
     private AgenticAuthoringCandidate selectLlmCandidate(
             AgenticAuthoringLlmIntentResolution llmIntent,
             List<AgenticAuthoringCandidate> candidates,
@@ -284,11 +554,35 @@ public class AgenticAuthoringIntentResolverService {
             warnings.add("llm-intent-resolution-fallback-deterministic");
         } else {
             warnings.add("llm-intent-resolution-used");
+            if (!llmIntent.resolved()) {
+                warnings.add("llm-intent-resolution-unresolved-fallback-deterministic");
+            }
             if (llmIntent.warnings() != null) {
                 warnings.addAll(llmIntent.warnings());
             }
         }
         return List.copyOf(warnings);
+    }
+
+    private List<String> llmClarificationQuestions(
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            AgenticAuthoringGateResult gate,
+            List<String> fallbackQuestions) {
+        if (llmIntent == null
+                || !llmIntent.resolved()
+                || gate == null
+                || !"clarification_required".equals(gate.status())
+                || llmIntent.clarificationQuestions() == null
+                || llmIntent.clarificationQuestions().isEmpty()) {
+            return fallbackQuestions;
+        }
+        List<String> questions = llmIntent.clarificationQuestions().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(question -> !question.isBlank())
+                .distinct()
+                .toList();
+        return questions.isEmpty() ? fallbackQuestions : questions;
     }
 
     private List<String> withWarning(List<String> warnings, String warning) {
@@ -339,48 +633,18 @@ public class AgenticAuthoringIntentResolverService {
         return diagnostics;
     }
 
-    private String resolveOperationKind(String prompt) {
-        if (isApiCatalogQuestion(prompt)) {
-            return "explore";
-        }
-        if (containsAny(prompt, "conectar", "ligar", "vincular", "relacionar")) {
-            return "connect";
-        }
-        if (containsAny(prompt, "remover", "remova", "remove", "excluir", "exclua", "apagar", "apague", "retirar", "retire")) {
-            return "remove";
-        }
-        if (containsAny(prompt, "alterar", "altere", "mudar", "mude", "trocar", "troque",
-                "adicionar", "adicione", "incluir", "inclua", "acrescentar", "acrescente",
-                "dividir", "divida", "renomear", "renomeie", "formatar", "formate", "formatacao")) {
-            return "modify";
-        }
-        if (isExplicitCreateConfirmation(prompt)) {
-            return "create";
-        }
-        if (isConsultativePrompt(prompt)) {
-            return "explore";
-        }
-        if (containsAny(prompt, "criar", "crie", "gerar", "gere", "montar", "monte",
-                "construir", "construa", "novo", "nova", "cadastrar", "abrir")) {
-            return "create";
-        }
-        if (tableCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
-            return "modify";
-        }
-        if (chartCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
-            return "modify";
-        }
-        if (formCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
-            return "modify";
-        }
-        if (containsAny(prompt, "explicar", "explique", "porque", "por que")) {
-            return "explain";
-        }
-        return "unknown";
-    }
-
     private boolean isExplicitCreateConfirmation(String prompt) {
-        return containsAny(prompt, "sim, crie", "sim crie", "pode criar", "confirmo criar", "confirmo, crie");
+        return containsAny(prompt,
+                "sim, crie",
+                "sim crie",
+                "pode criar",
+                "pode fazer",
+                "fazer agora",
+                "faz agora",
+                "pode montar",
+                "pode gerar",
+                "confirmo criar",
+                "confirmo, crie");
     }
 
     private boolean isConsultativePrompt(String prompt) {
@@ -429,114 +693,6 @@ public class AgenticAuthoringIntentResolverService {
         return tokens.length <= 2;
     }
 
-    private String resolveArtifactKind(String prompt, JsonNode currentPageSummary, AgenticAuthoringTarget target) {
-        if (isApiCatalogQuestion(prompt)) {
-            return "api_catalog";
-        }
-        if (prefersPayrollDashboardRecommendation(prompt)) {
-            return "dashboard";
-        }
-        if (containsAny(prompt, "formulario", "form", "campo", "campos", "cadastrar", "cadastro", "abrir chamado")) {
-            return "form";
-        }
-        if (target != null && "praxis-dynamic-form".equals(target.componentId())
-                && ("modify".equals(resolveOperationKind(prompt))
-                || "remove".equals(resolveOperationKind(prompt))
-                || formCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
-            return "form";
-        }
-        if (target != null && "praxis-table".equals(target.componentId())
-                && ("modify".equals(resolveOperationKind(prompt)) || tableCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
-            return "table";
-        }
-        if (target != null && "praxis-chart".equals(target.componentId())
-                && ("modify".equals(resolveOperationKind(prompt)) || chartCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
-            return "dashboard";
-        }
-        if (isTablePrompt(prompt)) {
-            return "table";
-        }
-        if (containsAny(prompt, "dashboard", "painel", "grafico", "graficos", "chart", "charts",
-                "indicador", "indicadores", "drill down", "drill-down", "drilldown",
-                "visualizar informacoes", "visualizar informacao", "folha de pagamento")) {
-            return "dashboard";
-        }
-        if (isDashboardWidgetAdditionPrompt(prompt) && isPayrollAnalyticsPrompt(prompt)) {
-            return "dashboard";
-        }
-        if (prefersPayrollDashboardRecommendation(prompt)) {
-            return "dashboard";
-        }
-        if (containsAny(prompt, "stepper", "etapa", "etapas", "passo", "passos")) {
-            return "stepper";
-        }
-        if (currentPageSummary.path("formWidgets").isArray() && !currentPageSummary.path("formWidgets").isEmpty()) {
-            return "form";
-        }
-        return "unknown";
-    }
-
-    private String resolveChangeKind(String prompt, String operationKind, String artifactKind) {
-        if ("connect".equals(operationKind)) {
-            return "connect_widgets";
-        }
-        if ("remove".equals(operationKind) && containsAny(prompt, "campo", "campos")) {
-            return formCapabilityCatalog.resolveChangeKind(prompt).orElse("remove_field");
-        }
-        if ("modify".equals(operationKind) && "form".equals(artifactKind)) {
-            Optional<String> formChangeKind = formCapabilityCatalog.resolveChangeKind(prompt);
-            if (formChangeKind.isPresent()) {
-                return formChangeKind.orElseThrow();
-            }
-        }
-        if ("modify".equals(operationKind) && "table".equals(artifactKind)) {
-            Optional<String> tableChangeKind = tableCapabilityCatalog.resolveChangeKind(prompt);
-            if (tableChangeKind.isPresent()) {
-                return tableChangeKind.orElseThrow();
-            }
-        }
-        if ("modify".equals(operationKind) && "dashboard".equals(artifactKind)) {
-            if (isDashboardWidgetAdditionPrompt(prompt)) {
-                return "add_dashboard_widget";
-            }
-            Optional<String> chartChangeKind = chartCapabilityCatalog.resolveChangeKind(prompt);
-            if (chartChangeKind.isPresent()) {
-                return chartChangeKind.orElseThrow();
-            }
-        }
-        if ("modify".equals(operationKind) && containsAny(prompt,
-                "renomear", "renomeie", "label", "rotulo", "titulo")) {
-            return "rename_or_relabel";
-        }
-        if ("modify".equals(operationKind) && containsAny(prompt, "adicionar", "adicione",
-                "incluir", "inclua", "acrescentar", "acrescente", "campo", "campos")) {
-            return "add_field";
-        }
-        if ("modify".equals(operationKind) && containsAny(prompt, "etapa", "etapas", "passo", "passos", "dividir")) {
-            return "split_into_steps";
-        }
-        if ("create".equals(operationKind) && "form".equals(artifactKind)) {
-            return "create_minimal_form";
-        }
-        if ("create".equals(operationKind) && "dashboard".equals(artifactKind)
-                && containsAny(prompt, "drill down", "drill-down", "drilldown", "detalhar", "detalhe", "aprofundar")) {
-            return "create_chart_drilldown";
-        }
-        if ("create".equals(operationKind)) {
-            return "create_artifact";
-        }
-        if ("explore".equals(operationKind) && "dashboard".equals(artifactKind)) {
-            return "recommend_dashboard_visualization";
-        }
-        if ("explore".equals(operationKind) && "table".equals(artifactKind)) {
-            return "recommend_table_visualization";
-        }
-        if ("explore".equals(operationKind) && "api_catalog".equals(artifactKind)) {
-            return "answer_api_catalog_question";
-        }
-        return "unknown";
-    }
-
     private boolean isDashboardWidgetAdditionPrompt(String prompt) {
         return containsAny(prompt, "adicionar", "adicione", "incluir", "inclua", "acrescentar", "acrescente")
                 && containsAny(prompt, "widget", "componente", "resumo", "executivo", "kpi", "indicador", "indicadores");
@@ -571,6 +727,39 @@ public class AgenticAuthoringIntentResolverService {
         return deduplicateCandidates(candidates);
     }
 
+    private List<AgenticAuthoringCandidate> discoverInitialCandidates(
+            String prompt,
+            AgenticAuthoringTarget target) {
+        List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
+        if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()) {
+            String operation = target.submitMethod() == null || target.submitMethod().isBlank()
+                    ? "post"
+                    : target.submitMethod();
+            candidates.add(candidate(
+                    target.resourcePath(),
+                    operation,
+                    0.95d,
+                    "resource resolved from current target widget",
+                    "current-page"));
+        }
+        if (apiMetadataCandidateCatalog != null) {
+            candidates.addAll(apiMetadataCandidateCatalog.discover(prompt, "unknown"));
+            candidates.addAll(apiMetadataCandidateCatalog.discover("", "unknown"));
+        }
+        candidates.addAll(discoverBroadKnownCandidates());
+        return deduplicateCandidates(candidates);
+    }
+
+    private List<AgenticAuthoringCandidate> discoverBroadKnownCandidates() {
+        return List.of(
+                candidate("/api/human-resources/funcionarios", "post", 0.40d,
+                        "broad employee creation candidate for LLM selection", "broad-artifact-discovery"),
+                candidate(PAYROLL_ANALYTICS, PAYROLL_ANALYTICS + "/stats/group-by", "post", 0.40d,
+                        "broad payroll analytics candidate for LLM selection", "broad-artifact-discovery"),
+                candidate(PAYROLL, PAYROLL + "/all", "get", 0.40d,
+                        "broad payroll collection candidate for LLM selection", "broad-artifact-discovery"));
+    }
+
     private List<AgenticAuthoringCandidate> discoverKnownCandidates(String prompt) {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
         if (containsAny(prompt, "funcionario", "funcionarios", "colaborador", "colaboradores")
@@ -592,6 +781,14 @@ public class AgenticAuthoringIntentResolverService {
                     "post",
                     0.94d,
                     "prompt asks for payroll dashboard recommendations",
+                    "known-quickstart-analytics-view"));
+        } else if (isPayrollAnalyticsPrompt(prompt) && isExplicitDashboardPrompt(prompt)) {
+            candidates.add(candidate(
+                    PAYROLL_ANALYTICS,
+                    PAYROLL_ANALYTICS + "/stats/group-by",
+                    "post",
+                    0.94d,
+                    "prompt asks for payroll analytics dashboard",
                     "known-quickstart-analytics-view"));
         } else if (isPayrollAnalyticsPrompt(prompt) && isTablePrompt(prompt)) {
             candidates.add(candidate(
@@ -784,6 +981,12 @@ public class AgenticAuthoringIntentResolverService {
         return containsAny(prompt, "tabela", "grid", "lista", "listagem", "listar", "liste", "relacao");
     }
 
+    private boolean isExplicitDashboardPrompt(String prompt) {
+        return containsAny(prompt, "dashboard", "painel", "grafico", "graficos", "chart", "charts",
+                "indicador", "indicadores", "drill down", "drill-down", "drilldown",
+                "visualizar informacoes", "visualizar informacao", "folha de pagamento");
+    }
+
     private boolean prefersPayrollDashboardRecommendation(String prompt) {
         if (!isConsultativePrompt(prompt) || !isPayrollAnalyticsPrompt(prompt)) {
             return false;
@@ -851,6 +1054,11 @@ public class AgenticAuthoringIntentResolverService {
             boolean answeredBareDomainClarification) {
         if (gate != null && gate.messages().contains("resource-candidate-required")) {
             return missingResourceAssistantMessage(artifactKind);
+        }
+        if (gate != null
+                && gate.messages().contains("resource-candidate-ambiguous")
+                && selectedCandidate == null) {
+            return ambiguousResourceAssistantMessage(artifactKind, candidates);
         }
         if (!"explore".equals(operationKind)) {
             return null;
@@ -933,6 +1141,25 @@ public class AgenticAuthoringIntentResolverService {
                     + " para esse objetivo antes de gerar a pagina.";
         }
         return message;
+    }
+
+    private String ambiguousResourceAssistantMessage(String artifactKind, List<AgenticAuthoringCandidate> candidates) {
+        String artifactLabel = switch (artifactKind) {
+            case "dashboard" -> "dashboard";
+            case "table" -> "tabela";
+            case "form" -> "formulario";
+            case "page" -> "pagina";
+            default -> "tela";
+        };
+        String options = (candidates == null ? List.<AgenticAuthoringCandidate>of() : candidates).stream()
+                .limit(4)
+                .map(candidate -> candidateLabel(candidate) + " (" + candidate.submitMethod().toUpperCase(Locale.ROOT)
+                        + " " + candidate.submitUrl() + ")")
+                .reduce((left, right) -> left + "; " + right)
+                .orElse("opcoes do catalogo de APIs");
+        return "Encontrei mais de uma fonte de dados possivel para este " + artifactLabel + ". "
+                + "Escolha a API que melhor representa o recorte de negocio antes de gerar a pre-visualizacao. "
+                + "Opcoes encontradas: " + options + ".";
     }
 
     private String missingResourceAssistantMessage(String artifactKind) {
@@ -1051,16 +1278,25 @@ public class AgenticAuthoringIntentResolverService {
         if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
-        return candidates.stream()
+        List<AgenticAuthoringCandidate> visibleCandidates = candidates.stream()
                 .limit(6)
+                .toList();
+        Map<String, Long> resourcePathCounts = visibleCandidates.stream()
+                .collect(Collectors.groupingBy(
+                        candidate -> valueOrDefault(candidate.resourcePath(), ""),
+                        Collectors.counting()));
+        return visibleCandidates.stream()
                 .map(candidate -> {
                     ObjectNode contextHints = objectMapper.createObjectNode();
                     contextHints.put("resourcePath", candidate.resourcePath());
                     contextHints.put("submitUrl", candidate.submitUrl());
                     contextHints.put("operation", candidate.operation());
                     contextHints.put("schemaUrl", candidate.schemaUrl());
+                    boolean duplicatedResourcePath = resourcePathCounts.getOrDefault(
+                            valueOrDefault(candidate.resourcePath(), ""),
+                            0L) > 1L;
                     return new AgenticAuthoringQuickReply(
-                            quickReplyId(candidate),
+                            quickReplyId(candidate, duplicatedResourcePath),
                             "suggestion",
                             candidateLabel(candidate),
                             AgenticAuthoringConversationPrompt.appendConfirmation(
@@ -1119,10 +1355,19 @@ public class AgenticAuthoringIntentResolverService {
                         null));
     }
 
-    private String quickReplyId(AgenticAuthoringCandidate candidate) {
-        return "resource-" + normalize(candidate.resourcePath())
+    private String quickReplyId(AgenticAuthoringCandidate candidate, boolean includeOperation) {
+        String base = "resource-" + normalize(candidate.resourcePath())
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-+|-+$)", "");
+        if (!includeOperation) {
+            return base;
+        }
+        String operation = valueOrDefault(candidate.operation(), "operation");
+        String submitUrl = valueOrDefault(candidate.submitUrl(), candidate.resourcePath());
+        String suffix = normalize(operation + "-" + submitUrl)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-+|-+$)", "");
+        return suffix.isBlank() ? base : base + "-" + suffix;
     }
 
     private String candidateLabel(AgenticAuthoringCandidate candidate) {
@@ -1306,7 +1551,23 @@ public class AgenticAuthoringIntentResolverService {
         return normalized.toLowerCase(Locale.ROOT).trim();
     }
 
+    private String normalizePath(String value) {
+        return value == null ? "" : value.trim().replaceAll("/+$", "");
+    }
+
+    private String jsonText(JsonNode node, String field) {
+        if (node == null || field == null || field.isBlank()) {
+            return "";
+        }
+        JsonNode value = node.path(field);
+        return value.isTextual() ? value.asText().trim() : "";
+    }
+
     private String valueOrDefault(String value, String defaultValue) {
         return value == null || value.isBlank() ? defaultValue : value.trim();
+    }
+
+    private String valueOrUnknown(String value) {
+        return valueOrDefault(value, "unknown");
     }
 }

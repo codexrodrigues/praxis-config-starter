@@ -18,6 +18,7 @@ public class AgenticAuthoringPreviewService {
     private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator;
     private final List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders;
+    private final AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -37,6 +38,15 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPatchCompilerService patchCompilerService,
             ObjectMapper objectMapper,
             List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders) {
+        this(planService, patchCompilerService, objectMapper, uiCompositionPlanProviders, null);
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
@@ -44,6 +54,7 @@ public class AgenticAuthoringPreviewService {
         this.conversationTurnOrchestrator = new AgenticAuthoringConversationTurnOrchestrator();
         this.uiCompositionPlanProviders = List.copyOf(
                 uiCompositionPlanProviders == null ? List.of() : uiCompositionPlanProviders);
+        this.messageSynthesizer = messageSynthesizer;
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -52,7 +63,8 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment) throws IOException {
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
-        Optional<AgenticAuthoringPreviewResult> uiCompositionPreview = previewUiCompositionPlan(effectiveRequest);
+        Optional<AgenticAuthoringPreviewResult> uiCompositionPreview =
+                previewUiCompositionPlan(effectiveRequest, tenantId, userId, environment);
         if (uiCompositionPreview.isPresent()) {
             return uiCompositionPreview.get();
         }
@@ -97,17 +109,35 @@ public class AgenticAuthoringPreviewService {
                         intentResolution));
         failureCodes.addAll(compileResult.failureCodes());
         warnings.addAll(compileResult.warnings());
+        boolean valid = planResult.valid() && compileResult.valid();
+        String fallbackMessage = deterministicPreviewAssistantMessage(intentResolution, null, valid);
         return new AgenticAuthoringPreviewResult(
-                planResult.valid() && compileResult.valid(),
+                valid,
                 List.copyOf(failureCodes),
                 List.copyOf(warnings),
                 planResult.minimalFormPlan(),
                 compileResult.compiledFormPatch(),
-                diagnostics(intentResolution, List.copyOf(failureCodes), List.copyOf(warnings))
+                diagnostics(intentResolution, List.copyOf(failureCodes), List.copyOf(warnings)),
+                null,
+                previewAssistantMessage(
+                        effectiveRequest,
+                        intentResolution,
+                        null,
+                        valid,
+                        List.copyOf(failureCodes),
+                        List.copyOf(warnings),
+                        fallbackMessage,
+                        tenantId,
+                        userId,
+                        environment)
         );
     }
 
-    private Optional<AgenticAuthoringPreviewResult> previewUiCompositionPlan(AgenticAuthoringPlanRequest request) {
+    private Optional<AgenticAuthoringPreviewResult> previewUiCompositionPlan(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
         if (request == null) {
             return Optional.empty();
         }
@@ -121,6 +151,10 @@ public class AgenticAuthoringPreviewService {
             List<String> warnings = new ArrayList<>(
                     planResult.warnings() == null ? List.of() : planResult.warnings());
             warnings.add("compiled-form-patch-materialized-by-page-builder");
+            String fallbackMessage = deterministicPreviewAssistantMessage(
+                    request.intentResolution(),
+                    planResult.uiCompositionPlan(),
+                    planResult.valid());
             return Optional.of(new AgenticAuthoringPreviewResult(
                     planResult.valid(),
                     failureCodes,
@@ -128,10 +162,97 @@ public class AgenticAuthoringPreviewService {
                     MissingNode.getInstance(),
                     planResult.compiledFormPatch() == null ? MissingNode.getInstance() : planResult.compiledFormPatch(),
                     diagnostics(request.intentResolution(), failureCodes, List.copyOf(warnings)),
-                    planResult.uiCompositionPlan()
+                    planResult.uiCompositionPlan(),
+                    previewAssistantMessage(
+                            request,
+                            request.intentResolution(),
+                            planResult.uiCompositionPlan(),
+                            planResult.valid(),
+                            failureCodes,
+                            List.copyOf(warnings),
+                            fallbackMessage,
+                            tenantId,
+                            userId,
+                            environment)
             ));
         }
         return Optional.empty();
+    }
+
+    private String previewAssistantMessage(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode uiCompositionPlan,
+            boolean valid,
+            List<String> failureCodes,
+            List<String> warnings,
+            String fallbackMessage,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (messageSynthesizer == null) {
+            return fallbackMessage;
+        }
+        return messageSynthesizer.synthesize(
+                request,
+                intentResolution,
+                uiCompositionPlan,
+                valid,
+                failureCodes,
+                warnings,
+                fallbackMessage,
+                tenantId,
+                userId,
+                environment);
+    }
+
+    private String deterministicPreviewAssistantMessage(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode uiCompositionPlan,
+            boolean valid) {
+        if (!valid) {
+            return "Encontrei a fonte de dados, mas o plano gerado usou propriedades incompativeis com o componente de tabela. Vou ajustar para usar apenas os campos suportados.";
+        }
+        AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
+        if (candidate == null || value(candidate.resourcePath()).isBlank()) {
+            return "";
+        }
+        String resourceLabel = titleFromResourcePath(candidate.resourcePath());
+        if (containsComponent(uiCompositionPlan, "praxis-table")) {
+            return "Criei uma pre-visualizacao usando \"" + resourceLabel
+                    + "\" como fonte de dados. A tabela foi conectada ao recurso e ja pode carregar schema/dados. "
+                    + "Voce pode revisar as colunas, pedir um grafico ou salvar a pagina.";
+        }
+        return "Criei uma pre-visualizacao usando \"" + resourceLabel
+                + "\" como fonte de dados. Revise o resultado e salve a pagina quando estiver de acordo.";
+    }
+
+    private boolean containsComponent(JsonNode uiCompositionPlan, String componentId) {
+        JsonNode widgets = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.path("widgets");
+        if (!widgets.isArray()) {
+            return false;
+        }
+        for (JsonNode widget : widgets) {
+            if (componentId.equals(widget.path("componentId").asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String titleFromResourcePath(String resourcePath) {
+        String value = value(resourcePath);
+        if (value.isBlank()) {
+            return "o recurso selecionado";
+        }
+        String lastSegment = value.substring(value.lastIndexOf('/') + 1)
+                .replace("vw-", "")
+                .replace('-', ' ')
+                .trim();
+        if (lastSegment.isBlank()) {
+            return "o recurso selecionado";
+        }
+        return Character.toUpperCase(lastSegment.charAt(0)) + lastSegment.substring(1);
     }
 
     private AgenticAuthoringPlanRequest enrichRequest(AgenticAuthoringPlanRequest request) {
