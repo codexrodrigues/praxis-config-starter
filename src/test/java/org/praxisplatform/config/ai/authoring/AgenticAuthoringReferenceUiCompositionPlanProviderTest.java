@@ -595,15 +595,55 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(table.path("componentId").asText()).isEqualTo("praxis-table");
         assertThat(table.path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-ranking-reputacao");
-        assertThat(table.path("inputs").path("submitUrl").asText())
-                .isEqualTo("/api/human-resources/vw-ranking-reputacao/filter/cursor");
-        assertThat(table.path("inputs").path("submitMethod").asText()).isEqualTo("POST");
+        assertThat(table.path("inputs").has("submitUrl")).isFalse();
+        assertThat(table.path("inputs").has("submitMethod")).isFalse();
         assertThat(plan.path("widgets").get(1).path("componentId").asText()).isEqualTo("praxis-rich-content");
+        assertThat(plan.path("widgets").get(1).path("inputs").path("document").path("nodes").get(0).path("text").asText())
+                .isEqualTo("Dashboard criado para Ranking reputacao.");
         assertThat(plan.path("canvas").path("items").path("human-resources-vw-ranking-reputacao-table").path("colSpan").asInt())
                 .isEqualTo(12);
         assertThat(planResult.warnings())
                 .contains("ui-composition-plan-provider:selected-resource-dashboard");
         assertThat(planResult.compiledFormPatch().path("patch").isObject()).isTrue();
+    }
+
+    @Test
+    void returnsResourceDashboardUiCompositionPlanForLlmDashboardChangeKind() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
+                null,
+                null,
+                null,
+                null,
+                selectedDashboardIntent(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                        "create_dashboard")));
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().warnings())
+                .contains("ui-composition-plan-provider:selected-resource-dashboard");
+        assertThat(result.orElseThrow().uiCompositionPlan().path("layoutPreset").asText())
+                .isEqualTo("resource-dashboard");
+    }
+
+    @Test
+    void normalizesMissionSummaryCandidateToOperationsResource() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um dashboard operacional de missoes",
+                null,
+                null,
+                null,
+                null,
+                selectedDashboardIntent(
+                        "/api/human-resources/vw-resumo-missoes",
+                        "/api/human-resources/vw-resumo-missoes/filter/cursor")));
+
+        assertThat(result).isPresent();
+        JsonNode table = result.orElseThrow().uiCompositionPlan().path("widgets").get(0);
+        assertThat(table.path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/operations/vw-resumo-missoes");
+        assertThat(table.path("inputs").path("title").asText()).isEqualTo("Resumo missoes");
     }
 
     @Test
@@ -719,20 +759,33 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
     }
 
     private AgenticAuthoringIntentResolutionResult selectedDashboardIntent() {
+        return selectedDashboardIntent(
+                "/api/human-resources/vw-ranking-reputacao",
+                "/api/human-resources/vw-ranking-reputacao/filter/cursor");
+    }
+
+    private AgenticAuthoringIntentResolutionResult selectedDashboardIntent(String resourcePath, String submitUrl) {
+        return selectedDashboardIntent(resourcePath, submitUrl, "create_artifact");
+    }
+
+    private AgenticAuthoringIntentResolutionResult selectedDashboardIntent(
+            String resourcePath,
+            String submitUrl,
+            String changeKind) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
                 "create",
                 "dashboard",
-                "create_artifact",
+                changeKind,
                 "generic-page-change",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
                 null,
                 new AgenticAuthoringCandidate(
-                        "/api/human-resources/vw-ranking-reputacao",
+                        resourcePath,
                         "post",
-                        "/schemas/filtered?path=/api/human-resources/vw-ranking-reputacao/filter/cursor&operation=post&schemaType=response",
-                        "/api/human-resources/vw-ranking-reputacao/filter/cursor",
+                        "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response",
+                        submitUrl,
                         "POST",
                         0.94d,
                         "user selected a dashboard resource candidate",

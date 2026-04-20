@@ -240,6 +240,79 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void streamExposesBackendRetrievalAndLlmSecondPassProgress() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = request();
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        when(turnEventService.findLastEvent(any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
+                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
+                        .eventId(UUID.randomUUID())
+                        .streamId(invocation.getArgument(1, UUID.class))
+                        .threadId(invocation.getArgument(2, UUID.class))
+                        .turnId(invocation.getArgument(3, UUID.class))
+                        .type(invocation.getArgument(4, String.class))
+                        .timestamp(Instant.now())
+                        .payload(objectMapper.valueToTree(invocation.getArgument(5)))
+                        .build());
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(secondPassIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnStreamService service = service();
+        service.start(request, "http://localhost", principalContext);
+
+        ArgumentCaptor<Object> payloads = ArgumentCaptor.forClass(Object.class);
+        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(4000).atLeast(7))
+                .appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), payloads.capture());
+        service.shutdown();
+
+        org.assertj.core.api.Assertions.assertThat(payloads.getAllValues())
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("resource.discovery");
+                    org.assertj.core.api.Assertions.assertThat(node.path("summary").asText())
+                            .contains("backend catalog");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("source").asText())
+                            .isEqualTo("backend-resource-catalog");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("candidateCount").asInt())
+                            .isEqualTo(1);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("selectedResourcePath").asText())
+                            .isEqualTo("/api/human-resources/vw-resumo-missoes");
+                })
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("intent.resolve");
+                    org.assertj.core.api.Assertions.assertThat(node.path("summary").asText())
+                            .contains("reviewed by the LLM");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("secondPass").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("selectedResourcePath").asText())
+                            .isEqualTo("/api/human-resources/vw-resumo-missoes");
+                });
+        org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
+                .completeTurn(eq(threadId), any(UUID.class));
+    }
+
+    @Test
     void cancelDoesNotOverwriteTurnWhenTerminalEventWinsRace() {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();
@@ -315,6 +388,37 @@ class AgenticAuthoringTurnStreamServiceTest {
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult secondPassIntent() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-resumo-missoes",
+                "read",
+                "/api/human-resources/vw-resumo-missoes/schema",
+                "/api/human-resources/vw-resumo-missoes/filter",
+                "POST",
+                0.91,
+                "Matches the payroll dashboard request.",
+                List.of("tool-search-api-resources"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_dashboard",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready for Resumo missoes.",
+                List.of(),
+                List.of(),
+                List.of("llm-intent-resolution-second-pass-used"),
                 List.of(),
                 objectMapper.createObjectNode());
     }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -194,11 +195,7 @@ public class AgenticAuthoringTurnStreamService {
             if (terminalReached(streamId)) {
                 return;
             }
-            if (intentResolution.failureCodes() != null && intentResolution.failureCodes().contains("resource-candidate-ambiguous")) {
-                appendAndEmit(principalContext, streamId, threadId, turnId, "thought.step", Map.of(
-                        "phase", "resource.discovery",
-                        "summary", "Resource candidates returned for user selection."));
-            }
+            emitIntentResolutionProgress(principalContext, streamId, threadId, turnId, intentResolution);
             AgenticAuthoringPreviewResult preview = null;
             if (intentResolution.valid()) {
                 appendAndEmit(principalContext, streamId, threadId, turnId, "thought.step", Map.of(
@@ -216,7 +213,7 @@ public class AgenticAuthoringTurnStreamService {
             StreamAppendResult terminalResult = appendAndEmit(principalContext, streamId, threadId, turnId, "result", Map.of(
                     "intentResolution", intentResolution,
                     "preview", preview != null ? preview : objectMapper.createObjectNode(),
-                    "assistantMessage", safeText(intentResolution.assistantMessage()),
+                    "assistantMessage", safeText(previewAssistantMessage(preview, intentResolution)),
                     "quickReplies", intentResolution.quickReplies() != null ? intentResolution.quickReplies() : List.of(),
                     "canApply", preview != null && preview.valid()));
             if (appendedType(terminalResult, "result")) {
@@ -387,6 +384,85 @@ public class AgenticAuthoringTurnStreamService {
                 && result.appended()
                 && result.event() != null
                 && type.equalsIgnoreCase(result.event().getType());
+    }
+
+    private void emitIntentResolutionProgress(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
+            return;
+        }
+        if (hasToolDiscoveredCandidates(intentResolution)) {
+            appendAndEmit(principalContext, streamId, threadId, turnId, "thought.step", Map.of(
+                    "phase", "resource.discovery",
+                    "summary", "Resource candidates were retrieved from the backend catalog.",
+                    "diagnostics", resourceDiscoveryDiagnostics(intentResolution)));
+        } else if (contains(intentResolution.failureCodes(), "resource-candidate-ambiguous")) {
+            appendAndEmit(principalContext, streamId, threadId, turnId, "thought.step", Map.of(
+                    "phase", "resource.discovery",
+                    "summary", "Resource candidates returned for user selection.",
+                    "diagnostics", resourceDiscoveryDiagnostics(intentResolution)));
+        }
+        if (contains(intentResolution.warnings(), "llm-intent-resolution-second-pass-used")) {
+            appendAndEmit(principalContext, streamId, threadId, turnId, "thought.step", Map.of(
+                    "phase", "intent.resolve",
+                    "summary", "Refined resource candidates were reviewed by the LLM.",
+                    "diagnostics", secondPassDiagnostics(intentResolution)));
+        }
+    }
+
+    private Map<String, Object> resourceDiscoveryDiagnostics(AgenticAuthoringIntentResolutionResult intentResolution) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("candidateCount", intentResolution.candidates() != null ? intentResolution.candidates().size() : 0);
+        diagnostics.put("operationKind", safeText(intentResolution.operationKind()));
+        diagnostics.put("artifactKind", safeText(intentResolution.artifactKind()));
+        AgenticAuthoringCandidate selectedCandidate = intentResolution.selectedCandidate();
+        if (selectedCandidate != null && selectedCandidate.resourcePath() != null && !selectedCandidate.resourcePath().isBlank()) {
+            diagnostics.put("selectedResourcePath", selectedCandidate.resourcePath());
+        }
+        diagnostics.put("source", hasToolDiscoveredCandidates(intentResolution) ? "backend-resource-catalog" : "intent-resolution");
+        return diagnostics;
+    }
+
+    private Map<String, Object> secondPassDiagnostics(AgenticAuthoringIntentResolutionResult intentResolution) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("secondPass", true);
+        diagnostics.put("candidateCount", intentResolution.candidates() != null ? intentResolution.candidates().size() : 0);
+        AgenticAuthoringCandidate selectedCandidate = intentResolution.selectedCandidate();
+        if (selectedCandidate != null && selectedCandidate.resourcePath() != null && !selectedCandidate.resourcePath().isBlank()) {
+            diagnostics.put("selectedResourcePath", selectedCandidate.resourcePath());
+        }
+        return diagnostics;
+    }
+
+    private boolean hasToolDiscoveredCandidates(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
+            return false;
+        }
+        if (hasEvidence(intentResolution.selectedCandidate(), "tool-search-api-resources")) {
+            return true;
+        }
+        return intentResolution.candidates() != null
+                && intentResolution.candidates().stream()
+                .anyMatch(candidate -> hasEvidence(candidate, "tool-search-api-resources"));
+    }
+
+    private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {
+        return candidate != null && contains(candidate.evidence(), evidence);
+    }
+
+    private boolean contains(List<String> values, String expected) {
+        return values != null && values.stream().anyMatch(expected::equals);
+    }
+
+    private String previewAssistantMessage(
+            AgenticAuthoringPreviewResult preview,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        String message = preview == null ? "" : safeText(preview.assistantMessage());
+        return !message.isBlank() ? message : safeText(intentResolution.assistantMessage());
     }
 
     private boolean terminalReached(UUID streamId) {

@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
@@ -123,6 +124,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "dashboard",
                         "create_artifact",
                         "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
                         "none",
                         "Posso criar com o recurso de folha de pagamento.",
                         List.of(richReply),
@@ -156,6 +158,469 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void usesResolvedLlmIntentForConsultativePromptInsteadOfKeywordFallback() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "none",
+                        "Faz mais sentido usar um dashboard para acompanhar folha de pagamento.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-suggested-create"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Leia o contexto dos componentes disponiveis e me oriente: para salarios, descontos, departamento e historico de pagamentos, faz mais sentido dashboard, tabela operacional ou formulario?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.warnings()).contains("llm-intent-resolution-used", "llm-suggested-create");
+    }
+
+    @Test
+    void doesNotFillResolvedLlmBlankFieldsWithKeywordFallback() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "",
+                        "",
+                        null,
+                        "",
+                        null,
+                        "Entendi que voce quer criar algo, mas preciso confirmar se e dashboard, relatorio, tabela ou formulario.",
+                        List.of(),
+                        List.of("Voce quer criar um dashboard, uma tabela ou um formulario?"),
+                        List.of("llm-needs-artifact-kind"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero um painel pros pagamento",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("unknown");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("intent-artifact-unknown");
+        assertThat(result.clarificationQuestions())
+                .contains("Voce quer criar um dashboard, uma tabela ou um formulario?");
+        assertThat(result.assistantMessage())
+                .contains("preciso confirmar");
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-used", "llm-needs-artifact-kind")
+                .doesNotContain("keyword-fallback-applied", "llm-intent-resolution-fallback-deterministic");
+    }
+
+    @Test
+    void usesResolvedLlmClarificationQuestionsWhenGateStillNeedsBusinessChoice() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        String llmQuestion = "Posso montar o painel usando folha de pagamento. Voce prefere quebrar por departamento, competencia ou status?";
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "none",
+                        "Encontrei a fonte de folha, mas ainda falta escolher o recorte principal do painel.",
+                        List.of(new AgenticAuthoringQuickReply(
+                                "payroll-by-department",
+                                "suggestion",
+                                "Por departamento",
+                                "Use departamento como recorte principal.")),
+                        List.of(llmQuestion),
+                        List.of("llm-clarification-question"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um dashboard de folha",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes()).contains("analytics-breakdown-required");
+        assertThat(result.assistantMessage())
+                .isEqualTo("Encontrei a fonte de folha, mas ainda falta escolher o recorte principal do painel.");
+        assertThat(result.clarificationQuestions()).containsExactly(llmQuestion);
+        assertThat(result.pendingClarification()).isNotNull();
+        assertThat(result.pendingClarification().questions()).containsExactly(llmQuestion);
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly("payroll-by-department");
+    }
+
+    @Test
+    void fallsBackToKeywordResolverOnlyWhenLlmIntentIsUnresolved() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "",
+                        "",
+                        "",
+                        null,
+                        null,
+                        "unknown",
+                        "Ainda preciso de mais contexto.",
+                        List.of(),
+                        List.of("Qual recurso deve alimentar esta tela?"),
+                        List.of("llm-unresolved-test"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um formulario didatico para cadastrar funcionarios",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-used",
+                "llm-intent-resolution-unresolved-fallback-deterministic",
+                "llm-unresolved-test");
+    }
+
+    @Test
+    void usesLlmResourceSearchQueryToRefineCandidateDiscovery() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate benefitsCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/beneficios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/beneficios&operation=post&schemaType=request",
+                "/api/human-resources/beneficios",
+                "post",
+                0.96d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString())).thenReturn(List.of());
+        Mockito.when(candidateCatalog.discover("cadastro de beneficios para funcionario", "form"))
+                .thenReturn(List.of(benefitsCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "form",
+                        "create_minimal_form",
+                        "/api/human-resources/beneficios",
+                        "cadastro de beneficios para funcionario",
+                        "none",
+                        "Vou buscar a API de beneficios para montar o formulario.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-resource-search-query"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "preciso monta uma ficha pra cadastra beneficio de funsionario",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.selectedCandidate()).isEqualTo(benefitsCandidate);
+        assertThat(result.warnings()).contains("llm-resource-search-query");
+        Mockito.verify(candidateCatalog).discover("cadastro de beneficios para funcionario", "form");
+    }
+
+    @Test
+    void rerunsLlmIntentResolutionAfterResourceSearchFindsBetterCandidates() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate benefitsCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/beneficios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/beneficios&operation=post&schemaType=request",
+                "/api/human-resources/beneficios",
+                "post",
+                0.96d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString())).thenReturn(List.of());
+        Mockito.when(candidateCatalog.discover("cadastro de beneficios para funcionario", "form"))
+                .thenReturn(List.of(benefitsCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(
+                        Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "form",
+                                "create_minimal_form",
+                                null,
+                                "cadastro de beneficios para funcionario",
+                                "none",
+                                "Vou buscar APIs de beneficios antes de escolher a fonte.",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-requested-resource-search"))),
+                        Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "form",
+                                "create_minimal_form",
+                                "/api/human-resources/beneficios",
+                                null,
+                                "none",
+                                "Encontrei beneficios e vou usar esse recurso para o formulario.",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-selected-refined-resource"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "preciso monta uma ficha pra cadastra beneficio de funsionario",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate()).isEqualTo(benefitsCandidate);
+        assertThat(result.assistantMessage())
+                .isEqualTo("Encontrei beneficios e vou usar esse recurso para o formulario.");
+        assertThat(result.warnings()).contains(
+                "llm-selected-refined-resource",
+                "llm-intent-resolution-second-pass-used");
+        Mockito.verify(llmIntentResolver, Mockito.times(2)).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
+    void usesToolDiscoveredCandidatesFromContextHintsForLlmSelection() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate toolCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-ranking-reputacao",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-ranking-reputacao/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-ranking-reputacao/filter/cursor",
+                "post",
+                0.97d,
+                "resource discovered by backend tool",
+                List.of("api-metadata", "tool-search-api-resources"));
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<AgenticAuthoringCandidate> candidates = invocation.getArgument(4, List.class);
+                    assertThat(candidates)
+                            .extracting(AgenticAuthoringCandidate::resourcePath)
+                            .contains("/api/human-resources/vw-ranking-reputacao");
+                    return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                            true,
+                            "create",
+                            "dashboard",
+                            "create_artifact",
+                            "/api/human-resources/vw-ranking-reputacao",
+                            null,
+                            "none",
+                            "Vou usar ranking reputacao como fonte de dados.",
+                            List.of(),
+                            List.of(),
+                            List.of("llm-tool-candidate")));
+                });
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.put("tool", "searchApiResources");
+        resourceDiscovery.put("retrievalQuery", "ranking reputacao");
+        resourceDiscovery.set("candidates", objectMapper.valueToTree(List.of(toolCandidate)));
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um painel para reputacao",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-ranking-reputacao");
+        assertThat(result.selectedCandidate().submitUrl())
+                .isEqualTo("/api/human-resources/vw-ranking-reputacao/filter/cursor");
+        assertThat(result.selectedCandidate().evidence()).contains("tool-search-api-resources");
+        assertThat(result.warnings()).contains("llm-tool-candidate");
+    }
+
+    @Test
     void usesLlmFollowUpKindToTreatPendingClarificationAsNewInstruction() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -175,6 +640,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "table",
                         "create_artifact",
                         "/api/human-resources/folhas-pagamento",
+                        null,
                         "new_instruction",
                         "Vou tratar este pedido como uma nova tabela operacional.",
                         List.of(),
@@ -220,6 +686,96 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "llm-intent-resolution-used",
                 "llm-semantic-follow-up",
                 "llm-follow-up-kind-new-instruction");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                promptCaptor.capture(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+        assertThat(promptCaptor.getValue())
+                .isEqualTo("Com base nisso, crie uma tabela operacional de folhas de pagamento");
+        assertThat(promptCaptor.getValue()).doesNotContain("Confirmed:");
+    }
+
+    @Test
+    void usesLlmFollowUpKindToCombinePendingClarificationOnlyAfterLlmClassifiesAnswer() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "clarification_answer",
+                        "Vou usar departamento como recorte do dashboard.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-semantic-follow-up"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "por departamento",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", "Crie um dashboard de folha", null),
+                        new AgenticAuthoringConversationMessage("m2", "assistant", "Qual recorte deve aparecer?", null)),
+                new AgenticAuthoringPendingClarification(
+                        "Crie um dashboard de folha",
+                        List.of("Qual recorte deve aparecer?"),
+                        "Qual recorte deve aparecer?",
+                        "turn-1",
+                        objectMapper.createObjectNode())));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.effectivePrompt())
+                .isEqualTo("Crie um dashboard de folha\n\nConfirmed: por departamento");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.assistantMessage()).isEqualTo("Vou usar departamento como recorte do dashboard.");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                promptCaptor.capture(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+        assertThat(promptCaptor.getValue()).isEqualTo("por departamento");
     }
 
     @Test
@@ -265,6 +821,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "dashboard",
                         "create_artifact",
                         "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
                         "none",
                         "Vou usar folha de pagamento como base.",
                         List.of(),
@@ -392,6 +949,26 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void keepsDashboardArtifactWhenPromptAlsoAsksForDetailsTable() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um dashboard de folha de pagamento com KPIs, folha por departamento, evolucao mensal e tabela de detalhes",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+    }
+    @Test
     void resolvesShortClarificationAnswerUsingPendingClarificationContext() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "folha de pagamento",
@@ -429,6 +1006,83 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.pendingClarification().questions())
                 .containsExactly("Qual recorte do dashboard de folha de pagamento voce quer usar: por departamento, competencia, status ou outro?");
         assertThat(result.pendingClarification().clientTurnId()).isEqualTo("turn-2");
+    }
+
+    @Test
+    void keepsConsultativeQuestionInExploreModeWhenHistoryHasSoftClarification() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Como visualizar a folha?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                "session-1",
+                "turn-5",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "m1",
+                                "user",
+                                "Me ajude a escolher um dashboard para folha de pagamento",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Voce pode seguir com essa visao e depois ajustar os graficos e metricas.",
+                                null)),
+                null));
+
+        assertThat(result.effectivePrompt()).isEqualTo("Como visualizar a folha?");
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.changeKind()).isEqualTo("recommend_dashboard_visualization");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.quickReplies()).isNotEmpty();
+    }
+    @Test
+    void resolvesNaturalConfirmationUsingSelectedResourceFromConversationHistory() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "pode fazer agora",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                "session-1",
+                "turn-4",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", "Crie um dashboard", null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Encontrei a melhor fonte de dados para o dashboard. Escolha a API principal.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m3",
+                                "user",
+                                "Usar Dashboard analitico (/api/human-resources/vw-analytics-folha-pagamento) como fonte de dados.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m4",
+                                "assistant",
+                                "Perfeito. Proximo passo: posso montar a previa usando essa fonte de dados.",
+                                null)),
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.quickReplies()).isEmpty();
     }
 
     @Test
@@ -1361,6 +2015,11 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .flatExtracting(AgenticAuthoringCandidate::evidence)
                 .contains("broad-artifact-discovery");
         assertThat(result.failureCodes()).containsExactly("resource-candidate-ambiguous");
+        assertThat(result.assistantMessage())
+                .contains("Encontrei mais de uma fonte de dados possivel para este dashboard")
+                .contains("Escolha a API que melhor representa o recorte de negocio")
+                .contains("/api/human-resources/vw-analytics-folha-pagamento/all")
+                .contains("/api/operations/vw-analytics-incidentes/all");
         assertThat(result.clarificationQuestions().get(0))
                 .contains("/api/human-resources/vw-analytics-folha-pagamento")
                 .contains("/api/operations/vw-analytics-incidentes");
@@ -1378,6 +2037,114 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(firstReply.prompt())
                 .isEqualTo("Crie um dashboard\n\nConfirmed: usar /api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void metadataBackedGenericDashboardSelectionUsesQuickReplyResourceContext() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringQuickReply repeatedResourceReply = new AgenticAuthoringQuickReply(
+                "resource-api-human-resources-vw-ranking-reputacao",
+                "suggestion",
+                "Ranking reputacao",
+                "Usar /api/human-resources/vw-ranking-reputacao",
+                "POST /api/human-resources/vw-ranking-reputacao/filter/cursor",
+                "query_stats",
+                "analytics",
+                objectMapper.createObjectNode().put("resourcePath", "/api/human-resources/vw-ranking-reputacao"));
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        null,
+                        "clarification_answer",
+                        "Encontrei mais de uma fonte de dados possivel para este dashboard.",
+                        List.of(repeatedResourceReply),
+                        List.of(),
+                        List.of())));
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/vw-ranking-reputacao/filter/cursor",
+                        "POST",
+                        "human-resources,reputacao,ranking",
+                        "Ranking de reputacao",
+                        "Ranking de reputacao dos herois",
+                        "rankingReputacaoCursor",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/vw-perfil-heroi/filter",
+                        "POST",
+                        "human-resources,perfil,heroi",
+                        "Perfil do heroi",
+                        "Perfil consolidado dos herois",
+                        "perfilHeroiFilter",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        null,
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/vw-ranking-reputacao");
+        contextHints.put("submitUrl", "/api/human-resources/vw-ranking-reputacao/filter/cursor");
+        contextHints.put("operation", "post");
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um dashboard\n\nConfirmed: usar /api/human-resources/vw-ranking-reputacao",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                "session-1",
+                "turn-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", "Crie um dashboard", null),
+                        new AgenticAuthoringConversationMessage("m2", "assistant", "Encontrei mais de uma fonte de dados possivel para este dashboard.", null)),
+                new AgenticAuthoringPendingClarification(
+                        "Crie um dashboard",
+                        List.of("Qual API deve alimentar este dashboard?"),
+                        "Encontrei mais de uma fonte de dados possivel para este dashboard.",
+                        "turn-1",
+                        null),
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-ranking-reputacao");
+        assertThat(result.selectedCandidate().submitUrl())
+                .isEqualTo("/api/human-resources/vw-ranking-reputacao/filter/cursor");
+        assertThat(result.failureCodes()).doesNotContain("resource-candidate-ambiguous");
+        assertThat(result.quickReplies()).isEmpty();
     }
 
     @Test
@@ -1589,6 +2356,67 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isTrue();
         assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/beneficios");
+    }
+
+    @Test
+    void metadataBackedResourceQuickReplyIdsRemainUniqueWhenResourcePathRepeats() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "human-resources,funcionarios",
+                        "Cadastrar funcionario",
+                        "Cadastra funcionarios",
+                        "createFuncionario",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        "human-resources,funcionarios",
+                        "Filtrar funcionarios",
+                        "Consulta funcionarios para selecionar a ficha",
+                        "filterFuncionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "POST",
+                        "human-resources,funcionarios",
+                        "Cursor funcionarios",
+                        "Consulta paginada de funcionarios",
+                        "cursorFuncionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "preciso monta uma ficha pra cadastra funsionario",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .doesNotHaveDuplicates();
     }
 
     @Test

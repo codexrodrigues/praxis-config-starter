@@ -33,6 +33,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringQuickReply;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
@@ -88,6 +89,7 @@ class AgenticAuthoringPagePreviewHttpTest {
                         "searchApiResources",
                         "Quais APIs analiticas podem alimentar graficos de folha?",
                         "dashboard",
+                        "Encontrei APIs candidatas para este painel.",
                         List.of(new AgenticAuthoringCandidate(
                                 "/api/human-resources/vw-analytics-folha-pagamento",
                                 "get",
@@ -97,6 +99,11 @@ class AgenticAuthoringPagePreviewHttpTest {
                                 0.9d,
                                 "api_metadata broad artifact discovery",
                                 List.of("api-metadata"))),
+                        List.of(new AgenticAuthoringQuickReply(
+                                "resource-api-human-resources-vw-analytics-folha-pagamento",
+                                "suggestion",
+                                "analytics folha pagamento",
+                                "Usar /api/human-resources/vw-analytics-folha-pagamento como fonte de dados.")),
                         List.of()));
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
@@ -124,9 +131,13 @@ class AgenticAuthoringPagePreviewHttpTest {
         JsonNode body = objectMapper.readTree(response);
         assertThat(body.path("tool").asText()).isEqualTo("searchApiResources");
         assertThat(body.path("artifactKind").asText()).isEqualTo("dashboard");
+        assertThat(body.path("assistantMessage").asText()).contains("APIs candidatas");
         assertThat(body.path("candidates")).hasSize(1);
         assertThat(body.path("candidates").get(0).path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(body.path("quickReplies")).hasSize(1);
+        assertThat(body.path("quickReplies").get(0).path("prompt").asText())
+                .contains("/api/human-resources/vw-analytics-folha-pagamento");
     }
 
     @Test

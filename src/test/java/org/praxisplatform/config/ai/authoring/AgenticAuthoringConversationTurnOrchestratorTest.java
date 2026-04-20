@@ -52,6 +52,36 @@ class AgenticAuthoringConversationTurnOrchestratorTest {
     }
 
     @Test
+    void infersPendingClarificationFromAssistantNextStepWithoutQuestionMark() {
+        AgenticAuthoringConversationTurn turn = orchestrator.resolve(
+                "pode fazer agora",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", "Crie um dashboard", null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Encontrei a melhor fonte de dados para o dashboard. Escolha a API principal.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m3",
+                                "user",
+                                "Usar Dashboard analitico (/api/human-resources/vw-analytics-folha-pagamento) como fonte de dados.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m4",
+                                "assistant",
+                                "Perfeito. Proximo passo: posso montar a previa usando essa fonte de dados.",
+                                null)),
+                null);
+
+        assertThat(turn.effectivePrompt())
+                .isEqualTo("Crie um dashboard\n\nConfirmed: Usar Dashboard analitico (/api/human-resources/vw-analytics-folha-pagamento) como fonte de dados.\n\nConfirmed: pode fazer agora");
+        assertThat(turn.sourcePrompt())
+                .isEqualTo("Crie um dashboard\n\nConfirmed: Usar Dashboard analitico (/api/human-resources/vw-analytics-folha-pagamento) como fonte de dados.");
+        assertThat(turn.answeredPendingClarification()).isTrue();
+    }
+
+    @Test
     void rebuildsAccumulatedClarificationContextFromConversationHistory() {
         AgenticAuthoringConversationTurn turn = orchestrator.resolve(
                 "por departamento",
@@ -91,6 +121,40 @@ class AgenticAuthoringConversationTurnOrchestratorTest {
         assertThat(turn.effectivePrompt())
                 .isEqualTo("Crie um dashboard\n\nConfirmed: folha de pagamento\n\nConfirmed: outro\n\nConfirmed: outro");
         assertThat(turn.answeredPendingClarification()).isTrue();
+    }
+
+    @Test
+    void treatsConsultativeQuestionAsNewPromptWhenHistoryHasSoftClarification() {
+        AgenticAuthoringConversationTurn turn = orchestrator.resolve(
+                "Como visualizar a folha?",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", "Me ajude a escolher um dashboard para folha de pagamento", null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Voce pode seguir com essa visao e depois ajustar os graficos e metricas.",
+                                null)),
+                null);
+
+        assertThat(turn.effectivePrompt()).isEqualTo("Como visualizar a folha?");
+        assertThat(turn.answeredPendingClarification()).isFalse();
+    }
+
+    @Test
+    void treatsConsultativeInstructionAsNewPromptWhenHistoryHasSoftClarification() {
+        AgenticAuthoringConversationTurn turn = orchestrator.resolve(
+                "Me ajude a escolher um dashboard para folha de pagamento",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", "Como visualizar informacoes da folha de pagamento por departamento?", null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Posso seguir com essa direcao e ajudar a configurar os graficos e metricas mais adequados.",
+                                null)),
+                null);
+
+        assertThat(turn.effectivePrompt()).isEqualTo("Me ajude a escolher um dashboard para folha de pagamento");
+        assertThat(turn.answeredPendingClarification()).isFalse();
     }
 
     @Test

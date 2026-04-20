@@ -7,7 +7,9 @@ public record AgenticAuthoringResourceCandidatesResult(
         String tool,
         String retrievalQuery,
         String artifactKind,
+        String assistantMessage,
         List<AgenticAuthoringCandidate> candidates,
+        List<AgenticAuthoringQuickReply> quickReplies,
         List<String> warnings
 ) {
 }

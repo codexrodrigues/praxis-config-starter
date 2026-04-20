@@ -33,6 +33,8 @@ final class AgenticAuthoringConversationTurnOrchestrator {
         if (sourcePrompt.isBlank()
                 || (normalize(sourcePrompt).contains(normalize(prompt))
                 && !isAlternativeClarificationAnswer(prompt, pendingClarification))
+                || isStandaloneQuestion(prompt)
+                || isStandaloneConsultativePrompt(prompt)
                 || isStandaloneInstruction(prompt, pendingClarification)) {
             return prompt;
         }
@@ -133,7 +135,14 @@ final class AgenticAuthoringConversationTurnOrchestrator {
 
     private boolean isAssistantClarification(AgenticAuthoringConversationMessage message) {
         String text = trim(message == null ? null : message.text());
-        return isAssistant(message) && !text.isBlank() && text.contains("?");
+        if (!isAssistant(message) || text.isBlank()) {
+            return false;
+        }
+        if (text.contains("?")) {
+            return true;
+        }
+        String normalized = normalize(text);
+        return normalized.matches(".*\\b(escolha|selecione|confirme|defina|informe|posso seguir|posso criar|posso montar|proximo passo|falta definir|para avancar|para seguir|se quiser)\\b.*");
     }
 
     private boolean isAssistant(AgenticAuthoringConversationMessage message) {
@@ -142,6 +151,20 @@ final class AgenticAuthoringConversationTurnOrchestrator {
 
     private boolean isUser(AgenticAuthoringConversationMessage message) {
         return message != null && "user".equals(message.role());
+    }
+
+    private boolean isStandaloneQuestion(String prompt) {
+        String normalized = normalize(prompt);
+        return normalized.endsWith("?")
+                || normalized.matches("^(como|qual|quais|que|o que|onde|quando|porque|por que)\\b.*");
+    }
+
+    private boolean isStandaloneConsultativePrompt(String prompt) {
+        String normalized = normalize(prompt);
+        if (normalized.matches(".*\\b(escolho|confirmo|confirmar|usar|use|usando|primeira|segunda|terceira)\\b.*")) {
+            return false;
+        }
+        return normalized.matches(".*\\b(me ajude|ajude|escolher|melhor forma|antes de criar|quais outras|compare|comparar|orientar|oriente|me oriente|faz mais sentido|devo usar)\\b.*");
     }
 
     private boolean isStandaloneInstruction(String prompt, AgenticAuthoringPendingClarification pendingClarification) {
@@ -163,7 +186,7 @@ final class AgenticAuthoringConversationTurnOrchestrator {
             return false;
         }
         return normalized.contains("/api/")
-                || normalized.matches(".*\\b(sim|confirmo|confirmar|escolho|escolher|seguir|use|usar|usando|mantenha|preserve|preservar|opcao|opcoes|primeira|segunda|terceira|com base|exatamente)\\b.*");
+                || normalized.matches(".*\\b(sim|confirmo|confirmar|escolho|escolher|seguir|fazer|use|usar|usando|mantenha|preserve|preservar|opcao|opcoes|primeira|segunda|terceira|com base|exatamente)\\b.*");
     }
 
     private static String trim(String value) {

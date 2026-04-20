@@ -125,6 +125,8 @@ class AgenticAuthoringControllerTest {
                 "searchApiResources",
                 request.retrievalQuery(),
                 request.artifactKind(),
+                "Encontrei APIs candidatas.",
+                List.of(),
                 List.of(),
                 List.of("resource-candidates-empty"));
         when(resourceDiscoveryService.search(request)).thenReturn(expected);

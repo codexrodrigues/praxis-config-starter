@@ -182,6 +182,33 @@ public class AiProviderManagementService {
         return selectedProvider.generateJson(prompt, schema, config);
     }
 
+    public String generateText(
+            String prompt,
+            AiCallConfig requestConfig,
+            String tenantId,
+            String userId,
+            String environment) {
+        StoredAiConfig stored = resolveStoredConfig(tenantId, userId, environment);
+        String provider = resolveProviderName(
+                requestConfig != null ? requestConfig.getProvider() : null,
+                stored != null ? stored.provider() : null);
+        AiProvider selectedProvider = resolveProvider(provider);
+        if (selectedProvider == null) {
+            throw new IllegalStateException("Provider not available: " + provider);
+        }
+        AiCallConfig config = AiCallConfig.builder()
+                .provider(provider)
+                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
+                .model(resolveModel(requestConfig != null ? requestConfig.getModel() : null, stored))
+                .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
+                .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
+                .tenantId(tenantId)
+                .environment(environment)
+                .ragReleaseId(requestConfig != null ? requestConfig.getRagReleaseId() : null)
+                .build();
+        return selectedProvider.generateText(prompt, config);
+    }
+
     public AiProviderCatalogResponse listCatalog() {
         List<AiProviderCatalogItem> providers = new ArrayList<>();
         ProviderCapabilities geminiCapabilities = resolveProviderCapabilities("gemini");

@@ -15,6 +15,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractVa
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewMessageSynthesizerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
@@ -160,8 +161,9 @@ public class AgenticAuthoringAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public AgenticAuthoringResourceDiscoveryService agenticAuthoringResourceDiscoveryService(
-            AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog) {
-        return new AgenticAuthoringResourceDiscoveryService(apiMetadataCandidateCatalog);
+            AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringResourceDiscoveryService(apiMetadataCandidateCatalog, objectMapper);
     }
 
     @Bean
@@ -191,17 +193,28 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean(AiProviderManagementService.class)
+    public AgenticAuthoringPreviewMessageSynthesizerService agenticAuthoringPreviewMessageSynthesizerService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringPreviewMessageSynthesizerService(providerManagementService, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({AgenticAuthoringPlanService.class, AgenticAuthoringPatchCompilerService.class})
     public AgenticAuthoringPreviewService agenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
             AgenticAuthoringPatchCompilerService patchCompilerService,
             ObjectMapper objectMapper,
-            ObjectProvider<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders) {
+            ObjectProvider<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            ObjectProvider<AgenticAuthoringPreviewMessageSynthesizerService> messageSynthesizer) {
         return new AgenticAuthoringPreviewService(
                 planService,
                 patchCompilerService,
                 objectMapper,
-                uiCompositionPlanProviders.orderedStream().toList());
+                uiCompositionPlanProviders.orderedStream().toList(),
+                messageSynthesizer.getIfAvailable());
     }
 
     @Bean

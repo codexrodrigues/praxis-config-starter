@@ -8,6 +8,7 @@ public record AgenticAuthoringLlmIntentResolution(
         String artifactKind,
         String changeKind,
         String selectedResourcePath,
+        String resourceSearchQuery,
         String followUpKind,
         String assistantMessage,
         List<AgenticAuthoringQuickReply> quickReplies,

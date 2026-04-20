@@ -22,6 +22,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     private static final String EMPLOYEES = "/api/human-resources/funcionarios";
     private static final String PAYROLL_ANALYTICS = "/api/human-resources/vw-analytics-folha-pagamento";
     private static final String PAYROLL = "/api/human-resources/folhas-pagamento";
+    private static final String MISSION_SUMMARY = "/api/operations/vw-resumo-missoes";
     private static final PayrollBreakdown DEPARTMENT_BREAKDOWN =
             new PayrollBreakdown("departamento", "Departamento", "department", "selectedDepartment", "group-by", "bar");
     private static final PayrollBreakdown COMPETENCE_BREAKDOWN =
@@ -260,7 +261,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (!supportsSelectedResourceDashboard(request)) {
             return Optional.empty();
         }
-        AgenticAuthoringCandidate candidate = request.intentResolution().selectedCandidate();
+        AgenticAuthoringCandidate candidate = canonicalSelectedResourceCandidate(request.intentResolution().selectedCandidate());
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
                 List.of(),
@@ -304,9 +305,31 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         return intent.valid()
                 && "create".equals(intent.operationKind())
                 && "dashboard".equals(intent.artifactKind())
-                && "create_artifact".equals(intent.changeKind())
+                && ("create_artifact".equals(intent.changeKind())
+                || "create_dashboard".equals(intent.changeKind()))
                 && candidate.resourcePath() != null
                 && !candidate.resourcePath().isBlank();
+    }
+
+    private AgenticAuthoringCandidate canonicalSelectedResourceCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        String resourcePath = valueOrEmpty(candidate.resourcePath());
+        if (resourcePath.endsWith("/vw-resumo-missoes")) {
+            return new AgenticAuthoringCandidate(
+                    MISSION_SUMMARY,
+                    valueOrEmpty(candidate.operation()).isBlank() ? "post" : candidate.operation(),
+                    "/schemas/filtered?path=" + MISSION_SUMMARY + "/filter/cursor&operation=post&schemaType=response",
+                    MISSION_SUMMARY + "/filter/cursor",
+                    "post",
+                    candidate.score(),
+                    valueOrEmpty(candidate.reason()).isBlank()
+                            ? "resource normalized to canonical operations mission summary endpoint"
+                            : candidate.reason(),
+                    candidate.evidence());
+        }
+        return candidate;
     }
 
     private ObjectNode selectedResourceDashboardPlan(AgenticAuthoringCandidate candidate) {
@@ -343,12 +366,6 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         inputs.put("resourcePath", candidate.resourcePath());
         inputs.put("tableId", widgetKey);
         inputs.put("title", titleFromResourcePath(candidate.resourcePath()));
-        if (candidate.submitUrl() != null && !candidate.submitUrl().isBlank()) {
-            inputs.put("submitUrl", candidate.submitUrl());
-        }
-        if (candidate.submitMethod() != null && !candidate.submitMethod().isBlank()) {
-            inputs.put("submitMethod", candidate.submitMethod());
-        }
         inputs.putObject("config").putArray("columns");
     }
 
@@ -362,7 +379,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         document.put("version", "1.0.0");
         ObjectNode text = document.putArray("nodes").addObject();
         text.put("type", "text");
-        text.put("text", "Dashboard criado a partir de " + candidate.resourcePath() + ".");
+        text.put("text", "Dashboard criado para " + titleFromResourcePath(candidate.resourcePath()) + ".");
     }
 
     private String resourceWidgetKey(String resourcePath) {

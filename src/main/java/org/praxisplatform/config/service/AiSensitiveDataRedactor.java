@@ -38,8 +38,6 @@ public class AiSensitiveDataRedactor {
     private static final Pattern OPENAI_KEY = Pattern.compile("\\bsk-[A-Za-z0-9]{20,}\\b");
     private static final Pattern LONG_NUMBER = Pattern.compile("\\b\\d{12,}\\b");
     private static final Set<String> EVENT_FORBIDDEN_FIELDS = Set.of(
-            "prompt",
-            "userprompt",
             "currentstate",
             "messages",
             "dataprofile",
@@ -54,8 +52,21 @@ public class AiSensitiveDataRedactor {
             "reason",
             "details",
             "error",
+            "effectiveprompt",
             "raw",
+            "prompt",
+            "sourceprompt",
+            "userprompt",
             "content");
+    private static final Set<String> QUICK_REPLY_CONTEXT_HINT_FIELDS = Set.of(
+            "artifactkind",
+            "operation",
+            "resourcepath",
+            "retrievalquery",
+            "schemaurl",
+            "submitmethod",
+            "submiturl",
+            "tool");
 
     public String redactText(String value) {
         if (value == null || value.isBlank()) {
@@ -117,6 +128,10 @@ public class AiSensitiveDataRedactor {
                 Map.Entry<String, JsonNode> field = fields.next();
                 String normalizedKey = normalizeFieldName(field.getKey());
                 if (EVENT_FORBIDDEN_FIELDS.contains(normalizedKey)) {
+                    if ("contexthints".equals(normalizedKey) && isQuickReplyContainer(fieldName)) {
+                        objectNode.set(field.getKey(), sanitizeQuickReplyContextHints(field.getValue()));
+                        continue;
+                    }
                     objectNode.put(field.getKey(), REDACTED);
                     continue;
                 }
@@ -145,6 +160,32 @@ public class AiSensitiveDataRedactor {
             }
         }
         return source;
+    }
+
+    private boolean isQuickReplyContainer(String fieldName) {
+        String normalized = normalizeFieldName(fieldName);
+        return "quickreplies".equals(normalized) || "quickreply".equals(normalized);
+    }
+
+    private JsonNode sanitizeQuickReplyContextHints(JsonNode source) {
+        if (source == null || source.isNull()) {
+            return source;
+        }
+        if (!source.isObject()) {
+            return JsonNodeFactory.instance.textNode(REDACTED);
+        }
+        ObjectNode objectNode = JsonNodeFactory.instance.objectNode();
+        Iterator<Map.Entry<String, JsonNode>> fields = source.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            String normalizedKey = normalizeFieldName(field.getKey());
+            if (!QUICK_REPLY_CONTEXT_HINT_FIELDS.contains(normalizedKey) || isSecretField(normalizedKey)) {
+                objectNode.put(field.getKey(), REDACTED);
+                continue;
+            }
+            objectNode.set(field.getKey(), sanitizeEventPayload(field.getValue(), field.getKey()));
+        }
+        return objectNode;
     }
 
     private String normalizeFieldName(String fieldName) {

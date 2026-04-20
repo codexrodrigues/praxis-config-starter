@@ -104,20 +104,42 @@ public class AgenticAuthoringLlmIntentResolverService {
     }
 
     private Optional<AgenticAuthoringLlmIntentResolution> toResolution(JsonNode result) {
-        if (result == null || !result.isObject() || !result.path("resolved").asBoolean(false)) {
+        if (result == null || !result.isObject()) {
+            return Optional.empty();
+        }
+        boolean resolved = result.path("resolved").asBoolean(false);
+        List<AgenticAuthoringQuickReply> quickReplies = quickReplies(result.path("quickReplies"));
+        List<String> clarificationQuestions = strings(result.path("clarificationQuestions"));
+        List<String> warnings = strings(result.path("warnings"));
+        String operationKind = text(result, "operationKind");
+        String artifactKind = text(result, "artifactKind");
+        String changeKind = text(result, "changeKind");
+        String selectedResourcePath = nullableText(result, "selectedResourcePath");
+        String resourceSearchQuery = nullableText(result, "resourceSearchQuery");
+        String followUpKind = text(result, "followUpKind");
+        String assistantMessage = nullableText(result, "assistantMessage");
+        if (!resolved
+                && operationKind.isBlank()
+                && artifactKind.isBlank()
+                && changeKind.isBlank()
+                && (assistantMessage == null || assistantMessage.isBlank())
+                && quickReplies.isEmpty()
+                && clarificationQuestions.isEmpty()
+                && warnings.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(new AgenticAuthoringLlmIntentResolution(
-                true,
-                text(result, "operationKind"),
-                text(result, "artifactKind"),
-                text(result, "changeKind"),
-                nullableText(result, "selectedResourcePath"),
-                text(result, "followUpKind"),
-                nullableText(result, "assistantMessage"),
-                quickReplies(result.path("quickReplies")),
-                strings(result.path("clarificationQuestions")),
-                strings(result.path("warnings"))));
+                resolved,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedResourcePath,
+                resourceSearchQuery,
+                followUpKind,
+                assistantMessage,
+                quickReplies,
+                clarificationQuestions,
+                warnings));
     }
 
     private List<AgenticAuthoringQuickReply> quickReplies(JsonNode node) {
@@ -133,6 +155,9 @@ public class AgenticAuthoringLlmIntentResolverService {
             if (id.isBlank() || kind.isBlank() || label.isBlank()) {
                 continue;
             }
+            if (isRedactedPrompt(prompt)) {
+                prompt = label;
+            }
             replies.add(new AgenticAuthoringQuickReply(
                     id,
                     kind,
@@ -144,6 +169,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                     item.path("contextHints").isObject() ? item.path("contextHints") : null));
         }
         return List.copyOf(replies);
+    }
+
+    private boolean isRedactedPrompt(String prompt) {
+        String value = prompt == null ? "" : prompt.trim();
+        return value.isBlank() || "[REDACTED]".equalsIgnoreCase(value);
     }
 
     private List<String> strings(JsonNode node) {
@@ -168,6 +198,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         stringEnum(properties, "artifactKind", List.of("dashboard", "table", "form", "page", "api_catalog", "component", "unknown"));
         properties.putObject("changeKind").put("type", "string");
         nullableString(properties, "selectedResourcePath");
+        nullableString(properties, "resourceSearchQuery");
         stringEnum(properties, "followUpKind", List.of(
                 "clarification_answer",
                 "new_instruction",
