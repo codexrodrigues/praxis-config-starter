@@ -7,6 +7,9 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -276,6 +279,96 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesDynamicFormLabelChangeFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-dynamic-form",
+                payloadFromClasspathSnapshot("praxis-dynamic-form"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "fieldMetadata": [
+                      { "name": "email", "label": "Email", "source": "schema" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "field.label.set",
+                    "target": "Email",
+                    "input": { "label": "E-mail Corporativo" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-dynamic-form",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.5.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("field.label.set");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");
+        assertThat(operation.path("resolvedPath").asText()).isEqualTo("fieldMetadata[]/0");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("email");
+        assertThat(operation.path("value").path("label").asText()).isEqualTo("E-mail Corporativo");
+        assertThat(result.patch().path("proposedConfig").path("fieldMetadata").get(0).path("label").asText())
+                .isEqualTo("E-mail Corporativo");
+    }
+
+    @Test
+    void enforcesDynamicFormRuleRemovalConfirmationFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-dynamic-form",
+                payloadFromClasspathSnapshot("praxis-dynamic-form"));
+        JsonNode unconfirmedRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "formRules": [
+                      { "id": "ocultar-cpf-pj", "name": "Ocultar CPF para PJ" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "rule.remove",
+                    "target": "ocultar-cpf-pj",
+                    "input": {}
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult unconfirmed = service.validateEditPlan(
+                "praxis-dynamic-form",
+                objectMapper.treeToValue(unconfirmedRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(unconfirmed.valid()).isFalse();
+        assertThat(unconfirmed.failures()).contains("operation requires explicit confirmation: rule.remove");
+
+        JsonNode confirmedRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "formRules": [
+                      { "id": "ocultar-cpf-pj", "name": "Ocultar CPF para PJ" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "rule.remove",
+                    "target": "ocultar-cpf-pj",
+                    "input": {},
+                    "confirmed": true
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult confirmed = service.compilePatch(
+                "praxis-dynamic-form",
+                objectMapper.treeToValue(confirmedRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(confirmed.compiled()).isTrue();
+        assertThat(confirmed.patch().path("operations").get(0).path("op").asText()).isEqualTo("remove-by-key");
+        assertThat(confirmed.patch().path("operations").get(0).path("removedIndex").asInt()).isZero();
+        assertThat(confirmed.patch().path("proposedConfig").path("formRules")).isEmpty();
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
@@ -325,9 +418,13 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     private AgenticAuthoringManifestService serviceWithPayload(String payload) {
+        return serviceWithPayload(COMPONENT_ID, payload);
+    }
+
+    private AgenticAuthoringManifestService serviceWithPayload(String componentId, String payload) {
         when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
                 eq("component_definition"),
-                eq(COMPONENT_ID),
+                eq(componentId),
                 eq("component-definition"),
                 eq(Scope.SYSTEM),
                 eq("GLOBAL")))
@@ -340,6 +437,20 @@ class AgenticAuthoringManifestServiceTest {
                 new AgenticAuthoringValidatorRegistry(targetResolverRegistry),
                 new AgenticAuthoringEffectCompilerRegistry(objectMapper, targetResolverRegistry),
                 new AgenticAuthoringManifestContractValidator());
+    }
+
+    private String payloadFromClasspathSnapshot(String componentId) throws IOException {
+        try (InputStream input = getClass().getResourceAsStream("/ai-registry/registry-snapshot.json")) {
+            assertThat(input).as("registry snapshot resource").isNotNull();
+            JsonNode snapshot = objectMapper.readTree(input);
+            JsonNode manifest = snapshot.path("components").path(componentId).path("authoringManifest");
+            assertThat(manifest.isObject()).as("%s authoringManifest", componentId).isTrue();
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.putObject("componentDefinition")
+                    .putObject("jsonSchema")
+                    .set("authoringManifest", manifest);
+            return objectMapper.writeValueAsString(payload);
+        }
     }
 
     private String validPayload() {
