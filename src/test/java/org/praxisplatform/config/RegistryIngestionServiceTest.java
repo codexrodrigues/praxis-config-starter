@@ -1,44 +1,40 @@
 package org.praxisplatform.config;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.AiRegistry;
-import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
-import org.praxisplatform.config.rag.RagVectorStoreConfiguration;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.repository.UiUserConfigRepository;
 import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingModel;
+import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
+import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
+import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
-
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.praxisplatform.config.repository.UiUserConfigRepository;
-import org.praxisplatform.config.repository.AiRegistryRepository;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
-
-import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
-import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
-import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
-import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(classes = TestApplication.class)
 @ActiveProfiles("test")
@@ -63,6 +59,9 @@ class RegistryIngestionServiceTest {
 
     @Autowired
     private RegistryIngestionService registryIngestionService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @MockBean
     private AiRegistryRepository repository;
@@ -149,5 +148,38 @@ class RegistryIngestionServiceTest {
 
         // Verify save was called
         verify(repository, times(1)).save(any(AiRegistry.class));
+    }
+
+    @Test
+    void shouldIngestClasspathSnapshotWithExecutableAuthoringManifests() throws Exception {
+        ClassPathResource resource = new ClassPathResource("ai-registry/registry-snapshot.json");
+        RegistryIngestionRequest request;
+        try (var input = resource.getInputStream()) {
+            request = objectMapper.readValue(input, RegistryIngestionRequest.class);
+        }
+
+        registryIngestionService.ingestRegistry(request, null, null);
+
+        ArgumentCaptor<AiRegistry> savedDefinitions = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository, times(request.getComponents().size())).save(savedDefinitions.capture());
+
+        AiRegistry tableDefinition = savedDefinitions.getAllValues().stream()
+                .filter(definition -> "praxis-table".equals(definition.getRegistryKey()))
+                .findFirst()
+                .orElseThrow();
+        AiRegistry formDefinition = savedDefinitions.getAllValues().stream()
+                .filter(definition -> "praxis-dynamic-form".equals(definition.getRegistryKey()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(authoringManifest(tableDefinition).path("operations").size()).isGreaterThan(0);
+        assertThat(authoringManifest(formDefinition).path("operations").size()).isGreaterThan(0);
+    }
+
+    private JsonNode authoringManifest(AiRegistry definition) throws Exception {
+        return objectMapper.readTree(definition.getPayload())
+                .path("componentDefinition")
+                .path("jsonSchema")
+                .path("authoringManifest");
     }
 }
