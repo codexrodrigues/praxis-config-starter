@@ -369,6 +369,123 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesTableColumnHeaderChangeFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-table",
+                payloadFromClasspathSnapshot("praxis-table"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "column.header.set",
+                    "target": "email",
+                    "input": { "header": "Contato" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-table",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("2.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("column.header.set");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");
+        assertThat(operation.path("resolvedPath").asText()).isEqualTo("columns[]/0");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("email");
+        assertThat(operation.path("value").path("header").asText()).isEqualTo("Contato");
+        assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("header").asText())
+                .isEqualTo("Contato");
+    }
+
+    @Test
+    void validatesTableRemoteBindingOperationFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-table",
+                payloadFromClasspathSnapshot("praxis-table"));
+        JsonNode unsafeRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "behavior": {
+                      "expansion": {
+                        "detail": {
+                          "source": {}
+                        }
+                      }
+                    }
+                  },
+                  "plan": {
+                    "operationId": "expansion.detailSource.configure",
+                    "input": {
+                      "mode": "resourcePath",
+                      "resourcePath": { "path": "https://evil.example/api/customers" }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult unsafe = service.validateEditPlan(
+                "praxis-table",
+                objectMapper.treeToValue(unsafeRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(unsafe.valid()).isFalse();
+        assertThat(unsafe.failures()).anyMatch(failure -> failure.contains("remote-resource-binding-safe failed"));
+
+        JsonNode safeRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "behavior": {
+                      "expansion": {
+                        "detail": {
+                          "source": {}
+                        }
+                      }
+                    }
+                  },
+                  "plan": {
+                    "operationId": "expansion.detailSource.configure",
+                    "input": {
+                      "mode": "resourcePath",
+                      "resourcePath": {
+                        "path": "/api/customers/{id}/detail",
+                        "method": "GET"
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult safe = service.compilePatch(
+                "praxis-table",
+                objectMapper.treeToValue(safeRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(safe.compiled()).isTrue();
+        assertThat(safe.failures()).isEmpty();
+        JsonNode operation = safe.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("expansion.detailSource.configure");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-object");
+        assertThat(operation.path("path").asText()).isEqualTo("behavior.expansion.detail.source");
+        assertThat(operation.path("submissionImpact").asText()).isEqualTo("affects-remote-binding");
+        assertThat(safe.patch()
+                        .path("proposedConfig")
+                        .path("behavior")
+                        .path("expansion")
+                        .path("detail")
+                        .path("source")
+                        .path("resourcePath")
+                        .path("path")
+                        .asText())
+                .isEqualTo("/api/customers/{id}/detail");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
