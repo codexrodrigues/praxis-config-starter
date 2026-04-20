@@ -13,6 +13,12 @@ Escopo coberto:
 - `POST /api/praxis/config/ai/patch/stream/{streamId}/cancel`
 - `GET /api/praxis/config/ai/authoring/component-capabilities`
 - `POST /api/praxis/config/ai/authoring/resource-candidates`
+- `GET /api/praxis/config/ai/authoring/manifests/{componentId}`
+- `GET /api/praxis/config/ai/authoring/manifests/{componentId}/editable-targets`
+- `GET /api/praxis/config/ai/authoring/manifests/{componentId}/operations`
+- `POST /api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target`
+- `POST /api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan`
+- `POST /api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch`
 - `POST /api/praxis/config/ai/authoring/turn/stream/start`
 - `GET /api/praxis/config/ai/authoring/turn/stream/{streamId}`
 - `GET /api/praxis/config/ai/authoring/turn/stream/{streamId}/probe`
@@ -49,6 +55,15 @@ Streaming de authoring:
 - O fluxo `/api/praxis/config/ai/authoring/turn/stream/**` reutiliza `AiTurnEventEnvelope`, replay, cancelamento e event log, mas usa payloads de authoring como `thought.step`, `result`, `error` e `cancelled`.
 - `llmDiagnostics` continua sendo diagnostico opt-in de turno concluido; feedback incremental deve vir pelos eventos SSE do turno.
 - A decisao canonica e a semantica dos eventos de authoring estao em `docs/ai/agentic-authoring-streaming.md`.
+
+Authoring manifests executaveis:
+
+- Os endpoints `/api/praxis/config/ai/authoring/manifests/{componentId}/**` expõem o contrato executavel versionado projetado em `ai_registry`.
+- `resolve-target` usa o `operation.target.resolver` declarado pelo manifest para resolver alvos de forma deterministica.
+- `validate-plan` valida plano, schema de input, validators declarados, confirmacao destrutiva e existencia de alvos sem depender de keywords.
+- `compile-patch` compila efeitos genericos como `merge-by-key`, `remove-by-key`, `set-value`, `merge-object` e `append` em patch de configuracao com `proposedConfig`.
+- Efeitos `compile-domain-patch` continuam sendo fronteira explicita para compiladores especificos por componente.
+- Erros de configuracao desses endpoints usam `AgenticAuthoringDryRunErrorResponse`, com `failureCodes=["DRY_RUN_CONFIGURATION_INVALID"]`.
 
 Trilha API Catalog Q&A:
 

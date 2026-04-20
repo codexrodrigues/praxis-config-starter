@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,7 @@ import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
@@ -40,6 +42,7 @@ public class RegistryIngestionService {
     private final ObjectMapper objectMapper;
     private final EmbeddingService embeddingService;
     private final RagVectorStoreService ragVectorStoreService;
+    private final AgenticAuthoringManifestContractValidator manifestContractValidator;
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
 
@@ -57,6 +60,7 @@ public class RegistryIngestionService {
         var definitions = request.getDefinitions();
         request.getComponents().forEach((componentId, entry) -> {
             try {
+                validateAuthoringManifest(componentId, entry);
                 AiRegistry def = toComponentDefinition(componentId, entry, definitions);
                 upsertDefinition(def);
                 Document ragDocument = toRagDocument(def, entry, resolvedTenant, resolvedEnv, releaseId, requestVersion);
@@ -119,6 +123,18 @@ public class RegistryIngestionService {
         metadata.put(RagMetadataKeys.CHUNK_INDEX, 0);
         metadata.put(RagMetadataKeys.DESCRIPTION, description);
         metadata.put(RagMetadataKeys.JSON_SCHEMA, toJson(entry));
+        com.fasterxml.jackson.databind.JsonNode authoringManifest = authoringManifest(entry);
+        if (authoringManifest != null && authoringManifest.isObject()) {
+            metadata.put(
+                    RagMetadataKeys.AUTHORING_MANIFEST_VERSION,
+                    text(authoringManifest, "manifestVersion"));
+            metadata.put(
+                    RagMetadataKeys.AUTHORING_OPERATION_COUNT,
+                    authoringManifest.path("operations").isArray() ? authoringManifest.path("operations").size() : 0);
+            metadata.put(
+                    RagMetadataKeys.AUTHORING_TARGET_COUNT,
+                    authoringManifest.path("editableTargets").isArray() ? authoringManifest.path("editableTargets").size() : 0);
+        }
         if (tenantId != null) {
             metadata.put(RagMetadataKeys.TENANT_ID, tenantId);
         }
@@ -175,6 +191,7 @@ public class RegistryIngestionService {
                 extra.get("componentCapabilities")));
         joiner.add("ComponentCapabilityNotes: " + summarizeNotes(
                 extra.get("componentCapabilityNotes")));
+        joiner.add("AuthoringManifest: " + summarizeAuthoringManifest(extra.get("authoringManifest")));
 
         return joiner.toString();
     }
@@ -271,6 +288,71 @@ public class RegistryIngestionService {
         return schemaNode.getNodeType().name().toLowerCase();
     }
 
+    private String summarizeAuthoringManifest(com.fasterxml.jackson.databind.JsonNode manifest) {
+        if (manifest == null || manifest.isNull() || manifest.isMissingNode()) {
+            return "none";
+        }
+        if (!manifest.isObject()) {
+            return "invalid";
+        }
+        StringJoiner joiner = new StringJoiner("; ");
+        joiner.add("version=" + text(manifest, "manifestVersion"));
+        joiner.add("targets=" + summarizeManifestArray(manifest.path("editableTargets"), "kind", 20));
+        joiner.add("operations=" + summarizeManifestArray(manifest.path("operations"), "operationId", 40));
+        joiner.add("validators=" + summarizeManifestArray(manifest.path("validators"), "validatorId", 30));
+        return joiner.toString();
+    }
+
+    private String summarizeManifestArray(
+            com.fasterxml.jackson.databind.JsonNode items,
+            String fieldName,
+            int limit) {
+        if (items == null || !items.isArray() || items.isEmpty()) {
+            return "none";
+        }
+        StringJoiner joiner = new StringJoiner(",");
+        int count = 0;
+        for (com.fasterxml.jackson.databind.JsonNode item : items) {
+            if (count >= limit) {
+                joiner.add("...+" + (items.size() - limit));
+                break;
+            }
+            String value = text(item, fieldName);
+            if (!value.isBlank()) {
+                joiner.add(value);
+                count++;
+            }
+        }
+        return joiner.length() > 0 ? joiner.toString() : "none";
+    }
+
+    private void validateAuthoringManifest(
+            String componentId,
+            RegistryIngestionRequest.ComponentEntry entry) {
+        com.fasterxml.jackson.databind.JsonNode manifest = authoringManifest(entry);
+        if (manifest == null || manifest.isNull() || manifest.isMissingNode()) {
+            return;
+        }
+        if (!manifest.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "authoringManifest must be an object for component: " + componentId);
+        }
+        List<String> failures = manifestContractValidator.validate(manifest);
+        if (!failures.isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "Invalid authoringManifest for component " + componentId + ": "
+                            + String.join("; ", failures));
+        }
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode authoringManifest(
+            RegistryIngestionRequest.ComponentEntry entry) {
+        if (entry == null || entry.getAdditionalProperties() == null) {
+            return null;
+        }
+        return entry.getAdditionalProperties().get("authoringManifest");
+    }
+
     private String buildPayload(String componentId, String description, RegistryIngestionRequest.ComponentEntry entry) {
         ObjectNode root = objectMapper.createObjectNode();
         ObjectNode def = root.putObject("componentDefinition");
@@ -320,6 +402,14 @@ public class RegistryIngestionService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String text(com.fasterxml.jackson.databind.JsonNode node, String field) {
+        if (node == null) {
+            return "";
+        }
+        com.fasterxml.jackson.databind.JsonNode value = node.path(field);
+        return value.isTextual() ? value.asText() : value.asText("");
     }
 
     private String toJson(Object data) {

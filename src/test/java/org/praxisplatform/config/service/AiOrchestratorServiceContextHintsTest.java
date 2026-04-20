@@ -216,4 +216,176 @@ class AiOrchestratorServiceContextHintsTest {
         assertThat(response.getPatch()).isNull();
         assertThat(response.getWarnings()).containsExactly("authoring-contract-used");
     }
+
+    @Test
+    void resolveAuthoringContractPrefersProjectedManifestOverLegacyHint() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "authoringContract": {
+                    "kind": "legacy-contract",
+                    "preferredResponse": "patch"
+                  }
+                }
+                """);
+        JsonNode componentDefinition = objectMapper.readTree("""
+                {
+                  "jsonSchema": {
+                    "authoringManifest": {
+                      "manifestVersion": "1.0.0",
+                      "editableTargets": [
+                        { "kind": "column", "resolver": "column-by-field" }
+                      ],
+                      "validators": [
+                        { "validatorId": "column-exists" }
+                      ],
+                      "operations": [
+                        {
+                          "operationId": "column.header.set",
+                          "target": {
+                            "kind": "column",
+                            "resolver": "column-by-field",
+                            "required": true
+                          },
+                          "inputSchema": {
+                            "type": "object",
+                            "required": ["header"]
+                          },
+                          "validators": ["column-exists"],
+                          "submissionImpact": { "kind": "none" }
+                        }
+                      ]
+                    }
+                  }
+                }
+                """);
+        JsonNode manifest = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractAuthoringManifest",
+                componentDefinition);
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .build();
+
+        JsonNode contract = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveAuthoringContract",
+                contextHints,
+                context,
+                manifest);
+
+        assertThat(contract).isNotNull();
+        assertThat(contract.path("source").asText()).isEqualTo("ai_registry.authoringManifest");
+        assertThat(contract.path("preferredResponse").asText()).isEqualTo("componentEditPlan");
+        assertThat(contract.path("operations").get(0).path("operationId").asText())
+                .isEqualTo("column.header.set");
+    }
+
+    @Test
+    void componentEditPlanResponseRejectsPlanThatDoesNotMatchManifest() throws Exception {
+        JsonNode manifest = minimalAuthoringManifest();
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "operations": [
+                      {
+                        "operationId": "column.unknown.set",
+                        "target": { "kind": "column", "field": "status" },
+                        "input": { "header": "SituaÃ§Ã£o" }
+                      }
+                    ]
+                  }
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-manifest-contract-used"),
+                manifest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("error");
+        assertThat(response.getMessage()).contains("operationId nao declarado");
+        assertThat(response.getWarnings()).contains("component-edit-plan-rejected-by-authoring-manifest");
+    }
+
+    @Test
+    void componentEditPlanResponseAcceptsPlanValidatedByManifest() throws Exception {
+        JsonNode manifest = minimalAuthoringManifest();
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "operations": [
+                      {
+                        "operationId": "column.header.set",
+                        "target": { "kind": "column", "field": "status" },
+                        "input": { "header": "SituaÃ§Ã£o" }
+                      }
+                    ]
+                  },
+                  "explanation": "Renomeei a coluna."
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-manifest-contract-used"),
+                manifest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        assertThat(response.getComponentEditPlan().path("operations").get(0).path("operationId").asText())
+                .isEqualTo("column.header.set");
+        assertThat(response.getWarnings())
+                .contains("component-edit-plan-validated-by-authoring-manifest");
+    }
+
+    private JsonNode minimalAuthoringManifest() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [
+                    { "kind": "column", "resolver": "column-by-field" }
+                  ],
+                  "validators": [
+                    { "validatorId": "column-exists" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "column.header.set",
+                      "target": {
+                        "kind": "column",
+                        "resolver": "column-by-field",
+                        "required": true
+                      },
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["header"]
+                      },
+                      "validators": ["column-exists"],
+                      "preconditions": ["config-initialized"],
+                      "affectedPaths": ["columns[].header"],
+                      "effects": [
+                        { "type": "merge-array-item", "path": "columns[]", "key": "field" }
+                      ],
+                      "submissionImpact": { "kind": "none" }
+                    }
+                  ]
+                }
+                """);
+    }
 }

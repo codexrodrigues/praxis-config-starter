@@ -11,14 +11,19 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiMetadataCandidateCatalog;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringLlmIntentResolverService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegistry;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
@@ -26,6 +31,7 @@ import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.AiTurnService;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.beans.factory.ObjectProvider;
@@ -103,6 +109,52 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnMissingBean
     public AgenticAuthoringComponentCapabilitiesService agenticAuthoringComponentCapabilitiesService() {
         return new AgenticAuthoringComponentCapabilitiesService();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringManifestContractValidator agenticAuthoringManifestContractValidator() {
+        return new AgenticAuthoringManifestContractValidator();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringTargetResolverRegistry agenticAuthoringTargetResolverRegistry() {
+        return new AgenticAuthoringTargetResolverRegistry();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringValidatorRegistry agenticAuthoringValidatorRegistry(
+            AgenticAuthoringTargetResolverRegistry targetResolverRegistry) {
+        return new AgenticAuthoringValidatorRegistry(targetResolverRegistry);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringEffectCompilerRegistry agenticAuthoringEffectCompilerRegistry(
+            ObjectMapper objectMapper,
+            AgenticAuthoringTargetResolverRegistry targetResolverRegistry) {
+        return new AgenticAuthoringEffectCompilerRegistry(objectMapper, targetResolverRegistry);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(AiRegistryRepository.class)
+    public AgenticAuthoringManifestService agenticAuthoringManifestService(
+            AiRegistryRepository aiRegistryRepository,
+            ObjectMapper objectMapper,
+            AgenticAuthoringTargetResolverRegistry targetResolverRegistry,
+            AgenticAuthoringValidatorRegistry validatorRegistry,
+            AgenticAuthoringEffectCompilerRegistry effectCompilerRegistry,
+            AgenticAuthoringManifestContractValidator manifestContractValidator) {
+        return new AgenticAuthoringManifestService(
+                aiRegistryRepository,
+                objectMapper,
+                targetResolverRegistry,
+                validatorRegistry,
+                effectCompilerRegistry,
+                manifestContractValidator);
     }
 
     @Bean

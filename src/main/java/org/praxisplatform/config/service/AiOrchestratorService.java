@@ -310,7 +310,14 @@ public class AiOrchestratorService {
                         request.getRuntimeState(),
                         request.getContextHints())),
                 maxRuntimeMetadataChars);
-        JsonNode authoringContract = extractAuthoringContract(request.getContextHints());
+        JsonNode authoringManifest = extractAuthoringManifest(context.getComponentDefinition());
+        JsonNode authoringContract = resolveAuthoringContract(
+                request.getContextHints(),
+                context,
+                authoringManifest);
+        if (authoringManifest != null && authoringManifest.isObject()) {
+            warnings.add("authoring-manifest-contract-used");
+        }
         List<ColumnDescriptor> uiColumnDescriptors = extractColumnDescriptors(currentState);
         List<ColumnDescriptor> columnDescriptors = mergeColumnDescriptors(uiColumnDescriptors, request.getDataProfile());
         List<String> columnNames = extractColumnNames(columnDescriptors);
@@ -981,7 +988,9 @@ public class AiOrchestratorService {
             warnings.add("clarification ignorado: patch e clarification nao podem coexistir na mesma resposta.");
         }
         if (result != null && result.get("patch") == null && hasComponentEditPlan(result)) {
-            return finalizeResponse(componentEditPlanResponse(result, request, warnings), memoryContext);
+            return finalizeResponse(
+                    componentEditPlanResponse(result, request, warnings, authoringManifest),
+                    memoryContext);
         }
         if (result == null || result.get("patch") == null) {
             return finalizeResponse(error("Nenhum patch gerado."), memoryContext);
@@ -8408,6 +8417,94 @@ public class AiOrchestratorService {
         return authoringContract != null && authoringContract.isObject() ? authoringContract : null;
     }
 
+    private JsonNode resolveAuthoringContract(
+            JsonNode contextHints,
+            AiContextDTO context,
+            JsonNode authoringManifest) {
+        if (authoringManifest != null && authoringManifest.isObject()) {
+            return buildAuthoringContractFromManifest(context, authoringManifest);
+        }
+        return extractAuthoringContract(contextHints);
+    }
+
+    private JsonNode extractAuthoringManifest(JsonNode componentDefinition) {
+        if (componentDefinition == null || componentDefinition.isNull() || componentDefinition.isMissingNode()) {
+            return null;
+        }
+        JsonNode manifest = componentDefinition.at("/jsonSchema/authoringManifest");
+        if (manifest != null && manifest.isObject() && !manifest.isMissingNode()) {
+            return manifest;
+        }
+        manifest = componentDefinition.at("/componentDefinition/jsonSchema/authoringManifest");
+        if (manifest != null && manifest.isObject() && !manifest.isMissingNode()) {
+            return manifest;
+        }
+        manifest = componentDefinition.get("authoringManifest");
+        return manifest != null && manifest.isObject() ? manifest : null;
+    }
+
+    private JsonNode buildAuthoringContractFromManifest(AiContextDTO context, JsonNode manifest) {
+        ObjectNode contract = objectMapper.createObjectNode();
+        contract.put("kind", "praxis.component-authoring-context");
+        contract.put("preferredResponse", "componentEditPlan");
+        contract.put("source", "ai_registry.authoringManifest");
+        if (context != null && context.getComponentId() != null) {
+            contract.put("componentId", context.getComponentId());
+        }
+        copyTextField(manifest, contract, "manifestVersion");
+        copyTextField(manifest, contract, "schemaVersion");
+        copyNodeField(manifest, contract, "editableTargets");
+        copyNodeField(manifest, contract, "validators");
+        ArrayNode operations = objectMapper.createArrayNode();
+        JsonNode manifestOperations = manifest.get("operations");
+        if (manifestOperations != null && manifestOperations.isArray()) {
+            for (JsonNode operation : manifestOperations) {
+                if (!operation.isObject()) {
+                    continue;
+                }
+                ObjectNode compact = objectMapper.createObjectNode();
+                copyTextField(operation, compact, "operationId");
+                copyTextField(operation, compact, "title");
+                copyTextField(operation, compact, "description");
+                copyNodeField(operation, compact, "target");
+                copyNodeField(operation, compact, "inputSchema");
+                copyNodeField(operation, compact, "preconditions");
+                copyNodeField(operation, compact, "validators");
+                copyNodeField(operation, compact, "submissionImpact");
+                copyNodeField(operation, compact, "affectedPaths");
+                if (operation.has("destructive")) {
+                    compact.set("destructive", operation.get("destructive"));
+                }
+                if (operation.has("requiresConfirmation")) {
+                    compact.set("requiresConfirmation", operation.get("requiresConfirmation"));
+                }
+                operations.add(compact);
+            }
+        }
+        contract.set("operations", operations);
+        ArrayNode instructions = objectMapper.createArrayNode();
+        instructions.add("Return componentEditPlan with operations[].operationId from this manifest only.");
+        instructions.add("Each operation must include target and input matching the operation target and inputSchema.");
+        instructions.add("Do not invent operations, target kinds, validators, aliases, keywords or patch paths.");
+        instructions.add("For destructive operations, set confirmed=true only when the user explicitly confirmed.");
+        contract.set("instructions", instructions);
+        return contract;
+    }
+
+    private void copyTextField(JsonNode source, ObjectNode target, String fieldName) {
+        JsonNode value = source != null ? source.get(fieldName) : null;
+        if (value != null && value.isTextual() && !value.asText().isBlank()) {
+            target.put(fieldName, value.asText());
+        }
+    }
+
+    private void copyNodeField(JsonNode source, ObjectNode target, String fieldName) {
+        JsonNode value = source != null ? source.get(fieldName) : null;
+        if (value != null && !value.isNull() && !value.isMissingNode()) {
+            target.set(fieldName, value);
+        }
+    }
+
     private String formatAuthoringContract(JsonNode authoringContract) {
         if (authoringContract == null || authoringContract.isNull() || authoringContract.isMissingNode()) {
             return "N/A";
@@ -13610,14 +13707,246 @@ public class AiOrchestratorService {
             JsonNode result,
             AiOrchestratorRequest request,
             List<String> warnings) {
+        return componentEditPlanResponse(result, request, warnings, null);
+    }
+
+    private AiOrchestratorResponse componentEditPlanResponse(
+            JsonNode result,
+            AiOrchestratorRequest request,
+            List<String> warnings,
+            JsonNode authoringManifest) {
+        JsonNode componentEditPlan = result.get("componentEditPlan");
+        List<String> validationFailures = validateComponentEditPlanAgainstAuthoringManifest(
+                componentEditPlan,
+                authoringManifest);
+        if (!validationFailures.isEmpty()) {
+            List<String> responseWarnings = warnings == null ? new ArrayList<>() : new ArrayList<>(warnings);
+            responseWarnings.add("component-edit-plan-rejected-by-authoring-manifest");
+            return errorWithWarnings(
+                    "componentEditPlan invalido para o authoringManifest: "
+                            + String.join("; ", validationFailures),
+                    responseWarnings);
+        }
+        List<String> responseWarnings = warnings == null ? new ArrayList<>() : new ArrayList<>(warnings);
+        if (authoringManifest != null && authoringManifest.isObject()) {
+            responseWarnings.add("component-edit-plan-validated-by-authoring-manifest");
+        }
         return AiOrchestratorResponse.builder()
                 .type("patch")
                 .componentId(request != null ? request.getComponentId() : null)
                 .componentType(request != null ? request.getComponentType() : null)
-                .componentEditPlan(result.get("componentEditPlan"))
+                .componentEditPlan(componentEditPlan)
                 .explanation(textOrNull(result.get("explanation")))
-                .warnings(warnings == null || warnings.isEmpty() ? null : List.copyOf(warnings))
+                .warnings(responseWarnings.isEmpty() ? null : List.copyOf(responseWarnings))
                 .build();
+    }
+
+    private List<String> validateComponentEditPlanAgainstAuthoringManifest(
+            JsonNode componentEditPlan,
+            JsonNode authoringManifest) {
+        if (authoringManifest == null || !authoringManifest.isObject()) {
+            return List.of();
+        }
+        List<String> failures = new ArrayList<>();
+        if (componentEditPlan == null || !componentEditPlan.isObject()) {
+            failures.add("componentEditPlan deve ser objeto.");
+            return failures;
+        }
+        Map<String, JsonNode> operationsById = indexManifestOperations(authoringManifest, failures);
+        Set<String> declaredTargetKinds = declaredTargetKinds(authoringManifest);
+        Set<String> declaredValidators = declaredValidatorIds(authoringManifest);
+        JsonNode planOperations = componentEditPlan.get("operations");
+        if (planOperations != null && planOperations.isArray()) {
+            if (planOperations.isEmpty()) {
+                failures.add("componentEditPlan.operations nao pode ser vazio.");
+            }
+            for (int i = 0; i < planOperations.size(); i++) {
+                validateComponentEditPlanOperation(
+                        planOperations.get(i),
+                        "operations[" + i + "]",
+                        operationsById,
+                        declaredTargetKinds,
+                        declaredValidators,
+                        failures);
+            }
+            return failures;
+        }
+        validateComponentEditPlanOperation(
+                componentEditPlan,
+                "componentEditPlan",
+                operationsById,
+                declaredTargetKinds,
+                declaredValidators,
+                failures);
+        return failures;
+    }
+
+    private Map<String, JsonNode> indexManifestOperations(JsonNode manifest, List<String> failures) {
+        Map<String, JsonNode> operationsById = new LinkedHashMap<>();
+        JsonNode operations = manifest.get("operations");
+        if (operations == null || !operations.isArray() || operations.isEmpty()) {
+            failures.add("authoringManifest.operations deve declarar ao menos uma operacao.");
+            return operationsById;
+        }
+        for (JsonNode operation : operations) {
+            String operationId = textOrNull(operation.get("operationId"));
+            if (operationId == null || operationId.isBlank()) {
+                failures.add("authoringManifest.operations contem operacao sem operationId.");
+                continue;
+            }
+            operationsById.put(operationId, operation);
+            JsonNode target = operation.get("target");
+            if (target == null || !target.isObject()) {
+                failures.add("operacao " + operationId + " nao declara target estruturado.");
+            } else {
+                if (textOrNull(target.get("kind")) == null) {
+                    failures.add("operacao " + operationId + " nao declara target.kind.");
+                }
+                if (textOrNull(target.get("resolver")) == null) {
+                    failures.add("operacao " + operationId + " nao declara target.resolver.");
+                }
+            }
+        }
+        return operationsById;
+    }
+
+    private Set<String> declaredTargetKinds(JsonNode manifest) {
+        Set<String> targetKinds = new LinkedHashSet<>();
+        JsonNode targets = manifest.get("editableTargets");
+        if (targets != null && targets.isArray()) {
+            for (JsonNode target : targets) {
+                String kind = textOrNull(target.get("kind"));
+                if (kind != null && !kind.isBlank()) {
+                    targetKinds.add(kind);
+                }
+            }
+        }
+        return targetKinds;
+    }
+
+    private Set<String> declaredValidatorIds(JsonNode manifest) {
+        Set<String> validatorIds = new LinkedHashSet<>();
+        JsonNode validators = manifest.get("validators");
+        if (validators != null && validators.isArray()) {
+            for (JsonNode validator : validators) {
+                String validatorId = textOrNull(validator.get("validatorId"));
+                if (validatorId == null || validatorId.isBlank()) {
+                    validatorId = textOrNull(validator.get("id"));
+                }
+                if (validatorId != null && !validatorId.isBlank()) {
+                    validatorIds.add(validatorId);
+                }
+            }
+        }
+        return validatorIds;
+    }
+
+    private void validateComponentEditPlanOperation(
+            JsonNode planOperation,
+            String path,
+            Map<String, JsonNode> operationsById,
+            Set<String> declaredTargetKinds,
+            Set<String> declaredValidators,
+            List<String> failures) {
+        if (planOperation == null || !planOperation.isObject()) {
+            failures.add(path + " deve ser objeto.");
+            return;
+        }
+        String operationId = textOrNull(planOperation.get("operationId"));
+        if (operationId == null || operationId.isBlank()) {
+            operationId = textOrNull(planOperation.get("changeKind"));
+        }
+        if (operationId == null || operationId.isBlank()) {
+            failures.add(path + " deve declarar operationId.");
+            return;
+        }
+        JsonNode manifestOperation = operationsById.get(operationId);
+        if (manifestOperation == null) {
+            failures.add(path + " referencia operationId nao declarado: " + operationId + ".");
+            return;
+        }
+        JsonNode manifestTarget = manifestOperation.get("target");
+        if (manifestTarget != null && manifestTarget.isObject()) {
+            String targetKind = textOrNull(manifestTarget.get("kind"));
+            if (targetKind != null && !declaredTargetKinds.isEmpty() && !declaredTargetKinds.contains(targetKind)) {
+                failures.add("operacao " + operationId + " usa target.kind nao declarado: " + targetKind + ".");
+            }
+            boolean targetRequired = !manifestTarget.has("required") || manifestTarget.path("required").asBoolean(true);
+            JsonNode planTarget = planOperation.get("target");
+            if (targetRequired && (planTarget == null || !planTarget.isObject())) {
+                failures.add(path + " deve declarar target para " + operationId + ".");
+            } else if (planTarget != null && planTarget.isObject()) {
+                String planTargetKind = textOrNull(planTarget.get("kind"));
+                if (planTargetKind != null && targetKind != null && !targetKind.equals(planTargetKind)) {
+                    failures.add(path + ".target.kind deve ser " + targetKind + ".");
+                }
+            }
+        }
+        validateInputSchemaRequiredFields(
+                planOperation.get("input"),
+                manifestOperation.at("/inputSchema/required"),
+                path,
+                operationId,
+                failures);
+        validateReferencedOperationValidators(
+                manifestOperation,
+                declaredValidators,
+                operationId,
+                failures);
+        boolean destructive = manifestOperation.path("destructive").asBoolean(false);
+        boolean requiresConfirmation = manifestOperation.path("requiresConfirmation").asBoolean(false);
+        if (destructive && !requiresConfirmation) {
+            failures.add("operacao destrutiva " + operationId + " deve declarar requiresConfirmation=true.");
+        }
+        if (requiresConfirmation && !planOperation.path("confirmed").asBoolean(false)) {
+            failures.add(path + " requer confirmed=true para " + operationId + ".");
+        }
+    }
+
+    private void validateInputSchemaRequiredFields(
+            JsonNode input,
+            JsonNode requiredFields,
+            String path,
+            String operationId,
+            List<String> failures) {
+        if (requiredFields == null || !requiredFields.isArray() || requiredFields.isEmpty()) {
+            return;
+        }
+        if (input == null || !input.isObject()) {
+            failures.add(path + " deve declarar input para " + operationId + ".");
+            return;
+        }
+        for (JsonNode field : requiredFields) {
+            String fieldName = field.asText(null);
+            if (fieldName != null && !fieldName.isBlank() && !input.has(fieldName)) {
+                failures.add(path + ".input nao declara campo obrigatorio " + fieldName + " para " + operationId + ".");
+            }
+        }
+    }
+
+    private void validateReferencedOperationValidators(
+            JsonNode manifestOperation,
+            Set<String> declaredValidators,
+            String operationId,
+            List<String> failures) {
+        JsonNode validators = manifestOperation.get("validators");
+        if (validators == null || !validators.isArray()) {
+            return;
+        }
+        for (JsonNode validator : validators) {
+            String validatorId = validator.isTextual()
+                    ? validator.asText()
+                    : textOrNull(validator.get("validatorId"));
+            if (validatorId == null || validatorId.isBlank()) {
+                validatorId = validator.isObject() ? textOrNull(validator.get("id")) : null;
+            }
+            if (validatorId != null
+                    && !validatorId.isBlank()
+                    && !declaredValidators.isEmpty()
+                    && !declaredValidators.contains(validatorId)) {
+                failures.add("operacao " + operationId + " referencia validator nao declarado: " + validatorId + ".");
+            }
+        }
     }
 
     private AiOrchestratorResponse error(String message) {

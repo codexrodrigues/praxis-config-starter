@@ -1,0 +1,326 @@
+package org.praxisplatform.config.ai.authoring;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+public final class AgenticAuthoringValidatorRegistry {
+
+    private static final Set<String> IMPLEMENTED_VALIDATORS = Set.of(
+            "target-column-exists",
+            "column-exists",
+            "field-exists",
+            "section-exists",
+            "row-exists",
+            "layout-column-exists",
+            "rule-exists",
+            "action-exists",
+            "target-exists",
+            "field-is-local",
+            "field-name-unique",
+            "field-exists-in-layout",
+            "local-schema-name-no-collision",
+            "option-source-valid",
+            "rich-content-document-valid",
+            "visual-block-exists",
+            "visual-block-id-unique",
+            "layout-target-exists",
+            "row-id-unique-in-section",
+            "column-id-unique-in-row",
+            "rule-id-unique",
+            "rule-target-refs-exist",
+            "column-field-unique",
+            "column-width-valid",
+            "computed-expression-valid",
+            "css-style-safe",
+            "row-action-id-unique",
+            "toolbar-action-id-unique",
+            "value-mapping-valid",
+            "section-id-unique",
+            "destructive-removal-confirmation",
+            "remote-resource-binding-safe",
+            "json-logic-valid",
+            "logic-valid",
+            "renderer-supported",
+            "renderer-type-supported",
+            "renderer-config-match",
+            "renderer-config-compatible",
+            "grouping-fields-exist",
+            "filter-fields-exist",
+            "editor-round-trip-preserve",
+            "no-index-as-identity",
+            "format-preset-supported",
+            "conditional-style-valid");
+
+    private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
+
+    public AgenticAuthoringValidatorRegistry(AgenticAuthoringTargetResolverRegistry targetResolverRegistry) {
+        this.targetResolverRegistry = Objects.requireNonNull(targetResolverRegistry, "targetResolverRegistry must not be null");
+    }
+
+    void validateInputSchema(JsonNode operation, JsonNode input, List<String> failures) {
+        validateSchemaNode(operation.path("inputSchema"), input, "operation input " + text(operation, "operationId"), failures);
+    }
+
+    void executeOperationValidators(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures,
+            List<String> warnings) {
+        String operationId = text(operation, "operationId");
+        Set<String> refs = new HashSet<>();
+        operation.path("validators").forEach(ref -> refs.add(ref.asText("")));
+        for (String validatorId : refs) {
+            if (validatorId.isBlank()) {
+                continue;
+            }
+            if (!IMPLEMENTED_VALIDATORS.contains(validatorId)) {
+                warnings.add("validator declared without backend implementation: " + validatorId + " for " + operationId);
+                continue;
+            }
+            switch (validatorId) {
+                case "target-column-exists", "column-exists", "field-exists", "section-exists",
+                     "row-exists", "layout-column-exists", "rule-exists", "action-exists", "target-exists" -> {
+                    if (operation.path("target").path("required").asBoolean(false)) {
+                        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                                componentId,
+                                operation,
+                                planOperation.path("target"),
+                                config);
+                        if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+                            failures.add("validator " + validatorId + " failed for " + operationId + ": "
+                                    + String.join(", ", resolved.failures()));
+                        }
+                    }
+                }
+                case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
+                case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
+                case "json-logic-valid", "logic-valid", "conditional-style-valid" ->
+                        validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
+                case "grouping-fields-exist", "filter-fields-exist" ->
+                        validateInputFieldsExist(operationId, planOperation.path("input"), config, failures);
+                default -> warnings.add("validator executed as structural pass-through: " + validatorId);
+            }
+        }
+    }
+
+    private void validateResolvedFieldIsLocal(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                componentId,
+                operation,
+                planOperation.path("target"),
+                config);
+        if (AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())
+                && !"local".equals(text(resolved.value(), "source"))) {
+            failures.add("validator field-is-local failed for " + text(operation, "operationId") + ": target field is not local");
+        }
+    }
+
+    private void validateRemoteResourceBindingSafe(
+            JsonNode operation,
+            JsonNode planOperation,
+            List<String> failures) {
+        if (containsUnsafeAbsoluteUrl(planOperation.path("input"))) {
+            failures.add("validator remote-resource-binding-safe failed for "
+                    + text(operation, "operationId")
+                    + ": absolute remote URLs are not allowed in authoring plans");
+        }
+    }
+
+    private boolean containsUnsafeAbsoluteUrl(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isTextual()) {
+            String value = node.asText("");
+            return value.startsWith("http://") || value.startsWith("https://") || value.startsWith("//");
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (containsUnsafeAbsoluteUrl(child)) {
+                    return true;
+                }
+            }
+        }
+        if (node.isObject()) {
+            Iterator<JsonNode> values = node.elements();
+            while (values.hasNext()) {
+                if (containsUnsafeAbsoluteUrl(values.next())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void validateJsonLogicLikeInput(String operationId, JsonNode input, List<String> failures) {
+        JsonNode condition = firstPresent(input, "condition", "logic", "expression");
+        if (condition.isMissingNode()) {
+            return;
+        }
+        if (condition.isTextual() && condition.asText("").isBlank()) {
+            failures.add("validator json-logic-valid failed for " + operationId + ": expression must not be blank");
+        } else if (!(condition.isObject() || condition.isArray() || condition.isTextual())) {
+            failures.add("validator json-logic-valid failed for " + operationId + ": expression has unsupported type");
+        }
+    }
+
+    private void validateInputFieldsExist(String operationId, JsonNode input, JsonNode config, List<String> failures) {
+        Set<String> existing = new HashSet<>();
+        config.path("columns").forEach(column -> existing.add(text(column, "field")));
+        config.path("fieldMetadata").forEach(field -> existing.add(text(field, "name")));
+        for (String field : inputFields(input)) {
+            if (!field.isBlank() && !existing.contains(field)) {
+                failures.add("validator fields-exist failed for " + operationId + ": unknown field " + field);
+            }
+        }
+    }
+
+    private List<String> inputFields(JsonNode input) {
+        List<String> fields = new ArrayList<>();
+        JsonNode fieldsNode = input.path("fields");
+        if (fieldsNode.isArray()) {
+            fieldsNode.forEach(field -> fields.add(field.asText("")));
+        }
+        String field = text(input, "field");
+        if (!field.isBlank()) {
+            fields.add(field);
+        }
+        return fields;
+    }
+
+    private void validateSchemaNode(JsonNode schema, JsonNode value, String path, List<String> failures) {
+        if (schema == null || schema.isMissingNode() || schema.isNull()) {
+            return;
+        }
+        if (schema.path("anyOf").isArray() && !matchesAny(schema.path("anyOf"), value)) {
+            failures.add(path + " must match at least one anyOf schema");
+        }
+        if (schema.path("oneOf").isArray() && countMatches(schema.path("oneOf"), value) != 1) {
+            failures.add(path + " must match exactly one oneOf schema");
+        }
+        if (schema.path("allOf").isArray()) {
+            for (JsonNode child : schema.path("allOf")) {
+                validateSchemaNode(child, value, path, failures);
+            }
+        }
+        String type = text(schema, "type");
+        if (!type.isBlank() && value != null && !value.isMissingNode() && !matchesType(type, value)) {
+            failures.add(path + " must be " + type);
+            return;
+        }
+        if (schema.has("const") && !schema.path("const").equals(value)) {
+            failures.add(path + " must equal const " + schema.path("const"));
+        }
+        if (schema.path("enum").isArray() && !enumContains(schema.path("enum"), value)) {
+            failures.add(path + " must be one of " + schema.path("enum"));
+        }
+        if (schema.path("required").isArray()) {
+            for (JsonNode required : schema.path("required")) {
+                String field = required.asText("");
+                if (!field.isBlank() && (value == null || !value.has(field) || value.path(field).isNull())) {
+                    failures.add(path + "." + field + " is required");
+                }
+            }
+        }
+        if (value != null && value.isObject()) {
+            JsonNode properties = schema.path("properties");
+            Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                JsonNode childSchema = properties.path(field.getKey());
+                if (!childSchema.isMissingNode()) {
+                    validateSchemaNode(childSchema, field.getValue(), path + "." + field.getKey(), failures);
+                } else if (schema.has("additionalProperties") && !schema.path("additionalProperties").asBoolean(true)) {
+                    failures.add(path + "." + field.getKey() + " is not allowed");
+                }
+            }
+        }
+        if (value != null && value.isArray() && schema.has("items")) {
+            for (int i = 0; i < value.size(); i++) {
+                validateSchemaNode(schema.path("items"), value.get(i), path + "[" + i + "]", failures);
+            }
+        }
+        if (value != null && value.isTextual()
+                && schema.has("minLength")
+                && value.asText("").length() < schema.path("minLength").asInt()) {
+            failures.add(path + " length must be >= " + schema.path("minLength").asInt());
+        }
+        if (value != null && value.isArray()
+                && schema.has("minItems")
+                && value.size() < schema.path("minItems").asInt()) {
+            failures.add(path + " size must be >= " + schema.path("minItems").asInt());
+        }
+    }
+
+    private boolean matchesAny(JsonNode schemas, JsonNode value) {
+        return countMatches(schemas, value) > 0;
+    }
+
+    private int countMatches(JsonNode schemas, JsonNode value) {
+        int count = 0;
+        for (JsonNode schema : schemas) {
+            List<String> failures = new ArrayList<>();
+            validateSchemaNode(schema, value, "$", failures);
+            if (failures.isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean matchesType(String type, JsonNode value) {
+        return switch (type) {
+            case "object" -> value.isObject();
+            case "array" -> value.isArray();
+            case "string" -> value.isTextual();
+            case "boolean" -> value.isBoolean();
+            case "number" -> value.isNumber();
+            case "integer" -> value.isIntegralNumber();
+            case "null" -> value.isNull();
+            default -> true;
+        };
+    }
+
+    private boolean enumContains(JsonNode enumNode, JsonNode value) {
+        for (JsonNode item : enumNode) {
+            if (item.equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private JsonNode firstPresent(JsonNode node, String... names) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return MissingNode.getInstance();
+        }
+        for (String name : names) {
+            if (node.has(name)) {
+                return node.path(name);
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private String text(JsonNode node, String field) {
+        if (node == null) {
+            return "";
+        }
+        JsonNode value = node.path(field);
+        return value.isTextual() ? value.asText() : value.asText("");
+    }
+}
