@@ -13,11 +13,17 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilit
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegistry;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
+import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiTurnEventService;
@@ -46,11 +52,51 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context).hasSingleBean(AgenticAuthoringPatchCompilerService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringUiCompositionPlanProvider.class);
             assertThat(context).hasSingleBean(AgenticAuthoringDryRunReportService.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringManifestContractValidator.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringTargetResolverRegistry.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringValidatorRegistry.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringEffectCompilerRegistry.class);
+            assertThat(context).doesNotHaveBean(AgenticAuthoringManifestService.class);
             assertThat(context).doesNotHaveBean(AgenticAuthoringPlanService.class);
             assertThat(context).doesNotHaveBean(AgenticAuthoringPreviewService.class);
             assertThat(context).doesNotHaveBean(AgenticAuthoringReplayAuditService.class);
             assertThat(context).doesNotHaveBean(ApplicationRunner.class);
         });
+    }
+
+    @Test
+    void shouldRegisterManifestServiceWithInjectedAuthoringRegistriesWhenRepositoryExists() {
+        AiRegistryRepository aiRegistryRepository = org.mockito.Mockito.mock(AiRegistryRepository.class);
+        contextRunner
+                .withBean(AiRegistryRepository.class, () -> aiRegistryRepository)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(AgenticAuthoringTargetResolverRegistry.class);
+                    assertThat(context).hasSingleBean(AgenticAuthoringValidatorRegistry.class);
+                    assertThat(context).hasSingleBean(AgenticAuthoringEffectCompilerRegistry.class);
+                    assertThat(context).hasSingleBean(AgenticAuthoringManifestContractValidator.class);
+                    assertThat(context).hasSingleBean(AgenticAuthoringManifestService.class);
+                });
+    }
+
+    @Test
+    void shouldRespectUserProvidedAuthoringRegistryBeans() {
+        AgenticAuthoringTargetResolverRegistry customTargetResolver = new AgenticAuthoringTargetResolverRegistry();
+        AgenticAuthoringValidatorRegistry customValidator = new AgenticAuthoringValidatorRegistry(customTargetResolver);
+        AgenticAuthoringEffectCompilerRegistry customCompiler =
+                new AgenticAuthoringEffectCompilerRegistry(new ObjectMapper(), customTargetResolver);
+        AgenticAuthoringManifestContractValidator customContractValidator =
+                new AgenticAuthoringManifestContractValidator();
+        contextRunner
+                .withBean(AgenticAuthoringTargetResolverRegistry.class, () -> customTargetResolver)
+                .withBean(AgenticAuthoringValidatorRegistry.class, () -> customValidator)
+                .withBean(AgenticAuthoringEffectCompilerRegistry.class, () -> customCompiler)
+                .withBean(AgenticAuthoringManifestContractValidator.class, () -> customContractValidator)
+                .run(context -> {
+                    assertThat(context.getBean(AgenticAuthoringTargetResolverRegistry.class)).isSameAs(customTargetResolver);
+                    assertThat(context.getBean(AgenticAuthoringValidatorRegistry.class)).isSameAs(customValidator);
+                    assertThat(context.getBean(AgenticAuthoringEffectCompilerRegistry.class)).isSameAs(customCompiler);
+                    assertThat(context.getBean(AgenticAuthoringManifestContractValidator.class)).isSameAs(customContractValidator);
+                });
     }
 
     @Test

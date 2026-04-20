@@ -23,6 +23,9 @@ public final class RagMetadataKeys {
     public static final String RESPONSE_SCHEMA = "responseSchema";
     public static final String PARAMETERS = "parameters";
     public static final String JSON_SCHEMA = "jsonSchema";
+    public static final String AUTHORING_MANIFEST_VERSION = "authoringManifestVersion";
+    public static final String AUTHORING_OPERATION_COUNT = "authoringOperationCount";
+    public static final String AUTHORING_TARGET_COUNT = "authoringTargetCount";
 
     private RagMetadataKeys() {
     }

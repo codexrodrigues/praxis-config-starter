@@ -9,7 +9,7 @@ import java.util.List;
 public final class AiContractSpec {
 
     public static final String CONTRACT_VERSION = "v1.1";
-    public static final String CONTRACT_SCHEMA_HASH = "dacaba8fa7ec21ee9ae31bab7057614837d2d1320d784d0ee61fb840efe55a35";
+    public static final String CONTRACT_SCHEMA_HASH = "f7bbb88ab1137f2cf18911841e73f102d97e50ba33e9be65f0aaf87368911563";
     public static final String STREAM_EVENT_SCHEMA_VERSION = "v1";
     public static final List<String> STREAM_EVENT_TYPES = List.of("status", "thought.step", "heartbeat", "result", "error", "cancelled");
 

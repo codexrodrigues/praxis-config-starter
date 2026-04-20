@@ -1,0 +1,543 @@
+package org.praxisplatform.config.ai.authoring;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Optional;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.praxisplatform.config.domain.AiRegistry;
+import org.praxisplatform.config.domain.Scope;
+import org.praxisplatform.config.repository.AiRegistryRepository;
+
+@ExtendWith(MockitoExtension.class)
+@Tag("unit")
+class AgenticAuthoringManifestServiceTest {
+
+    private static final String COMPONENT_ID = "praxis-table";
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Mock
+    private AiRegistryRepository repository;
+
+    @Test
+    void validatesExecutableManifestShapeAndPlan() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "plan": {
+                    "operations": [
+                      {
+                        "operationId": "column.header.set",
+                        "target": "email",
+                        "input": { "header": "Contato" }
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.normalizedPlan().path("operations")).hasSize(1);
+    }
+
+    @Test
+    void resolvesTargetUsingOperationTargetResolverWithoutEffectInference() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "operationId": "column.header.set",
+                  "target": "email"
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget result = service.resolveTarget(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringResolveTargetRequest.class));
+
+        assertThat(result.status()).isEqualTo("resolved");
+        assertThat(result.kind()).isEqualTo("column");
+        assertThat(result.resolver()).isEqualTo("column-by-field");
+        assertThat(result.path()).isEqualTo("columns[]/0");
+    }
+
+    @Test
+    void resolvesFieldByNameOrLabelEvenWhenEffectHasNoKey() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "fieldMetadata": [
+                      { "name": "email", "label": "E-mail corporativo", "source": "local" }
+                    ]
+                  },
+                  "operationId": "field.label.set",
+                  "target": "E-mail corporativo"
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget result = service.resolveTarget(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringResolveTargetRequest.class));
+
+        assertThat(result.status()).isEqualTo("resolved");
+        assertThat(result.resolver()).isEqualTo("field-by-name-or-label");
+        assertThat(result.path()).isEqualTo("fieldMetadata[]/0");
+    }
+
+    @Test
+    void rejectsInvalidEnumFromInputSchema() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "column.align.set",
+                    "target": "email",
+                    "input": { "align": "middle" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failures()).anyMatch(failure -> failure.contains("must be one of"));
+    }
+
+    @Test
+    void executesRemoteResourceBindingValidator() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {},
+                  "plan": {
+                    "operationId": "expansion.detailSource.configure",
+                    "input": {
+                      "resourcePath": { "path": "https://evil.example/api/customers" }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failures()).anyMatch(failure -> failure.contains("remote-resource-binding-safe failed"));
+    }
+
+    @Test
+    void rejectsDestructivePlanWithoutConfirmation() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "column.remove",
+                    "target": "email",
+                    "input": {}
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failures()).contains("operation requires explicit confirmation: column.remove");
+    }
+
+    @Test
+    void compilesMergeByKeyEffectWithResolvedKeyAndValue() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "column.header.set",
+                    "target": "email",
+                    "input": { "header": "Contato" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.patch().path("operations")).hasSize(1);
+        JsonNode op = result.patch().path("operations").get(0);
+        assertThat(op.path("effectKind").asText()).isEqualTo("merge-by-key");
+        assertThat(op.path("resolvedPath").asText()).isEqualTo("columns[]/0");
+        assertThat(op.path("keyValue").asText()).isEqualTo("email");
+        assertThat(op.path("value").path("header").asText()).isEqualTo("Contato");
+        assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("header").asText())
+                .isEqualTo("Contato");
+    }
+
+    @Test
+    void compilesSetValueEffectIntoProposedConfig() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "fieldMetadata": [
+                      { "name": "email", "label": "Email", "source": "local" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "field.label.set",
+                    "target": "email",
+                    "input": { "label": "E-mail Corporativo" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.patch().path("operations").get(0).path("op").asText()).isEqualTo("set-value");
+        assertThat(result.patch().path("proposedConfig").path("fieldMetadata").get(0).path("label").asText())
+                .isEqualTo("E-mail Corporativo");
+    }
+
+    @Test
+    void compilesRemoveByKeyEffectIntoProposedConfig() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" },
+                      { "field": "name", "header": "Name" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "column.remove",
+                    "target": "email",
+                    "input": {},
+                    "confirmed": true
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.patch().path("operations").get(0).path("op").asText()).isEqualTo("remove-by-key");
+        assertThat(result.patch().path("operations").get(0).path("removedIndex").asInt()).isZero();
+        assertThat(result.patch().path("proposedConfig").path("columns")).hasSize(1);
+        assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("field").asText())
+                .isEqualTo("name");
+    }
+
+    @Test
+    void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {},
+                  "plan": {
+                    "operationId": "toolbar.visibility.set",
+                    "input": { "visible": true }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failures()).anyMatch(failure -> failure.contains("target.kind is not declared"));
+    }
+
+    @Test
+    void rejectsValidatorThatHasNoBackendImplementation() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(unsupportedValidatorPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "column.header.set",
+                    "target": "email",
+                    "input": { "header": "Contato" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.warnings())
+                .contains("validator declared without backend implementation: not-implemented-validator for column.header.set");
+    }
+
+    private AgenticAuthoringManifestService serviceWithPayload(String payload) {
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                eq("component_definition"),
+                eq(COMPONENT_ID),
+                eq("component-definition"),
+                eq(Scope.SYSTEM),
+                eq("GLOBAL")))
+                .thenReturn(Optional.of(AiRegistry.builder().payload(payload).build()));
+        AgenticAuthoringTargetResolverRegistry targetResolverRegistry = new AgenticAuthoringTargetResolverRegistry();
+        return new AgenticAuthoringManifestService(
+                repository,
+                objectMapper,
+                targetResolverRegistry,
+                new AgenticAuthoringValidatorRegistry(targetResolverRegistry),
+                new AgenticAuthoringEffectCompilerRegistry(objectMapper, targetResolverRegistry),
+                new AgenticAuthoringManifestContractValidator());
+    }
+
+    private String validPayload() {
+        return """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-table",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "column", "resolver": "column-by-field" },
+                          { "kind": "field", "resolver": "field-by-name-or-label" },
+                          { "kind": "expansion", "resolver": "expansion-config" }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "column.header.set",
+                            "target": {
+                              "kind": "column",
+                              "resolver": "column-by-field",
+                              "ambiguityPolicy": "fail",
+                              "required": true
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["header"],
+                              "properties": {
+                                "header": { "type": "string" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "merge-by-key", "path": "columns[]", "key": "field" }
+                            ],
+                            "affectedPaths": ["columns[].header"],
+                            "preconditions": ["config-initialized", "target-exists"],
+                            "validators": ["target-column-exists"],
+                            "submissionImpact": "visual-only"
+                          },
+                          {
+                            "operationId": "column.align.set",
+                            "target": {
+                              "kind": "column",
+                              "resolver": "column-by-field",
+                              "ambiguityPolicy": "fail",
+                              "required": true
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["align"],
+                              "properties": {
+                                "align": { "enum": ["start", "center", "end"] }
+                              },
+                              "additionalProperties": false
+                            },
+                            "effects": [
+                              { "kind": "merge-by-key", "path": "columns[]", "key": "field" }
+                            ],
+                            "affectedPaths": ["columns[].align"],
+                            "preconditions": ["config-initialized", "target-exists"],
+                            "validators": ["target-column-exists"],
+                            "submissionImpact": "visual-only"
+                          },
+                          {
+                            "operationId": "field.label.set",
+                            "target": {
+                              "kind": "field",
+                              "resolver": "field-by-name-or-label",
+                              "ambiguityPolicy": "fail",
+                              "required": true
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["label"],
+                              "properties": {
+                                "label": { "type": "string" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "fieldMetadata[].label" }
+                            ],
+                            "affectedPaths": ["fieldMetadata[].label"],
+                            "preconditions": ["config-initialized", "target-exists"],
+                            "validators": ["field-exists"],
+                            "submissionImpact": "visual-only"
+                          },
+                          {
+                            "operationId": "expansion.detailSource.configure",
+                            "target": {
+                              "kind": "expansion",
+                              "resolver": "expansion-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "properties": {
+                                "resourcePath": {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": { "type": "string" }
+                                  }
+                                }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "merge-object", "path": "behavior.expansion.detail.source" }
+                            ],
+                            "affectedPaths": ["behavior.expansion.detail.source.resourcePath"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["remote-resource-binding-safe"],
+                            "submissionImpact": "affects-remote-binding"
+                          },
+                          {
+                            "operationId": "column.remove",
+                            "target": {
+                              "kind": "column",
+                              "resolver": "column-by-field",
+                              "ambiguityPolicy": "fail",
+                              "required": true
+                            },
+                            "inputSchema": { "type": "object", "properties": {} },
+                            "effects": [
+                              { "kind": "remove-by-key", "path": "columns[]", "key": "field" }
+                            ],
+                            "affectedPaths": ["columns[]"],
+                            "preconditions": ["config-initialized", "target-exists"],
+                            "validators": ["destructive-removal-confirmation"],
+                            "submissionImpact": "affects-schema-backed-data",
+                            "destructive": true,
+                            "requiresConfirmation": true
+                          }
+                        ],
+                        "validators": [
+                          { "validatorId": "target-column-exists" },
+                          { "validatorId": "field-exists" },
+                          { "validatorId": "remote-resource-binding-safe" },
+                          { "validatorId": "destructive-removal-confirmation" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+    }
+
+    private String unsupportedValidatorPayload() {
+        return validPayload().replace(
+                "{ \"validatorId\": \"target-column-exists\" }",
+                "{ \"validatorId\": \"target-column-exists\" }, { \"validatorId\": \"not-implemented-validator\" }")
+                .replace(
+                        "\"validators\": [\"target-column-exists\"],",
+                        "\"validators\": [\"target-column-exists\", \"not-implemented-validator\"],");
+    }
+
+    private String invalidTargetPayload() {
+        return """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-table",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "toolbarAction", "resolver": "action-by-id" }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "toolbar.visibility.set",
+                            "target": {
+                              "kind": "toolbar",
+                              "resolver": "toolbar-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["visible"],
+                              "properties": {
+                                "visible": { "type": "boolean" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "toolbar.visible" }
+                            ],
+                            "affectedPaths": ["toolbar.visible"],
+                            "preconditions": ["config-initialized"],
+                            "validators": [],
+                            "submissionImpact": "visual-only"
+                          }
+                        ],
+                        "validators": []
+                      }
+                    }
+                  }
+                }
+                """;
+    }
+}

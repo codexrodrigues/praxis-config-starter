@@ -370,9 +370,11 @@ export interface AgenticAuthoringResourceCandidatesResultContract {
   tool?: string | null;
   retrievalQuery?: string | null;
   artifactKind?: string | null;
+  assistantMessage?: string | null;
   candidates?: AgenticAuthoringCandidateContract[];
+  quickReplies?: AgenticAuthoringQuickReplyContract[];
   warnings?: string[];
-  [key: string]: AiJsonValue | AgenticAuthoringCandidateContract[] | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringCandidateContract[] | AgenticAuthoringQuickReplyContract[] | undefined;
 }
 
 export interface AgenticAuthoringPlanRequestContract
@@ -460,6 +462,44 @@ export interface AgenticAuthoringComponentCapabilitiesResultContract {
   version?: string | null;
   catalogs?: AgenticAuthoringComponentCapabilityCatalogContract[];
   [key: string]: AiJsonValue | AgenticAuthoringComponentCapabilityCatalogContract[] | undefined;
+}
+
+export interface AgenticAuthoringManifestEditPlanRequestContract {
+  config?: AiJsonObject | null;
+  plan?: AiJsonObject | null;
+}
+
+export interface AgenticAuthoringResolveTargetRequestContract {
+  config?: AiJsonObject | null;
+  operationId?: string | null;
+  target?: AiJsonValue;
+  input?: AiJsonValue;
+}
+
+export interface AgenticAuthoringResolvedTargetContract {
+  status?: string | null;
+  componentId?: string | null;
+  operationId?: string | null;
+  kind?: string | null;
+  resolver?: string | null;
+  path?: string | null;
+  value?: AiJsonValue;
+  candidates?: string[];
+  failures?: string[];
+}
+
+export interface AgenticAuthoringManifestValidationResultContract {
+  valid?: boolean;
+  failures?: string[];
+  warnings?: string[];
+  normalizedPlan?: AiJsonObject | null;
+}
+
+export interface AgenticAuthoringManifestCompileResultContract {
+  compiled?: boolean;
+  failures?: string[];
+  warnings?: string[];
+  patch?: AiJsonObject | null;
 }
 
 export interface AiPatchStreamStartResponseContract {

@@ -64,6 +64,7 @@ public class RegistryIngestionRequest {
         
         // Campos adicionais livres que podem vir do JSON
         @JsonIgnore
+        @Builder.Default
         private Map<String, JsonNode> additionalProperties = new LinkedHashMap<>();
 
         @JsonAnySetter

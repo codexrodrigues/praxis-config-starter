@@ -48,6 +48,12 @@ class AiApiContractOpenApiTest {
                 "/api/praxis/config/ai/patch/stream/{streamId}/cancel",
                 "/api/praxis/config/ai/authoring/component-capabilities",
                 "/api/praxis/config/ai/authoring/resource-candidates",
+                "/api/praxis/config/ai/authoring/manifests/{componentId}",
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/editable-targets",
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/operations",
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target",
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan",
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch",
                 "/api/praxis/config/ai/authoring/intent-resolution",
                 "/api/praxis/config/ai/authoring/page-preview",
                 "/api/praxis/config/ai/authoring/page-apply");
@@ -75,6 +81,12 @@ class AiApiContractOpenApiTest {
                 "AgenticAuthoringComponentCapability",
                 "AgenticAuthoringComponentFieldAlias",
                 "AgenticAuthoringComponentCapabilityExample",
+                "AgenticAuthoringDryRunErrorResponse",
+                "AgenticAuthoringManifestEditPlanRequest",
+                "AgenticAuthoringResolveTargetRequest",
+                "AgenticAuthoringResolvedTarget",
+                "AgenticAuthoringManifestValidationResult",
+                "AgenticAuthoringManifestCompileResult",
                 "AgenticAuthoringResourceCandidatesRequest",
                 "AgenticAuthoringResourceCandidatesResult",
                 "AgenticAuthoringCandidate",
@@ -125,6 +137,70 @@ class AiApiContractOpenApiTest {
                 .anySatisfy(entry -> assertThat((Map<String, Object>) entry)
                         .containsEntry("$ref", "#/components/schemas/AgenticAuthoringConversationContext"));
 
+        Map<String, Object> resolveTargetRequest =
+                (Map<String, Object>) schemas.get("AgenticAuthoringResolveTargetRequest");
+        Map<String, Object> resolveTargetProperties =
+                (Map<String, Object>) resolveTargetRequest.get("properties");
+        assertThat(resolveTargetProperties).containsKeys("config", "operationId", "target", "input");
+        Map<String, Object> resolvedTarget =
+                (Map<String, Object>) schemas.get("AgenticAuthoringResolvedTarget");
+        Map<String, Object> resolvedTargetProperties =
+                (Map<String, Object>) resolvedTarget.get("properties");
+        assertThat(resolvedTargetProperties).containsKeys(
+                "status",
+                "componentId",
+                "operationId",
+                "kind",
+                "resolver",
+                "path",
+                "value",
+                "candidates",
+                "failures");
+
+        assertManifestEndpointUsesAuthoringError(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}");
+        assertManifestEndpointUsesAuthoringError(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/editable-targets");
+        assertManifestEndpointUsesAuthoringError(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/operations");
+        assertManifestEndpointUsesAuthoringError(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target");
+        assertManifestEndpointUsesAuthoringError(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan");
+        assertManifestEndpointUsesAuthoringError(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch");
+
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}",
+                "get",
+                null,
+                null);
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/editable-targets",
+                "get",
+                null,
+                null);
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/operations",
+                "get",
+                null,
+                null);
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target",
+                "post",
+                "#/components/schemas/AgenticAuthoringResolveTargetRequest",
+                "#/components/schemas/AgenticAuthoringResolvedTarget");
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan",
+                "post",
+                "#/components/schemas/AgenticAuthoringManifestEditPlanRequest",
+                "#/components/schemas/AgenticAuthoringManifestValidationResult");
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch",
+                "post",
+                "#/components/schemas/AgenticAuthoringManifestEditPlanRequest",
+                "#/components/schemas/AgenticAuthoringManifestCompileResult");
+
         Map<String, Object> intentResolution =
                 (Map<String, Object>) schemas.get("AgenticAuthoringIntentResolutionResult");
         Map<String, Object> intentResolutionProperties =
@@ -142,6 +218,20 @@ class AiApiContractOpenApiTest {
                 (Map<String, Object>) intentResolutionProperties.get("pendingClarification");
         assertThat(nextPendingClarification)
                 .containsEntry("$ref", "#/components/schemas/AgenticAuthoringPendingClarification");
+
+        Map<String, Object> resourceCandidates =
+                (Map<String, Object>) schemas.get("AgenticAuthoringResourceCandidatesResult");
+        Map<String, Object> resourceCandidatesProperties =
+                (Map<String, Object>) resourceCandidates.get("properties");
+        assertThat(resourceCandidatesProperties).containsKeys(
+                "assistantMessage",
+                "quickReplies",
+                "candidates",
+                "warnings");
+        Map<String, Object> resourceQuickReplies =
+                (Map<String, Object>) resourceCandidatesProperties.get("quickReplies");
+        assertThat((Map<String, Object>) resourceQuickReplies.get("items"))
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringQuickReply");
 
         Map<String, Object> parameters = (Map<String, Object>) components.get("parameters");
         assertThat(parameters).isNotNull();
@@ -164,5 +254,72 @@ class AiApiContractOpenApiTest {
             }
         }
         return candidates.get(0);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void assertManifestEndpointUsesAuthoringError(Map<String, Object> paths, String path) {
+        Map<String, Object> pathItem = (Map<String, Object>) paths.get(path);
+        assertThat(pathItem).isNotNull();
+        String method = path.endsWith("editable-targets") || path.endsWith("operations") || path.endsWith("{componentId}")
+                ? "get"
+                : "post";
+        Map<String, Object> operation = (Map<String, Object>) pathItem.get(method);
+        assertThat(operation).isNotNull();
+        Map<String, Object> responses = (Map<String, Object>) operation.get("responses");
+        assertThat(responses).containsKey("400");
+        Map<String, Object> badRequest = (Map<String, Object>) responses.get("400");
+        Map<String, Object> content = (Map<String, Object>) badRequest.get("content");
+        Map<String, Object> mediaType = (Map<String, Object>) content.get("application/json");
+        Map<String, Object> schema = (Map<String, Object>) mediaType.get("schema");
+        assertThat(schema)
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringDryRunErrorResponse");
+    }
+
+    @SuppressWarnings("unchecked")
+    private void assertManifestEndpointSchemas(
+            Map<String, Object> paths,
+            String path,
+            String method,
+            String requestSchemaRef,
+            String successSchemaRef) {
+        Map<String, Object> pathItem = (Map<String, Object>) paths.get(path);
+        assertThat(pathItem).isNotNull();
+        Map<String, Object> operation = (Map<String, Object>) pathItem.get(method);
+        assertThat(operation).isNotNull();
+
+        if (requestSchemaRef == null) {
+            assertThat(operation).doesNotContainKey("requestBody");
+        } else {
+            Map<String, Object> requestBody = (Map<String, Object>) operation.get("requestBody");
+            assertThat(requestBody).isNotNull();
+            assertJsonSchemaRef(requestBody, "content", requestSchemaRef);
+        }
+
+        Map<String, Object> responses = (Map<String, Object>) operation.get("responses");
+        assertThat(responses).isNotNull();
+        Map<String, Object> okResponse = (Map<String, Object>) responses.get("200");
+        assertThat(okResponse).isNotNull();
+        if (successSchemaRef == null) {
+            assertThat(resolveJsonSchema(okResponse, "content")).isNotNull();
+        } else {
+            assertJsonSchemaRef(okResponse, "content", successSchemaRef);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void assertJsonSchemaRef(Map<String, Object> node, String contentField, String expectedRef) {
+        Map<String, Object> schema = resolveJsonSchema(node, contentField);
+        assertThat(schema).containsEntry("$ref", expectedRef);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> resolveJsonSchema(Map<String, Object> node, String contentField) {
+        Map<String, Object> content = (Map<String, Object>) node.get(contentField);
+        assertThat(content).isNotNull();
+        Map<String, Object> mediaType = (Map<String, Object>) content.get("application/json");
+        assertThat(mediaType).isNotNull();
+        Map<String, Object> schema = (Map<String, Object>) mediaType.get("schema");
+        assertThat(schema).isNotNull();
+        return schema;
     }
 }

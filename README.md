@@ -186,9 +186,25 @@ Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG 
 | DELETE | `/api/praxis/config/ai-registry/templates/{componentId}` | Deletes SYSTEM/GLOBAL template (accepts `componentId[:variantId]`). |
 | POST | `/api/praxis/config/ai-registry/templates/bulk` | Bulk upsert of templates. |
 | GET | `/api/praxis/config/ai-registry/templates/search` | Vector search over templates in `ai_registry`. |
+| GET | `/api/praxis/config/ai/authoring/manifests/{componentId}` | Reads the executable authoring manifest projected in `ai_registry`. |
+| GET | `/api/praxis/config/ai/authoring/manifests/{componentId}/editable-targets` | Lists editable targets declared by the manifest. |
+| GET | `/api/praxis/config/ai/authoring/manifests/{componentId}/operations` | Lists typed authoring operations declared by the manifest. |
+| POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target` | Resolves an operation target using manifest-declared resolver metadata. |
+| POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan` | Validates a component edit plan against the manifest structure. |
+| POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch` | Compiles generic manifest effects into an applicable component config patch with `proposedConfig`; domain effects remain explicit compiler boundaries. |
 
 Templates are global per key `componentId` (base) or `componentId:variantId` (variants), without `resourcePath` binding.
 Base templates can expose `templateMeta.variants` and `defaultVariantId` to guide variant selection.
+
+### Agentic authoring manifests
+
+The manifest endpoints execute the platform contract stored in `ai_registry` instead of routing by keywords. They validate structural invariants that are common to all components: operation-level target resolver, preconditions, validators, affected paths, destructive confirmation and submission impact.
+
+During component registry ingestion, `authoringManifest` is validated when present and projected into the component RAG document with manifest version, operation count, target count and searchable operation/target summaries.
+
+During `/api/praxis/config/ai/patch` orchestration, the projected manifest is also promoted into the prompt as the canonical authoring contract. If a model returns `componentEditPlan`, the backend validates the plan against the manifest before handing it to preview/apply: operations must exist in the manifest, operation targets must match the declared resolver contract, required `inputSchema` fields must be present, referenced validators must be declared and destructive operations must carry explicit confirmation.
+
+The backend does not redefine component semantics. Operations with `compile-domain-patch` are returned as explicit compiler boundaries so a component-specific compiler can be added after that component manifest passes semantic approval.
 
 ### AI key maintenance (clear / rotate)
 
