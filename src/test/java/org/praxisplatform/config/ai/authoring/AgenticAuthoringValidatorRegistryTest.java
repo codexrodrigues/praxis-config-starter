@@ -843,6 +843,113 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator metadata-bridge-gated-by-customization failed for metadataBridge.configure: metadata bridge requires enableCustomization");
     }
 
+    @Test
+    void shouldValidateEditorialFormsAuthoringSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "solution": {
+                    "journeys": [
+                      {
+                        "journeyId": "main",
+                        "steps": [
+                          {
+                            "stepId": "start",
+                            "blocks": [
+                              {
+                                "blockId": "profile",
+                                "fields": [ { "name": "email" } ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "adapterRegistry": [
+                    { "adapterId": "dynamic-form", "supportedDataBlockTypes": ["dataCollection"] }
+                  ],
+                  "snapshot": { "diagnostics": { "items": [] } }
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-editorial-forms",
+                operation("snapshot.set", "snapshot", "editorial-runtime-snapshot", false,
+                        "snapshot-shape-canonical,journey-exists,step-exists"),
+                plan("{}", "{ \"solutionId\": \"\", \"journeyId\": \"missing\", \"stepId\": \"missing\", \"runtimeContextPatch\": [] }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-editorial-forms",
+                operation("fallback.configure", "fallback", "editorial-runtime-fallback-state", false,
+                        "fallback-explicit,fallback-diagnostic-backed,fallback-scope-exists"),
+                plan("{}", "{ \"mode\": \"blocked\", \"scope\": { \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"missing\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-editorial-forms",
+                operation("presentation.configure", "presentation", "editorial-solution-presentation", false,
+                        "presentation-supported-by-runtime,presentation-does-not-mutate-domain-data,theme-tokens-valid"),
+                plan("{}", "{ \"layout\": { \"orientation\": \"diagonal\" }, \"journeys\": [], \"theme\": { \"image\": \"https://evil.example/theme.png\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-editorial-forms",
+                operation("adapter.bind", "adapter", "editorial-data-block-adapter-registry", true,
+                        "adapter-exists,adapter-supports-data-block,adapter-component-valid,fallback-explicit"),
+                plan("\"missing\"", "{ \"adapterId\": \"missing\", \"dataBlockType\": \"dataCollection\", \"componentRef\": \"foreign-widget\", \"fallbackModeWhenMissing\": \"blocked\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-editorial-forms",
+                operation("dataBlock.add", "dataBlock", "editorial-journey-step-block-by-id", true,
+                        "data-block-id-unique,journey-exists,step-exists"),
+                plan("{ \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"profile\" }", "{ \"journeyId\": \"main\", \"stepId\": \"start\", \"block\": { \"blockId\": \"profile\", \"kind\": \"dataCollection\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-editorial-forms",
+                operation("dataBlock.remove", "dataBlock", "editorial-journey-step-block-by-id", true,
+                        "data-block-exists"),
+                plan("{ \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"missing\" }", "{ \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"missing\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-editorial-forms",
+                operation("fieldBinding.set", "fieldBinding", "editorial-data-block-field-binding", true,
+                        "field-binding-target-exists,field-binding-path-valid,delegates-field-metadata"),
+                plan("{ \"blockId\": \"profile\", \"fieldName\": \"missing\" }", "{ \"blockId\": \"profile\", \"fieldName\": \"missing\", \"contextPath\": \"../bad\", \"delegateFieldMetadataTo\": \"other\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator snapshot-shape-canonical failed for snapshot.set: solutionId is required",
+                        "validator snapshot-shape-canonical failed for snapshot.set: runtimeContextPatch must be an object",
+                        "validator journey-exists failed for snapshot.set: journey not found missing",
+                        "validator step-exists failed for snapshot.set: step not found missing",
+                        "validator fallback-diagnostic-backed failed for fallback.configure: diagnosticCode is required for blocked",
+                        "validator fallback-scope-exists failed for fallback.configure: block not found missing",
+                        "validator presentation-supported-by-runtime failed for presentation.configure: unsupported layout orientation",
+                        "validator presentation-does-not-mutate-domain-data failed for presentation.configure: presentation must not mutate journeys",
+                        "validator theme-tokens-valid failed for presentation.configure: theme contains unsafe remote URL",
+                        "validator adapter-exists failed for adapter.bind: adapter not registered missing",
+                        "validator adapter-component-valid failed for adapter.bind: componentRef must be Praxis-owned",
+                        "validator data-block-id-unique failed for dataBlock.add: duplicate blockId profile",
+                        "validator data-block-exists failed for dataBlock.remove: block not found missing",
+                        "validator field-binding-target-exists failed for fieldBinding.set: field not found missing",
+                        "validator field-binding-path-valid failed for fieldBinding.set: contextPath is invalid",
+                        "validator delegates-field-metadata failed for fieldBinding.set: must delegate to praxis-metadata-editor");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

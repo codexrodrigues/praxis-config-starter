@@ -85,7 +85,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "visual-builder-node-add".equals(handler)
                 || "visual-builder-edge-connect".equals(handler)
                 || "visual-builder-variable-add".equals(handler)
-                || "manual-field-add".equals(handler);
+                || "manual-field-add".equals(handler)
+                || "editorial-data-block-add".equals(handler);
     }
 
     boolean supportsDomainPatchHandler(String handler) {
@@ -177,6 +178,13 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "manual-autosave-enabled-set".equals(handler)
                 || "manual-submit-behavior-set".equals(handler)
                 || "manual-metadata-bridge-configure".equals(handler)
+                || "editorial-snapshot-set".equals(handler)
+                || "editorial-fallback-configure".equals(handler)
+                || "editorial-presentation-configure".equals(handler)
+                || "editorial-adapter-bind".equals(handler)
+                || "editorial-data-block-add".equals(handler)
+                || "editorial-data-block-remove".equals(handler)
+                || "editorial-field-binding-set".equals(handler)
                 || "chart-series-add".equals(handler)
                 || "chart-axis-configure".equals(handler)
                 || "chart-data-resource-bind".equals(handler)
@@ -719,6 +727,20 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             case "manual-submit-behavior-set" -> compileManualSubmitBehaviorSet(
                     componentId, operation, effect, planOperation, proposedConfig);
             case "manual-metadata-bridge-configure" -> compileManualMetadataBridgeConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "editorial-snapshot-set" -> compileEditorialSnapshotSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "editorial-fallback-configure" -> compileEditorialFallbackConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "editorial-presentation-configure" -> compileEditorialPresentationConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "editorial-adapter-bind" -> compileEditorialAdapterBind(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "editorial-data-block-add" -> compileEditorialDataBlockAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "editorial-data-block-remove" -> compileEditorialDataBlockRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "editorial-field-binding-set" -> compileEditorialFieldBindingSet(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
             case "chart-series-add" -> compileChartSeriesAdd(
                     componentId,
@@ -4461,6 +4483,319 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         proposedConfig.set("currentFieldMetadata", fieldMetadata.deepCopy());
         ObjectNode form = objectAt(proposedConfig, "form", true);
         form.set("fieldMetadata", fieldMetadata.deepCopy());
+    }
+
+    private ObjectNode compileEditorialSnapshotSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String solutionId = text(input, "solutionId");
+        if (solutionId.isBlank()) {
+            failures.add("editorial-snapshot-set requires solutionId");
+            return null;
+        }
+        ObjectNode solution = objectAt(proposedConfig, "solution", true);
+        solution.put("solutionId", solutionId);
+        copyIfPresent(input, solution, "journeyId", "activeJourneyId");
+        copyIfPresent(input, solution, "stepId", "activeStepId");
+
+        ObjectNode instance = objectAt(proposedConfig, "instance", true);
+        copyIfPresent(input, instance, "instanceId");
+        if (input.path("instanceContextPatch").isObject()) {
+            ObjectNode context = objectAt(instance, "context", true);
+            mergeObject(context, input.path("instanceContextPatch"));
+        }
+        if (input.path("runtimeContextPatch").isObject()) {
+            ObjectNode runtimeContext = objectAt(proposedConfig, "runtimeContext", true);
+            mergeObject(runtimeContext, input.path("runtimeContextPatch"));
+        }
+        if (!text(input, "journeyId").isBlank() && editorialJourney(proposedConfig, text(input, "journeyId")) == null) {
+            failures.add("editorial-snapshot-set journey not found: " + text(input, "journeyId"));
+            return null;
+        }
+        if (!text(input, "stepId").isBlank()
+                && editorialStep(proposedConfig, text(input, "journeyId"), text(input, "stepId")) == null) {
+            failures.add("editorial-snapshot-set step not found: " + text(input, "stepId"));
+            return null;
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-editorial-snapshot");
+        compiled.put("path", "solution");
+        compiled.set("solution", solution.deepCopy());
+        compiled.set("instance", instance.deepCopy());
+        compiled.set("runtimeContext", proposedConfig.path("runtimeContext").deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileEditorialFallbackConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String mode = text(input, "mode");
+        if (mode.isBlank()) {
+            failures.add("editorial-fallback-configure requires mode");
+            return null;
+        }
+        ObjectNode hostConfig = objectAt(proposedConfig, "hostConfig", true);
+        hostConfig.put("emitOperationalEvents", true);
+        ArrayNode diagnostics = arrayAt(proposedConfig, "snapshot.diagnostics.items", true);
+        ObjectNode diagnostic = objectMapper.createObjectNode();
+        diagnostic.put("code", textOrDefault(input, "diagnosticCode", "editorial-fallback-" + mode));
+        diagnostic.put("mode", mode);
+        copyIfPresent(input, diagnostic, "progressionBlocked");
+        copyIfPresent(input, diagnostic, "requiresEngineAttention");
+        if (input.path("scope").isObject()) {
+            diagnostic.set("scope", input.path("scope").deepCopy());
+        }
+        diagnostics.add(diagnostic);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-editorial-fallback");
+        compiled.put("path", "snapshot.diagnostics.items[]");
+        compiled.set("value", diagnostic);
+        return compiled;
+    }
+
+    private ObjectNode compileEditorialPresentationConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        ObjectNode presentation = objectAt(proposedConfig, "solution.presentation", true);
+        JsonNode previousPresentation = presentation.deepCopy();
+        mergeObject(presentation, planOperation.path("input"));
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-editorial-presentation");
+        compiled.put("path", "solution.presentation");
+        compiled.set("previousPresentation", previousPresentation);
+        compiled.set("presentation", presentation.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileEditorialAdapterBind(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String adapterId = text(input, "adapterId");
+        String dataBlockType = text(input, "dataBlockType");
+        if (adapterId.isBlank() || dataBlockType.isBlank()) {
+            failures.add("editorial-adapter-bind requires adapterId and dataBlockType");
+            return null;
+        }
+        ArrayNode registry = editorialAdapterRegistry(proposedConfig, false);
+        ObjectNode registered = findObjectByAnyKey(registry, List.of("adapterId", "id"), adapterId);
+        if (registered == null) {
+            failures.add("editorial-adapter-bind adapter not registered: " + adapterId);
+            return null;
+        }
+        ObjectNode hostConfig = objectAt(proposedConfig, "hostConfig", true);
+        if (input.has("forwardOperationalEvents")) {
+            hostConfig.set("forwardAdapterOperationalEvents", input.path("forwardOperationalEvents").deepCopy());
+        }
+        ArrayNode bindings = arrayAt(proposedConfig, "hostConfig.dataBlockAdapters", true);
+        ObjectNode binding = findObjectByAnyKey(bindings, List.of("adapterId", "id"), adapterId);
+        if (binding == null) {
+            binding = objectMapper.createObjectNode();
+            bindings.add(binding);
+        }
+        binding.put("adapterId", adapterId);
+        binding.put("dataBlockType", dataBlockType);
+        copyIfPresent(input, binding, "componentRef");
+        copyIfPresent(input, binding, "requiredInputs");
+        copyIfPresent(input, binding, "fallbackModeWhenMissing");
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "bind-editorial-adapter");
+        compiled.put("path", "hostConfig.dataBlockAdapters[]");
+        compiled.put("key", "adapterId");
+        compiled.put("keyValue", adapterId);
+        compiled.set("value", binding.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileEditorialDataBlockAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String journeyId = text(input, "journeyId");
+        String stepId = text(input, "stepId");
+        JsonNode blockInput = input.path("block");
+        String blockId = text(blockInput, "blockId");
+        if (journeyId.isBlank() || stepId.isBlank() || blockId.isBlank()) {
+            failures.add("editorial-data-block-add requires journeyId, stepId and block.blockId");
+            return null;
+        }
+        ObjectNode step = editorialStep(proposedConfig, journeyId, stepId);
+        if (step == null) {
+            failures.add("editorial-data-block-add step not found: " + journeyId + "/" + stepId);
+            return null;
+        }
+        ArrayNode blocks = step.path("blocks") instanceof ArrayNode array ? array : step.putArray("blocks");
+        if (findObjectByAnyKey(blocks, List.of("blockId", "id"), blockId) != null) {
+            failures.add("editorial-data-block-add duplicate blockId: " + blockId);
+            return null;
+        }
+        ObjectNode block = blockInput.deepCopy();
+        int insertedIndex = editorialInsertIndex(blocks, input.path("insert"), failures);
+        if (!failures.isEmpty()) {
+            return null;
+        }
+        if (insertedIndex >= blocks.size()) {
+            blocks.add(block);
+            insertedIndex = blocks.size() - 1;
+        } else {
+            blocks.insert(insertedIndex, block);
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-editorial-data-block");
+        compiled.put("path", "solution.journeys[].steps[].blocks[]");
+        compiled.put("key", "blockId");
+        compiled.put("keyValue", blockId);
+        compiled.put("insertedIndex", insertedIndex);
+        compiled.set("value", block.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileEditorialDataBlockRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String journeyId = text(input, "journeyId");
+        String stepId = text(input, "stepId");
+        String blockId = text(input, "blockId");
+        ObjectNode step = editorialStep(proposedConfig, journeyId, stepId);
+        ArrayNode blocks = step == null ? null : step.path("blocks") instanceof ArrayNode array ? array : null;
+        int index = indexOfObjectByAnyKey(blocks, List.of("blockId", "id"), blockId);
+        if (index < 0) {
+            failures.add("editorial-data-block-remove block not found: " + blockId);
+            return null;
+        }
+        JsonNode removed = blocks.remove(index);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-editorial-data-block");
+        compiled.put("path", "solution.journeys[].steps[].blocks[]");
+        compiled.put("key", "blockId");
+        compiled.put("keyValue", blockId);
+        compiled.put("removedIndex", index);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode compileEditorialFieldBindingSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String blockId = text(input, "blockId");
+        String fieldName = text(input, "fieldName");
+        String contextPath = text(input, "contextPath");
+        ObjectNode block = editorialBlockById(proposedConfig, blockId);
+        if (block == null) {
+            failures.add("editorial-field-binding-set block not found: " + blockId);
+            return null;
+        }
+        if (fieldName.isBlank() || contextPath.isBlank()) {
+            failures.add("editorial-field-binding-set requires fieldName and contextPath");
+            return null;
+        }
+        ObjectNode bindings = block.path("fieldBindings") instanceof ObjectNode object ? object : block.putObject("fieldBindings");
+        ObjectNode binding = objectMapper.createObjectNode();
+        binding.put("contextPath", contextPath);
+        copyIfPresent(input, binding, "mode");
+        copyIfPresent(input, binding, "valueMode");
+        copyIfPresent(input, binding, "delegateFieldMetadataTo");
+        bindings.set(fieldName, binding);
+        ObjectNode formData = objectAt(proposedConfig, "runtimeContext.formData", true);
+        if ("replace".equals(text(input, "valueMode"))) {
+            setDottedValue(formData, contextPath, MissingNode.getInstance());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-editorial-field-binding");
+        compiled.put("path", "solution.journeys[].steps[].blocks[].fieldBindings");
+        compiled.put("key", "fieldName");
+        compiled.put("keyValue", fieldName);
+        compiled.set("value", binding);
+        return compiled;
+    }
+
+    private ObjectNode editorialJourney(ObjectNode proposedConfig, String journeyId) {
+        return findObjectByAnyKey(arrayAt(proposedConfig, "solution.journeys", false), List.of("journeyId", "id"), journeyId);
+    }
+
+    private ObjectNode editorialStep(ObjectNode proposedConfig, String journeyId, String stepId) {
+        ObjectNode journey = editorialJourney(proposedConfig, journeyId);
+        if (journey == null) {
+            return null;
+        }
+        return findObjectByAnyKey(journey.path("steps") instanceof ArrayNode array ? array : null, List.of("stepId", "id"), stepId);
+    }
+
+    private ObjectNode editorialBlockById(ObjectNode proposedConfig, String blockId) {
+        JsonNode journeys = proposedConfig.path("solution").path("journeys");
+        if (!journeys.isArray()) {
+            return null;
+        }
+        for (JsonNode journey : journeys) {
+            for (JsonNode step : journey.path("steps")) {
+                ObjectNode block = findObjectByAnyKey(step.path("blocks") instanceof ArrayNode array ? array : null,
+                        List.of("blockId", "id"),
+                        blockId);
+                if (block != null) {
+                    return block;
+                }
+            }
+        }
+        return null;
+    }
+
+    private ArrayNode editorialAdapterRegistry(ObjectNode proposedConfig, boolean create) {
+        ArrayNode adapters = arrayAt(proposedConfig, "adapterRegistry", create);
+        if (adapters != null) {
+            return adapters;
+        }
+        return arrayAt(proposedConfig, "dataBlockAdapters", create);
+    }
+
+    private int editorialInsertIndex(ArrayNode blocks, JsonNode insert, List<String> failures) {
+        String mode = textOrDefault(insert, "mode", "append");
+        String relativeToBlockId = text(insert, "relativeToBlockId");
+        if ("append".equals(mode) || mode.isBlank()) {
+            return blocks.size();
+        }
+        int relativeIndex = indexOfObjectByAnyKey(blocks, List.of("blockId", "id"), relativeToBlockId);
+        if (relativeIndex < 0) {
+            failures.add("editorial-data-block-add relative block not found: " + relativeToBlockId);
+            return blocks.size();
+        }
+        return "insertAfter".equals(mode) ? relativeIndex + 1 : relativeIndex;
     }
 
     private ObjectNode baseDomainPatch(

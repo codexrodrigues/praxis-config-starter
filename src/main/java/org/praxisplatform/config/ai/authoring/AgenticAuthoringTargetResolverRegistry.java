@@ -89,6 +89,9 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "manual-form-autosave-policy",
             "manual-field-metadata-bridge",
             "manual-form-submit-behavior",
+            "editorial-runtime-snapshot",
+            "editorial-runtime-fallback-state",
+            "editorial-solution-presentation",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -132,7 +135,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                     List.of());
         }
         String targetValue = targetValue(target);
-        if (targetValue.isBlank() && !"rich-timeline-item-by-block-id-and-item-id".equals(resolver)) {
+        if (targetValue.isBlank() && !objectTargetResolverAcceptsBlankValue(resolver)) {
             return unresolved(componentId, operationId, kind, resolver, "target value is required");
         }
         List<ResolvedCandidate> candidates = resolveCandidates(resolver, kind, config, target, targetValue);
@@ -140,6 +143,12 @@ public final class AgenticAuthoringTargetResolverRegistry {
             return unresolved(componentId, operationId, kind, resolver, "unsupported target resolver: " + resolver);
         }
         return resolvedFromCandidates(componentId, operation, targetValue.isBlank() ? target.toString() : targetValue, candidates);
+    }
+
+    private boolean objectTargetResolverAcceptsBlankValue(String resolver) {
+        return "rich-timeline-item-by-block-id-and-item-id".equals(resolver)
+                || "editorial-journey-step-block-by-id".equals(resolver)
+                || "editorial-data-block-field-binding".equals(resolver);
     }
 
     AgenticAuthoringResolvedTarget unresolved(
@@ -228,6 +237,9 @@ public final class AgenticAuthoringTargetResolverRegistry {
                     addArrayMatches(candidates, config, "nodes[]", List.of("id", "nodeId"), targetValue);
             case "rule-node-edge-by-source-target" -> addVisualBuilderEdgeMatches(candidates, config, target);
             case "context-variable-by-name-scope" -> addVisualBuilderVariableMatches(candidates, config, target);
+            case "editorial-data-block-adapter-registry" -> addEditorialAdapterMatches(candidates, config, targetValue);
+            case "editorial-journey-step-block-by-id" -> addEditorialBlockMatches(candidates, config, target, targetValue);
+            case "editorial-data-block-field-binding" -> addEditorialFieldBindingMatches(candidates, config, target);
             default -> {
                 if (kind != null && !kind.isBlank()) {
                     addRecursiveObjectMatches(candidates, config, List.of("id", "field", "name", "key", "label", "title"), targetValue);
@@ -347,6 +359,9 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "rule-node-by-id",
                 "rule-node-edge-by-source-target",
                 "context-variable-by-name-scope",
+                "editorial-data-block-adapter-registry",
+                "editorial-journey-step-block-by-id",
+                "editorial-data-block-field-binding",
                 "json-logic-condition-by-node",
                 "property-effect-by-node").contains(resolver);
     }
@@ -624,6 +639,70 @@ public final class AgenticAuthoringTargetResolverRegistry {
         }
     }
 
+    private void addEditorialAdapterMatches(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
+        addArrayMatches(candidates, config, "adapterRegistry[]", List.of("adapterId", "id", "dataBlockType"), targetValue);
+        addArrayMatches(candidates, config, "dataBlockAdapters[]", List.of("adapterId", "id", "dataBlockType"), targetValue);
+        addArrayMatches(candidates, config, "hostConfig.dataBlockAdapters[]", List.of("adapterId", "id", "dataBlockType"), targetValue);
+    }
+
+    private void addEditorialBlockMatches(List<ResolvedCandidate> candidates, JsonNode config, JsonNode target, String targetValue) {
+        String journeyId = text(target, "journeyId");
+        String stepId = text(target, "stepId");
+        String blockId = firstNonBlank(text(target, "blockId"), text(target, "id"), targetValue);
+        JsonNode journeys = resolvePath(config, "solution.journeys");
+        if (!journeys.isArray()) {
+            return;
+        }
+        for (int journeyIndex = 0; journeyIndex < journeys.size(); journeyIndex++) {
+            JsonNode journey = journeys.get(journeyIndex);
+            if (!journeyId.isBlank() && !matchesAnyKey(journey, List.of("journeyId", "id"), journeyId)) {
+                continue;
+            }
+            JsonNode steps = journey.path("steps");
+            if (!steps.isArray()) {
+                continue;
+            }
+            for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+                JsonNode step = steps.get(stepIndex);
+                if (!stepId.isBlank() && !matchesAnyKey(step, List.of("stepId", "id"), stepId)) {
+                    continue;
+                }
+                JsonNode blocks = step.path("blocks");
+                if (!blocks.isArray()) {
+                    continue;
+                }
+                for (int blockIndex = 0; blockIndex < blocks.size(); blockIndex++) {
+                    JsonNode block = blocks.get(blockIndex);
+                    if (matchesAnyKey(block, List.of("blockId", "id"), blockId)) {
+                        candidates.add(new ResolvedCandidate(
+                                "solution.journeys[]/" + journeyIndex + ".steps[]/" + stepIndex + ".blocks[]/" + blockIndex,
+                                block));
+                    }
+                }
+            }
+        }
+    }
+
+    private void addEditorialFieldBindingMatches(List<ResolvedCandidate> candidates, JsonNode config, JsonNode target) {
+        String blockId = text(target, "blockId");
+        String fieldName = text(target, "fieldName");
+        if (blockId.isBlank() || fieldName.isBlank()) {
+            return;
+        }
+        List<ResolvedCandidate> blocks = new ArrayList<>();
+        ObjectNode blockTarget = JsonNodeFactory.instance.objectNode();
+        blockTarget.put("blockId", blockId);
+        addEditorialBlockMatches(blocks, config, blockTarget, blockId);
+        for (ResolvedCandidate block : blocks) {
+            JsonNode binding = block.value().path("fieldBindings").path(fieldName);
+            if (!binding.isMissingNode()) {
+                candidates.add(new ResolvedCandidate(block.path() + ".fieldBindings." + fieldName, binding));
+            } else {
+                candidates.add(new ResolvedCandidate(block.path(), block.value()));
+            }
+        }
+    }
+
     private void addRecursiveArrayMatches(
             List<ResolvedCandidate> candidates,
             JsonNode node,
@@ -776,6 +855,15 @@ public final class AgenticAuthoringTargetResolverRegistry {
         for (String field : fields) {
             String value = text(node, field);
             if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
                 return value;
             }
         }

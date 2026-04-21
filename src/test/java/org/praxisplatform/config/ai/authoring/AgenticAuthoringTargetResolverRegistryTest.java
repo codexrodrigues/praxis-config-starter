@@ -597,6 +597,66 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(toolbar.status()).isEqualTo("not-required");
     }
 
+    @Test
+    void shouldResolveEditorialFormsTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "solution": {
+                    "journeys": [
+                      {
+                        "journeyId": "main",
+                        "steps": [
+                          {
+                            "stepId": "start",
+                            "blocks": [
+                              {
+                                "blockId": "profile",
+                                "fieldBindings": {
+                                  "email": { "contextPath": "customer.email" }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "adapterRegistry": [
+                    { "adapterId": "dynamic-form", "supportedDataBlockTypes": ["dataCollection"] }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget snapshot = registry.resolve(
+                "praxis-editorial-forms",
+                operation("snapshot.set", "snapshot", "editorial-runtime-snapshot", "fail", false),
+                objectMapper.readTree("{}"),
+                config);
+        AgenticAuthoringResolvedTarget adapter = registry.resolve(
+                "praxis-editorial-forms",
+                operation("adapter.bind", "adapter", "editorial-data-block-adapter-registry", "fail", true),
+                objectMapper.readTree("\"dynamic-form\""),
+                config);
+        AgenticAuthoringResolvedTarget block = registry.resolve(
+                "praxis-editorial-forms",
+                operation("dataBlock.remove", "dataBlock", "editorial-journey-step-block-by-id", "fail", true),
+                objectMapper.readTree("{ \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"profile\" }"),
+                config);
+        AgenticAuthoringResolvedTarget binding = registry.resolve(
+                "praxis-editorial-forms",
+                operation("fieldBinding.set", "fieldBinding", "editorial-data-block-field-binding", "fail", true),
+                objectMapper.readTree("{ \"blockId\": \"profile\", \"fieldName\": \"email\" }"),
+                config);
+
+        assertThat(snapshot.status()).isEqualTo("not-required");
+        assertThat(adapter.status()).isEqualTo("resolved");
+        assertThat(adapter.path()).isEqualTo("adapterRegistry[]/0");
+        assertThat(block.status()).isEqualTo("resolved");
+        assertThat(block.path()).isEqualTo("solution.journeys[]/0.steps[]/0.blocks[]/0");
+        assertThat(binding.status()).isEqualTo("resolved");
+        assertThat(binding.path()).isEqualTo("solution.journeys[]/0.steps[]/0.blocks[]/0.fieldBindings.email");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

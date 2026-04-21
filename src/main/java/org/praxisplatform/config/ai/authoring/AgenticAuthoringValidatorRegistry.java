@@ -196,6 +196,23 @@ public final class AgenticAuthoringValidatorRegistry {
             "persistence-key-deterministic",
             "submit-behavior-supported",
             "delegates-field-metadata",
+            "snapshot-shape-canonical",
+            "journey-exists",
+            "diagnostics-preserved",
+            "editorial-round-trip",
+            "fallback-explicit",
+            "fallback-diagnostic-backed",
+            "fallback-scope-exists",
+            "presentation-supported-by-runtime",
+            "presentation-does-not-mutate-domain-data",
+            "theme-tokens-valid",
+            "adapter-exists",
+            "adapter-supports-data-block",
+            "adapter-component-valid",
+            "data-block-id-unique",
+            "data-block-exists",
+            "field-binding-target-exists",
+            "field-binding-path-valid",
             "resource-exists-in-api-metadata",
             "resource-path-canonical",
             "resource-key-stable",
@@ -329,7 +346,7 @@ public final class AgenticAuthoringValidatorRegistry {
             switch (validatorId) {
                 case "target-column-exists", "column-exists", "field-exists", "section-exists",
                      "row-exists", "layout-column-exists", "rule-exists", "action-exists", "target-exists",
-                     "step-exists", "tab-or-link-exists", "panel-exists", "default-expanded-panel-exists" -> {
+                     "tab-or-link-exists", "panel-exists", "default-expanded-panel-exists" -> {
                     if (operation.path("target").path("required").asBoolean(false)) {
                         AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
                                 componentId,
@@ -484,6 +501,39 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "manual-form-round-trip" -> {
                     // Round-trip is enforced by syncing currentConfig.fieldMetadata, currentFieldMetadata and form.fieldMetadata.
                 }
+                case "snapshot-shape-canonical" -> validateEditorialSnapshotShape(operationId, planOperation, config, failures);
+                case "journey-exists" -> validateEditorialJourneyExists(operationId, planOperation, config, failures);
+                case "step-exists" -> {
+                    if ("praxis-editorial-forms".equals(componentId)) {
+                        validateEditorialStepExists(operationId, planOperation, config, failures);
+                    } else if (operation.path("target").path("required").asBoolean(false)) {
+                        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                                componentId,
+                                operation,
+                                planOperation.path("target"),
+                                config);
+                        if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+                            failures.add("validator step-exists failed for " + operationId + ": "
+                                    + String.join(", ", resolved.failures()));
+                        }
+                    }
+                }
+                case "diagnostics-preserved", "editorial-round-trip" -> {
+                    // Enforced by compiling canonical snapshot/solution/runtimeContext paths together.
+                }
+                case "fallback-explicit" -> validateEditorialFallbackExplicit(operationId, planOperation, failures);
+                case "fallback-diagnostic-backed" -> validateEditorialFallbackDiagnosticBacked(operationId, planOperation, failures);
+                case "fallback-scope-exists" -> validateEditorialFallbackScopeExists(operationId, planOperation, config, failures);
+                case "presentation-supported-by-runtime" -> validateEditorialPresentationSupported(operationId, planOperation, failures);
+                case "presentation-does-not-mutate-domain-data" -> validateEditorialPresentationNoDomainMutation(operationId, planOperation, failures);
+                case "theme-tokens-valid" -> validateEditorialThemeTokens(operationId, planOperation, failures);
+                case "adapter-exists" -> validateEditorialAdapterExists(operationId, planOperation, config, failures);
+                case "adapter-supports-data-block" -> validateEditorialAdapterSupportsDataBlock(operationId, planOperation, config, failures);
+                case "adapter-component-valid" -> validateEditorialAdapterComponent(operationId, planOperation, failures);
+                case "data-block-id-unique" -> validateEditorialDataBlockIdUnique(operationId, planOperation, config, failures);
+                case "data-block-exists" -> validateEditorialDataBlockExists(operationId, planOperation, config, failures);
+                case "field-binding-target-exists" -> validateEditorialFieldBindingTargetExists(operationId, planOperation, config, failures);
+                case "field-binding-path-valid" -> validateEditorialFieldBindingPath(operationId, planOperation, failures);
                 case "resource-exists-in-api-metadata", "resource-capabilities-resolvable" -> validateCrudResourcePresent(operationId, planOperation, config, failures);
                 case "resource-path-canonical", "schema-url-canonical", "submit-url-canonical" -> validateCrudCanonicalRelativeUrls(operationId, planOperation, failures);
                 case "resource-key-stable" -> validateCrudResourceKeyStable(operationId, planOperation, failures);
@@ -2034,6 +2084,237 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private void validateEditorialSnapshotShape(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String solutionId = text(planOperation.path("input"), "solutionId");
+        if (solutionId.isBlank()) {
+            failures.add("validator snapshot-shape-canonical failed for " + operationId + ": solutionId is required");
+        }
+        if (!config.path("solution").isObject()) {
+            failures.add("validator snapshot-shape-canonical failed for " + operationId + ": solution must be an object");
+        }
+        if (planOperation.path("input").has("runtimeContextPatch")
+                && !planOperation.path("input").path("runtimeContextPatch").isObject()) {
+            failures.add("validator snapshot-shape-canonical failed for " + operationId + ": runtimeContextPatch must be an object");
+        }
+    }
+
+    private void validateEditorialJourneyExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String journeyId = firstNonBlank(text(planOperation.path("input"), "journeyId"), text(planOperation.path("target"), "journeyId"));
+        if (!journeyId.isBlank() && editorialJourney(config, journeyId) == null) {
+            failures.add("validator journey-exists failed for " + operationId + ": journey not found " + journeyId);
+        }
+    }
+
+    private void validateEditorialStepExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String journeyId = firstNonBlank(text(planOperation.path("input"), "journeyId"), text(planOperation.path("target"), "journeyId"));
+        String stepId = firstNonBlank(text(planOperation.path("input"), "stepId"), text(planOperation.path("target"), "stepId"));
+        if (!stepId.isBlank() && editorialStep(config, journeyId, stepId) == null) {
+            failures.add("validator step-exists failed for " + operationId + ": step not found " + stepId);
+        }
+    }
+
+    private void validateEditorialFallbackExplicit(String operationId, JsonNode planOperation, List<String> failures) {
+        String mode = firstNonBlank(text(planOperation.path("input"), "mode"), text(planOperation.path("input"), "fallbackModeWhenMissing"));
+        if (!Set.of("normal", "warning", "degraded", "blocked").contains(mode)) {
+            failures.add("validator fallback-explicit failed for " + operationId + ": unsupported mode " + mode);
+        }
+    }
+
+    private void validateEditorialFallbackDiagnosticBacked(String operationId, JsonNode planOperation, List<String> failures) {
+        String mode = text(planOperation.path("input"), "mode");
+        if (Set.of("warning", "degraded", "blocked").contains(mode) && text(planOperation.path("input"), "diagnosticCode").isBlank()) {
+            failures.add("validator fallback-diagnostic-backed failed for " + operationId + ": diagnosticCode is required for " + mode);
+        }
+    }
+
+    private void validateEditorialFallbackScopeExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode scope = planOperation.path("input").path("scope");
+        if (!scope.isObject()) {
+            return;
+        }
+        String journeyId = text(scope, "journeyId");
+        String stepId = text(scope, "stepId");
+        String blockId = text(scope, "blockId");
+        if (!journeyId.isBlank() && editorialJourney(config, journeyId) == null) {
+            failures.add("validator fallback-scope-exists failed for " + operationId + ": journey not found " + journeyId);
+        }
+        if (!stepId.isBlank() && editorialStep(config, journeyId, stepId) == null) {
+            failures.add("validator fallback-scope-exists failed for " + operationId + ": step not found " + stepId);
+        }
+        if (!blockId.isBlank() && editorialBlock(config, journeyId, stepId, blockId) == null) {
+            failures.add("validator fallback-scope-exists failed for " + operationId + ": block not found " + blockId);
+        }
+    }
+
+    private void validateEditorialPresentationSupported(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("layout") && input.path("layout").has("orientation")
+                && !Set.of("horizontal", "vertical").contains(text(input.path("layout"), "orientation"))) {
+            failures.add("validator presentation-supported-by-runtime failed for " + operationId + ": unsupported layout orientation");
+        }
+        if (input.has("stepper") && input.path("stepper").has("orientation")
+                && !Set.of("horizontal", "vertical").contains(text(input.path("stepper"), "orientation"))) {
+            failures.add("validator presentation-supported-by-runtime failed for " + operationId + ": unsupported stepper orientation");
+        }
+    }
+
+    private void validateEditorialPresentationNoDomainMutation(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("journeys", "steps", "blocks", "runtimeContext", "fieldMetadata", "data")) {
+            if (input.has(field)) {
+                failures.add("validator presentation-does-not-mutate-domain-data failed for " + operationId
+                        + ": presentation must not mutate " + field);
+            }
+        }
+    }
+
+    private void validateEditorialThemeTokens(String operationId, JsonNode planOperation, List<String> failures) {
+        if (containsUnsafeAbsoluteUrl(planOperation.path("input").path("theme"))) {
+            failures.add("validator theme-tokens-valid failed for " + operationId + ": theme contains unsafe remote URL");
+        }
+    }
+
+    private void validateEditorialAdapterExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String adapterId = text(planOperation.path("input"), "adapterId");
+        if (adapterId.isBlank() || editorialAdapter(config, adapterId) == null) {
+            failures.add("validator adapter-exists failed for " + operationId + ": adapter not registered " + adapterId);
+        }
+    }
+
+    private void validateEditorialAdapterSupportsDataBlock(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String adapterId = text(planOperation.path("input"), "adapterId");
+        String dataBlockType = text(planOperation.path("input"), "dataBlockType");
+        JsonNode adapter = editorialAdapter(config, adapterId);
+        if (adapter == null || dataBlockType.isBlank()) {
+            return;
+        }
+        JsonNode supported = firstPresent(adapter, "supportedDataBlockTypes", "supports");
+        if (supported.isArray() && !arrayContainsText(supported, dataBlockType)) {
+            failures.add("validator adapter-supports-data-block failed for " + operationId
+                    + ": adapter " + adapterId + " does not support " + dataBlockType);
+        }
+    }
+
+    private void validateEditorialAdapterComponent(String operationId, JsonNode planOperation, List<String> failures) {
+        String componentRef = text(planOperation.path("input"), "componentRef");
+        if (!componentRef.isBlank() && !(componentRef.startsWith("praxis-") || componentRef.startsWith("@praxisui/"))) {
+            failures.add("validator adapter-component-valid failed for " + operationId + ": componentRef must be Praxis-owned");
+        }
+    }
+
+    private void validateEditorialDataBlockIdUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String blockId = text(input.path("block"), "blockId");
+        if (!blockId.isBlank() && editorialBlock(config, text(input, "journeyId"), text(input, "stepId"), blockId) != null) {
+            failures.add("validator data-block-id-unique failed for " + operationId + ": duplicate blockId " + blockId);
+        }
+    }
+
+    private void validateEditorialDataBlockExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String blockId = text(input, "blockId");
+        if (blockId.isBlank() || editorialBlock(config, text(input, "journeyId"), text(input, "stepId"), blockId) == null) {
+            failures.add("validator data-block-exists failed for " + operationId + ": block not found " + blockId);
+        }
+    }
+
+    private void validateEditorialFieldBindingTargetExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String blockId = text(input, "blockId");
+        String fieldName = text(input, "fieldName");
+        JsonNode block = editorialBlock(config, "", "", blockId);
+        if (block == null) {
+            failures.add("validator field-binding-target-exists failed for " + operationId + ": block not found " + blockId);
+            return;
+        }
+        if (!fieldName.isBlank() && !editorialBlockFieldExists(block, fieldName)) {
+            failures.add("validator field-binding-target-exists failed for " + operationId + ": field not found " + fieldName);
+        }
+    }
+
+    private void validateEditorialFieldBindingPath(String operationId, JsonNode planOperation, List<String> failures) {
+        String contextPath = text(planOperation.path("input"), "contextPath");
+        if (contextPath.isBlank() || contextPath.startsWith("$") || contextPath.contains("..") || contextPath.contains("://")) {
+            failures.add("validator field-binding-path-valid failed for " + operationId + ": contextPath is invalid");
+        }
+    }
+
+    private JsonNode editorialJourney(JsonNode config, String journeyId) {
+        JsonNode journeys = config.path("solution").path("journeys");
+        if (!journeys.isArray()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode journey : journeys) {
+            if (matchesAnyKey(journey, List.of("journeyId", "id"), journeyId)) {
+                return journey;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode editorialStep(JsonNode config, String journeyId, String stepId) {
+        JsonNode journey = editorialJourney(config, journeyId);
+        if (journey == null || journey.isMissingNode()) {
+            return null;
+        }
+        for (JsonNode step : journey.path("steps")) {
+            if (matchesAnyKey(step, List.of("stepId", "id"), stepId)) {
+                return step;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode editorialBlock(JsonNode config, String journeyId, String stepId, String blockId) {
+        JsonNode journeys = config.path("solution").path("journeys");
+        if (!journeys.isArray()) {
+            return null;
+        }
+        for (JsonNode journey : journeys) {
+            if (!journeyId.isBlank() && !matchesAnyKey(journey, List.of("journeyId", "id"), journeyId)) {
+                continue;
+            }
+            for (JsonNode step : journey.path("steps")) {
+                if (!stepId.isBlank() && !matchesAnyKey(step, List.of("stepId", "id"), stepId)) {
+                    continue;
+                }
+                for (JsonNode block : step.path("blocks")) {
+                    if (matchesAnyKey(block, List.of("blockId", "id"), blockId)) {
+                        return block;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private JsonNode editorialAdapter(JsonNode config, String adapterId) {
+        for (String path : List.of("adapterRegistry", "dataBlockAdapters", "hostConfig.dataBlockAdapters")) {
+            JsonNode adapters = resolvePath(config, path);
+            if (!adapters.isArray()) {
+                continue;
+            }
+            for (JsonNode adapter : adapters) {
+                if (matchesAnyKey(adapter, List.of("adapterId", "id"), adapterId)) {
+                    return adapter;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean editorialBlockFieldExists(JsonNode block, String fieldName) {
+        if (block.path("fieldBindings").has(fieldName)) {
+            return true;
+        }
+        for (JsonNode field : block.path("fields")) {
+            if (fieldName.equals(field.asText("")) || matchesAnyKey(field, List.of("name", "fieldName", "field"), fieldName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void validateCrudResourcePresent(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
         JsonNode input = planOperation.path("input");
         String resourcePath = text(input, "resourcePath");
@@ -3578,6 +3859,18 @@ public final class AgenticAuthoringValidatorRegistry {
         }
         for (JsonNode item : array) {
             if (value.equals(item.asText(""))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean matchesAnyKey(JsonNode item, List<String> keys, String targetValue) {
+        if (targetValue == null || targetValue.isBlank()) {
+            return false;
+        }
+        for (String key : keys) {
+            if (targetValue.equals(text(item, key))) {
                 return true;
             }
         }

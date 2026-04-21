@@ -2348,6 +2348,118 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("metadataBridge").path("openMode").asText()).isEqualTo("field-toolbar");
     }
 
+    @Test
+    void shouldCompileEditorialFormsAuthoringPatches() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "solution": {
+                    "solutionId": "onboarding",
+                    "journeys": [
+                      {
+                        "journeyId": "main",
+                        "steps": [
+                          {
+                            "stepId": "start",
+                            "blocks": [
+                              {
+                                "blockId": "profile",
+                                "kind": "dataCollection",
+                                "fields": [ { "name": "email" } ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "adapterRegistry": [
+                    { "adapterId": "dynamic-form", "supportedDataBlockTypes": ["dataCollection"] }
+                  ],
+                  "snapshot": { "diagnostics": { "items": [] } },
+                  "runtimeContext": { "formData": {} },
+                  "hostConfig": {}
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-editorial-forms",
+                operationWithHandler("snapshot.set", "snapshot", "editorial-runtime-snapshot", false,
+                        "compile-domain-patch", "editorial-snapshot-set", "solution.solutionId"),
+                plan("{}", "{ \"solutionId\": \"onboarding\", \"journeyId\": \"main\", \"stepId\": \"start\", \"instanceId\": \"i1\", \"runtimeContextPatch\": { \"locale\": \"pt-BR\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-editorial-forms",
+                operationWithHandler("fallback.configure", "fallback", "editorial-runtime-fallback-state", false,
+                        "compile-domain-patch", "editorial-fallback-configure", "snapshot.diagnostics.items"),
+                plan("{}", "{ \"mode\": \"warning\", \"diagnosticCode\": \"adapter-missing\", \"scope\": { \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"profile\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-editorial-forms",
+                operationWithHandler("presentation.configure", "presentation", "editorial-solution-presentation", false,
+                        "compile-domain-patch", "editorial-presentation-configure", "solution.presentation"),
+                plan("{}", "{ \"layout\": { \"orientation\": \"vertical\" }, \"stepper\": { \"visible\": true } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-editorial-forms",
+                operationWithHandler("adapter.bind", "adapter", "editorial-data-block-adapter-registry", true,
+                        "compile-domain-patch", "editorial-adapter-bind", "hostConfig.dataBlockAdapters"),
+                plan("\"dynamic-form\"", "{ \"adapterId\": \"dynamic-form\", \"dataBlockType\": \"dataCollection\", \"componentRef\": \"praxis-dynamic-form\", \"forwardOperationalEvents\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-editorial-forms",
+                operationWithHandler("dataBlock.add", "dataBlock", "editorial-journey-step-block-by-id", true,
+                        "compile-domain-patch", "editorial-data-block-add", "solution.journeys[].steps[].blocks"),
+                plan("{ \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"review\" }", "{ \"journeyId\": \"main\", \"stepId\": \"start\", \"block\": { \"blockId\": \"review\", \"kind\": \"reviewSections\", \"title\": \"Review\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-editorial-forms",
+                operationWithHandler("fieldBinding.set", "fieldBinding", "editorial-data-block-field-binding", true,
+                        "compile-domain-patch", "editorial-field-binding-set", "runtimeContext.formData"),
+                plan("{ \"blockId\": \"profile\", \"fieldName\": \"email\" }", "{ \"blockId\": \"profile\", \"fieldName\": \"email\", \"contextPath\": \"customer.email\", \"mode\": \"readWrite\", \"delegateFieldMetadataTo\": \"praxis-metadata-editor\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-editorial-forms",
+                operationWithHandler("dataBlock.remove", "dataBlock", "editorial-journey-step-block-by-id", true,
+                        "compile-domain-patch", "editorial-data-block-remove", "solution.journeys[].steps[].blocks"),
+                plan("{ \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"review\" }", "{ \"journeyId\": \"main\", \"stepId\": \"start\", \"blockId\": \"review\", \"requireNoFieldBindings\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(7);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("set-editorial-snapshot");
+        assertThat(patchOperations.get(6).path("op").asText()).isEqualTo("remove-editorial-data-block");
+        assertThat(proposedConfig.path("runtimeContext").path("locale").asText()).isEqualTo("pt-BR");
+        assertThat(proposedConfig.path("snapshot").path("diagnostics").path("items")).hasSize(1);
+        assertThat(proposedConfig.path("solution").path("presentation").path("layout").path("orientation").asText()).isEqualTo("vertical");
+        assertThat(proposedConfig.path("hostConfig").path("dataBlockAdapters").get(0).path("adapterId").asText()).isEqualTo("dynamic-form");
+        assertThat(proposedConfig.path("solution").path("journeys").get(0).path("steps").get(0).path("blocks")).hasSize(1);
+        assertThat(proposedConfig.path("solution").path("journeys").get(0).path("steps").get(0).path("blocks").get(0)
+                .path("fieldBindings").path("email").path("contextPath").asText()).isEqualTo("customer.email");
+    }
+
     private ObjectNode dynamicFormConfig() throws Exception {
         return (ObjectNode) objectMapper.readTree("""
                 {
