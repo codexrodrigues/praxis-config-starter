@@ -535,6 +535,97 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesTabsLabelChangeFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-tabs",
+                payloadFromClasspathSnapshot("praxis-tabs"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "tabs": [
+                      { "id": "general", "textLabel": "Geral", "icon": "settings" },
+                      { "id": "security", "textLabel": "Seguranca", "icon": "shield" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "tab.label.set",
+                    "target": "Geral",
+                    "input": {
+                      "textLabel": "Visao geral"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: tab-exists for tab.label.set");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("tab.label.set");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");
+        assertThat(operation.path("resolvedPath").asText()).isEqualTo("tabs[]/0");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("general");
+        assertThat(operation.path("value").path("textLabel").asText()).isEqualTo("Visao geral");
+        assertThat(result.patch().path("proposedConfig").path("tabs").get(0).path("textLabel").asText())
+                .isEqualTo("Visao geral");
+    }
+
+    @Test
+    void warnsOnTabsDomainPatchAndRejectsCompilationWithoutHandler() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-tabs",
+                payloadFromClasspathSnapshot("praxis-tabs"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "tabs": [
+                      { "id": "general", "textLabel": "Geral" },
+                      { "id": "security", "textLabel": "Seguranca" }
+                    ],
+                    "group": {
+                      "selectedIndex": 0
+                    }
+                  },
+                  "plan": {
+                    "operationId": "tab.order.set",
+                    "target": "general",
+                    "input": {
+                      "beforeTabId": "security"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings()).contains("operation requires domain compiler: tab.order.set");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isFalse();
+        assertThat(result.failures()).contains("domain compiler is required for operation: tab.order.set");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
