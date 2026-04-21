@@ -1,0 +1,149 @@
+{
+  "schemaVersion": "praxis.domain-catalog/v0.1",
+  "service": {
+    "serviceKey": "praxis-api-quickstart",
+    "name": "Praxis API Quickstart",
+    "version": "2.0.0-rc.9"
+  },
+  "release": {
+    "releaseKey": "praxis-api-quickstart:domain-catalog-example:v0.1",
+    "generatedAt": "2026-04-21T22:30:00Z",
+    "sourceHash": "sha256:example"
+  },
+  "contexts": [
+    {
+      "contextKey": "human-resources",
+      "label": "Human Resources",
+      "description": "People, payroll and workforce lifecycle.",
+      "owner": "people-platform",
+      "source": "api-resource",
+      "status": "active",
+      "tags": [
+        "hr",
+        "payroll"
+      ],
+      "confidence": 0.95
+    }
+  ],
+  "nodes": [
+    {
+      "nodeKey": "human-resources.folhas-pagamento",
+      "contextKey": "human-resources",
+      "nodeType": "resource",
+      "label": "Payroll",
+      "description": "Monthly payroll cycle and payment state.",
+      "status": "active",
+      "source": "api-resource",
+      "confidence": 0.95,
+      "metadata": {
+        "resourceKey": "human-resources.folhas-pagamento"
+      },
+      "tags": [
+        "payroll"
+      ],
+      "owner": "people-platform"
+    },
+    {
+      "nodeKey": "human-resources.folhas-pagamento.field.valorLiquido",
+      "contextKey": "human-resources",
+      "nodeType": "field",
+      "label": "Net payroll value",
+      "description": "Net amount paid to an employee.",
+      "status": "active",
+      "source": "openapi-schema",
+      "confidence": 0.9,
+      "metadata": {
+        "fieldName": "valorLiquido",
+        "type": "number"
+      },
+      "tags": [
+        "financial",
+        "lgpd"
+      ],
+      "owner": "people-platform"
+    }
+  ],
+  "edges": [
+    {
+      "edgeKey": "human-resources.folhas-pagamento.has-field.valorLiquido",
+      "sourceNodeKey": "human-resources.folhas-pagamento",
+      "targetNodeKey": "human-resources.folhas-pagamento.field.valorLiquido",
+      "edgeType": "has_field",
+      "label": "Payroll has net value field",
+      "confidence": 0.9,
+      "evidenceKeys": [
+        "evidence:human-resources.folhas-pagamento.field.valorLiquido:schema"
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "bindingKey": "binding:human-resources.folhas-pagamento.field.valorLiquido:dto-field",
+      "nodeKey": "human-resources.folhas-pagamento.field.valorLiquido",
+      "bindingType": "dto_field",
+      "target": {
+        "schemaId": "FolhaPagamentoResponse",
+        "fieldName": "valorLiquido"
+      },
+      "schemaLinks": [
+        {
+          "rel": "schema",
+          "href": "/v3/api-docs",
+          "schemaId": "FolhaPagamentoResponse",
+          "schemaType": "response"
+        }
+      ],
+      "evidenceKeys": [
+        "evidence:human-resources.folhas-pagamento.field.valorLiquido:schema"
+      ]
+    }
+  ],
+  "aliases": [
+    {
+      "aliasKey": "alias:human-resources.folhas-pagamento.field.valorLiquido:pt-BR:salario-liquido",
+      "nodeKey": "human-resources.folhas-pagamento.field.valorLiquido",
+      "alias": "salario liquido",
+      "locale": "pt-BR",
+      "source": "business-glossary",
+      "confidence": 0.8
+    }
+  ],
+  "evidence": [
+    {
+      "evidenceKey": "evidence:human-resources.folhas-pagamento.field.valorLiquido:schema",
+      "evidenceType": "dto_schema",
+      "sourceRef": {
+        "schemaId": "FolhaPagamentoResponse",
+        "fieldName": "valorLiquido"
+      },
+      "summary": "Field discovered from OpenAPI schema.",
+      "confidence": 0.9
+    }
+  ],
+  "governance": [
+    {
+      "governanceKey": "governance:human-resources.folhas-pagamento.field.valorLiquido:privacy",
+      "nodeKey": "human-resources.folhas-pagamento.field.valorLiquido",
+      "annotationType": "privacy",
+      "classification": "confidential",
+      "dataCategory": "financial",
+      "complianceTags": [
+        "LGPD",
+        "INTERNAL_POLICY"
+      ],
+      "owner": "people-platform",
+      "steward": "people-data-governance",
+      "retentionPolicy": "payroll-retention",
+      "aiUsage": {
+        "visibility": "mask",
+        "trainingUse": "deny",
+        "ruleAuthoring": "review_required",
+        "reasoningUse": "allow",
+        "maskingStrategy": "currency-value-redaction",
+        "notes": "LLMs may reason over classification, but should not see raw salary values."
+      },
+      "source": "business-governance",
+      "confidence": 0.95
+    }
+  ]
+}

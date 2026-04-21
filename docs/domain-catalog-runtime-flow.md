@@ -64,6 +64,11 @@ Expected top-level shape:
 }
 ```
 
+The normative v0.1 vocabulary and governance baseline are documented in
+`docs/domain-catalog/domain-catalog-contract-v0.1.md`. The matching JSON Schema
+is available at
+`docs/domain-catalog/contracts/praxis-domain-catalog-v0.1.schema.json`.
+
 ## 3. Ingest The Catalog
 
 ```bash
