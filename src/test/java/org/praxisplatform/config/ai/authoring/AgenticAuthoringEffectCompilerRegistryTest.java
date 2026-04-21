@@ -1244,6 +1244,60 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("baseUrl").isMissingNode()).isTrue();
     }
 
+    @Test
+    void shouldCompileListTemplateSlotSet() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "templating": {
+                    "primary": { "type": "text", "expr": "name" }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-list",
+                operationWithHandler("template.slot.set", "itemTemplate", "list-template-slot", true,
+                        "compile-domain-patch", "list-template-slot-set", "templating.primary"),
+                plan("\"primary\"", "{ \"slot\": \"primary\", \"template\": { \"type\": \"text\", \"expr\": \"title\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-list-template-slot");
+        assertThat(patchOperation.path("path").asText()).isEqualTo("templating.primary");
+        assertThat(patchOperation.path("previousValue").path("expr").asText()).isEqualTo("name");
+        assertThat(patchOperation.path("value").path("expr").asText()).isEqualTo("title");
+        assertThat(proposedConfig.path("templating").path("primary").path("expr").asText()).isEqualTo("title");
+    }
+
+    @Test
+    void shouldRejectListTemplateSlotMismatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "templating": {}
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-list",
+                operationWithHandler("template.slot.set", "itemTemplate", "list-template-slot", true,
+                        "compile-domain-patch", "list-template-slot-set", "templating.primary"),
+                plan("\"primary\"", "{ \"slot\": \"secondary\", \"template\": { \"type\": \"text\", \"expr\": \"title\" } }"),
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).contains("list-template-slot-set target slot does not match input slot");
+        assertThat(proposedConfig.path("templating").path("secondary").isMissingNode()).isTrue();
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

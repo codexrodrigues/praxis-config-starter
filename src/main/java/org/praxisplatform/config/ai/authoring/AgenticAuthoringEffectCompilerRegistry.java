@@ -94,7 +94,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "expansion-multi-expand-set".equals(handler)
                 || "expansion-default-expanded-upsert".equals(handler)
                 || "files-upload-presign-base-url".equals(handler)
-                || "files-upload-direct-base-url".equals(handler);
+                || "files-upload-direct-base-url".equals(handler)
+                || "list-template-slot-set".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -326,6 +327,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures,
                     "direct");
+            case "list-template-slot-set" -> compileListTemplateSlotSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
             default -> {
                 failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
                 yield null;
@@ -1651,6 +1660,44 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileListTemplateSlotSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String slot = text(input, "slot");
+        if (!listTemplateSlots().contains(slot)) {
+            failures.add("list-template-slot-set unsupported slot: " + slot);
+            return null;
+        }
+        String resolvedSlot = resolved != null ? text(resolved.value(), "slot") : "";
+        if (!resolvedSlot.isBlank() && !slot.equals(resolvedSlot)) {
+            failures.add("list-template-slot-set target slot does not match input slot");
+            return null;
+        }
+        JsonNode template = input.path("template");
+        if (template.isMissingNode() || template.isNull()) {
+            failures.add("list-template-slot-set requires input.template");
+            return null;
+        }
+
+        ObjectNode templating = objectAt(proposedConfig, "templating", true);
+        JsonNode previousValue = templating.path(slot);
+        templating.set(slot, template);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "set-list-template-slot");
+        compiled.put("path", "templating." + slot);
+        compiled.put("slot", slot);
+        compiled.set("previousValue", previousValue.isMissingNode() ? MissingNode.getInstance() : previousValue);
+        compiled.set("value", template);
+        return compiled;
+    }
+
     private ObjectNode compileExpansionMultiExpandSet(
             String componentId,
             JsonNode operation,
@@ -1766,6 +1813,23 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
         }
         return "";
+    }
+
+    private Set<String> listTemplateSlots() {
+        return Set.of(
+                "leading",
+                "primary",
+                "secondary",
+                "meta",
+                "trailing",
+                "identity",
+                "balance",
+                "limit",
+                "risk",
+                "alerts",
+                "owner",
+                "sectionHeader",
+                "emptyState");
     }
 
     private boolean isUnsafeFilesBaseUrl(String baseUrl) {

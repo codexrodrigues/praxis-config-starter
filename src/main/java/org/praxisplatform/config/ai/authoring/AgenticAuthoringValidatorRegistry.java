@@ -72,6 +72,9 @@ public final class AgenticAuthoringValidatorRegistry {
             "presign-cross-origin-fields-safe",
             "upload-endpoint-fixed-contract",
             "bulk-endpoint-fixed-contract",
+            "template-slot-supported",
+            "bound-field-exists",
+            "template-expression-safe",
             "sanitization-policy-explicit",
             "unsafe-html-rejected",
             "unsafe-url-rejected",
@@ -159,6 +162,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "upload-endpoint-fixed-contract" -> validateFilesEndpointPathContract(operationId, planOperation, failures, "upload");
                 case "bulk-endpoint-fixed-contract" -> validateFilesEndpointPathContract(operationId, planOperation, failures, "bulk");
                 case "presign-cross-origin-fields-safe" -> validatePresignCrossOriginFieldsSafe(operationId, planOperation, failures);
+                case "template-slot-supported" -> validateListTemplateSlotSupported(operationId, planOperation, failures);
+                case "bound-field-exists" -> validateListTemplateBoundFieldsExist(operationId, planOperation, config, failures);
+                case "template-expression-safe" -> validateListTemplateExpressionSafe(operationId, planOperation, failures);
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
                 case "unsafe-html-rejected" -> validateUnsafeHtmlRejected(operationId, planOperation, failures);
                 case "unsafe-url-rejected" -> validateUnsafeUrlRejected(operationId, planOperation, failures);
@@ -673,6 +679,94 @@ public final class AgenticAuthoringValidatorRegistry {
         return normalized;
     }
 
+    private Set<String> listTemplateSlots() {
+        return Set.of(
+                "leading",
+                "primary",
+                "secondary",
+                "meta",
+                "trailing",
+                "identity",
+                "balance",
+                "limit",
+                "risk",
+                "alerts",
+                "owner",
+                "sectionHeader",
+                "emptyState");
+    }
+
+    private Set<String> templateReferencedFields(JsonNode template) {
+        Set<String> fields = new HashSet<>();
+        collectTemplateReferencedFields(template, fields);
+        return fields;
+    }
+
+    private void collectTemplateReferencedFields(JsonNode node, Set<String> fields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isTextual()) {
+            collectFieldReferencesFromText(node.asText(""), fields);
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(child -> collectTemplateReferencedFields(child, fields));
+            return;
+        }
+        if (node.isObject()) {
+            for (String key : List.of("field", "fieldName", "valueExpr", "expr", "titleExpr", "subtitleExpr", "iconExpr", "colorExpr")) {
+                collectFieldReferencesFromText(text(node, key), fields);
+            }
+            Iterator<JsonNode> values = node.elements();
+            while (values.hasNext()) {
+                collectTemplateReferencedFields(values.next(), fields);
+            }
+        }
+    }
+
+    private void collectFieldReferencesFromText(String text, Set<String> fields) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        if (text.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            fields.add(text);
+            return;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\\{\\{?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*}?}")
+                .matcher(text);
+        while (matcher.find()) {
+            fields.add(matcher.group(1));
+        }
+    }
+
+    private boolean containsUnsafeTemplateHtml(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isObject()) {
+            String type = text(node, "type");
+            if ("html".equals(type)) {
+                return true;
+            }
+            Iterator<JsonNode> values = node.elements();
+            while (values.hasNext()) {
+                if (containsUnsafeTemplateHtml(values.next())) {
+                    return true;
+                }
+            }
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (containsUnsafeTemplateHtml(child)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private Set<String> safeRichContentUrlProtocols() {
         return Set.of("http", "https", "mailto", "tel");
     }
@@ -903,6 +997,59 @@ public final class AgenticAuthoringValidatorRegistry {
         if (planOperation.path("input").path("allowCrossOriginPresignedTarget").asBoolean(false)) {
             failures.add("validator presign-cross-origin-fields-safe failed for " + operationId
                     + ": cross-origin presigned targets are not configurable through component authoring");
+        }
+    }
+
+    private void validateListTemplateSlotSupported(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String slot = text(planOperation.path("input"), "slot");
+        if (!listTemplateSlots().contains(slot)) {
+            failures.add("validator template-slot-supported failed for " + operationId
+                    + ": unsupported template slot " + slot);
+        }
+        String targetSlot = planOperation.path("target").isTextual()
+                ? planOperation.path("target").asText("")
+                : text(planOperation.path("target"), "slot");
+        if (!targetSlot.isBlank() && !slot.equals(targetSlot)) {
+            failures.add("validator template-slot-supported failed for " + operationId
+                    + ": target slot does not match input slot");
+        }
+    }
+
+    private void validateListTemplateBoundFieldsExist(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        Set<String> existing = new HashSet<>();
+        config.path("fields").forEach(field -> existing.add(field.asText("")));
+        config.path("columns").forEach(column -> existing.add(text(column, "field")));
+        config.path("fieldMetadata").forEach(field -> existing.add(text(field, "name")));
+        if (existing.isEmpty()) {
+            return;
+        }
+        for (String field : templateReferencedFields(planOperation.path("input").path("template"))) {
+            if (!field.isBlank() && !existing.contains(field)) {
+                failures.add("validator bound-field-exists failed for " + operationId
+                        + ": unknown field " + field);
+            }
+        }
+    }
+
+    private void validateListTemplateExpressionSafe(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode template = planOperation.path("input").path("template");
+        if (containsUnsafeInlineHandler(template)) {
+            failures.add("validator template-expression-safe failed for " + operationId
+                    + ": template must not include inline handlers or functions");
+        }
+        if (containsUnsafeTemplateHtml(template)) {
+            failures.add("validator template-expression-safe failed for " + operationId
+                    + ": html template expressions are not accepted by backend authoring");
         }
     }
 

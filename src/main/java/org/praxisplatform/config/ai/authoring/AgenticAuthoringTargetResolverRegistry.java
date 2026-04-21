@@ -1,7 +1,9 @@
 package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -131,6 +133,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 addArrayMatches(candidates, config, "nav.links[]", List.of("id", "label", "textLabel", "title"), targetValue);
             }
             case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
+            case "list-template-slot" -> addListTemplateSlotMatch(candidates, config, targetValue);
             case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
             case "rich-timeline-item-by-block-id-and-item-id" -> addRichTimelineItemMatches(candidates, config, target, targetValue);
             case "rule-by-id", "rule-by-id-or-name" -> addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
@@ -225,6 +228,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "tab-by-id-or-label",
                 "tab-or-link-by-id",
                 "tab-index-or-id",
+                "list-template-slot",
                 "rich-block-by-id-or-index",
                 "rich-text-node-by-id-or-path",
                 "rich-media-node-by-id-or-path",
@@ -276,6 +280,36 @@ public final class AgenticAuthoringTargetResolverRegistry {
             return;
         }
         addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
+    }
+
+    private void addListTemplateSlotMatch(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
+        if (!listTemplateSlots().contains(targetValue)) {
+            return;
+        }
+        ObjectNode value = JsonNodeFactory.instance.objectNode();
+        value.put("slot", targetValue);
+        JsonNode existing = resolvePath(config, "templating." + targetValue);
+        if (!existing.isMissingNode()) {
+            value.set("template", existing);
+        }
+        candidates.add(new ResolvedCandidate("templating." + targetValue, value));
+    }
+
+    private Set<String> listTemplateSlots() {
+        return Set.of(
+                "leading",
+                "primary",
+                "secondary",
+                "meta",
+                "trailing",
+                "identity",
+                "balance",
+                "limit",
+                "risk",
+                "alerts",
+                "owner",
+                "sectionHeader",
+                "emptyState");
     }
 
     private void addRichTimelineItemMatches(
@@ -452,7 +486,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
         if (target.isTextual() || target.isNumber() || target.isBoolean()) {
             return target.asText("");
         }
-        for (String field : List.of("id", "field", "name", "key", "value")) {
+        for (String field : List.of("id", "field", "name", "key", "value", "slot")) {
             if (target.has(field)) {
                 return target.path(field).asText("");
             }
