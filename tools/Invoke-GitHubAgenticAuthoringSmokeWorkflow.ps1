@@ -4,7 +4,7 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "main",
+    [string] $QuickstartRef = "3cd1344fdbd772f54b4261a0527d361e3ef1df33",
     [string] $UiRef = "main",
     [int] $StreamProcessingTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,

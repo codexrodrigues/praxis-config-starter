@@ -51,6 +51,7 @@ Release e Gate de Authoring
 - Antes de criar tag/publicar no Maven Central, o gate recomendado e `Agentic Authoring HTTP Smoke`.
 - Workflow: `.github/workflows/agentic-authoring-smoke.yml`.
 - O workflow instala o starter do checkout no Maven local do runner, empacota `praxis-api-quickstart` contra essa versao local e roda o smoke HTTP/SSE completo.
+- O `quickstart_ref` padrao deve apontar para um ref conhecido com dependencias publicadas no Maven Central; nao usar `main` como default enquanto ele puder depender de releases ainda nao publicadas.
 - Para mudancas que toquem fluxo agentic do page-builder, SSE browser, patch/apply ou contrato ponta a ponta com Angular, habilitar tambem o input `run_page_builder_full_e2e=true` nesse mesmo workflow.
 - O full gate opcional faz checkout de `praxis-ui-angular`, sobe o quickstart em `8088`, Angular em `4003` e executa `praxis-page-builder-agentic-validation.playwright.config.ts` contra LLM real e stream em modo `signed-url-token`, com retry controlado para absorver variacao nao deterministica do provedor.
 - Secrets do gate:
@@ -74,7 +75,7 @@ Comandos de Validacao Local
 - Full E2E local do page-builder agentic:
   - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -UiRoot ..\praxis-ui-angular -StreamProcessingTimeoutSeconds 180`
 - Disparo local do workflow GitHub quando `gh` estiver autenticado:
-  - `gh workflow run agentic-authoring-smoke.yml --repo codexrodrigues/praxis-config-starter -f provider=openai -f quickstart_ref=main`
+  - `gh workflow run agentic-authoring-smoke.yml --repo codexrodrigues/praxis-config-starter -f provider=openai`
 
 Validacao Downstream
 - Quando a mudanca tocar contrato publico, release, authoring, AI tools, streaming ou integracao real de host, validar com `praxis-api-quickstart`.
