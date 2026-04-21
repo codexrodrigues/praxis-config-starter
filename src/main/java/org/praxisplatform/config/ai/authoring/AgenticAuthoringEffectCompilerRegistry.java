@@ -75,7 +75,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return "stepper-step-reorder".equals(handler)
                 || "tabs.reorder-tab-and-preserve-selection".equals(handler)
                 || "tabs.remove-tab-and-reselect".equals(handler)
-                || "tabs.set-active-item".equals(handler);
+                || "tabs.set-active-item".equals(handler)
+                || "rich-content-block-add".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -165,6 +166,13 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     resolved,
                     proposedConfig,
                     failures);
+            case "rich-content-block-add" -> compileRichContentBlockAdd(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
             default -> {
                 failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
                 yield null;
@@ -241,6 +249,87 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("selectedIndexAfter", selectedIndexAfter);
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileRichContentBlockAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode nodes = arrayAt(proposedConfig, "document.nodes", true);
+        if (nodes == null) {
+            failures.add("rich-content-block-add path is not an array: document.nodes[]");
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        String type = text(input, "type");
+        if (type.isBlank()) {
+            failures.add("rich-content-block-add requires type");
+            return null;
+        }
+
+        ObjectNode node = objectMapper.createObjectNode();
+        if (input.path("node") instanceof ObjectNode inputNode) {
+            node.setAll(inputNode);
+        }
+        if (!node.hasNonNull("type") && !node.hasNonNull("kind")) {
+            node.put("type", type);
+        }
+        if (!node.hasNonNull("id")) {
+            node.put("id", nextRichContentNodeId(nodes, type));
+        }
+        String nodeId = text(node, "id");
+        if (nodeId.isBlank()) {
+            failures.add("rich-content-block-add requires node.id or generated id");
+            return null;
+        }
+        if (indexOfObjectByKey(nodes, "id", nodeId) >= 0) {
+            failures.add("rich-content-block-add duplicate node id: document.nodes[] id=" + nodeId);
+            return null;
+        }
+
+        int insertedIndex = nodes.size();
+        String beforeBlockId = text(input, "beforeBlockId");
+        String afterBlockId = text(input, "afterBlockId");
+        if (!beforeBlockId.isBlank()) {
+            insertedIndex = indexOfObjectByKey(nodes, "id", beforeBlockId);
+            if (insertedIndex < 0) {
+                failures.add("rich-content-block-add before block not found: document.nodes[] id=" + beforeBlockId);
+                return null;
+            }
+        } else if (!afterBlockId.isBlank()) {
+            int afterIndex = indexOfObjectByKey(nodes, "id", afterBlockId);
+            if (afterIndex < 0) {
+                failures.add("rich-content-block-add after block not found: document.nodes[] id=" + afterBlockId);
+                return null;
+            }
+            insertedIndex = afterIndex + 1;
+        }
+        nodes.insert(insertedIndex, node);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "insert-rich-block");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "document.nodes[]");
+        compiled.put("keyValue", nodeId);
+        compiled.put("insertedIndex", insertedIndex);
+        if (!beforeBlockId.isBlank()) {
+            compiled.put("beforeBlockId", beforeBlockId);
+        }
+        if (!afterBlockId.isBlank()) {
+            compiled.put("afterBlockId", afterBlockId);
+        }
+        compiled.set("value", node);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
         compiled.set("affectedPaths", operation.path("affectedPaths"));
         compiled.set("submissionImpact", operation.path("submissionImpact"));
         return compiled;
@@ -707,6 +796,18 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return Integer.parseInt(resolved.path().substring(slash + 1));
         } catch (NumberFormatException ex) {
             return -1;
+        }
+    }
+
+    private String nextRichContentNodeId(ArrayNode nodes, String type) {
+        String normalizedType = type == null || type.isBlank()
+                ? "block"
+                : type.replaceAll("[^A-Za-z0-9]+", "-").toLowerCase();
+        for (int i = nodes.size() + 1; ; i++) {
+            String candidate = normalizedType + "-" + i;
+            if (indexOfObjectByKey(nodes, "id", candidate) < 0) {
+                return candidate;
+            }
         }
     }
 

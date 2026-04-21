@@ -403,6 +403,46 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("nav").path("selectedIndex").asInt()).isEqualTo(1);
     }
 
+    @Test
+    void shouldCompileRichContentBlockAddDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      { "id": "hero", "type": "text", "text": "Intro" },
+                      { "id": "footer", "type": "text", "text": "End" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("block.add", "block", "document-nodes-array", false,
+                        "compile-domain-patch", "rich-content-block-add", "document.nodes[]"),
+                plan("{}", "{ \"type\": \"text\", \"node\": { \"id\": \"body\", \"text\": \"Body\" }, \"afterBlockId\": \"hero\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("insert-rich-block");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-block-add");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("body");
+        assertThat(patchOperation.path("insertedIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("afterBlockId").asText()).isEqualTo("hero");
+        assertThat(patchOperation.path("value").path("type").asText()).isEqualTo("text");
+        assertThat(proposedConfig.path("document").path("nodes")).hasSize(3);
+        assertThat(proposedConfig.path("document").path("nodes").get(1).path("id").asText()).isEqualTo("body");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

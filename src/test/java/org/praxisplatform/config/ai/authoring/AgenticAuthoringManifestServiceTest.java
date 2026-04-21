@@ -867,6 +867,66 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesRichContentBlockAddFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "hero", "type": "text", "text": "Intro" },
+                        { "id": "footer", "type": "text", "text": "End" }
+                      ]
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.add",
+                    "input": {
+                      "type": "text",
+                      "node": {
+                        "id": "body",
+                        "text": "Body"
+                      },
+                      "afterBlockId": "hero"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: node-types-supported for block.add")
+                .contains("validator declared without backend implementation: block-id-unique for block.add")
+                .contains("validator declared without backend implementation: document-shape-canonical for block.add");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("block.add");
+        assertThat(operation.path("op").asText()).isEqualTo("insert-rich-block");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("rich-content-block-add");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("body");
+        assertThat(operation.path("insertedIndex").asInt()).isEqualTo(1);
+        assertThat(result.patch().path("proposedConfig").path("document").path("nodes")).hasSize(3);
+        assertThat(result.patch().path("proposedConfig").path("document").path("nodes").get(1).path("id").asText())
+                .isEqualTo("body");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
