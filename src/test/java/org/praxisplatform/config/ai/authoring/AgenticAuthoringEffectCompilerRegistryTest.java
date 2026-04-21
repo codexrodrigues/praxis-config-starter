@@ -2131,6 +2131,111 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("validationErrors")).isEmpty();
     }
 
+    @Test
+    void shouldCompileMetadataEditorAuthoringPatches() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "fieldMetadata": { "name": "status", "label": "Status", "controlType": "select" },
+                  "properties": [
+                    { "name": "label", "editorType": "text" }
+                  ],
+                  "componentRegistry": [
+                    { "controlType": "select" },
+                    { "controlType": "pdx-combo" }
+                  ],
+                  "editorCoverage": []
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("fieldMetadata.property.set", "fieldMetadata", "field-metadata-json-path", true,
+                        "compile-domain-patch", "metadata-field-property-set", "fieldMetadata.label"),
+                plan("{ \"path\": \"label\" }", "{ \"path\": \"label\", \"value\": \"Situação\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("controlType.set", "controlType", "dynamic-fields-control-type-discovery", true,
+                        "compile-domain-patch", "metadata-control-type-set", "fieldMetadata.controlType"),
+                plan("\"select\"", "{ \"controlType\": \"pdx-combo\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("optionSource.configure", "optionSource", "field-metadata-option-source", false,
+                        "compile-domain-patch", "metadata-option-source-configure", "fieldMetadata.optionSource"),
+                plan("{}", "{ \"kind\": \"resource\", \"resource\": \"/api/status\", \"valueField\": \"id\", \"labelField\": \"name\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("cascade.configure", "cascade", "metadata-editor-cascade-rules", false,
+                        "compile-domain-patch", "metadata-cascade-configure", "fieldMetadata.dependencyFields"),
+                plan("{}", "{ \"dependentField\": \"country\", \"sourceField\": \"state\", \"strategy\": \"replace\", \"debounceMs\": 200 }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("renderer.configure", "renderer", "metadata-editor-renderer-property", true,
+                        "compile-domain-patch", "metadata-renderer-configure", "properties[]"),
+                plan("\"label\"", "{ \"propertyName\": \"label\", \"editorType\": \"textarea\", \"group\": \"basic\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("validationRule.add", "validation", "field-metadata-validation-rules", false,
+                        "compile-domain-patch", "metadata-validation-rule-add", "fieldMetadata.validators[]"),
+                plan("{}", "{ \"rule\": { \"type\": \"required\" }, \"message\": \"Required\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("contextHint.set", "contextHint", "metadata-editor-context-hints", false,
+                        "compile-domain-patch", "metadata-context-hint-set", "fieldMetadata.helpText"),
+                plan("{}", "{ \"hintPath\": \"helpText\", \"value\": \"Choose status\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
+                operationWithHandler("normalization.apply", "normalization", "metadata-editor-schema-normalizer", false,
+                        "compile-domain-patch", "metadata-normalization-apply", "normalizedSeed"),
+                plan("{}", "{ \"mode\": \"preserve-advanced-properties\", \"preserveUnknownCanonicalFields\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(8);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("set-metadata-field-property");
+        assertThat(patchOperations.get(7).path("op").asText()).isEqualTo("apply-metadata-normalization");
+        assertThat(proposedConfig.path("fieldMetadata").path("label").asText()).isEqualTo("Situação");
+        assertThat(proposedConfig.path("fieldMetadata").path("controlType").asText()).isEqualTo("pdx-combo");
+        assertThat(proposedConfig.path("fieldMetadata").path("optionSource").path("resource").asText()).isEqualTo("/api/status");
+        assertThat(proposedConfig.path("fieldMetadata").path("dependencyFields").get(0).asText()).isEqualTo("country");
+        assertThat(proposedConfig.path("properties").get(0).path("editorType").asText()).isEqualTo("textarea");
+        assertThat(proposedConfig.path("fieldMetadata").path("validators")).hasSize(1);
+        assertThat(proposedConfig.path("normalizedSeed").path("normalized").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("form").path("fieldMetadata").path("helpText").asText()).isEqualTo("Choose status");
+    }
+
     private ObjectNode dynamicFormConfig() throws Exception {
         return (ObjectNode) objectMapper.readTree("""
                 {

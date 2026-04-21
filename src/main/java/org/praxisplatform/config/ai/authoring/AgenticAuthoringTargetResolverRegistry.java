@@ -83,6 +83,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "default-effect-preset-by-key",
             "praxis-table-authoring-operation",
             "rule-builder-json-logic-document",
+            "metadata-editor-schema-normalizer",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -191,15 +192,27 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 addArrayMatches(candidates, config, "rowConditionalStyles[]", List.of("id", "key"), targetValue);
                 addRecursiveArrayMatches(candidates, config, "conditionalStyles", List.of("id", "key"), targetValue);
             }
-            case "field-control-type-token", "component-registry-coverage" -> {
+            case "field-control-type-token", "component-registry-coverage", "dynamic-fields-control-type-discovery" -> {
                 addArrayMatches(candidates, config, "componentRegistry[]", List.of("controlType", "type", "id", "name"), targetValue);
                 addRecursiveArrayMatches(candidates, config, "controlProfiles", List.of("controlType", "type", "id", "name"), targetValue);
+                addArrayMatches(candidates, config, "editorCoverage[]", List.of("controlType", "type", "id", "name"), targetValue);
             }
             case "normalized-control-type-alias" -> addArrayMatches(candidates, config, "controlTypeAliases[]", List.of("alias", "normalizedAlias", "id"), normalizeToken(targetValue));
             case "field-selector-registry-entry" -> addArrayMatches(candidates, config, "selectorMappings[]", List.of("selector", "id"), targetValue);
             case "metadata-editor-tooling-coverage" -> addArrayMatches(candidates, config, "editorCoverage[]", List.of("controlType", "type", "id", "name"), targetValue);
             case "component-metadata-editorial-descriptor" -> addRecursiveArrayMatches(candidates, config, "controlProfiles", List.of("controlType", "type", "id", "name"), targetValue);
-            case "field-metadata-json-path" -> addRecursiveObjectMatches(candidates, config, List.of("path", "jsonPath", "name", "id"), targetValue);
+            case "field-metadata-json-path" -> addFieldMetadataPathMatches(candidates, config, targetValue);
+            case "field-metadata-option-source" -> addMetadataRootMatch(candidates, config, "fieldMetadata.optionSource");
+            case "metadata-editor-cascade-rules" -> addMetadataRootMatch(candidates, config, "fieldMetadata");
+            case "metadata-editor-renderer-property" -> {
+                int before = candidates.size();
+                addArrayMatches(candidates, config, "properties[]", List.of("name", "propertyName", "id", "key"), targetValue);
+                if (candidates.size() == before) {
+                    addArrayMatches(candidates, config, "editorCoverage[]", List.of("propertyName", "name", "id", "key"), targetValue);
+                }
+            }
+            case "field-metadata-validation-rules" -> addMetadataRootMatch(candidates, config, "fieldMetadata.validators");
+            case "metadata-editor-context-hints" -> addMetadataRootMatch(candidates, config, "fieldMetadata");
             case "row-by-id-in-section" -> addRecursiveArrayMatches(candidates, config, "rows", List.of("id"), targetValue);
             case "column-by-id-in-row" -> addRecursiveArrayMatches(candidates, config, "columns", List.of("id"), targetValue);
             case "layout-item-by-id" -> addRecursiveArrayMatches(candidates, config, "items", List.of("id", "key"), targetValue);
@@ -311,6 +324,12 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "metadata-editor-tooling-coverage",
                 "component-metadata-editorial-descriptor",
                 "field-metadata-json-path",
+                "dynamic-fields-control-type-discovery",
+                "field-metadata-option-source",
+                "metadata-editor-cascade-rules",
+                "metadata-editor-renderer-property",
+                "field-metadata-validation-rules",
+                "metadata-editor-context-hints",
                 "row-by-id-in-section",
                 "column-by-id-in-row",
                 "layout-item-by-id",
@@ -374,6 +393,66 @@ public final class AgenticAuthoringTargetResolverRegistry {
     private void addCronPresetMatches(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
         addArrayMatches(candidates, config, "metadata.presets[]", List.of("label", "cron", "expression", "value"), targetValue);
         addArrayMatches(candidates, config, "presets[]", List.of("label", "cron", "expression", "value"), targetValue);
+    }
+
+    private void addFieldMetadataPathMatches(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
+        JsonNode fieldMetadata = resolvePath(config, "fieldMetadata");
+        if (fieldMetadata.isObject() && metadataFieldPaths().contains(targetValue)) {
+            candidates.add(new ResolvedCandidate("fieldMetadata." + targetValue, fieldMetadata.path(targetValue)));
+            return;
+        }
+        if (fieldMetadata.isArray()) {
+            for (int i = 0; i < fieldMetadata.size(); i++) {
+                JsonNode item = fieldMetadata.get(i);
+                if (matchesAnyKey(item, List.of("name", "label", "id", "path", "jsonPath"), targetValue)) {
+                    candidates.add(new ResolvedCandidate("fieldMetadata[]/" + i, item));
+                }
+            }
+            return;
+        }
+        addRecursiveObjectMatches(candidates, config, List.of("path", "jsonPath", "name", "id"), targetValue);
+    }
+
+    private void addMetadataRootMatch(List<ResolvedCandidate> candidates, JsonNode config, String path) {
+        JsonNode value = resolvePath(config, path);
+        if (!value.isMissingNode()) {
+            candidates.add(new ResolvedCandidate(path, value));
+            return;
+        }
+        JsonNode fieldMetadata = resolvePath(config, "fieldMetadata");
+        if (!fieldMetadata.isMissingNode()) {
+            candidates.add(new ResolvedCandidate("fieldMetadata", fieldMetadata));
+        }
+    }
+
+    private Set<String> metadataFieldPaths() {
+        return Set.of(
+                "name",
+                "label",
+                "description",
+                "controlType",
+                "placeholder",
+                "defaultValue",
+                "group",
+                "order",
+                "required",
+                "disabled",
+                "readOnly",
+                "hidden",
+                "source",
+                "transient",
+                "submitPolicy",
+                "hint",
+                "helpText",
+                "tooltip",
+                "options",
+                "optionSource",
+                "validators",
+                "conditionalRequired",
+                "conditionalDisplay",
+                "visibleIn",
+                "ariaLabel",
+                "ariaDescribedBy");
     }
 
     private Set<String> listTemplateSlots() {
@@ -656,7 +735,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
         if (target.isTextual() || target.isNumber() || target.isBoolean()) {
             return target.asText("");
         }
-        for (String field : List.of("id", "field", "name", "key", "value", "slot", "ruleId", "effectId", "presetKey", "tableOperationId", "nodeId", "sourceNodeId", "targetNodeId")) {
+        for (String field : List.of("id", "field", "name", "key", "value", "slot", "path", "jsonPath", "propertyName", "hintPath", "controlType", "ruleId", "effectId", "presetKey", "tableOperationId", "nodeId", "sourceNodeId", "targetNodeId")) {
             if (target.has(field)) {
                 return target.path(field).asText("");
             }

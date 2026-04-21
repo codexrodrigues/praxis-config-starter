@@ -508,6 +508,61 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(dsl.path()).isEmpty();
     }
 
+    @Test
+    void shouldResolveMetadataEditorTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "fieldMetadata": {
+                    "name": "status",
+                    "label": "Status",
+                    "controlType": "select",
+                    "validators": []
+                  },
+                  "componentRegistry": [
+                    { "controlType": "select" }
+                  ],
+                  "properties": [
+                    { "name": "label", "editorType": "text" }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget fieldPath = registry.resolve(
+                "praxis-metadata-editor",
+                operation("fieldMetadata.property.set", "fieldMetadata", "field-metadata-json-path", "fail", true),
+                objectMapper.readTree("{ \"path\": \"label\" }"),
+                config);
+        AgenticAuthoringResolvedTarget controlType = registry.resolve(
+                "praxis-metadata-editor",
+                operation("controlType.set", "controlType", "dynamic-fields-control-type-discovery", "fail", true),
+                objectMapper.readTree("\"select\""),
+                config);
+        AgenticAuthoringResolvedTarget renderer = registry.resolve(
+                "praxis-metadata-editor",
+                operation("renderer.configure", "renderer", "metadata-editor-renderer-property", "fail", true),
+                objectMapper.readTree("{ \"propertyName\": \"label\" }"),
+                config);
+        AgenticAuthoringResolvedTarget validator = registry.resolve(
+                "praxis-metadata-editor",
+                operation("validationRule.add", "validation", "field-metadata-validation-rules", "fail", false),
+                objectMapper.readTree("{}"),
+                config);
+        AgenticAuthoringResolvedTarget normalizer = registry.resolve(
+                "praxis-metadata-editor",
+                operation("normalization.apply", "normalization", "metadata-editor-schema-normalizer", "fail", false),
+                objectMapper.readTree("{}"),
+                config);
+
+        assertThat(fieldPath.status()).isEqualTo("resolved");
+        assertThat(fieldPath.path()).isEqualTo("fieldMetadata.label");
+        assertThat(controlType.status()).isEqualTo("resolved");
+        assertThat(controlType.path()).isEqualTo("componentRegistry[]/0");
+        assertThat(renderer.status()).isEqualTo("resolved");
+        assertThat(renderer.path()).isEqualTo("properties[]/0");
+        assertThat(validator.status()).isEqualTo("not-required");
+        assertThat(normalizer.status()).isEqualTo("not-required");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

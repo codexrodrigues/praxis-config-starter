@@ -159,6 +159,24 @@ public final class AgenticAuthoringValidatorRegistry {
             "metadata-capability-aligned",
             "runtime-editor-coverage-not-divergent",
             "coverage-evidence-present",
+            "field-metadata-shape-canonical",
+            "field-path-supported-by-editor",
+            "metadata-round-trip",
+            "control-type-exists-in-discovery",
+            "editor-coverage-exists",
+            "option-source-shape-canonical",
+            "remote-option-source-governed",
+            "cascade-backend-shape-preserved",
+            "cascade-fields-exist",
+            "cascade-cycle-free",
+            "renderer-editor-type-registered",
+            "visual-editor-coverage-required",
+            "validation-rule-canonical",
+            "context-validator-registered",
+            "context-hint-shape-canonical",
+            "context-hint-i18n-compatible",
+            "normalization-preserves-canonical-fields",
+            "runtime-editor-round-trip",
             "resource-exists-in-api-metadata",
             "resource-path-canonical",
             "resource-key-stable",
@@ -409,6 +427,24 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "editor-tooling-discovers-control" -> validateDynamicEditorToolingDiscoversControl(operationId, planOperation, config, failures);
                 case "runtime-editor-coverage-not-divergent" -> validateDynamicRuntimeEditorCoverageNotDivergent(operationId, planOperation, config, failures);
                 case "coverage-evidence-present" -> validateDynamicCoverageEvidencePresent(operationId, planOperation, failures);
+                case "field-metadata-shape-canonical" -> validateMetadataFieldShape(operationId, config, failures);
+                case "field-path-supported-by-editor" -> validateMetadataFieldPath(operationId, planOperation, failures);
+                case "control-type-exists-in-discovery" -> validateMetadataControlTypeExists(operationId, planOperation, config, failures);
+                case "editor-coverage-exists" -> validateMetadataEditorCoverage(operationId, planOperation, config, failures);
+                case "option-source-shape-canonical" -> validateMetadataOptionSourceShape(operationId, planOperation, failures);
+                case "remote-option-source-governed" -> validateMetadataRemoteOptionSourceGoverned(operationId, planOperation, failures);
+                case "cascade-backend-shape-preserved" -> validateMetadataCascadeBackendShape(operationId, planOperation, failures);
+                case "cascade-fields-exist" -> validateMetadataCascadeFieldsExist(operationId, planOperation, config, failures);
+                case "cascade-cycle-free" -> validateMetadataCascadeCycleFree(operationId, planOperation, failures);
+                case "renderer-editor-type-registered", "visual-editor-coverage-required" -> validateMetadataRendererEditorType(operationId, planOperation, failures);
+                case "validation-rule-canonical" -> validateMetadataValidationRule(operationId, planOperation, failures);
+                case "context-validator-registered" -> validateMetadataContextValidatorRegistered(operationId, planOperation, config, failures);
+                case "context-hint-shape-canonical" -> validateMetadataContextHintShape(operationId, planOperation, failures);
+                case "context-hint-i18n-compatible" -> validateMetadataContextHintI18n(operationId, planOperation, failures);
+                case "normalization-preserves-canonical-fields" -> validateMetadataNormalization(operationId, planOperation, failures);
+                case "metadata-round-trip", "runtime-editor-round-trip" -> {
+                    // Round-trip is enforced by compiling fieldMetadata and normalizedSeed together.
+                }
                 case "resource-exists-in-api-metadata", "resource-capabilities-resolvable" -> validateCrudResourcePresent(operationId, planOperation, config, failures);
                 case "resource-path-canonical", "schema-url-canonical", "submit-url-canonical" -> validateCrudCanonicalRelativeUrls(operationId, planOperation, failures);
                 case "resource-key-stable" -> validateCrudResourceKeyStable(operationId, planOperation, failures);
@@ -1616,6 +1652,186 @@ public final class AgenticAuthoringValidatorRegistry {
         JsonNode evidence = planOperation.path("input").path("evidence");
         if (!evidence.isArray() || evidence.isEmpty()) {
             failures.add("validator coverage-evidence-present failed for " + operationId + ": evidence array is required");
+        }
+    }
+
+    private void validateMetadataFieldShape(String operationId, JsonNode config, List<String> failures) {
+        JsonNode fieldMetadata = config.path("fieldMetadata");
+        if (fieldMetadata.isMissingNode() || fieldMetadata.isNull()) {
+            failures.add("validator field-metadata-shape-canonical failed for " + operationId + ": fieldMetadata is required");
+            return;
+        }
+        if (!(fieldMetadata.isObject() || fieldMetadata.isArray())) {
+            failures.add("validator field-metadata-shape-canonical failed for " + operationId + ": fieldMetadata must be object or array");
+        }
+    }
+
+    private void validateMetadataFieldPath(String operationId, JsonNode planOperation, List<String> failures) {
+        String path = text(planOperation.path("input"), "path");
+        if (path.isBlank() || !metadataFieldPaths().contains(path)) {
+            failures.add("validator field-path-supported-by-editor failed for " + operationId + ": unsupported metadata path " + path);
+        }
+    }
+
+    private void validateMetadataControlTypeExists(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String controlType = text(planOperation.path("input"), "controlType");
+        if (controlType.isBlank()) {
+            controlType = text(planOperation.path("target"), "controlType");
+        }
+        if (controlType.isBlank() || !hasControlType(config, controlType)) {
+            failures.add("validator control-type-exists-in-discovery failed for " + operationId + ": controlType is not discoverable " + controlType);
+        }
+    }
+
+    private void validateMetadataEditorCoverage(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String controlType = text(planOperation.path("input"), "controlType");
+        if (controlType.isBlank()) {
+            return;
+        }
+        JsonNode coverage = findObjectByKey(config.path("editorCoverage"), "controlType", controlType);
+        if (coverage.isMissingNode() && !hasControlType(config, controlType)) {
+            failures.add("validator editor-coverage-exists failed for " + operationId + ": editor coverage missing for " + controlType);
+        }
+    }
+
+    private void validateMetadataOptionSourceShape(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String kind = text(input, "kind");
+        if (kind.isBlank()) {
+            return;
+        }
+        if (!Set.of("static", "remote", "resource", "lookup").contains(kind)) {
+            failures.add("validator option-source-shape-canonical failed for " + operationId + ": unsupported option source kind " + kind);
+        }
+        if ("static".equals(kind) && input.has("options") && !input.path("options").isArray()) {
+            failures.add("validator option-source-shape-canonical failed for " + operationId + ": static options must be an array");
+        }
+        if (Set.of("remote", "resource", "lookup").contains(kind)
+                && text(input, "resource").isBlank()
+                && text(input, "endpoint").isBlank()) {
+            failures.add("validator option-source-shape-canonical failed for " + operationId + ": governed resource or endpoint is required");
+        }
+    }
+
+    private void validateMetadataRemoteOptionSourceGoverned(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String resource = text(input, "resource");
+        String endpoint = text(input, "endpoint");
+        if ((!resource.isBlank() && isUnsafeCrudUrl(resource))
+                || (!endpoint.isBlank() && isUnsafeCrudUrl(endpoint))
+                || containsUnsafeAbsoluteUrl(input.path("resource"))
+                || containsUnsafeAbsoluteUrl(input.path("endpoint"))) {
+            failures.add("validator remote-option-source-governed failed for " + operationId
+                    + ": option sources must use relative governed Praxis paths");
+        }
+    }
+
+    private void validateMetadataCascadeBackendShape(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("dependencyFilterMap") && !input.path("dependencyFilterMap").isObject()) {
+            failures.add("validator cascade-backend-shape-preserved failed for " + operationId + ": dependencyFilterMap must be an object");
+        }
+        if (input.has("debounceMs") && input.path("debounceMs").asInt(-1) < 0) {
+            failures.add("validator cascade-backend-shape-preserved failed for " + operationId + ": debounceMs must be non-negative");
+        }
+    }
+
+    private void validateMetadataCascadeFieldsExist(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of(text(input, "dependentField"), text(input, "sourceField"))) {
+            if (!field.isBlank() && !metadataFieldExists(config, field)) {
+                failures.add("validator cascade-fields-exist failed for " + operationId + ": field not found " + field);
+            }
+        }
+    }
+
+    private void validateMetadataCascadeCycleFree(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String dependentField = text(input, "dependentField");
+        String sourceField = text(input, "sourceField");
+        if (!dependentField.isBlank() && dependentField.equals(sourceField)) {
+            failures.add("validator cascade-cycle-free failed for " + operationId + ": dependentField cannot equal sourceField");
+        }
+    }
+
+    private void validateMetadataRendererEditorType(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String propertyName = text(input, "propertyName");
+        String editorType = text(input, "editorType");
+        if (propertyName.isBlank() || editorType.isBlank()) {
+            failures.add("validator renderer-editor-type-registered failed for " + operationId + ": propertyName and editorType are required");
+        }
+        if (containsUnsafeInlineHandler(input) || containsUnsafeTemplateHtml(input) || containsUnsafeAbsoluteUrl(input)) {
+            failures.add("validator visual-editor-coverage-required failed for " + operationId + ": renderer config contains unsafe values");
+        }
+    }
+
+    private void validateMetadataValidationRule(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode rule = planOperation.path("input").path("rule");
+        if (!rule.isObject() || rule.isEmpty()) {
+            failures.add("validator validation-rule-canonical failed for " + operationId + ": rule must be a non-empty object");
+        }
+        if (containsUnsafeAbsoluteUrl(rule) || containsUnsafeInlineHandler(rule)) {
+            failures.add("validator validation-rule-canonical failed for " + operationId + ": rule contains unsafe values");
+        }
+    }
+
+    private void validateMetadataContextValidatorRegistered(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String contextValidatorId = text(planOperation.path("input"), "contextValidatorId");
+        if (contextValidatorId.isBlank()) {
+            return;
+        }
+        JsonNode contextValidators = config.path("contextValidators");
+        if (contextValidators.isArray()
+                && findObjectByKey(contextValidators, "id", contextValidatorId).isMissingNode()
+                && findObjectByKey(contextValidators, "validatorId", contextValidatorId).isMissingNode()) {
+            failures.add("validator context-validator-registered failed for " + operationId
+                    + ": context validator not registered " + contextValidatorId);
+        }
+    }
+
+    private void validateMetadataContextHintShape(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String hintPath = text(input, "hintPath");
+        if (hintPath.isBlank() || !metadataHintPaths().contains(hintPath)) {
+            failures.add("validator context-hint-shape-canonical failed for " + operationId + ": unsupported hint path " + hintPath);
+        }
+        if (input.path("value").isMissingNode()) {
+            failures.add("validator context-hint-shape-canonical failed for " + operationId + ": value is required");
+        }
+        if (containsUnsafeInlineHandler(input.path("value")) || containsUnsafeAbsoluteUrl(input.path("value"))) {
+            failures.add("validator context-hint-shape-canonical failed for " + operationId + ": hint contains unsafe values");
+        }
+    }
+
+    private void validateMetadataContextHintI18n(String operationId, JsonNode planOperation, List<String> failures) {
+        String localeKey = text(planOperation.path("input"), "localeKey");
+        if (!localeKey.isBlank() && (localeKey.contains(" ") || localeKey.startsWith(".") || localeKey.endsWith("."))) {
+            failures.add("validator context-hint-i18n-compatible failed for " + operationId + ": localeKey is not canonical");
+        }
+    }
+
+    private void validateMetadataNormalization(String operationId, JsonNode planOperation, List<String> failures) {
+        String mode = text(planOperation.path("input"), "mode");
+        if (!mode.isBlank()
+                && !Set.of("hydrate-seed", "coerce-types", "apply-defaults", "preserve-advanced-properties").contains(mode)) {
+            failures.add("validator normalization-preserves-canonical-fields failed for " + operationId + ": unsupported mode " + mode);
         }
     }
 
@@ -3009,6 +3225,70 @@ public final class AgenticAuthoringValidatorRegistry {
                 || !findObjectByKey(config.path("componentMetadata").path("controlProfiles"), "controlType", controlType).isMissingNode()
                 || !findObjectByKey(config.path("controlProfiles"), "controlType", controlType).isMissingNode()
                 || !findObjectByKey(config.path("runtimeCoverage"), "controlType", controlType).isMissingNode();
+    }
+
+    private boolean metadataFieldExists(JsonNode config, String fieldName) {
+        if (fieldName == null || fieldName.isBlank()) {
+            return false;
+        }
+        JsonNode fieldMetadata = config.path("fieldMetadata");
+        if (fieldMetadata.isObject()) {
+            return fieldName.equals(text(fieldMetadata, "name"))
+                    || metadataFieldPaths().contains(fieldName)
+                    || fieldMetadata.has(fieldName);
+        }
+        if (fieldMetadata.isArray()) {
+            for (JsonNode field : fieldMetadata) {
+                if (fieldName.equals(text(field, "name")) || fieldName.equals(text(field, "field"))) {
+                    return true;
+                }
+            }
+        }
+        for (JsonNode field : config.path("availableFields")) {
+            if (fieldName.equals(text(field, "name")) || fieldName.equals(text(field, "field"))) {
+                return true;
+            }
+        }
+        for (JsonNode field : config.path("fields")) {
+            if (fieldName.equals(text(field, "name")) || fieldName.equals(text(field, "field"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<String> metadataFieldPaths() {
+        return Set.of(
+                "name",
+                "label",
+                "description",
+                "controlType",
+                "placeholder",
+                "defaultValue",
+                "group",
+                "order",
+                "required",
+                "disabled",
+                "readOnly",
+                "hidden",
+                "source",
+                "transient",
+                "submitPolicy",
+                "hint",
+                "helpText",
+                "tooltip",
+                "options",
+                "optionSource",
+                "validators",
+                "conditionalRequired",
+                "conditionalDisplay",
+                "visibleIn",
+                "ariaLabel",
+                "ariaDescribedBy");
+    }
+
+    private Set<String> metadataHintPaths() {
+        return Set.of("hint", "helpText", "description", "tooltip", "ariaLabel", "ariaDescribedBy");
     }
 
     private JsonNode findAlias(JsonNode config, String alias) {

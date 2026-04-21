@@ -637,6 +637,108 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator effect-values-valid failed for effect.set: remote absolute URLs are not allowed in effect values");
     }
 
+    @Test
+    void shouldValidateMetadataEditorAuthoringSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "fieldMetadata": { "name": "status", "label": "Status", "controlType": "select" },
+                  "componentRegistry": [
+                    { "controlType": "select" }
+                  ],
+                  "availableFields": [
+                    { "name": "country" }
+                  ],
+                  "contextValidators": [
+                    { "id": "required" }
+                  ]
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("fieldMetadata.property.set", "fieldMetadata", "field-metadata-json-path", true,
+                        "field-metadata-shape-canonical,field-path-supported-by-editor,metadata-round-trip"),
+                plan("{ \"path\": \"bad.path\" }", "{ \"path\": \"bad.path\", \"value\": true }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("controlType.set", "controlType", "dynamic-fields-control-type-discovery", true,
+                        "control-type-exists-in-discovery,editor-coverage-exists"),
+                plan("\"missing\"", "{ \"controlType\": \"missing\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("optionSource.configure", "optionSource", "field-metadata-option-source", false,
+                        "option-source-shape-canonical,remote-option-source-governed"),
+                plan("{}", "{ \"kind\": \"resource\", \"resource\": \"https://evil.example/options\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("cascade.configure", "cascade", "metadata-editor-cascade-rules", false,
+                        "cascade-backend-shape-preserved,cascade-fields-exist,cascade-cycle-free"),
+                plan("{}", "{ \"dependentField\": \"country\", \"sourceField\": \"country\", \"dependencyFilterMap\": [], \"debounceMs\": -1 }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("renderer.configure", "renderer", "metadata-editor-renderer-property", true,
+                        "renderer-editor-type-registered,visual-editor-coverage-required"),
+                plan("{ \"propertyName\": \"label\" }", "{ \"propertyName\": \"label\", \"editorType\": \"\", \"options\": { \"href\": \"https://evil.example\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("validationRule.add", "validation", "field-metadata-validation-rules", false,
+                        "validation-rule-canonical,context-validator-registered"),
+                plan("{}", "{ \"rule\": {}, \"contextValidatorId\": \"missing-validator\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("contextHint.set", "contextHint", "metadata-editor-context-hints", false,
+                        "context-hint-shape-canonical,context-hint-i18n-compatible"),
+                plan("{}", "{ \"hintPath\": \"badHint\", \"value\": \"https://evil.example/help\", \"localeKey\": \"bad key\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("normalization.apply", "normalization", "metadata-editor-schema-normalizer", false,
+                        "normalization-preserves-canonical-fields,runtime-editor-round-trip"),
+                plan("{}", "{ \"mode\": \"destroy\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator field-path-supported-by-editor failed for fieldMetadata.property.set: unsupported metadata path bad.path",
+                        "validator control-type-exists-in-discovery failed for controlType.set: controlType is not discoverable missing",
+                        "validator editor-coverage-exists failed for controlType.set: editor coverage missing for missing",
+                        "validator remote-option-source-governed failed for optionSource.configure: option sources must use relative governed Praxis paths",
+                        "validator cascade-backend-shape-preserved failed for cascade.configure: dependencyFilterMap must be an object",
+                        "validator cascade-backend-shape-preserved failed for cascade.configure: debounceMs must be non-negative",
+                        "validator cascade-cycle-free failed for cascade.configure: dependentField cannot equal sourceField",
+                        "validator renderer-editor-type-registered failed for renderer.configure: propertyName and editorType are required",
+                        "validator visual-editor-coverage-required failed for renderer.configure: renderer config contains unsafe values",
+                        "validator validation-rule-canonical failed for validationRule.add: rule must be a non-empty object",
+                        "validator context-validator-registered failed for validationRule.add: context validator not registered missing-validator",
+                        "validator context-hint-shape-canonical failed for contextHint.set: unsupported hint path badHint",
+                        "validator context-hint-shape-canonical failed for contextHint.set: hint contains unsafe values",
+                        "validator context-hint-i18n-compatible failed for contextHint.set: localeKey is not canonical",
+                        "validator normalization-preserves-canonical-fields failed for normalization.apply: unsupported mode destroy");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

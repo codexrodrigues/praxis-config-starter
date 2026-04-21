@@ -126,6 +126,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "dynamic-fields-selector-mapping-set".equals(handler)
                 || "dynamic-fields-editor-coverage-validation".equals(handler)
                 || "dynamic-fields-runtime-coverage-validation".equals(handler)
+                || "metadata-field-property-set".equals(handler)
+                || "metadata-control-type-set".equals(handler)
+                || "metadata-option-source-configure".equals(handler)
+                || "metadata-cascade-configure".equals(handler)
+                || "metadata-renderer-configure".equals(handler)
+                || "metadata-validation-rule-add".equals(handler)
+                || "metadata-context-hint-set".equals(handler)
+                || "metadata-normalization-apply".equals(handler)
                 || "crud-resource-bind".equals(handler)
                 || "crud-list-surface-configure".equals(handler)
                 || "crud-create-surface-configure".equals(handler)
@@ -516,6 +524,22 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     "runtimeCoverage",
                     "validate-dynamic-fields-runtime-coverage");
+            case "metadata-field-property-set" -> compileMetadataFieldPropertySet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-control-type-set" -> compileMetadataControlTypeSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-option-source-configure" -> compileMetadataOptionSourceConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-cascade-configure" -> compileMetadataCascadeConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-renderer-configure" -> compileMetadataRendererConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-validation-rule-add" -> compileMetadataValidationRuleAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-context-hint-set" -> compileMetadataContextHintSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-normalization-apply" -> compileMetadataNormalizationApply(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
             case "crud-resource-bind" -> compileCrudResourceBind(
                     componentId,
                     operation,
@@ -2683,6 +2707,300 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.set("previousEntry", previousEntry);
         compiled.set("entry", entry.deepCopy());
         return compiled;
+    }
+
+    private ObjectNode compileMetadataFieldPropertySet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String path = text(input, "path");
+        if (path.isBlank() || input.path("value").isMissingNode()) {
+            failures.add("metadata-field-property-set requires input.path and input.value");
+            return null;
+        }
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        JsonNode previousValue = fieldMetadata.path(path).deepCopy();
+        if (input.path("merge").asBoolean(false) && fieldMetadata.path(path).isObject() && input.path("value").isObject()) {
+            mergeObject((ObjectNode) fieldMetadata.path(path), input.path("value"));
+        } else {
+            fieldMetadata.set(path, input.path("value").deepCopy());
+        }
+        metadataWriteNormalizedSeed(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-metadata-field-property");
+        compiled.put("path", "fieldMetadata." + path);
+        compiled.put("propertyPath", path);
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", fieldMetadata.path(path).deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileMetadataControlTypeSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String controlType = text(input, "controlType");
+        if (controlType.isBlank()) {
+            failures.add("metadata-control-type-set requires input.controlType");
+            return null;
+        }
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        JsonNode previousControlType = fieldMetadata.path("controlType").deepCopy();
+        if (!input.path("preserveCompatibleProperties").asBoolean(true)) {
+            fieldMetadata.remove(List.of("options", "optionSource", "validators", "conditionalRequired", "conditionalDisplay"));
+        }
+        fieldMetadata.put("controlType", controlType);
+        metadataWriteNormalizedSeed(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-metadata-control-type");
+        compiled.put("path", "fieldMetadata.controlType");
+        compiled.set("previousValue", previousControlType);
+        compiled.put("controlType", controlType);
+        return compiled;
+    }
+
+    private ObjectNode compileMetadataOptionSourceConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        ObjectNode optionSource = fieldMetadata.path("optionSource") instanceof ObjectNode object
+                ? object
+                : fieldMetadata.putObject("optionSource");
+        JsonNode previousValue = optionSource.deepCopy();
+        mergeObject(optionSource, input);
+        if (input.has("options")) {
+            fieldMetadata.set("options", input.path("options").deepCopy());
+        }
+        metadataWriteNormalizedSeed(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-metadata-option-source");
+        compiled.put("path", "fieldMetadata.optionSource");
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", optionSource.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileMetadataCascadeConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String dependentField = text(input, "dependentField");
+        if (dependentField.isBlank()) {
+            failures.add("metadata-cascade-configure requires input.dependentField");
+            return null;
+        }
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        JsonNode previousValue = fieldMetadata.deepCopy();
+        ArrayNode dependencyFields = fieldMetadata.path("dependencyFields") instanceof ArrayNode array
+                ? array
+                : fieldMetadata.putArray("dependencyFields");
+        addTextUnique(dependencyFields, dependentField);
+        copyIfPresent(input, fieldMetadata, "sourceField");
+        copyIfPresent(input, fieldMetadata, "dependencyFilterMap");
+        fieldMetadata.put("enableDependencyCascade", true);
+        fieldMetadata.put("resetOnDependentChange", true);
+        if (input.has("strategy")) {
+            fieldMetadata.set("dependencyMergeStrategy", input.path("strategy"));
+        }
+        if (input.has("debounceMs")) {
+            fieldMetadata.set("dependencyDebounceMs", input.path("debounceMs"));
+        }
+        if (input.has("loadMode")) {
+            fieldMetadata.set("dependencyLoadOnChange", input.path("loadMode"));
+        }
+        metadataWriteNormalizedSeed(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-metadata-cascade");
+        compiled.put("path", "fieldMetadata.dependencyFields");
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", fieldMetadata.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileMetadataRendererConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String propertyName = text(input, "propertyName");
+        String editorType = text(input, "editorType");
+        if (propertyName.isBlank() || editorType.isBlank()) {
+            failures.add("metadata-renderer-configure requires propertyName and editorType");
+            return null;
+        }
+        ArrayNode properties = arrayAt(proposedConfig, "properties", true);
+        ObjectNode property = findObjectByKey(properties, "name", propertyName);
+        JsonNode previousValue = property == null ? MissingNode.getInstance() : property.deepCopy();
+        if (property == null) {
+            property = objectMapper.createObjectNode();
+            property.put("name", propertyName);
+            properties.add(property);
+        }
+        property.put("editorType", editorType);
+        copyIfPresent(input, property, "group");
+        copyIfPresent(input, property, "required");
+        copyIfPresent(input, property, "options");
+        ArrayNode editorCoverage = arrayAt(proposedConfig, "editorCoverage", true);
+        ObjectNode coverage = findObjectByKey(editorCoverage, "propertyName", propertyName);
+        if (coverage == null) {
+            coverage = objectMapper.createObjectNode();
+            coverage.put("propertyName", propertyName);
+            editorCoverage.add(coverage);
+        }
+        coverage.put("editorType", editorType);
+        coverage.put("covered", true);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-metadata-renderer");
+        compiled.put("path", "properties[]");
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", property.deepCopy());
+        compiled.set("editorCoverage", coverage.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileMetadataValidationRuleAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.path("rule").isObject()) {
+            failures.add("metadata-validation-rule-add requires object input.rule");
+            return null;
+        }
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        ArrayNode validators = fieldMetadata.path("validators") instanceof ArrayNode array
+                ? array
+                : fieldMetadata.putArray("validators");
+        ObjectNode rule = (ObjectNode) input.path("rule").deepCopy();
+        copyIfPresent(input, rule, "message");
+        copyIfPresent(input, rule, "contextValidatorId");
+        validators.add(rule);
+        metadataWriteNormalizedSeed(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-metadata-validation-rule");
+        compiled.put("path", "fieldMetadata.validators[]");
+        compiled.put("insertedIndex", validators.size() - 1);
+        compiled.set("value", rule);
+        return compiled;
+    }
+
+    private ObjectNode compileMetadataContextHintSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String hintPath = text(input, "hintPath");
+        if (hintPath.isBlank() || input.path("value").isMissingNode()) {
+            failures.add("metadata-context-hint-set requires hintPath and value");
+            return null;
+        }
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        JsonNode previousValue = fieldMetadata.path(hintPath).deepCopy();
+        fieldMetadata.set(hintPath, input.path("value").deepCopy());
+        if (input.has("localeKey")) {
+            ObjectNode i18n = objectAt(proposedConfig, "i18nHints", true);
+            i18n.set(hintPath, input.path("localeKey"));
+        }
+        metadataWriteNormalizedSeed(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-metadata-context-hint");
+        compiled.put("path", "fieldMetadata." + hintPath);
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", fieldMetadata.path(hintPath).deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileMetadataNormalizationApply(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        ObjectNode normalizedSeed = objectAt(proposedConfig, "normalizedSeed", true);
+        JsonNode previousSeed = normalizedSeed.deepCopy();
+        mergeObject(normalizedSeed, fieldMetadata);
+        normalizedSeed.put("normalized", true);
+        normalizedSeed.put("mode", textOrDefault(input, "mode", "preserve-advanced-properties"));
+        if (input.has("preserveUnknownCanonicalFields")) {
+            normalizedSeed.set("preserveUnknownCanonicalFields", input.path("preserveUnknownCanonicalFields"));
+        }
+        ObjectNode form = objectAt(proposedConfig, "form", true);
+        form.set("fieldMetadata", fieldMetadata.deepCopy());
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "apply-metadata-normalization");
+        compiled.put("path", "normalizedSeed");
+        compiled.set("previousValue", previousSeed);
+        compiled.set("value", normalizedSeed.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode metadataFieldMetadata(ObjectNode proposedConfig, boolean create) {
+        JsonNode fieldMetadata = proposedConfig.path("fieldMetadata");
+        if (fieldMetadata instanceof ObjectNode object) {
+            return object;
+        }
+        if (fieldMetadata instanceof ArrayNode array) {
+            for (JsonNode item : array) {
+                if (item instanceof ObjectNode object) {
+                    return object;
+                }
+            }
+            if (create) {
+                ObjectNode object = objectMapper.createObjectNode();
+                array.add(object);
+                return object;
+            }
+            return null;
+        }
+        JsonNode normalizedSeed = proposedConfig.path("normalizedSeed");
+        if (normalizedSeed instanceof ObjectNode object) {
+            if (create) {
+                proposedConfig.set("fieldMetadata", object.deepCopy());
+                return (ObjectNode) proposedConfig.path("fieldMetadata");
+            }
+            return object;
+        }
+        if (create) {
+            return proposedConfig.putObject("fieldMetadata");
+        }
+        return null;
+    }
+
+    private void metadataWriteNormalizedSeed(ObjectNode proposedConfig) {
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        ObjectNode normalizedSeed = objectAt(proposedConfig, "normalizedSeed", true);
+        mergeObject(normalizedSeed, fieldMetadata);
+        ObjectNode form = objectAt(proposedConfig, "form", true);
+        form.set("fieldMetadata", fieldMetadata.deepCopy());
     }
 
     private ObjectNode compileCrudResourceBind(
