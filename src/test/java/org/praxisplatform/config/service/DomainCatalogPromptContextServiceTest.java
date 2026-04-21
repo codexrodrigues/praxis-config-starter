@@ -102,6 +102,90 @@ class DomainCatalogPromptContextServiceTest {
     }
 
     @Test
+    void includesGovernanceSummaryInPromptContext() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+
+        when(ingestionService.contextLatest(
+                eq("praxis-service"),
+                eq("tenant-a"),
+                eq("dev"),
+                eq("governance"),
+                eq("human-resources"),
+                eq(null),
+                eq("LGPD"),
+                eq(5)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        new DomainCatalogReleaseResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:human-resources:latest",
+                                "praxis.domain-catalog/v0.1",
+                                "praxis-service",
+                                "Praxis Service",
+                                "test",
+                                Instant.parse("2026-04-21T20:00:00Z"),
+                                "sha256:test",
+                                "tenant-a",
+                                "dev",
+                                Instant.parse("2026-04-21T20:00:01Z")),
+                        "LGPD",
+                        "governance",
+                        "human-resources",
+                        null,
+                        List.of("Use governance items to respect privacy, compliance and AI visibility constraints."),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:human-resources:latest",
+                                "governance",
+                                "governance:human-resources.funcionarios.field.cpf:privacy",
+                                null,
+                                null,
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "governanceKey": "governance:human-resources.funcionarios.field.cpf:privacy",
+                                      "nodeKey": "human-resources.funcionarios.field.cpf",
+                                      "annotationType": "privacy",
+                                      "classification": "confidential",
+                                      "dataCategory": "personal",
+                                      "complianceTags": ["LGPD", "GDPR"],
+                                      "aiUsage": {
+                                        "visibility": "mask",
+                                        "trainingUse": "deny",
+                                        "ruleAuthoring": "review_required"
+                                      }
+                                    }
+                                    """)))));
+
+        String promptContext = service.buildPromptContext(
+                "quais campos sao LGPD?",
+                objectMapper.readTree("""
+                    {
+                      "domainCatalog": {
+                        "serviceKey": "praxis-service",
+                        "type": "governance",
+                        "contextKey": "human-resources",
+                        "query": "LGPD",
+                        "limit": 5
+                      }
+                    }
+                    """),
+                "tenant-a",
+                "dev");
+
+        assertThat(promptContext)
+                .contains("[governance/-] governance:human-resources.funcionarios.field.cpf:privacy")
+                .contains("classification=confidential")
+                .contains("dataCategory=personal")
+                .contains("visibility=mask")
+                .contains("trainingUse=deny")
+                .contains("ruleAuthoring=review_required")
+                .contains("complianceTags=LGPD,GDPR");
+    }
+
+    @Test
     void ignoresRequestsWithoutDomainCatalogHints() {
         DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
         DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);

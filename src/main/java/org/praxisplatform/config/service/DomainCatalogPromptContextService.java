@@ -141,6 +141,13 @@ public class DomainCatalogPromptContextService {
         appendInline(builder, "binding", text(payload, "bindingType"));
         appendInline(builder, "edge", text(payload, "edgeType"));
         appendInline(builder, "source", text(payload, "source"));
+        appendInline(builder, "classification", text(payload, "classification"));
+        appendInline(builder, "dataCategory", text(payload, "dataCategory"));
+        appendInline(builder, "visibility", text(payload.path("aiUsage"), "visibility"));
+        appendInline(builder, "trainingUse", text(payload.path("aiUsage"), "trainingUse"));
+        appendInline(builder, "ruleAuthoring", text(payload.path("aiUsage"), "ruleAuthoring"));
+        appendInline(builder, "reasoningUse", text(payload.path("aiUsage"), "reasoningUse"));
+        appendInline(builder, "complianceTags", textArray(payload.path("complianceTags")));
         if (payload.path("metadata").has("required")) {
             appendInline(builder, "required", Boolean.toString(payload.path("metadata").path("required").asBoolean()));
         }
@@ -191,6 +198,22 @@ public class DomainCatalogPromptContextService {
         return value != null && value.isTextual() && StringUtils.hasText(value.asText())
                 ? value.asText()
                 : null;
+    }
+
+    private String textArray(JsonNode node) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        node.forEach(item -> {
+            if (item != null && item.isTextual() && StringUtils.hasText(item.asText())) {
+                if (builder.length() > 0) {
+                    builder.append(',');
+                }
+                builder.append(item.asText());
+            }
+        });
+        return builder.length() == 0 ? null : builder.toString();
     }
 
     private int clampLimit(int limit) {

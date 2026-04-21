@@ -171,6 +171,7 @@ public class DomainCatalogIngestionService {
                 List.of(
                         "Use this context as the semantic vocabulary for the requested business scope.",
                         "Prefer node items for business concepts, fields, actions, states and policy hints.",
+                        "Use governance items to respect privacy, compliance and AI visibility constraints.",
                         "Use binding and evidence items to cite runtime/API/schema sources.",
                         "Do not infer executable rules from policy_hint nodes unless an executable rule binding is present."
                 ),
@@ -310,6 +311,18 @@ public class DomainCatalogIngestionService {
         add(joiner, text(node, "edgeType"));
         add(joiner, text(node, "alias"));
         add(joiner, text(node, "summary"));
+        add(joiner, text(node, "annotationType"));
+        add(joiner, text(node, "classification"));
+        add(joiner, text(node, "dataCategory"));
+        add(joiner, text(node, "nodeKey"));
+        JsonNode complianceTags = node.path("complianceTags");
+        if (complianceTags.isArray()) {
+            add(joiner, complianceTags.toString());
+        }
+        JsonNode aiUsage = node.path("aiUsage");
+        if (aiUsage.isObject()) {
+            add(joiner, aiUsage.toString());
+        }
         JsonNode metadata = node.path("metadata");
         if (metadata.isObject()) {
             add(joiner, metadata.toString());

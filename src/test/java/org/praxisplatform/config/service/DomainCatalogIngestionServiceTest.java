@@ -48,7 +48,7 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
 
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
-        assertThat(response.itemCount()).isEqualTo(7);
+        assertThat(response.itemCount()).isEqualTo(8);
 
         ArgumentCaptor<DomainCatalogRelease> releaseCaptor = ArgumentCaptor.forClass(DomainCatalogRelease.class);
         verify(releaseRepository).save(releaseCaptor.capture());
@@ -67,7 +67,7 @@ class DomainCatalogIngestionServiceTest {
         List<DomainCatalogItem> items = itemsCaptor.getValue();
 
         assertThat(items).extracting(DomainCatalogItem::getItemType)
-                .contains("context", "node", "edge", "binding", "evidence");
+                .contains("context", "node", "edge", "binding", "evidence", "governance");
         assertThat(items).filteredOn(item -> "node".equals(item.getItemType()))
                 .extracting(DomainCatalogItem::getNodeType)
                 .contains("concept", "field", "policy_hint");
@@ -84,6 +84,14 @@ class DomainCatalogIngestionServiceTest {
                     assertThat(item.getNodeType()).isEqualTo("policy_hint");
                     assertThat(item.getSearchableText()).contains("Supplier selecionavel");
                     assertThat(item.getPayload()).contains("ACTIVE", "BLOCKED");
+                });
+        assertThat(items).filteredOn(item -> "governance:human-resources.folhas-pagamento.field.valor-liquido:privacy".equals(item.getItemKey()))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.getItemType()).isEqualTo("governance");
+                    assertThat(item.getSearchableText())
+                            .contains("confidential", "financial", "LGPD", "INTERNAL_POLICY", "mask", "deny");
+                    assertThat(item.getPayload()).contains("\"classification\":\"confidential\"");
                 });
     }
 
@@ -296,7 +304,24 @@ class DomainCatalogIngestionServiceTest {
                   "summary": "Campo derivado do schema OpenAPI WorkflowResponse."
                 }
               ],
-              "governance": []
+              "governance": [
+                {
+                  "governanceKey": "governance:human-resources.folhas-pagamento.field.valor-liquido:privacy",
+                  "nodeKey": "human-resources.folhas-pagamento.field.valor-liquido",
+                  "annotationType": "privacy",
+                  "classification": "confidential",
+                  "dataCategory": "financial",
+                  "complianceTags": ["LGPD", "INTERNAL_POLICY"],
+                  "aiUsage": {
+                    "visibility": "mask",
+                    "trainingUse": "deny",
+                    "ruleAuthoring": "review_required",
+                    "reasoningUse": "allow"
+                  },
+                  "source": "dto-field-heuristic",
+                  "confidence": 0.72
+                }
+              ]
             }
             """);
     }
