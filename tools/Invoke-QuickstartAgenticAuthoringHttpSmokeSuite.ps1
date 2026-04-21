@@ -50,6 +50,13 @@ function Wait-QuickstartHealth([string] $HealthUrl, [int] $TimeoutSec) {
 
 $starterRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $starterRoot
+$starterAuthoringRoot = Join-Path $starterRoot "docs\ai\agentic-authoring"
+$workspaceAuthoringRoot = Join-Path $workspaceRoot "docs\ai\agentic-authoring"
+$authoringRoot = if (Test-Path -LiteralPath (Join-Path $starterAuthoringRoot "contracts")) {
+    $starterAuthoringRoot
+} else {
+    $workspaceAuthoringRoot
+}
 if ([string]::IsNullOrWhiteSpace($QuickstartRoot)) {
     $QuickstartRoot = Join-Path $workspaceRoot "praxis-api-quickstart"
 }
@@ -112,8 +119,8 @@ Set-Location '$QuickstartRoot'
 `$env:APP_SECURITY_CONFIG_ORIGIN_RESTRICTION_ALLOWED_ORIGINS = 'http://localhost:4003,http://127.0.0.1:4003,http://localhost:4200,http://127.0.0.1:4200'
 `$env:CORS_ALLOWED_ORIGINS = 'http://localhost:4003,http://127.0.0.1:4003,http://localhost:4200,http://127.0.0.1:4200'
 `$env:PRAXIS_AI_AUTHORING_HTTP_ENABLED = 'true'
-`$env:PRAXIS_AI_AUTHORING_ARTIFACTS_DIR = '$workspaceRoot\docs\ai\agentic-authoring\proofs'
-`$env:PRAXIS_AI_AUTHORING_CONTRACTS_DIR = '$workspaceRoot\docs\ai\agentic-authoring\contracts'
+`$env:PRAXIS_AI_AUTHORING_ARTIFACTS_DIR = '$authoringRoot\proofs'
+`$env:PRAXIS_AI_AUTHORING_CONTRACTS_DIR = '$authoringRoot\contracts'
 `$env:PRAXIS_AI_SECURITY_CORPORATE_MODE = 'false'
 `$env:PRAXIS_AI_SECURITY_ALLOW_HEADER_IDENTITY_IN_LOCAL = 'true'
 `$env:EMBEDDING_PROVIDER = 'mock'
