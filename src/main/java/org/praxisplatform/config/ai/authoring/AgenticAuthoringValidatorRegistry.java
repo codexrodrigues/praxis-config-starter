@@ -2,6 +2,7 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.scheduling.support.CronExpression;
 
 public final class AgenticAuthoringValidatorRegistry {
 
@@ -75,6 +77,15 @@ public final class AgenticAuthoringValidatorRegistry {
             "template-slot-supported",
             "bound-field-exists",
             "template-expression-safe",
+            "cron-expression-valid",
+            "cron-dialect-compatible",
+            "frequency-maps-to-canonical-expression",
+            "diagnostics-before-patch",
+            "timezone-valid",
+            "preview-matches-expression",
+            "invalid-schedules-return-diagnostics",
+            "preset-exists",
+            "preset-maps-to-canonical-expression",
             "sanitization-policy-explicit",
             "unsafe-html-rejected",
             "unsafe-url-rejected",
@@ -165,6 +176,15 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "template-slot-supported" -> validateListTemplateSlotSupported(operationId, planOperation, failures);
                 case "bound-field-exists" -> validateListTemplateBoundFieldsExist(operationId, planOperation, config, failures);
                 case "template-expression-safe" -> validateListTemplateExpressionSafe(operationId, planOperation, failures);
+                case "cron-expression-valid" -> validateCronExpressionValid(operationId, planOperation, config, failures);
+                case "cron-dialect-compatible" -> validateCronDialectCompatible(operationId, planOperation, failures);
+                case "frequency-maps-to-canonical-expression" -> validateCronFrequencyMaps(operationId, planOperation, failures);
+                case "diagnostics-before-patch", "preview-matches-expression", "invalid-schedules-return-diagnostics",
+                     "preset-maps-to-canonical-expression" -> {
+                    // These are enforced by the domain compiler, which emits diagnostics before mutating derived paths.
+                }
+                case "timezone-valid" -> validateCronTimezoneValid(operationId, planOperation, config, failures);
+                case "preset-exists" -> validateCronPresetExists(operationId, planOperation, config, failures);
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
                 case "unsafe-html-rejected" -> validateUnsafeHtmlRejected(operationId, planOperation, failures);
                 case "unsafe-url-rejected" -> validateUnsafeUrlRejected(operationId, planOperation, failures);
@@ -767,6 +787,45 @@ public final class AgenticAuthoringValidatorRegistry {
         return false;
     }
 
+    private boolean findCronPreset(JsonNode presets, String labelOrCron) {
+        if (!presets.isArray()) {
+            return false;
+        }
+        for (JsonNode preset : presets) {
+            if (labelOrCron.equals(text(preset, "label"))
+                    || labelOrCron.equals(text(preset, "cron"))
+                    || labelOrCron.equals(text(preset, "expression"))
+                    || labelOrCron.equals(text(preset, "value"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String springCronExpression(String cron, boolean seconds) {
+        int count = cronFieldCount(cron);
+        if (count == 5 && !seconds) {
+            return "0 " + cron;
+        }
+        return cron == null ? "" : cron.trim();
+    }
+
+    private int cronFieldCount(String cron) {
+        if (cron == null || cron.isBlank()) {
+            return 0;
+        }
+        return cron.trim().split("\\s+").length;
+    }
+
+    private boolean isValidSpringCron(String springCron) {
+        try {
+            CronExpression.parse(springCron);
+            return true;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
     private Set<String> safeRichContentUrlProtocols() {
         return Set.of("http", "https", "mailto", "tel");
     }
@@ -1051,6 +1110,83 @@ public final class AgenticAuthoringValidatorRegistry {
             failures.add("validator template-expression-safe failed for " + operationId
                     + ": html template expressions are not accepted by backend authoring");
         }
+    }
+
+    private void validateCronExpressionValid(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String cron = text(planOperation.path("input"), "cron");
+        if (cron.isBlank()) {
+            cron = text(config.path("schedule").path("expression"), "cron");
+        }
+        if (cron.isBlank()) {
+            cron = text(config, "value");
+        }
+        if (!isValidSpringCron(springCronExpression(cron, cronFieldCount(cron) == 6))) {
+            failures.add("validator cron-expression-valid failed for " + operationId + ": invalid cron expression");
+        }
+    }
+
+    private void validateCronDialectCompatible(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String dialect = text(planOperation.path("input"), "dialect");
+        if (!dialect.isBlank() && !Set.of("unix", "quartz", "aws-eventbridge", "kubernetes", "github-actions", "gcp-scheduler").contains(dialect)) {
+            failures.add("validator cron-dialect-compatible failed for " + operationId + ": unsupported dialect " + dialect);
+        }
+    }
+
+    private void validateCronFrequencyMaps(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String kind = text(planOperation.path("input"), "kind");
+        if (!Set.of("interval", "daily", "weekly", "monthly", "customCron").contains(kind)) {
+            failures.add("validator frequency-maps-to-canonical-expression failed for " + operationId
+                    + ": unsupported schedule kind " + kind);
+        }
+    }
+
+    private void validateCronTimezoneValid(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String timezone = text(planOperation.path("input"), "timezone");
+        if (timezone.isBlank()) {
+            timezone = text(config.path("schedule"), "timezone");
+        }
+        if (timezone.isBlank()) {
+            timezone = text(config.path("metadata"), "timezone");
+        }
+        if (timezone.isBlank()) {
+            timezone = "UTC";
+        }
+        try {
+            ZoneId.of(timezone);
+        } catch (Exception ex) {
+            failures.add("validator timezone-valid failed for " + operationId + ": invalid timezone " + timezone);
+        }
+    }
+
+    private void validateCronPresetExists(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String labelOrCron = text(planOperation.path("input"), "labelOrCron");
+        if (labelOrCron.isBlank()) {
+            failures.add("validator preset-exists failed for " + operationId + ": labelOrCron is required");
+            return;
+        }
+        if (findCronPreset(config.path("metadata").path("presets"), labelOrCron)
+                || findCronPreset(config.path("presets"), labelOrCron)) {
+            return;
+        }
+        failures.add("validator preset-exists failed for " + operationId + ": preset not found " + labelOrCron);
     }
 
     private String text(JsonNode node, String field) {

@@ -1298,6 +1298,84 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("templating").path("secondary").isMissingNode()).isTrue();
     }
 
+    @Test
+    void shouldCompileCronExpressionSetAndDiagnostics() throws Exception {
+        ObjectNode proposedConfig = objectMapper.createObjectNode();
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "pdx-cron-builder",
+                operationWithHandler("cron.expression.set", "expression", "schedule-expression", false,
+                        "compile-domain-patch", "cron-expression-set", "schedule.expression"),
+                plan("null", "{ \"cron\": \"0 9 * * MON\", \"dialect\": \"unix\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-cron-expression");
+        assertThat(patchOperation.path("cron").asText()).isEqualTo("0 9 * * MON");
+        assertThat(patchOperation.path("diagnostics").path("valid").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("schedule").path("kind").asText()).isEqualTo("customCron");
+        assertThat(proposedConfig.path("schedule").path("expression").path("cron").asText()).isEqualTo("0 9 * * MON");
+        assertThat(proposedConfig.path("value").asText()).isEqualTo("0 9 * * MON");
+    }
+
+    @Test
+    void shouldCompileCronFrequencyToExpression() throws Exception {
+        ObjectNode proposedConfig = objectMapper.createObjectNode();
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "pdx-cron-builder",
+                operationWithHandler("cron.frequency.set", "frequency", "schedule-kind-and-recurrence", false,
+                        "compile-domain-patch", "cron-frequency-to-expression", "schedule.expression"),
+                plan("null", "{ \"kind\": \"daily\", \"recurrence\": { \"hour\": 8, \"minute\": 30 } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("set-cron-frequency");
+        assertThat(patchOperations.get(0).path("cron").asText()).isEqualTo("30 8 * * *");
+        assertThat(proposedConfig.path("schedule").path("kind").asText()).isEqualTo("daily");
+        assertThat(proposedConfig.path("schedule").path("expression").path("cron").asText()).isEqualTo("30 8 * * *");
+    }
+
+    @Test
+    void shouldCompileCronPreviewGenerate() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "schedule": {
+                    "expression": { "cron": "0 9 * * *", "dialect": "unix" },
+                    "timezone": "UTC"
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "pdx-cron-builder",
+                operationWithHandler("cron.preview.generate", "preview", "schedule-preview-config", false,
+                        "compile-domain-patch", "cron-preview-generate", "preview"),
+                plan("null", "{ \"occurrences\": 2, \"from\": \"2026-04-21T00:00:00Z\", \"timezone\": \"UTC\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("generate-cron-preview");
+        assertThat(patchOperations.get(0).path("preview")).hasSize(2);
+        assertThat(proposedConfig.path("preview")).hasSize(2);
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

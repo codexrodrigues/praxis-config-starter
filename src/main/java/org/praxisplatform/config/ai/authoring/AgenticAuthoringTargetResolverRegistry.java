@@ -46,6 +46,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "upload-security-policy",
             "upload-error-code-message",
             "files-upload-display-mode-and-ui",
+            "schedule-expression",
+            "schedule-kind-and-recurrence",
+            "schedule-timezone",
+            "schedule-validation-request",
+            "schedule-preview-config",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -134,6 +139,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             }
             case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
             case "list-template-slot" -> addListTemplateSlotMatch(candidates, config, targetValue);
+            case "cron-preset-by-label-or-expression" -> addCronPresetMatches(candidates, config, targetValue);
             case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
             case "rich-timeline-item-by-block-id-and-item-id" -> addRichTimelineItemMatches(candidates, config, target, targetValue);
             case "rule-by-id", "rule-by-id-or-name" -> addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
@@ -229,6 +235,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "tab-or-link-by-id",
                 "tab-index-or-id",
                 "list-template-slot",
+                "cron-preset-by-label-or-expression",
                 "rich-block-by-id-or-index",
                 "rich-text-node-by-id-or-path",
                 "rich-media-node-by-id-or-path",
@@ -293,6 +300,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
             value.set("template", existing);
         }
         candidates.add(new ResolvedCandidate("templating." + targetValue, value));
+    }
+
+    private void addCronPresetMatches(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
+        addArrayMatches(candidates, config, "metadata.presets[]", List.of("label", "cron", "expression", "value"), targetValue);
+        addArrayMatches(candidates, config, "presets[]", List.of("label", "cron", "expression", "value"), targetValue);
     }
 
     private Set<String> listTemplateSlots() {

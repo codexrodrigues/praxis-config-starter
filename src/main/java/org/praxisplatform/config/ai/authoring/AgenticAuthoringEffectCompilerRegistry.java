@@ -5,11 +5,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.scheduling.support.CronExpression;
 
 public final class AgenticAuthoringEffectCompilerRegistry {
 
@@ -95,7 +99,13 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "expansion-default-expanded-upsert".equals(handler)
                 || "files-upload-presign-base-url".equals(handler)
                 || "files-upload-direct-base-url".equals(handler)
-                || "list-template-slot-set".equals(handler);
+                || "list-template-slot-set".equals(handler)
+                || "cron-expression-set".equals(handler)
+                || "cron-frequency-to-expression".equals(handler)
+                || "cron-timezone-set".equals(handler)
+                || "cron-preset-apply".equals(handler)
+                || "cron-validation-diagnostics".equals(handler)
+                || "cron-preview-generate".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -333,6 +343,48 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     effect,
                     planOperation,
                     resolved,
+                    proposedConfig,
+                    failures);
+            case "cron-expression-set" -> compileCronExpressionSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "cron-frequency-to-expression" -> compileCronFrequencyToExpression(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "cron-timezone-set" -> compileCronTimezoneSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "cron-preset-apply" -> compileCronPresetApply(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "cron-validation-diagnostics" -> compileCronValidationDiagnostics(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig);
+            case "cron-preview-generate" -> compileCronPreviewGenerate(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
                     proposedConfig,
                     failures);
             default -> {
@@ -1698,6 +1750,179 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileCronExpressionSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String cron = text(input, "cron").trim();
+        String dialect = textOrDefault(input, "dialect", "unix");
+        boolean seconds = input.path("seconds").asBoolean(cronFieldCount(cron) == 6);
+        String springCron = springCronExpression(cron, seconds);
+        if (!isValidSpringCron(springCron)) {
+            failures.add("cron-expression-set invalid expression: " + cron);
+            return null;
+        }
+        writeCronExpression(proposedConfig, "customCron", cron, dialect, seconds);
+        ObjectNode diagnostics = cronDiagnostics(cron, springCron, timezoneFromConfig(proposedConfig), dialect);
+        proposedConfig.set("diagnostics", diagnostics);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-cron-expression");
+        compiled.put("path", "schedule.expression");
+        compiled.put("cron", cron);
+        compiled.put("dialect", dialect);
+        compiled.put("seconds", seconds);
+        compiled.set("diagnostics", diagnostics);
+        return compiled;
+    }
+
+    private ObjectNode compileCronFrequencyToExpression(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String kind = text(input, "kind");
+        String dialect = textOrDefault(input, "dialect", textOrDefault(proposedConfig.path("schedule").path("expression"), "dialect", "unix"));
+        String cron = cronFromFrequency(kind, input.path("recurrence"), failures);
+        if (cron.isBlank()) {
+            return null;
+        }
+        String springCron = springCronExpression(cron, false);
+        if (!isValidSpringCron(springCron)) {
+            failures.add("cron-frequency-to-expression compiled invalid expression: " + cron);
+            return null;
+        }
+        ObjectNode schedule = objectAt(proposedConfig, "schedule", true);
+        schedule.put("kind", kind);
+        schedule.set("recurrence", input.path("recurrence"));
+        writeCronExpression(proposedConfig, kind, cron, dialect, false);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-cron-frequency");
+        compiled.put("path", "schedule");
+        compiled.put("kind", kind);
+        compiled.put("cron", cron);
+        compiled.put("dialect", dialect);
+        return compiled;
+    }
+
+    private ObjectNode compileCronTimezoneSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String timezone = text(planOperation.path("input"), "timezone");
+        ZoneId zone = zoneId(timezone, failures, "cron-timezone-set");
+        if (zone == null) {
+            return null;
+        }
+        objectAt(proposedConfig, "schedule", true).put("timezone", zone.getId());
+        objectAt(proposedConfig, "metadata", true).put("timezone", zone.getId());
+        ObjectNode diagnostics = cronDiagnosticsFromConfig(proposedConfig, zone);
+        proposedConfig.set("diagnostics", diagnostics);
+        proposedConfig.set("preview", cronPreviewFromConfig(proposedConfig, zone, 5, ZonedDateTime.now(zone)));
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-cron-timezone");
+        compiled.put("path", "schedule.timezone");
+        compiled.put("timezone", zone.getId());
+        compiled.set("diagnostics", diagnostics);
+        return compiled;
+    }
+
+    private ObjectNode compileCronPresetApply(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode preset = resolved == null ? MissingNode.getInstance() : resolved.value();
+        String cron = firstText(preset, "cron", "expression", "value");
+        if (cron.isBlank()) {
+            failures.add("cron-preset-apply preset does not define cron expression");
+            return null;
+        }
+        String timezone = textOrDefault(planOperation.path("input"), "timezone", timezoneFromConfig(proposedConfig));
+        String springCron = springCronExpression(cron, cronFieldCount(cron) == 6);
+        if (!isValidSpringCron(springCron)) {
+            failures.add("cron-preset-apply preset cron is invalid: " + cron);
+            return null;
+        }
+        writeCronExpression(proposedConfig, "customCron", cron, textOrDefault(preset, "dialect", "unix"), cronFieldCount(cron) == 6);
+        objectAt(proposedConfig, "schedule", true).put("timezone", timezone);
+        proposedConfig.put("value", cron);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "apply-cron-preset");
+        compiled.put("path", "schedule.expression");
+        compiled.put("cron", cron);
+        compiled.put("timezone", timezone);
+        return compiled;
+    }
+
+    private ObjectNode compileCronValidationDiagnostics(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        String cron = text(planOperation.path("input"), "cron");
+        if (cron.isBlank()) {
+            cron = currentCron(proposedConfig);
+        }
+        String timezone = textOrDefault(planOperation.path("input"), "timezone", timezoneFromConfig(proposedConfig));
+        String springCron = springCronExpression(cron, cronFieldCount(cron) == 6);
+        ObjectNode diagnostics = cronDiagnostics(cron, springCron, timezone, textOrDefault(planOperation.path("input"), "dialect", "unix"));
+        proposedConfig.set("diagnostics", diagnostics);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "validate-cron-expression");
+        compiled.put("path", "diagnostics");
+        compiled.set("diagnostics", diagnostics);
+        return compiled;
+    }
+
+    private ObjectNode compileCronPreviewGenerate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String timezone = textOrDefault(planOperation.path("input"), "timezone", timezoneFromConfig(proposedConfig));
+        ZoneId zone = zoneId(timezone, failures, "cron-preview-generate");
+        if (zone == null) {
+            return null;
+        }
+        int occurrences = planOperation.path("input").path("occurrences").canConvertToInt()
+                ? planOperation.path("input").path("occurrences").asInt()
+                : proposedConfig.path("metadata").path("previewOccurrences").asInt(5);
+        occurrences = Math.max(1, Math.min(occurrences, 25));
+        ZonedDateTime from = parsePreviewFrom(text(planOperation.path("input"), "from"), zone);
+        ObjectNode diagnostics = cronDiagnosticsFromConfig(proposedConfig, zone);
+        ArrayNode preview = cronPreviewFromConfig(proposedConfig, zone, occurrences, from);
+        proposedConfig.set("diagnostics", diagnostics);
+        proposedConfig.set("preview", preview);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "generate-cron-preview");
+        compiled.put("path", "preview");
+        compiled.set("preview", preview);
+        compiled.set("diagnostics", diagnostics);
+        return compiled;
+    }
+
     private ObjectNode compileExpansionMultiExpandSet(
             String componentId,
             JsonNode operation,
@@ -1830,6 +2055,147 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 "owner",
                 "sectionHeader",
                 "emptyState");
+    }
+
+    private void writeCronExpression(ObjectNode proposedConfig, String kind, String cron, String dialect, boolean seconds) {
+        ObjectNode schedule = objectAt(proposedConfig, "schedule", true);
+        schedule.put("kind", kind);
+        ObjectNode expression = objectAt(proposedConfig, "schedule.expression", true);
+        expression.put("cron", cron);
+        expression.put("dialect", dialect);
+        expression.put("seconds", seconds);
+        proposedConfig.put("value", cron);
+    }
+
+    private String cronFromFrequency(String kind, JsonNode recurrence, List<String> failures) {
+        int minute = recurrence.path("minute").asInt(0);
+        int hour = recurrence.path("hour").asInt(0);
+        return switch (kind) {
+            case "daily" -> "%d %d * * *".formatted(minute, hour);
+            case "weekly" -> "%d %d * * %s".formatted(minute, hour, textOrDefault(recurrence, "dayOfWeek", "MON"));
+            case "monthly" -> "%d %d %d * *".formatted(minute, hour, recurrence.path("dayOfMonth").asInt(1));
+            case "interval" -> {
+                int everyMinutes = recurrence.path("everyMinutes").asInt(0);
+                if (everyMinutes <= 0 || everyMinutes > 1440) {
+                    failures.add("cron-frequency-to-expression interval requires everyMinutes between 1 and 1440");
+                    yield "";
+                }
+                yield "*/%d * * * *".formatted(everyMinutes);
+            }
+            case "customCron" -> text(recurrence, "cron");
+            default -> {
+                failures.add("cron-frequency-to-expression unsupported kind: " + kind);
+                yield "";
+            }
+        };
+    }
+
+    private ObjectNode cronDiagnosticsFromConfig(ObjectNode proposedConfig, ZoneId zone) {
+        String cron = currentCron(proposedConfig);
+        return cronDiagnostics(cron, springCronExpression(cron, cronFieldCount(cron) == 6), zone.getId(),
+                textOrDefault(proposedConfig.path("schedule").path("expression"), "dialect", "unix"));
+    }
+
+    private ObjectNode cronDiagnostics(String cron, String springCron, String timezone, String dialect) {
+        ObjectNode diagnostics = objectMapper.createObjectNode();
+        diagnostics.put("cron", cron);
+        diagnostics.put("dialect", dialect);
+        diagnostics.put("timezone", timezone);
+        ArrayNode errors = diagnostics.putArray("errors");
+        if (cron == null || cron.isBlank()) {
+            errors.add("cron expression is required");
+        } else if (!isValidSpringCron(springCron)) {
+            errors.add("cron expression is invalid");
+        }
+        try {
+            ZoneId.of(timezone);
+        } catch (Exception ex) {
+            errors.add("timezone is invalid");
+        }
+        diagnostics.put("valid", errors.isEmpty());
+        return diagnostics;
+    }
+
+    private ArrayNode cronPreviewFromConfig(ObjectNode proposedConfig, ZoneId zone, int occurrences, ZonedDateTime from) {
+        ArrayNode preview = objectMapper.createArrayNode();
+        String cron = currentCron(proposedConfig);
+        String springCron = springCronExpression(cron, cronFieldCount(cron) == 6);
+        if (!isValidSpringCron(springCron)) {
+            return preview;
+        }
+        CronExpression expression = CronExpression.parse(springCron);
+        ZonedDateTime cursor = from.withZoneSameInstant(zone);
+        for (int i = 0; i < occurrences; i++) {
+            ZonedDateTime next = expression.next(cursor);
+            if (next == null) {
+                break;
+            }
+            preview.add(next.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+            cursor = next;
+        }
+        return preview;
+    }
+
+    private ZonedDateTime parsePreviewFrom(String from, ZoneId zone) {
+        if (from == null || from.isBlank()) {
+            return ZonedDateTime.now(zone);
+        }
+        try {
+            return ZonedDateTime.parse(from).withZoneSameInstant(zone);
+        } catch (Exception ex) {
+            return ZonedDateTime.now(zone);
+        }
+    }
+
+    private ZoneId zoneId(String timezone, List<String> failures, String handler) {
+        try {
+            return ZoneId.of(timezone == null || timezone.isBlank() ? "UTC" : timezone);
+        } catch (Exception ex) {
+            failures.add(handler + " invalid timezone: " + timezone);
+            return null;
+        }
+    }
+
+    private String timezoneFromConfig(ObjectNode proposedConfig) {
+        String timezone = text(proposedConfig.path("schedule"), "timezone");
+        if (timezone.isBlank()) {
+            timezone = text(proposedConfig.path("metadata"), "timezone");
+        }
+        return timezone.isBlank() ? "UTC" : timezone;
+    }
+
+    private String currentCron(ObjectNode proposedConfig) {
+        String cron = text(proposedConfig.path("schedule").path("expression"), "cron");
+        return cron.isBlank() ? text(proposedConfig, "value") : cron;
+    }
+
+    private String springCronExpression(String cron, boolean seconds) {
+        int count = cronFieldCount(cron);
+        if (count == 5 && !seconds) {
+            return "0 " + cron;
+        }
+        return cron == null ? "" : cron.trim();
+    }
+
+    private int cronFieldCount(String cron) {
+        if (cron == null || cron.isBlank()) {
+            return 0;
+        }
+        return cron.trim().split("\\s+").length;
+    }
+
+    private boolean isValidSpringCron(String springCron) {
+        try {
+            CronExpression.parse(springCron);
+            return true;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private String textOrDefault(JsonNode node, String field, String defaultValue) {
+        String value = text(node, field);
+        return value.isBlank() ? defaultValue : value;
     }
 
     private boolean isUnsafeFilesBaseUrl(String baseUrl) {
