@@ -75,6 +75,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     boolean supportsDomainPatchHandler(String handler) {
         return "stepper-step-reorder".equals(handler)
                 || "stepper-step-remove".equals(handler)
+                || "stepper-validation-rule-upsert".equals(handler)
                 || "tabs.reorder-tab-and-preserve-selection".equals(handler)
                 || "tabs.remove-tab-and-reselect".equals(handler)
                 || "tabs.set-active-item".equals(handler)
@@ -152,6 +153,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "stepper-step-remove" -> compileStepperStepRemove(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "stepper-validation-rule-upsert" -> compileStepperValidationRuleUpsert(
                     componentId,
                     operation,
                     effect,
@@ -400,6 +409,121 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         }
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileStepperValidationRuleUpsert(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null ? MissingNode.getInstance() : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode step)) {
+            failures.add("stepper-validation-rule-upsert target not found: " + (resolved == null ? "" : resolved.path()));
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        String stepId = text(step, "id");
+        String inputStepId = text(input, "stepId");
+        if (!inputStepId.isBlank() && !inputStepId.equals(stepId)) {
+            failures.add("stepper-validation-rule-upsert input stepId does not match target: " + inputStepId);
+            return null;
+        }
+        if (input.path("remote").asBoolean(false)) {
+            failures.add("stepper-validation-rule-upsert remote validation must be delegated to host serverValidate");
+            return null;
+        }
+        JsonNode ruleInput = input.path("rule");
+        if (!ruleInput.isObject()) {
+            failures.add("stepper-validation-rule-upsert requires rule object");
+            return null;
+        }
+
+        ObjectNode form = step.path("form") instanceof ObjectNode existingForm
+                ? existingForm
+                : step.putObject("form");
+        ObjectNode formConfig = form.path("config") instanceof ObjectNode existingConfig
+                ? existingConfig
+                : form.putObject("config");
+        ArrayNode formRules = formConfig.path("formRules") instanceof ArrayNode existingRules
+                ? existingRules
+                : formConfig.putArray("formRules");
+
+        String fieldName = text(input, "fieldName");
+        String ruleId = firstText(ruleInput, "id", "name", "key");
+        if (ruleId.isBlank()) {
+            ruleId = nextStepperValidationRuleId(formRules, stepId, fieldName);
+        }
+        ObjectNode rule = objectMapper.createObjectNode();
+        if (ruleInput instanceof ObjectNode ruleObject) {
+            rule.setAll(ruleObject);
+        }
+        rule.put("id", ruleId);
+        if (!rule.hasNonNull("name")) {
+            rule.put("name", ruleId);
+        }
+        rule.put("context", "validation");
+        rule.put("targetType", fieldName.isBlank() ? "step" : "field");
+        ArrayNode targets = objectMapper.createArrayNode();
+        targets.add(fieldName.isBlank() ? stepId : fieldName);
+        rule.set("targets", targets);
+        if (!fieldName.isBlank()) {
+            ArrayNode targetFields = objectMapper.createArrayNode();
+            targetFields.add(fieldName);
+            rule.set("targetFields", targetFields);
+        }
+        ObjectNode effectNode = rule.path("effect") instanceof ObjectNode existingEffect
+                ? existingEffect
+                : objectMapper.createObjectNode();
+        if (!effectNode.has("condition")) {
+            JsonNode condition = firstPresent(ruleInput, "condition", "logic", "expression");
+            effectNode.set("condition", condition.isMissingNode() ? objectMapper.nullNode() : condition);
+        }
+        ObjectNode properties = effectNode.path("properties") instanceof ObjectNode existingProperties
+                ? existingProperties
+                : objectMapper.createObjectNode();
+        String message = text(input, "message");
+        if (!message.isBlank()) {
+            properties.put("message", message);
+            step.put("errorMessage", message);
+        }
+        properties.put("valid", false);
+        effectNode.set("properties", properties);
+        rule.set("effect", effectNode);
+
+        int existingIndex = indexOfObjectByKey(formRules, "id", ruleId);
+        if (existingIndex >= 0) {
+            formRules.set(existingIndex, rule);
+        } else {
+            formRules.add(rule);
+        }
+        step.put("hasError", true);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "upsert-step-validation-rule");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", resolved == null ? "" : resolved.path() + ".form.config.formRules[]");
+        compiled.put("resolvedPath", resolved == null ? "" : resolved.path());
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("stepId", stepId);
+        compiled.put("ruleId", ruleId);
+        if (!fieldName.isBlank()) {
+            compiled.put("fieldName", fieldName);
+        }
+        compiled.put("upsertedIndex", existingIndex >= 0 ? existingIndex : formRules.size() - 1);
+        compiled.set("value", rule);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
         compiled.set("affectedPaths", operation.path("affectedPaths"));
         compiled.set("submissionImpact", operation.path("submissionImpact"));
         return compiled;
@@ -1548,6 +1672,19 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         }
     }
 
+    private String nextStepperValidationRuleId(ArrayNode rules, String stepId, String fieldName) {
+        String suffix = fieldName == null || fieldName.isBlank() ? stepId : fieldName;
+        String normalized = suffix == null || suffix.isBlank()
+                ? "rule"
+                : suffix.replaceAll("[^A-Za-z0-9]+", "-").replaceAll("(^-|-$)", "").toLowerCase();
+        String base = "validation-" + (normalized.isBlank() ? "rule" : normalized);
+        String candidate = base;
+        for (int i = 2; indexOfObjectByKey(rules, "id", candidate) >= 0; i++) {
+            candidate = base + "-" + i;
+        }
+        return candidate;
+    }
+
     private String timelineBlockPathFromItemPath(String itemPath) {
         int marker = itemPath == null ? -1 : itemPath.lastIndexOf(".items[]/");
         return marker < 0 ? "" : itemPath.substring(0, marker);
@@ -1795,5 +1932,18 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
         }
         return "";
+    }
+
+    private JsonNode firstPresent(JsonNode node, String... fields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return MissingNode.getInstance();
+        }
+        for (String field : fields) {
+            JsonNode value = node.path(field);
+            if (!value.isMissingNode() && !value.isNull()) {
+                return value;
+            }
+        }
+        return MissingNode.getInstance();
     }
 }

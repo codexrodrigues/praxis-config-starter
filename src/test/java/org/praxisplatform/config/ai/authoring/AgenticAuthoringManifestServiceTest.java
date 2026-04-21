@@ -918,6 +918,72 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesStepperValidationRuleFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-stepper",
+                payloadFromClasspathSnapshot("praxis-stepper"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "steps": [
+                      {
+                        "id": "account",
+                        "label": "Conta",
+                        "form": {
+                          "config": {
+                            "fieldMetadata": [
+                              { "name": "email", "label": "Email" }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "validation.rule.add",
+                    "target": "account",
+                    "input": {
+                      "stepId": "account",
+                      "fieldName": "email",
+                      "message": "Email obrigatorio",
+                      "rule": {
+                        "condition": { "!": [{ "var": "email" }] }
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings()).isEmpty();
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("upsert-step-validation-rule");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("stepper-validation-rule-upsert");
+        assertThat(operation.path("stepId").asText()).isEqualTo("account");
+        assertThat(operation.path("fieldName").asText()).isEqualTo("email");
+        assertThat(operation.path("ruleId").asText()).isEqualTo("validation-email");
+        JsonNode formRule = result.patch().path("proposedConfig")
+                .path("steps").get(0)
+                .path("form").path("config").path("formRules").get(0);
+        assertThat(formRule.path("context").asText()).isEqualTo("validation");
+        assertThat(formRule.path("targetType").asText()).isEqualTo("field");
+        assertThat(formRule.path("effect").path("properties").path("message").asText()).isEqualTo("Email obrigatorio");
+        assertThat(result.patch().path("proposedConfig").path("steps").get(0).path("hasError").asBoolean()).isTrue();
+    }
+
+    @Test
     void compilesRichContentBlockAddFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-rich-content",

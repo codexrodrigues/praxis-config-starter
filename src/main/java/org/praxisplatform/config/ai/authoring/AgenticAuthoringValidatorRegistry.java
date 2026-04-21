@@ -25,6 +25,9 @@ public final class AgenticAuthoringValidatorRegistry {
             "step-exists",
             "selected-step-removal-safe",
             "step-content-removal-confirmed",
+            "validation-rule-target-exists",
+            "validation-rule-compatible",
+            "server-validation-delegated",
             "field-is-local",
             "field-name-unique",
             "field-exists-in-layout",
@@ -113,6 +116,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 }
                 case "selected-step-removal-safe" -> validateSelectedStepRemovalSafe(operationId, planOperation, config, failures);
                 case "step-content-removal-confirmed" -> validateStepContentRemovalConfirmed(operationId, planOperation, failures);
+                case "validation-rule-target-exists" -> validateStepperValidationRuleTargetExists(operationId, planOperation, config, failures);
+                case "validation-rule-compatible" -> validateStepperValidationRuleCompatible(operationId, planOperation, failures);
+                case "server-validation-delegated" -> validateStepperServerValidationDelegated(operationId, planOperation, failures);
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
@@ -163,6 +169,59 @@ public final class AgenticAuthoringValidatorRegistry {
         if (!planOperation.path("confirmed").asBoolean(false)) {
             failures.add("validator step-content-removal-confirmed failed for " + operationId
                     + ": explicit confirmation is required");
+        }
+    }
+
+    private void validateStepperValidationRuleTargetExists(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String stepId = text(input, "stepId");
+        JsonNode step = findObjectByKey(config.path("steps"), "id", stepId);
+        if (step.isMissingNode()) {
+            failures.add("validator validation-rule-target-exists failed for " + operationId
+                    + ": step not found " + stepId);
+            return;
+        }
+        String fieldName = text(input, "fieldName");
+        if (!fieldName.isBlank() && findObjectByKey(step.path("form").path("config").path("fieldMetadata"), "name", fieldName).isMissingNode()) {
+            failures.add("validator validation-rule-target-exists failed for " + operationId
+                    + ": field not found " + fieldName);
+        }
+        String childComponentId = text(input, "childComponentId");
+        if (!childComponentId.isBlank() && findObjectByKey(step.path("widgets"), "id", childComponentId).isMissingNode()) {
+            failures.add("validator validation-rule-target-exists failed for " + operationId
+                    + ": child component not found " + childComponentId);
+        }
+    }
+
+    private void validateStepperValidationRuleCompatible(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode rule = planOperation.path("input").path("rule");
+        if (!rule.isObject() || rule.isEmpty()) {
+            failures.add("validator validation-rule-compatible failed for " + operationId
+                    + ": rule object must not be empty");
+            return;
+        }
+        JsonNode condition = firstPresent(rule, "condition", "logic", "expression");
+        if (!condition.isMissingNode() && condition.isTextual() && condition.asText("").isBlank()) {
+            failures.add("validator validation-rule-compatible failed for " + operationId
+                    + ": rule condition must not be blank");
+        }
+    }
+
+    private void validateStepperServerValidationDelegated(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.path("remote").asBoolean(false) && text(input, "childComponentId").isBlank()) {
+            failures.add("validator server-validation-delegated failed for " + operationId
+                    + ": remote validation requires childComponentId for host delegation");
         }
     }
 
@@ -481,6 +540,18 @@ public final class AgenticAuthoringValidatorRegistry {
         for (String name : names) {
             if (node.has(name)) {
                 return node.path(name);
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private JsonNode findObjectByKey(JsonNode array, String key, String value) {
+        if (!array.isArray() || value == null || value.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode item : array) {
+            if (value.equals(text(item, key))) {
+                return item;
             }
         }
         return MissingNode.getInstance();

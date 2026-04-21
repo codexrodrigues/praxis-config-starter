@@ -317,6 +317,63 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileStepperValidationRuleUpsertIntoNestedFormConfig() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "steps": [
+                    {
+                      "id": "account",
+                      "label": "Conta",
+                      "form": {
+                        "config": {
+                          "fieldMetadata": [
+                            { "name": "email", "label": "Email" }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-stepper",
+                operationWithHandler("validation.rule.add", "validationGate", "step-validation-by-id", true,
+                        "compile-domain-patch", "stepper-validation-rule-upsert", "steps[].form.config.formRules[]"),
+                plan("\"account\"", """
+                        {
+                          "stepId": "account",
+                          "fieldName": "email",
+                          "message": "Email obrigatorio",
+                          "rule": {
+                            "condition": { "!": [{ "var": "email" }] }
+                          }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("upsert-step-validation-rule");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("stepper-validation-rule-upsert");
+        assertThat(patchOperation.path("stepId").asText()).isEqualTo("account");
+        assertThat(patchOperation.path("fieldName").asText()).isEqualTo("email");
+        assertThat(patchOperation.path("ruleId").asText()).isEqualTo("validation-email");
+        JsonNode formRule = proposedConfig.path("steps").get(0).path("form").path("config").path("formRules").get(0);
+        assertThat(formRule.path("context").asText()).isEqualTo("validation");
+        assertThat(formRule.path("targetType").asText()).isEqualTo("field");
+        assertThat(formRule.path("targets").get(0).asText()).isEqualTo("email");
+        assertThat(formRule.path("effect").path("properties").path("message").asText()).isEqualTo("Email obrigatorio");
+        assertThat(proposedConfig.path("steps").get(0).path("hasError").asBoolean()).isTrue();
+    }
+
+    @Test
     void shouldCompileTabsReorderDomainPatchAndPreserveSelectedIndexIdentity() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {

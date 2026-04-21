@@ -115,7 +115,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "field-by-name" -> addArrayMatches(candidates, config, "fieldMetadata[]", List.of("name"), targetValue);
             case "section-by-id-or-title" -> addArrayMatches(candidates, config, "sections[]", List.of("id", "title", "label"), targetValue);
             case "panel-by-id-or-title", "panel-content-by-id" -> addArrayMatches(candidates, config, "panels[]", List.of("id", "title", "label"), targetValue);
-            case "step-by-id-or-label", "step-content-by-id" -> addArrayMatches(candidates, config, "steps[]", List.of("id", "label", "textLabel", "title"), targetValue);
+            case "step-by-id-or-label", "step-content-by-id", "step-validation-by-id" -> addArrayMatches(candidates, config, "steps[]", List.of("id", "label", "textLabel", "title"), targetValue);
             case "tab-by-id-or-label" -> addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
             case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
             case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
@@ -208,6 +208,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "panel-content-by-id",
                 "step-by-id-or-label",
                 "step-content-by-id",
+                "step-validation-by-id",
                 "tab-by-id-or-label",
                 "tab-index-or-id",
                 "rich-block-by-id-or-index",
