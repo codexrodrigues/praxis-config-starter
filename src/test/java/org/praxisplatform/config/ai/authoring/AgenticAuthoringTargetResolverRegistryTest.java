@@ -429,6 +429,40 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(result.value().path("type").asText()).isEqualTo("richContent");
     }
 
+    @Test
+    void shouldResolveTableRuleAndNestedEffectTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "ruleEffects": {
+                    "rules": [
+                      {
+                        "ruleId": "sla",
+                        "effects": [
+                          { "effectId": "paint", "effectType": "fundo" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget rule = registry.resolve(
+                "praxis-table-rule-builder",
+                operation("condition.set", "condition", "table-rule-condition-by-rule-id", "fail", true),
+                objectMapper.readTree("{ \"ruleId\": \"sla\" }"),
+                config);
+        AgenticAuthoringResolvedTarget effect = registry.resolve(
+                "praxis-table-rule-builder",
+                operation("effect.update", "effect", "rule-effect-by-rule-and-effect-id", "fail", true),
+                objectMapper.readTree("{ \"ruleId\": \"sla\", \"effectId\": \"paint\" }"),
+                config);
+
+        assertThat(rule.status()).isEqualTo("resolved");
+        assertThat(rule.path()).isEqualTo("ruleEffects.rules[]/0");
+        assertThat(effect.status()).isEqualTo("resolved");
+        assertThat(effect.path()).isEqualTo("ruleEffects.rules[]/0.effects[]/0");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

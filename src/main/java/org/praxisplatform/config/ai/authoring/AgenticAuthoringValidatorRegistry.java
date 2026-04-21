@@ -220,7 +220,28 @@ public final class AgenticAuthoringValidatorRegistry {
             "drilldown-target-governed",
             "selection-output-structured",
             "feature-toggle-valid",
-            "editor-runtime-round-trip");
+            "editor-runtime-round-trip",
+            "scope-supported",
+            "condition-table-context-valid",
+            "effect-registry-supported",
+            "table-owned-config-delegated",
+            "table-renderer-references-clean",
+            "condition-fields-known",
+            "condition-operators-supported",
+            "effect-id-unique",
+            "style-values-safe",
+            "preview-class-not-persisted",
+            "effect-exists",
+            "runtime-effect-compilable",
+            "empty-rule-policy-valid",
+            "preset-key-known",
+            "preset-effect-compilable",
+            "animation-preset-known",
+            "animation-alias-known",
+            "animation-override-valid",
+            "animation-runtime-supported",
+            "table-manifest-operation-known",
+            "table-target-valid");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
@@ -412,6 +433,22 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "feature-toggle-valid" -> validateChartFeatureToggle(operationId, planOperation, failures);
                 case "editor-runtime-round-trip" -> {
                     // Round-trip is enforced by compiling only canonical chartDocument paths consumed by editor and runtime.
+                }
+                case "scope-supported" -> validateTableRuleScope(operationId, planOperation, failures);
+                case "condition-table-context-valid", "condition-operators-supported" -> validateTableRuleCondition(operationId, planOperation, failures);
+                case "condition-fields-known" -> validateTableRuleConditionFields(operationId, planOperation, config, failures);
+                case "effect-registry-supported" -> validateTableRuleEffectType(operationId, planOperation, failures);
+                case "effect-id-unique" -> validateTableRuleEffectIdUnique(operationId, planOperation, config, failures);
+                case "effect-exists" -> validateTableRuleEffectExists(operationId, planOperation, config, failures);
+                case "style-values-safe" -> validateTableRuleStyleSafe(operationId, planOperation, failures);
+                case "preset-key-known", "preset-effect-compilable" -> validateTableRulePreset(operationId, planOperation, failures);
+                case "animation-preset-known", "animation-alias-known", "animation-override-valid", "animation-runtime-supported" ->
+                        validateTableRuleAnimation(operationId, planOperation, failures);
+                case "table-manifest-operation-known" -> validateTableRuleTableOperation(operationId, planOperation, failures);
+                case "table-target-valid" -> validateTableRuleTableTarget(operationId, planOperation, failures);
+                case "table-owned-config-delegated", "table-renderer-references-clean", "preview-class-not-persisted",
+                     "runtime-effect-compilable", "empty-rule-policy-valid" -> {
+                    // Enforced by compiled delegation and by refusing direct writes to table-owned config paths.
                 }
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
@@ -1027,6 +1064,154 @@ public final class AgenticAuthoringValidatorRegistry {
             }
         }
         return false;
+    }
+
+    private void validateTableRuleScope(String operationId, JsonNode planOperation, List<String> failures) {
+        String scope = text(planOperation.path("input"), "scope");
+        if (!scope.isBlank() && !Set.of("cell", "row", "column", "table").contains(scope)) {
+            failures.add("validator scope-supported failed for " + operationId + ": unsupported scope " + scope);
+        }
+        if ("cell".equals(scope) || "column".equals(scope)) {
+            if (text(planOperation.path("input"), "columnKey").isBlank()) {
+                failures.add("validator scope-supported failed for " + operationId + ": columnKey is required for " + scope + " scope");
+            }
+        }
+    }
+
+    private void validateTableRuleCondition(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode condition = planOperation.path("input").path("condition");
+        if (condition.isMissingNode()) {
+            return;
+        }
+        if (!condition.isObject() || condition.isEmpty()) {
+            failures.add("validator condition-table-context-valid failed for " + operationId + ": condition must be a non-empty object");
+            return;
+        }
+        if (containsUnsafeAbsoluteUrl(condition)) {
+            failures.add("validator condition-table-context-valid failed for " + operationId + ": condition must not contain remote URLs");
+        }
+    }
+
+    private void validateTableRuleConditionFields(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        Set<String> fields = new HashSet<>();
+        collectTemplateReferencedFields(planOperation.path("input").path("condition"), fields);
+        for (String field : fields) {
+            if (!fieldExists(config.path("columns"), field) && !fieldExists(config.path("fieldMetadata"), field)) {
+                failures.add("validator condition-fields-known failed for " + operationId + ": unknown field " + field);
+            }
+        }
+    }
+
+    private void validateTableRuleEffectType(String operationId, JsonNode planOperation, List<String> failures) {
+        String effectType = text(planOperation.path("input"), "effectType");
+        if (effectType.isBlank()) {
+            JsonNode effect = planOperation.path("input").path("effect");
+            effectType = firstNonBlank(text(effect, "effectType"), text(effect, "type"));
+        }
+        if (!effectType.isBlank() && !tableRuleEffectTypes().contains(effectType)) {
+            failures.add("validator effect-registry-supported failed for " + operationId + ": unsupported effectType " + effectType);
+        }
+    }
+
+    private void validateTableRuleEffectIdUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String ruleId = text(planOperation.path("input"), "ruleId");
+        String effectId = text(planOperation.path("input"), "effectId");
+        JsonNode rule = findTableRule(config, ruleId);
+        if (rule != null && findObjectByAnyKey(rule.path("effects"), List.of("effectId", "id"), effectId) != null) {
+            failures.add("validator effect-id-unique failed for " + operationId + ": duplicate effectId " + effectId);
+        }
+    }
+
+    private void validateTableRuleEffectExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String ruleId = text(planOperation.path("input"), "ruleId");
+        String effectId = text(planOperation.path("input"), "effectId");
+        JsonNode rule = findTableRule(config, ruleId);
+        if (rule == null || findObjectByAnyKey(rule.path("effects"), List.of("effectId", "id"), effectId) == null) {
+            failures.add("validator effect-exists failed for " + operationId + ": effect not found " + effectId);
+        }
+    }
+
+    private void validateTableRuleStyleSafe(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode payload = firstPresent(planOperation.path("input"), "payload", "effect");
+        if (containsUnsafeAbsoluteUrl(payload) || containsUnsafeTemplateHtml(payload)) {
+            failures.add("validator style-values-safe failed for " + operationId + ": unsafe style payload");
+        }
+    }
+
+    private void validateTableRulePreset(String operationId, JsonNode planOperation, List<String> failures) {
+        String presetKey = text(planOperation.path("input"), "presetKey");
+        if (!Set.of("aprovado", "alerta", "erro", "info").contains(presetKey)) {
+            failures.add("validator preset-key-known failed for " + operationId + ": unknown presetKey " + presetKey);
+        }
+    }
+
+    private void validateTableRuleAnimation(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode animation = planOperation.path("input").path("animation");
+        if (!animation.isObject()) {
+            failures.add("validator animation-override-valid failed for " + operationId + ": animation must be an object");
+            return;
+        }
+        String preset = text(animation, "preset");
+        if (!preset.isBlank() && !tableRuleAnimationPresets().contains(preset)) {
+            failures.add("validator animation-preset-known failed for " + operationId + ": unknown animation preset " + preset);
+        }
+        int duration = animation.path("durationMs").asInt(0);
+        if (duration < 0 || duration > 10000) {
+            failures.add("validator animation-override-valid failed for " + operationId + ": durationMs out of bounds");
+        }
+    }
+
+    private void validateTableRuleTableOperation(String operationId, JsonNode planOperation, List<String> failures) {
+        String tableOperationId = text(planOperation.path("input"), "tableOperationId");
+        if (tableOperationId.isBlank() || tableOperationId.startsWith("page.") || tableOperationId.contains("localConfig")) {
+            failures.add("validator table-manifest-operation-known failed for " + operationId + ": unsupported tableOperationId " + tableOperationId);
+        }
+    }
+
+    private void validateTableRuleTableTarget(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode target = planOperation.path("input").path("tableTarget");
+        if (!target.isMissingNode() && !target.isObject()) {
+            failures.add("validator table-target-valid failed for " + operationId + ": tableTarget must be an object");
+        }
+    }
+
+    private Set<String> tableRuleEffectTypes() {
+        return Set.of("estilo", "layout", "icone", "fundo", "animacao", "tooltip");
+    }
+
+    private Set<String> tableRuleAnimationPresets() {
+        return Set.of(
+                "info-soft",
+                "success-confirm",
+                "warning-attention",
+                "critical-alert",
+                "audit-review",
+                "sync-pending",
+                "sla-warning",
+                "sla-breach",
+                "risk-elevated",
+                "risk-critical",
+                "audit-warning",
+                "sync-warning");
+    }
+
+    private JsonNode findTableRule(JsonNode config, String ruleId) {
+        JsonNode rules = config.path("ruleEffects").path("rules");
+        return findObjectByAnyKey(rules, List.of("ruleId", "id"), ruleId);
+    }
+
+    private JsonNode findObjectByAnyKey(JsonNode array, List<String> keys, String value) {
+        if (!array.isArray()) {
+            return null;
+        }
+        for (JsonNode item : array) {
+            for (String key : keys) {
+                if (value.equals(text(item, key))) {
+                    return item;
+                }
+            }
+        }
+        return null;
     }
 
     private void validateRemoteResourceBindingSafe(

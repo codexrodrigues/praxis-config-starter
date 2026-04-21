@@ -80,6 +80,8 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "x-ui-chart-events-selection-change",
             "x-ui-chart-legend-feature",
             "x-ui-chart-tooltip-feature",
+            "default-effect-preset-by-key",
+            "praxis-table-authoring-operation",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -200,6 +202,8 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "row-by-id-in-section" -> addRecursiveArrayMatches(candidates, config, "rows", List.of("id"), targetValue);
             case "column-by-id-in-row" -> addRecursiveArrayMatches(candidates, config, "columns", List.of("id"), targetValue);
             case "layout-item-by-id" -> addRecursiveArrayMatches(candidates, config, "items", List.of("id", "key"), targetValue);
+            case "table-rule-by-stable-id", "table-rule-condition-by-rule-id" -> addArrayMatches(candidates, config, "ruleEffects.rules[]", List.of("ruleId", "id"), targetValue);
+            case "rule-effect-by-rule-and-effect-id", "rule-animation-by-rule-and-effect-id" -> addTableRuleEffectMatches(candidates, config, target, targetValue);
             default -> {
                 if (kind != null && !kind.isBlank()) {
                     addRecursiveObjectMatches(candidates, config, List.of("id", "field", "name", "key", "label", "title"), targetValue);
@@ -304,7 +308,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "field-metadata-json-path",
                 "row-by-id-in-section",
                 "column-by-id-in-row",
-                "layout-item-by-id").contains(resolver);
+                "layout-item-by-id",
+                "table-rule-by-stable-id",
+                "table-rule-condition-by-rule-id",
+                "rule-effect-by-rule-and-effect-id",
+                "rule-animation-by-rule-and-effect-id").contains(resolver);
     }
 
     private void addArrayMatches(
@@ -420,6 +428,41 @@ public final class AgenticAuthoringTargetResolverRegistry {
                     candidates.add(new ResolvedCandidate(
                             "document.nodes[]/" + blockIndex + ".items[]/" + itemPosition,
                             item));
+                }
+            }
+            return;
+        }
+    }
+
+    private void addTableRuleEffectMatches(
+            List<ResolvedCandidate> candidates,
+            JsonNode config,
+            JsonNode target,
+            String targetValue) {
+        String ruleId = target.isObject() ? firstText(target, "ruleId", "id", "value") : "";
+        String effectId = target.isObject() ? firstText(target, "effectId", "effect", "key") : targetValue;
+        if (ruleId.isBlank() || effectId.isBlank()) {
+            return;
+        }
+        JsonNode rules = resolvePath(config, "ruleEffects.rules");
+        if (!rules.isArray()) {
+            return;
+        }
+        for (int ruleIndex = 0; ruleIndex < rules.size(); ruleIndex++) {
+            JsonNode rule = rules.get(ruleIndex);
+            if (!matchesAnyKey(rule, List.of("ruleId", "id"), ruleId)) {
+                continue;
+            }
+            JsonNode effects = rule.path("effects");
+            if (!effects.isArray()) {
+                return;
+            }
+            for (int effectIndex = 0; effectIndex < effects.size(); effectIndex++) {
+                JsonNode effect = effects.get(effectIndex);
+                if (matchesAnyKey(effect, List.of("effectId", "id"), effectId)) {
+                    candidates.add(new ResolvedCandidate(
+                            "ruleEffects.rules[]/" + ruleIndex + ".effects[]/" + effectIndex,
+                            effect));
                 }
             }
             return;
@@ -554,7 +597,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
         if (target.isTextual() || target.isNumber() || target.isBoolean()) {
             return target.asText("");
         }
-        for (String field : List.of("id", "field", "name", "key", "value", "slot")) {
+        for (String field : List.of("id", "field", "name", "key", "value", "slot", "ruleId", "effectId", "presetKey", "tableOperationId")) {
             if (target.has(field)) {
                 return target.path(field).asText("");
             }

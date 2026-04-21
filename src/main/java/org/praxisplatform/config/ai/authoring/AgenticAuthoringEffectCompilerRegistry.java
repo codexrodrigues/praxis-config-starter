@@ -38,7 +38,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         for (JsonNode effect : operation.path("effects")) {
             String effectKind = text(effect, "kind");
             AgenticAuthoringResolvedTarget resolved = null;
-            if (operation.path("target").path("required").asBoolean(false)) {
+            if (operation.path("target").path("required").asBoolean(false)
+                    && !domainHandlerCreatesTarget(text(effect, "handler"))) {
                 resolved = targetResolverRegistry.resolve(componentId, operation, planOperation.path("target"), proposedConfig);
                 if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
                     failures.add("target resolution failed during compile for "
@@ -74,6 +75,12 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 patchOperations.add(compiled);
             }
         }
+    }
+
+    private boolean domainHandlerCreatesTarget(String handler) {
+        return "table-rule-builder-rule-add".equals(handler)
+                || "table-rule-builder-effect-add".equals(handler)
+                || "table-rule-builder-animation-set".equals(handler);
     }
 
     boolean supportsDomainPatchHandler(String handler) {
@@ -131,6 +138,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "form-layout-visual-block-update".equals(handler)
                 || "form-layout-visual-block-move".equals(handler)
                 || "form-layout-visual-block-remove".equals(handler)
+                || "table-rule-builder-rule-add".equals(handler)
+                || "table-rule-builder-rule-remove".equals(handler)
+                || "table-rule-builder-condition-set".equals(handler)
+                || "table-rule-builder-effect-add".equals(handler)
+                || "table-rule-builder-effect-update".equals(handler)
+                || "table-rule-builder-effect-remove".equals(handler)
+                || "table-rule-builder-preset-apply".equals(handler)
+                || "table-rule-builder-animation-set".equals(handler)
+                || "table-rule-builder-table-delegate".equals(handler)
                 || "chart-series-add".equals(handler)
                 || "chart-axis-configure".equals(handler)
                 || "chart-data-resource-bind".equals(handler)
@@ -606,6 +622,24 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     resolved,
                     proposedConfig,
                     failures);
+            case "table-rule-builder-rule-add" -> compileTableRuleBuilderRuleAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-rule-remove" -> compileTableRuleBuilderRuleRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-condition-set" -> compileTableRuleBuilderConditionSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-effect-add" -> compileTableRuleBuilderEffectAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-effect-update" -> compileTableRuleBuilderEffectUpdate(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-effect-remove" -> compileTableRuleBuilderEffectRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-preset-apply" -> compileTableRuleBuilderPresetApply(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-animation-set" -> compileTableRuleBuilderAnimationSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "table-rule-builder-table-delegate" -> compileTableRuleBuilderTableDelegate(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
             case "chart-series-add" -> compileChartSeriesAdd(
                     componentId,
                     operation,
@@ -3180,6 +3214,303 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileTableRuleBuilderRuleAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String ruleId = text(input, "ruleId");
+        if (ruleId.isBlank()) {
+            failures.add("table-rule-builder-rule-add requires input.ruleId");
+            return null;
+        }
+        ArrayNode rules = tableRuleRules(proposedConfig, true);
+        if (findObjectByAnyKey(rules, List.of("ruleId", "id"), ruleId) != null) {
+            failures.add("table-rule-builder-rule-add duplicate ruleId: " + ruleId);
+            return null;
+        }
+        ObjectNode rule = objectMapper.createObjectNode();
+        rule.put("ruleId", ruleId);
+        rule.put("id", ruleId);
+        copyIfPresent(input, rule, "scope");
+        copyIfPresent(input, rule, "columnKey");
+        if (input.has("condition")) {
+            rule.set("condition", input.path("condition").deepCopy());
+        }
+        ArrayNode effects = rule.putArray("effects");
+        if (input.path("effect").isObject()) {
+            ObjectNode effectValue = input.path("effect").deepCopy();
+            if (!effectValue.has("effectId")) {
+                effectValue.put("effectId", ruleId + "-effect");
+            }
+            effects.add(effectValue);
+        }
+        int insertedIndex = rules.size();
+        String insertAfter = text(input, "insertAfterRuleId");
+        if (!insertAfter.isBlank()) {
+            int afterIndex = indexOfObjectByAnyKey(rules, List.of("ruleId", "id"), insertAfter);
+            if (afterIndex < 0) {
+                failures.add("table-rule-builder-rule-add insertAfterRuleId not found: " + insertAfter);
+                return null;
+            }
+            insertedIndex = afterIndex + 1;
+            rules.insert(insertedIndex, rule);
+        } else {
+            rules.add(rule);
+        }
+        appendTableRuleDelegation(proposedConfig, "rule.add", input, ruleId);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-table-rule-builder-rule");
+        compiled.put("path", "ruleEffects.rules[]");
+        compiled.put("key", "ruleId");
+        compiled.put("keyValue", ruleId);
+        compiled.put("insertedIndex", insertedIndex);
+        compiled.set("value", rule);
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderRuleRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String ruleId = firstNonBlank(text(planOperation.path("input"), "ruleId"), targetText(planOperation.path("target")));
+        ArrayNode rules = tableRuleRules(proposedConfig, false);
+        int index = rules == null ? -1 : indexOfObjectByAnyKey(rules, List.of("ruleId", "id"), ruleId);
+        if (index < 0) {
+            failures.add("table-rule-builder-rule-remove target not found: " + ruleId);
+            return null;
+        }
+        JsonNode removed = rules.remove(index);
+        appendTableRuleDelegation(proposedConfig, "rule.remove", planOperation.path("input"), ruleId);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-table-rule-builder-rule");
+        compiled.put("path", "ruleEffects.rules[]");
+        compiled.put("key", "ruleId");
+        compiled.put("keyValue", ruleId);
+        compiled.put("removedIndex", index);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderConditionSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode rule = tableRuleByInput(proposedConfig, planOperation.path("input"));
+        if (rule == null) {
+            failures.add("table-rule-builder-condition-set rule not found: " + text(planOperation.path("input"), "ruleId"));
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        if ("merge".equals(text(input, "mode")) && rule.path("condition").isObject()) {
+            mergeObject((ObjectNode) rule.path("condition"), input.path("condition"));
+        } else {
+            rule.set("condition", input.path("condition").deepCopy());
+        }
+        copyIfPresent(input, rule, "scope");
+        copyIfPresent(input, rule, "columnKey");
+        appendTableRuleDelegation(proposedConfig, "condition.set", input, text(rule, "ruleId"));
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-table-rule-builder-condition");
+        compiled.put("path", "ruleEffects.rules[].condition");
+        compiled.put("key", "ruleId");
+        compiled.put("keyValue", text(rule, "ruleId"));
+        compiled.set("value", rule.path("condition"));
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderEffectAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode rule = tableRuleByInput(proposedConfig, planOperation.path("input"));
+        JsonNode input = planOperation.path("input");
+        String effectId = text(input, "effectId");
+        if (rule == null || effectId.isBlank()) {
+            failures.add("table-rule-builder-effect-add requires existing rule and input.effectId");
+            return null;
+        }
+        ArrayNode effects = tableRuleEffects(rule, true);
+        if (findObjectByAnyKey(effects, List.of("effectId", "id"), effectId) != null) {
+            failures.add("table-rule-builder-effect-add duplicate effectId: " + effectId);
+            return null;
+        }
+        ObjectNode newEffect = objectMapper.createObjectNode();
+        newEffect.put("effectId", effectId);
+        newEffect.put("id", effectId);
+        newEffect.put("effectType", text(input, "effectType"));
+        if (input.has("payload")) {
+            newEffect.set("payload", input.path("payload").deepCopy());
+        }
+        effects.add(newEffect);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-table-rule-builder-effect");
+        compiled.put("path", "ruleEffects.rules[].effects[]");
+        compiled.put("key", "effectId");
+        compiled.put("keyValue", effectId);
+        compiled.put("ruleId", text(rule, "ruleId"));
+        compiled.put("insertedIndex", effects.size() - 1);
+        compiled.set("value", newEffect);
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderEffectUpdate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode targetEffect = tableRuleEffectByInput(proposedConfig, planOperation.path("input"));
+        if (targetEffect == null) {
+            failures.add("table-rule-builder-effect-update effect not found: " + text(planOperation.path("input"), "effectId"));
+            return null;
+        }
+        JsonNode payload = planOperation.path("input").path("payload");
+        if ("replace".equals(text(planOperation.path("input"), "mode")) || !targetEffect.path("payload").isObject()) {
+            targetEffect.set("payload", payload.deepCopy());
+        } else {
+            mergeObject((ObjectNode) targetEffect.path("payload"), payload);
+        }
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "update-table-rule-builder-effect");
+        compiled.put("path", "ruleEffects.rules[].effects[].payload");
+        compiled.put("key", "effectId");
+        compiled.put("keyValue", text(targetEffect, "effectId"));
+        compiled.set("value", targetEffect);
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderEffectRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode rule = tableRuleByInput(proposedConfig, input);
+        if (rule == null) {
+            failures.add("table-rule-builder-effect-remove rule not found: " + text(input, "ruleId"));
+            return null;
+        }
+        ArrayNode effects = tableRuleEffects(rule, false);
+        String effectId = text(input, "effectId");
+        int index = effects == null ? -1 : indexOfObjectByAnyKey(effects, List.of("effectId", "id"), effectId);
+        if (index < 0) {
+            failures.add("table-rule-builder-effect-remove effect not found: " + effectId);
+            return null;
+        }
+        JsonNode removed = effects.remove(index);
+        if (effects.isEmpty() && input.path("removeEmptyRule").asBoolean(false)) {
+            ArrayNode rules = tableRuleRules(proposedConfig, false);
+            int ruleIndex = indexOfObjectByAnyKey(rules, List.of("ruleId", "id"), text(rule, "ruleId"));
+            if (ruleIndex >= 0) {
+                rules.remove(ruleIndex);
+            }
+        }
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-table-rule-builder-effect");
+        compiled.put("path", "ruleEffects.rules[].effects[]");
+        compiled.put("key", "effectId");
+        compiled.put("keyValue", effectId);
+        compiled.put("removedIndex", index);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderPresetApply(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode rule = tableRuleByInput(proposedConfig, planOperation.path("input"));
+        JsonNode input = planOperation.path("input");
+        String presetKey = text(input, "presetKey");
+        if (rule == null || !tableRulePresetKeys().contains(presetKey)) {
+            failures.add("table-rule-builder-preset-apply requires existing rule and known preset");
+            return null;
+        }
+        ArrayNode effects = tableRuleEffects(rule, true);
+        if (!input.path("mergeWithExisting").asBoolean(false)) {
+            effects.removeAll();
+        }
+        ObjectNode presetEffect = tableRulePresetEffect(presetKey);
+        if (input.has("scope")) {
+            rule.set("scope", input.path("scope"));
+        }
+        effects.add(presetEffect);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "apply-table-rule-builder-preset");
+        compiled.put("path", "ruleEffects.rules[].effects[]");
+        compiled.put("key", "presetKey");
+        compiled.put("keyValue", presetKey);
+        compiled.set("value", presetEffect);
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderAnimationSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode targetEffect = text(input, "effectId").isBlank()
+                ? firstTableRuleEffect(tableRuleByInput(proposedConfig, input))
+                : tableRuleEffectByInput(proposedConfig, input);
+        if (targetEffect == null) {
+            failures.add("table-rule-builder-animation-set effect not found for rule: " + text(input, "ruleId"));
+            return null;
+        }
+        targetEffect.set("animation", input.path("animation").deepCopy());
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-table-rule-builder-animation");
+        compiled.put("path", "ruleEffects.rules[].effects[].animation");
+        compiled.put("key", "effectId");
+        compiled.put("keyValue", text(targetEffect, "effectId"));
+        compiled.set("value", targetEffect.path("animation"));
+        return compiled;
+    }
+
+    private ObjectNode compileTableRuleBuilderTableDelegate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String tableOperationId = text(input, "tableOperationId");
+        if (tableOperationId.isBlank()) {
+            failures.add("table-rule-builder-table-delegate requires input.tableOperationId");
+            return null;
+        }
+        ObjectNode delegation = appendTableRuleDelegation(proposedConfig, tableOperationId, input, tableOperationId);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "delegate-table-rule-builder-table-operation");
+        compiled.put("path", "delegatedAuthoringOperations[]");
+        compiled.put("key", "tableOperationId");
+        compiled.put("keyValue", tableOperationId);
+        compiled.set("value", delegation);
+        return compiled;
+    }
+
     private ObjectNode baseDomainPatch(
             String componentId,
             JsonNode operation,
@@ -4206,6 +4537,106 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return -1;
         }
         return index;
+    }
+
+    private ArrayNode tableRuleRules(ObjectNode proposedConfig, boolean create) {
+        return arrayAt(proposedConfig, "ruleEffects.rules", create);
+    }
+
+    private ObjectNode tableRuleByInput(ObjectNode proposedConfig, JsonNode input) {
+        String ruleId = text(input, "ruleId");
+        ArrayNode rules = tableRuleRules(proposedConfig, false);
+        return rules == null ? null : findObjectByAnyKey(rules, List.of("ruleId", "id"), ruleId);
+    }
+
+    private ArrayNode tableRuleEffects(ObjectNode rule, boolean create) {
+        JsonNode effects = rule.path("effects");
+        if (effects instanceof ArrayNode array) {
+            return array;
+        }
+        return create ? rule.putArray("effects") : null;
+    }
+
+    private ObjectNode tableRuleEffectByInput(ObjectNode proposedConfig, JsonNode input) {
+        ObjectNode rule = tableRuleByInput(proposedConfig, input);
+        if (rule == null) {
+            return null;
+        }
+        ArrayNode effects = tableRuleEffects(rule, false);
+        return effects == null ? null : findObjectByAnyKey(effects, List.of("effectId", "id"), text(input, "effectId"));
+    }
+
+    private ObjectNode firstTableRuleEffect(ObjectNode rule) {
+        if (rule == null) {
+            return null;
+        }
+        ArrayNode effects = tableRuleEffects(rule, false);
+        if (effects == null || effects.isEmpty() || !(effects.get(0) instanceof ObjectNode object)) {
+            return null;
+        }
+        return object;
+    }
+
+    private ObjectNode appendTableRuleDelegation(ObjectNode proposedConfig, String operationId, JsonNode input, String identity) {
+        ArrayNode delegated = arrayAt(proposedConfig, "delegatedAuthoringOperations", true);
+        ObjectNode delegation = objectMapper.createObjectNode();
+        delegation.put("componentId", "praxis-table");
+        delegation.put("operationId", operationId);
+        delegation.put("identity", identity);
+        delegation.set("input", input.deepCopy());
+        delegated.add(delegation);
+        return delegation;
+    }
+
+    private ObjectNode tableRulePresetEffect(String presetKey) {
+        ObjectNode effect = objectMapper.createObjectNode();
+        effect.put("effectId", "preset-" + presetKey);
+        effect.put("id", "preset-" + presetKey);
+        effect.put("effectType", switch (presetKey) {
+            case "aprovado" -> "estilo";
+            case "alerta", "erro" -> "fundo";
+            default -> "tooltip";
+        });
+        ObjectNode payload = effect.putObject("payload");
+        payload.put("presetKey", presetKey);
+        payload.put("semantic", true);
+        return effect;
+    }
+
+    private Set<String> tableRulePresetKeys() {
+        return Set.of("aprovado", "alerta", "erro", "info");
+    }
+
+    private ObjectNode findObjectByAnyKey(ArrayNode array, List<String> keys, String value) {
+        if (array == null) {
+            return null;
+        }
+        for (JsonNode item : array) {
+            if (!(item instanceof ObjectNode object)) {
+                continue;
+            }
+            for (String key : keys) {
+                if (value.equals(text(object, key))) {
+                    return object;
+                }
+            }
+        }
+        return null;
+    }
+
+    private int indexOfObjectByAnyKey(ArrayNode array, List<String> keys, String value) {
+        if (array == null) {
+            return -1;
+        }
+        for (int i = 0; i < array.size(); i++) {
+            JsonNode item = array.get(i);
+            for (String key : keys) {
+                if (value.equals(text(item, key))) {
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     private ObjectNode objectAt(ObjectNode root, String dottedPath, boolean create) {

@@ -184,6 +184,73 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateTableRuleBuilderSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "status" }
+                  ],
+                  "ruleEffects": {
+                    "rules": [
+                      {
+                        "ruleId": "sla",
+                        "effects": [
+                          { "effectId": "paint", "effectType": "fundo" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-table-rule-builder",
+                operation("rule.add", "rule", "table-rule-by-stable-id", true,
+                        "scope-supported,condition-table-context-valid,condition-fields-known,effect-registry-supported"),
+                plan("{ \"ruleId\": \"new\" }", "{ \"ruleId\": \"new\", \"scope\": \"cell\", \"condition\": { \"==\": [{ \"var\": \"missing\" }, true] }, \"effect\": { \"effectType\": \"unknown\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-table-rule-builder",
+                operation("effect.add", "effect", "rule-effect-by-rule-and-effect-id", true,
+                        "effect-id-unique,style-values-safe"),
+                plan("{ \"ruleId\": \"sla\", \"effectId\": \"paint\" }", "{ \"ruleId\": \"sla\", \"effectId\": \"paint\", \"effectType\": \"fundo\", \"payload\": { \"url\": \"https://evil.example/style\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-table-rule-builder",
+                operation("animation.set", "animation", "rule-animation-by-rule-and-effect-id", true,
+                        "animation-preset-known,animation-override-valid"),
+                plan("{ \"ruleId\": \"sla\", \"effectId\": \"paint\" }", "{ \"ruleId\": \"sla\", \"effectId\": \"paint\", \"animation\": { \"preset\": \"unknown\", \"durationMs\": 20000 } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-table-rule-builder",
+                operation("tableIntegration.delegate", "tableDelegation", "praxis-table-authoring-operation", false,
+                        "table-manifest-operation-known,table-target-valid"),
+                plan("{}", "{ \"tableOperationId\": \"page.localConfig.write\", \"reason\": \"bad\", \"tableTarget\": \"status\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator scope-supported failed for rule.add: columnKey is required for cell scope",
+                        "validator condition-fields-known failed for rule.add: unknown field missing",
+                        "validator effect-registry-supported failed for rule.add: unsupported effectType unknown",
+                        "validator effect-id-unique failed for effect.add: duplicate effectId paint",
+                        "validator style-values-safe failed for effect.add: unsafe style payload",
+                        "validator animation-preset-known failed for animation.set: unknown animation preset unknown",
+                        "validator animation-override-valid failed for animation.set: durationMs out of bounds",
+                        "validator table-manifest-operation-known failed for tableIntegration.delegate: unsupported tableOperationId page.localConfig.write",
+                        "validator table-target-valid failed for tableIntegration.delegate: tableTarget must be an object");
+    }
+
+    @Test
     void shouldWarnWhenValidatorHasNoBackendImplementation() throws Exception {
         List<String> failures = new ArrayList<>();
         List<String> warnings = new ArrayList<>();

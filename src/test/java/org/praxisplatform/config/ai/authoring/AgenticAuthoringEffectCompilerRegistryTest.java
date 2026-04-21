@@ -324,6 +324,131 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileTableRuleBuilderDomainPatchesAndDelegations() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "status" }
+                  ],
+                  "ruleEffects": {
+                    "rules": [
+                      {
+                        "ruleId": "existing",
+                        "scope": "row",
+                        "condition": { "==": [{ "var": "status" }, "open"] },
+                        "effects": [
+                          { "effectId": "paint", "effectType": "fundo", "payload": { "color": "yellow" } }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("rule.add", "rule", "table-rule-by-stable-id", true,
+                        "compile-domain-patch", "table-rule-builder-rule-add", "ruleEffects.rules[]"),
+                plan("\"new-rule\"", "{ \"ruleId\": \"new-rule\", \"scope\": \"cell\", \"columnKey\": \"status\", \"condition\": { \"==\": [{ \"var\": \"status\" }, \"done\"] }, \"effect\": { \"effectType\": \"estilo\", \"payload\": { \"fontWeight\": \"600\" } } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("condition.set", "condition", "table-rule-condition-by-rule-id", true,
+                        "compile-domain-patch", "table-rule-builder-condition-set", "delegatedAuthoringOperations"),
+                plan("\"new-rule\"", "{ \"ruleId\": \"new-rule\", \"condition\": { \"==\": [{ \"var\": \"status\" }, \"blocked\"] }, \"mode\": \"replace\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("effect.add", "effect", "rule-effect-by-rule-and-effect-id", true,
+                        "compile-domain-patch", "table-rule-builder-effect-add", "RuleEffectDefinition"),
+                plan("{ \"ruleId\": \"new-rule\", \"effectId\": \"icon\" }", "{ \"ruleId\": \"new-rule\", \"effectId\": \"icon\", \"effectType\": \"icone\", \"payload\": { \"icon\": \"check\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("effect.update", "effect", "rule-effect-by-rule-and-effect-id", true,
+                        "compile-domain-patch", "table-rule-builder-effect-update", "RuleEffectDefinition"),
+                plan("{ \"ruleId\": \"new-rule\", \"effectId\": \"icon\" }", "{ \"ruleId\": \"new-rule\", \"effectId\": \"icon\", \"payload\": { \"color\": \"green\" }, \"mode\": \"merge\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("animation.set", "animation", "rule-animation-by-rule-and-effect-id", true,
+                        "compile-domain-patch", "table-rule-builder-animation-set", "RuleEffectDefinition.animation"),
+                plan("{ \"ruleId\": \"new-rule\", \"effectId\": \"icon\" }", "{ \"ruleId\": \"new-rule\", \"effectId\": \"icon\", \"animation\": { \"preset\": \"info-soft\", \"durationMs\": 250 } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("preset.apply", "preset", "default-effect-preset-by-key", true,
+                        "compile-domain-patch", "table-rule-builder-preset-apply", "RuleEffectDefinition"),
+                plan("{ \"presetKey\": \"alerta\" }", "{ \"ruleId\": \"new-rule\", \"presetKey\": \"alerta\", \"scope\": \"row\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("effect.remove", "effect", "rule-effect-by-rule-and-effect-id", true,
+                        "compile-domain-patch", "table-rule-builder-effect-remove", "RuleEffectDefinition"),
+                plan("{ \"ruleId\": \"existing\", \"effectId\": \"paint\" }", "{ \"ruleId\": \"existing\", \"effectId\": \"paint\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("tableIntegration.delegate", "tableDelegation", "praxis-table-authoring-operation", false,
+                        "compile-domain-patch", "table-rule-builder-table-delegate", "delegatedAuthoringOperations"),
+                plan("{}", "{ \"tableOperationId\": \"column.conditionalRenderer.add\", \"reason\": \"renderer placement belongs to praxis-table\", \"tableTarget\": { \"field\": \"status\" }, \"tableParams\": { \"renderer\": \"badge\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table-rule-builder",
+                operationWithHandler("rule.remove", "rule", "table-rule-by-stable-id", true,
+                        "compile-domain-patch", "table-rule-builder-rule-remove", "delegatedAuthoringOperations"),
+                plan("\"existing\"", "{ \"ruleId\": \"existing\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).extracting(node -> node.path("op").asText())
+                .containsExactly(
+                        "add-table-rule-builder-rule",
+                        "set-table-rule-builder-condition",
+                        "add-table-rule-builder-effect",
+                        "update-table-rule-builder-effect",
+                        "set-table-rule-builder-animation",
+                        "apply-table-rule-builder-preset",
+                        "remove-table-rule-builder-effect",
+                        "delegate-table-rule-builder-table-operation",
+                        "remove-table-rule-builder-rule");
+        JsonNode newRule = proposedConfig.path("ruleEffects").path("rules").get(0);
+        assertThat(newRule.path("ruleId").asText()).isEqualTo("new-rule");
+        assertThat(newRule.path("condition").path("==").get(1).asText()).isEqualTo("blocked");
+        assertThat(newRule.path("effects").get(0).path("effectId").asText()).isEqualTo("preset-alerta");
+        assertThat(proposedConfig.path("delegatedAuthoringOperations")).hasSize(4);
+    }
+
+    @Test
     void shouldCompileStepperReorderDomainPatchAndPreserveSelectedIndexIdentity() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {
