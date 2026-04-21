@@ -44,6 +44,7 @@ jobs:
           repository: codexrodrigues/praxis-api-quickstart
           ref: ${{ inputs.quickstart_ref }}
           path: praxis-api-quickstart
+          token: ${{ secrets.RELEASE_PAT || github.token }}
 
       - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v4
