@@ -1056,7 +1056,7 @@ public class AgenticAuthoringIntentResolverService {
             String prompt,
             String effectivePrompt,
             AgenticAuthoringCandidate selectedCandidate) {
-        if (selectedCandidate == null || !PAYROLL_ANALYTICS.equals(selectedCandidate.resourcePath())) {
+        if (selectedCandidate == null || !isPayrollDashboardCandidate(selectedCandidate)) {
             return false;
         }
         String combinedPrompt = normalize(valueOrDefault(effectivePrompt, "") + "\n" + valueOrDefault(prompt, ""));
@@ -1067,10 +1067,15 @@ public class AgenticAuthoringIntentResolverService {
                 || isConfirmedDataSourceSelection(combinedPrompt);
     }
 
+    private boolean isPayrollDashboardCandidate(AgenticAuthoringCandidate selectedCandidate) {
+        String resourcePath = selectedCandidate == null ? "" : normalizePath(selectedCandidate.resourcePath());
+        return PAYROLL_ANALYTICS.equals(resourcePath) || PAYROLL.equals(resourcePath);
+    }
+
     private boolean isConfirmedDataSourceSelection(String prompt) {
         return containsAny(prompt, "fonte confirmada", "source confirmed", "data source", "usar vw-", "use vw-",
                 "usar /api/", "use /api/", "recurso confirmado", "api confirmada")
-                || (prompt.contains(PAYROLL_ANALYTICS)
+                || ((prompt.contains(PAYROLL_ANALYTICS) || prompt.contains(PAYROLL))
                 && containsAny(prompt, "usar", "use", "confirmada", "confirmado", "selecionada", "selecionado"));
     }
 
