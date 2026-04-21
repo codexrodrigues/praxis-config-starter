@@ -2236,6 +2236,118 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("form").path("fieldMetadata").path("helpText").asText()).isEqualTo("Choose status");
     }
 
+    @Test
+    void shouldCompileManualFormAuthoringPatches() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "currentConfig": {
+                    "fieldMetadata": [
+                      { "name": "email", "label": "Email", "controlType": "text" }
+                    ],
+                    "sections": [
+                      { "id": "main", "rows": [ { "id": "r1", "columns": [ { "id": "c1", "fields": ["email"] } ] } ] }
+                    ]
+                  },
+                  "componentRegistry": [
+                    { "controlType": "text" },
+                    { "controlType": "pdx-email" }
+                  ],
+                  "form": {
+                    "value": { "email": "old@example.com" }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("manualField.add", "manualField", "manual-form-field-by-name", true,
+                        "compile-domain-patch", "manual-field-add", "currentConfig.fieldMetadata"),
+                plan("\"phone\"", "{ \"fieldName\": \"phone\", \"controlType\": \"text\", \"label\": \"Phone\", \"source\": \"manual-template\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("manualField.label.set", "manualField", "manual-form-field-by-name", true,
+                        "compile-domain-patch", "manual-field-label-set", "currentConfig.fieldMetadata[].label"),
+                plan("\"email\"", "{ \"fieldName\": \"email\", \"label\": \"Work email\", \"updatePlaceholderWhenEmpty\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("layout.configure", "layout", "manual-form-layout", false,
+                        "compile-domain-patch", "manual-layout-configure", "currentConfig.sections"),
+                plan("{}", "{ \"usePathNames\": true, \"fieldOrder\": [\"phone\", \"email\"] }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("toolbar.configure", "toolbar", "manual-form-customization-toolbar", false,
+                        "compile-domain-patch", "manual-toolbar-configure", "enableCustomization"),
+                plan("{}", "{ \"enableCustomization\": true, \"editableFlags\": [\"required\", \"openMetadataEditor\"] }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("autosave.enabled.set", "autosave", "manual-form-autosave-policy", false,
+                        "compile-domain-patch", "manual-autosave-enabled-set", "enableAutoSave"),
+                plan("{}", "{ \"enabled\": true, \"debounceMs\": 500, \"storageKey\": \"manual.customer\", \"namespace\": \"sales\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("submitBehavior.set", "submitBehavior", "manual-form-submit-behavior", false,
+                        "compile-domain-patch", "manual-submit-behavior-set", "currentConfig.behavior"),
+                plan("{}", "{ \"action\": \"saveDraft\", \"focusFirstError\": true, \"delegateFormSubmitTo\": \"praxis-dynamic-form\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("metadataBridge.configure", "metadataBridge", "manual-field-metadata-bridge", false,
+                        "compile-domain-patch", "manual-metadata-bridge-configure", "metadataBridge"),
+                plan("{}", "{ \"enabled\": true, \"fieldName\": \"email\", \"openMode\": \"field-toolbar\", \"delegateFieldMetadataTo\": \"praxis-metadata-editor\", \"delegateControlDiscoveryTo\": \"praxis-dynamic-fields\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-manual-form",
+                operationWithHandler("manualField.remove", "manualField", "manual-form-field-by-name", true,
+                        "compile-domain-patch", "manual-field-remove", "currentConfig.fieldMetadata"),
+                plan("\"email\"", "{ \"fieldName\": \"email\", \"removeFromLayout\": true, \"clearPersistedValue\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(8);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("add-manual-field");
+        assertThat(patchOperations.get(7).path("op").asText()).isEqualTo("remove-manual-field");
+        assertThat(proposedConfig.path("currentConfig").path("fieldMetadata")).hasSize(1);
+        assertThat(proposedConfig.path("currentConfig").path("fieldMetadata").get(0).path("name").asText()).isEqualTo("phone");
+        assertThat(proposedConfig.path("currentFieldMetadata").get(0).path("name").asText()).isEqualTo("phone");
+        assertThat(proposedConfig.path("form").path("value").has("email")).isFalse();
+        assertThat(proposedConfig.path("enableCustomization").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("enableAutoSave").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("persistenceOptions").path("storageKey").asText()).isEqualTo("manual.customer");
+        assertThat(proposedConfig.path("currentConfig").path("behavior").path("action").asText()).isEqualTo("saveDraft");
+        assertThat(proposedConfig.path("metadataBridge").path("openMode").asText()).isEqualTo("field-toolbar");
+    }
+
     private ObjectNode dynamicFormConfig() throws Exception {
         return (ObjectNode) objectMapper.readTree("""
                 {

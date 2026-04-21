@@ -563,6 +563,40 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(normalizer.status()).isEqualTo("not-required");
     }
 
+    @Test
+    void shouldResolveManualFormTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "currentConfig": {
+                    "fieldMetadata": [
+                      { "name": "email", "label": "Email" }
+                    ]
+                  }
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget field = registry.resolve(
+                "praxis-manual-form",
+                operation("manualField.label.set", "manualField", "manual-form-field-by-name", "fail", true),
+                objectMapper.readTree("\"email\""),
+                config);
+        AgenticAuthoringResolvedTarget layout = registry.resolve(
+                "praxis-manual-form",
+                operation("layout.configure", "layout", "manual-form-layout", "fail", false),
+                objectMapper.readTree("{}"),
+                config);
+        AgenticAuthoringResolvedTarget toolbar = registry.resolve(
+                "praxis-manual-form",
+                operation("toolbar.configure", "toolbar", "manual-form-customization-toolbar", "fail", false),
+                objectMapper.readTree("{}"),
+                config);
+
+        assertThat(field.status()).isEqualTo("resolved");
+        assertThat(field.path()).isEqualTo("currentConfig.fieldMetadata[]/0");
+        assertThat(layout.status()).isEqualTo("not-required");
+        assertThat(toolbar.status()).isEqualTo("not-required");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

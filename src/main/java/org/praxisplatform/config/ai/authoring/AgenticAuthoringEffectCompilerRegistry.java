@@ -84,7 +84,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "table-rule-builder-animation-set".equals(handler)
                 || "visual-builder-node-add".equals(handler)
                 || "visual-builder-edge-connect".equals(handler)
-                || "visual-builder-variable-add".equals(handler);
+                || "visual-builder-variable-add".equals(handler)
+                || "manual-field-add".equals(handler);
     }
 
     boolean supportsDomainPatchHandler(String handler) {
@@ -168,6 +169,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "visual-builder-condition-set".equals(handler)
                 || "visual-builder-effect-set".equals(handler)
                 || "visual-builder-dsl-round-trip-validate".equals(handler)
+                || "manual-field-add".equals(handler)
+                || "manual-field-remove".equals(handler)
+                || "manual-field-label-set".equals(handler)
+                || "manual-layout-configure".equals(handler)
+                || "manual-toolbar-configure".equals(handler)
+                || "manual-autosave-enabled-set".equals(handler)
+                || "manual-submit-behavior-set".equals(handler)
+                || "manual-metadata-bridge-configure".equals(handler)
                 || "chart-series-add".equals(handler)
                 || "chart-axis-configure".equals(handler)
                 || "chart-data-resource-bind".equals(handler)
@@ -694,6 +703,22 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             case "visual-builder-effect-set" -> compileVisualBuilderEffectSet(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
             case "visual-builder-dsl-round-trip-validate" -> compileVisualBuilderDslRoundTripValidate(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "manual-field-add" -> compileManualFieldAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "manual-field-remove" -> compileManualFieldRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "manual-field-label-set" -> compileManualFieldLabelSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "manual-layout-configure" -> compileManualLayoutConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "manual-toolbar-configure" -> compileManualToolbarConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "manual-autosave-enabled-set" -> compileManualAutosaveEnabledSet(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "manual-submit-behavior-set" -> compileManualSubmitBehaviorSet(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "manual-metadata-bridge-configure" -> compileManualMetadataBridgeConfigure(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
             case "chart-series-add" -> compileChartSeriesAdd(
                     componentId,
@@ -4175,6 +4200,267 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.set("value", proposedConfig.path("currentJSON"));
         compiled.set("validationErrors", validationErrors);
         return compiled;
+    }
+
+    private ObjectNode compileManualFieldAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String fieldName = text(input, "fieldName");
+        String controlType = text(input, "controlType");
+        if (fieldName.isBlank() || controlType.isBlank()) {
+            failures.add("manual-field-add requires fieldName and controlType");
+            return null;
+        }
+        ArrayNode fieldMetadata = manualFieldMetadata(proposedConfig, true);
+        if (indexOfObjectByKey(fieldMetadata, "name", fieldName) >= 0) {
+            failures.add("manual-field-add duplicate fieldName: " + fieldName);
+            return null;
+        }
+        ObjectNode field = objectMapper.createObjectNode();
+        field.put("name", fieldName);
+        field.put("controlType", controlType);
+        field.put("source", textOrDefault(input, "source", "manual-template"));
+        copyIfPresent(input, field, "label");
+        copyIfPresent(input, field, "required");
+        copyIfPresent(input, field, "sectionId");
+        copyIfPresent(input, field, "delegateFieldMetadataTo");
+        fieldMetadata.add(field);
+        syncManualFieldMetadata(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-manual-field");
+        compiled.put("path", "currentConfig.fieldMetadata[]");
+        compiled.put("insertedIndex", fieldMetadata.size() - 1);
+        compiled.set("value", field.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileManualFieldRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String fieldName = firstNonBlank(text(input, "fieldName"), targetText(planOperation.path("target")));
+        ArrayNode fieldMetadata = manualFieldMetadata(proposedConfig, false);
+        int index = indexOfObjectByKey(fieldMetadata, "name", fieldName);
+        if (index < 0) {
+            failures.add("manual-field-remove target not found: " + fieldName);
+            return null;
+        }
+        JsonNode removed = fieldMetadata.remove(index);
+        int removedLayoutRefs = input.path("removeFromLayout").asBoolean(false)
+                ? removeFormFieldLayoutRefs(proposedConfig.path("currentConfig").path("sections"), fieldName)
+                : 0;
+        if (input.path("clearPersistedValue").asBoolean(false)) {
+            ObjectNode form = objectAt(proposedConfig, "form", true);
+            if (form.path("value") instanceof ObjectNode value) {
+                value.remove(fieldName);
+            }
+        }
+        syncManualFieldMetadata(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-manual-field");
+        compiled.put("path", "currentConfig.fieldMetadata[]");
+        compiled.put("removedIndex", index);
+        compiled.put("removedLayoutRefs", removedLayoutRefs);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode compileManualFieldLabelSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String fieldName = firstNonBlank(text(input, "fieldName"), targetText(planOperation.path("target")));
+        String label = text(input, "label");
+        if (fieldName.isBlank() || label.isBlank()) {
+            failures.add("manual-field-label-set requires fieldName and label");
+            return null;
+        }
+        ObjectNode field = manualFieldByName(proposedConfig, fieldName);
+        if (field == null) {
+            failures.add("manual-field-label-set target not found: " + fieldName);
+            return null;
+        }
+        JsonNode previousValue = field.deepCopy();
+        field.put("label", label);
+        if (input.path("updatePlaceholderWhenEmpty").asBoolean(false) && text(field, "placeholder").isBlank()) {
+            field.put("placeholder", label);
+        }
+        syncManualFieldMetadata(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-manual-field-label");
+        compiled.put("path", "currentConfig.fieldMetadata[].label");
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", field.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileManualLayoutConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode currentConfig = objectAt(proposedConfig, "currentConfig", true);
+        JsonNode previousSections = currentConfig.path("sections").deepCopy();
+        if (input.has("usePathNames")) {
+            proposedConfig.set("usePathNames", input.path("usePathNames").deepCopy());
+        }
+        if (input.has("sections")) {
+            currentConfig.set("sections", input.path("sections").deepCopy());
+        }
+        if (input.has("fieldOrder")) {
+            ArrayNode ordered = objectMapper.createArrayNode();
+            ArrayNode existing = manualFieldMetadata(proposedConfig, false);
+            for (JsonNode fieldNameNode : input.path("fieldOrder")) {
+                String fieldName = fieldNameNode.asText("");
+                ObjectNode field = findObjectByKey(existing, "name", fieldName);
+                if (field == null) {
+                    failures.add("manual-layout-configure fieldOrder target not found: " + fieldName);
+                    return null;
+                }
+                ordered.add(field.deepCopy());
+            }
+            currentConfig.set("fieldMetadata", ordered);
+        }
+        syncManualFieldMetadata(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-manual-layout");
+        compiled.put("path", "currentConfig.sections");
+        compiled.set("previousSections", previousSections);
+        compiled.set("sections", currentConfig.path("sections"));
+        return compiled;
+    }
+
+    private ObjectNode compileManualToolbarConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        JsonNode previousValue = proposedConfig.path("enableCustomization").deepCopy();
+        if (input.has("enableCustomization")) {
+            proposedConfig.set("enableCustomization", input.path("enableCustomization").deepCopy());
+        }
+        if (input.has("editableFlags")) {
+            proposedConfig.set("editableFlags", input.path("editableFlags").deepCopy());
+        }
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-manual-toolbar");
+        compiled.put("path", "enableCustomization");
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", proposedConfig.path("enableCustomization"));
+        return compiled;
+    }
+
+    private ObjectNode compileManualAutosaveEnabledSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        JsonNode previousOptions = proposedConfig.path("persistenceOptions").deepCopy();
+        proposedConfig.set("enableAutoSave", input.path("enabled").deepCopy());
+        if (input.has("debounceMs")) {
+            proposedConfig.set("autoSaveDebounceMs", input.path("debounceMs").deepCopy());
+        }
+        ObjectNode options = objectAt(proposedConfig, "persistenceOptions", true);
+        copyIfPresent(input, options, "storageKey");
+        copyIfPresent(input, options, "namespace");
+        copyIfPresent(input, options, "tenantId");
+        copyIfPresent(input, options, "profileId");
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-manual-autosave");
+        compiled.put("path", "enableAutoSave");
+        compiled.set("previousPersistenceOptions", previousOptions);
+        compiled.set("persistenceOptions", options.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileManualSubmitBehaviorSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode behavior = objectAt(proposedConfig, "currentConfig.behavior", true);
+        JsonNode previousBehavior = behavior.deepCopy();
+        mergeObject(behavior, input);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-manual-submit-behavior");
+        compiled.put("path", "currentConfig.behavior");
+        compiled.set("previousBehavior", previousBehavior);
+        compiled.set("behavior", behavior.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileManualMetadataBridgeConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String fieldName = text(input, "fieldName");
+        if (!fieldName.isBlank() && manualFieldByName(proposedConfig, fieldName) == null) {
+            failures.add("manual-metadata-bridge-configure field not found: " + fieldName);
+            return null;
+        }
+        ObjectNode bridge = objectAt(proposedConfig, "metadataBridge", true);
+        JsonNode previousBridge = bridge.deepCopy();
+        mergeObject(bridge, input);
+        if (input.has("enabled")) {
+            proposedConfig.set("enableCustomization", input.path("enabled").deepCopy());
+        }
+        if (!fieldName.isBlank()) {
+            ObjectNode field = manualFieldByName(proposedConfig, fieldName);
+            copyIfPresent(input, field, "delegateFieldMetadataTo");
+            copyIfPresent(input, field, "delegateControlDiscoveryTo");
+        }
+        syncManualFieldMetadata(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-manual-metadata-bridge");
+        compiled.put("path", "metadataBridge");
+        compiled.set("previousBridge", previousBridge);
+        compiled.set("metadataBridge", bridge.deepCopy());
+        return compiled;
+    }
+
+    private ArrayNode manualFieldMetadata(ObjectNode proposedConfig, boolean create) {
+        ArrayNode fromCurrentConfig = arrayAt(proposedConfig, "currentConfig.fieldMetadata", create);
+        if (fromCurrentConfig != null) {
+            return fromCurrentConfig;
+        }
+        return arrayAt(proposedConfig, "fieldMetadata", create);
+    }
+
+    private ObjectNode manualFieldByName(ObjectNode proposedConfig, String fieldName) {
+        return findObjectByKey(manualFieldMetadata(proposedConfig, false), "name", fieldName);
+    }
+
+    private void syncManualFieldMetadata(ObjectNode proposedConfig) {
+        ArrayNode fieldMetadata = manualFieldMetadata(proposedConfig, true);
+        proposedConfig.set("currentFieldMetadata", fieldMetadata.deepCopy());
+        ObjectNode form = objectAt(proposedConfig, "form", true);
+        form.set("fieldMetadata", fieldMetadata.deepCopy());
     }
 
     private ObjectNode baseDomainPatch(

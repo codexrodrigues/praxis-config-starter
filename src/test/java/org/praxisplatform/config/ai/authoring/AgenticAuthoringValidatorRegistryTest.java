@@ -739,6 +739,110 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator normalization-preserves-canonical-fields failed for normalization.apply: unsupported mode destroy");
     }
 
+    @Test
+    void shouldValidateManualFormAuthoringSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "currentConfig": {
+                    "fieldMetadata": [
+                      { "name": "email", "controlType": "text" }
+                    ]
+                  },
+                  "componentRegistry": [
+                    { "controlType": "text" }
+                  ],
+                  "enableCustomization": false
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("manualField.add", "manualField", "manual-form-field-by-name", true,
+                        "manual-field-id-unique,control-type-discovered,metadata-bridge-does-not-redefine-schema"),
+                plan("\"email\"", "{ \"fieldName\": \"email\", \"controlType\": \"missing\", \"schemaPatch\": {} }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("manualField.remove", "manualField", "manual-form-field-by-name", true,
+                        "manual-field-exists,field-removal-confirmed"),
+                plan("\"missing\"", "{ \"fieldName\": \"missing\", \"removeFromLayout\": true, \"clearPersistedValue\": true }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("manualField.label.set", "manualField", "manual-form-field-by-name", true,
+                        "manual-field-exists,field-label-valid"),
+                plan("\"email\"", "{ \"fieldName\": \"email\", \"label\": \"\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("layout.configure", "layout", "manual-form-layout", false,
+                        "layout-field-references-valid,manual-layout-does-not-replace-host-template,delegates-form-config"),
+                plan("{}", "{ \"fieldOrder\": [\"missing\"], \"hostTemplate\": \"<form></form>\", \"delegateAdvancedFormConfigTo\": \"other\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("toolbar.configure", "toolbar", "manual-form-customization-toolbar", false,
+                        "toolbar-flags-supported,metadata-bridge-gated-by-customization"),
+                plan("{}", "{ \"enableCustomization\": false, \"enabled\": true, \"editableFlags\": [\"bad\"] }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("autosave.enabled.set", "autosave", "manual-form-autosave-policy", false,
+                        "autosave-explicit,autosave-debounce-safe,autosave-storage-available,persistence-key-deterministic"),
+                plan("{}", "{ \"enabled\": true, \"debounceMs\": 50, \"storageKey\": \"bad key\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("submitBehavior.set", "submitBehavior", "manual-form-submit-behavior", false,
+                        "submit-behavior-supported,delegates-form-config"),
+                plan("{}", "{ \"action\": \"archive\", \"delegateFormSubmitTo\": \"other\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-manual-form",
+                operation("metadataBridge.configure", "metadataBridge", "manual-field-metadata-bridge", false,
+                        "delegates-field-metadata,metadata-bridge-gated-by-customization"),
+                plan("{}", "{ \"enabled\": true, \"enableCustomization\": false, \"delegateFieldMetadataTo\": \"other\", \"delegateControlDiscoveryTo\": \"other\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator manual-field-id-unique failed for manualField.add: duplicate fieldName email",
+                        "validator control-type-discovered failed for manualField.add: controlType is not discoverable missing",
+                        "validator metadata-bridge-does-not-redefine-schema failed for manualField.add: manual-form must not redefine backend schema via schemaPatch",
+                        "validator manual-field-exists failed for manualField.remove: field not found missing",
+                        "validator field-removal-confirmed failed for manualField.remove: explicit confirmation is required",
+                        "validator field-label-valid failed for manualField.label.set: label is required",
+                        "validator layout-field-references-valid failed for layout.configure: unknown field missing",
+                        "validator manual-layout-does-not-replace-host-template failed for layout.configure: host template replacement is not allowed",
+                        "validator delegates-form-config failed for layout.configure: must delegate to praxis-dynamic-form",
+                        "validator toolbar-flags-supported failed for toolbar.configure: unsupported flag bad",
+                        "validator metadata-bridge-gated-by-customization failed for toolbar.configure: metadata bridge requires enableCustomization",
+                        "validator autosave-debounce-safe failed for autosave.enabled.set: debounceMs must be between 100 and 60000",
+                        "validator persistence-key-deterministic failed for autosave.enabled.set: storageKey is not deterministic",
+                        "validator submit-behavior-supported failed for submitBehavior.set: unsupported action archive",
+                        "validator delegates-form-config failed for submitBehavior.set: must delegate to praxis-dynamic-form",
+                        "validator delegates-field-metadata failed for metadataBridge.configure: must delegate to praxis-metadata-editor",
+                        "validator delegates-field-metadata failed for metadataBridge.configure: control discovery must delegate to praxis-dynamic-fields",
+                        "validator metadata-bridge-gated-by-customization failed for metadataBridge.configure: metadata bridge requires enableCustomization");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

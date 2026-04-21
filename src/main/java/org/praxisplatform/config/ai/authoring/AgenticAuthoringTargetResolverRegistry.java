@@ -84,6 +84,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "praxis-table-authoring-operation",
             "rule-builder-json-logic-document",
             "metadata-editor-schema-normalizer",
+            "manual-form-layout",
+            "manual-form-customization-toolbar",
+            "manual-form-autosave-policy",
+            "manual-field-metadata-bridge",
+            "manual-form-submit-behavior",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -213,6 +218,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             }
             case "field-metadata-validation-rules" -> addMetadataRootMatch(candidates, config, "fieldMetadata.validators");
             case "metadata-editor-context-hints" -> addMetadataRootMatch(candidates, config, "fieldMetadata");
+            case "manual-form-field-by-name" -> addManualFieldMatches(candidates, config, targetValue);
             case "row-by-id-in-section" -> addRecursiveArrayMatches(candidates, config, "rows", List.of("id"), targetValue);
             case "column-by-id-in-row" -> addRecursiveArrayMatches(candidates, config, "columns", List.of("id"), targetValue);
             case "layout-item-by-id" -> addRecursiveArrayMatches(candidates, config, "items", List.of("id", "key"), targetValue);
@@ -330,6 +336,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "metadata-editor-renderer-property",
                 "field-metadata-validation-rules",
                 "metadata-editor-context-hints",
+                "manual-form-field-by-name",
                 "row-by-id-in-section",
                 "column-by-id-in-row",
                 "layout-item-by-id",
@@ -423,6 +430,16 @@ public final class AgenticAuthoringTargetResolverRegistry {
         if (!fieldMetadata.isMissingNode()) {
             candidates.add(new ResolvedCandidate("fieldMetadata", fieldMetadata));
         }
+    }
+
+    private void addManualFieldMatches(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
+        addArrayMatches(candidates, config, "currentConfig.fieldMetadata[]", List.of("name", "field", "id", "label"), targetValue);
+        if (!candidates.isEmpty()) {
+            return;
+        }
+        addArrayMatches(candidates, config, "currentFieldMetadata[]", List.of("name", "field", "id", "label"), targetValue);
+        addArrayMatches(candidates, config, "fieldMetadata[]", List.of("name", "field", "id", "label"), targetValue);
+        addArrayMatches(candidates, config, "form.fieldMetadata[]", List.of("name", "field", "id", "label"), targetValue);
     }
 
     private Set<String> metadataFieldPaths() {

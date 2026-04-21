@@ -177,6 +177,25 @@ public final class AgenticAuthoringValidatorRegistry {
             "context-hint-i18n-compatible",
             "normalization-preserves-canonical-fields",
             "runtime-editor-round-trip",
+            "manual-field-id-unique",
+            "control-type-discovered",
+            "host-template-field-exists",
+            "metadata-bridge-does-not-redefine-schema",
+            "manual-form-round-trip",
+            "manual-field-exists",
+            "field-removal-confirmed",
+            "layout-field-references-valid",
+            "field-label-valid",
+            "manual-layout-does-not-replace-host-template",
+            "delegates-form-config",
+            "toolbar-flags-supported",
+            "metadata-bridge-gated-by-customization",
+            "autosave-explicit",
+            "autosave-debounce-safe",
+            "autosave-storage-available",
+            "persistence-key-deterministic",
+            "submit-behavior-supported",
+            "delegates-field-metadata",
             "resource-exists-in-api-metadata",
             "resource-path-canonical",
             "resource-key-stable",
@@ -444,6 +463,26 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "normalization-preserves-canonical-fields" -> validateMetadataNormalization(operationId, planOperation, failures);
                 case "metadata-round-trip", "runtime-editor-round-trip" -> {
                     // Round-trip is enforced by compiling fieldMetadata and normalizedSeed together.
+                }
+                case "manual-field-id-unique" -> validateManualFieldIdUnique(operationId, planOperation, config, failures);
+                case "manual-field-exists", "host-template-field-exists" -> validateManualFieldExists(operationId, planOperation, config, failures);
+                case "control-type-discovered" -> validateManualControlTypeDiscovered(operationId, planOperation, config, failures);
+                case "metadata-bridge-does-not-redefine-schema" -> validateManualMetadataBridgeNoSchemaRedefinition(operationId, planOperation, failures);
+                case "field-removal-confirmed" -> validateManualFieldRemovalConfirmed(operationId, planOperation, failures);
+                case "layout-field-references-valid" -> validateManualLayoutFieldReferences(operationId, planOperation, config, failures);
+                case "field-label-valid" -> validateManualFieldLabelValid(operationId, planOperation, failures);
+                case "manual-layout-does-not-replace-host-template" -> validateManualLayoutHostTemplate(operationId, planOperation, failures);
+                case "delegates-form-config" -> validateManualDelegatesFormConfig(operationId, planOperation, failures);
+                case "toolbar-flags-supported" -> validateManualToolbarFlags(operationId, planOperation, failures);
+                case "metadata-bridge-gated-by-customization" -> validateManualMetadataBridgeGated(operationId, planOperation, config, failures);
+                case "autosave-explicit" -> validateManualAutosaveExplicit(operationId, planOperation, failures);
+                case "autosave-debounce-safe" -> validateManualAutosaveDebounce(operationId, planOperation, failures);
+                case "autosave-storage-available" -> validateManualAutosaveStorage(operationId, planOperation, config, failures);
+                case "persistence-key-deterministic" -> validateManualPersistenceKey(operationId, planOperation, failures);
+                case "submit-behavior-supported" -> validateManualSubmitBehavior(operationId, planOperation, failures);
+                case "delegates-field-metadata" -> validateManualDelegatesFieldMetadata(operationId, planOperation, failures);
+                case "manual-form-round-trip" -> {
+                    // Round-trip is enforced by syncing currentConfig.fieldMetadata, currentFieldMetadata and form.fieldMetadata.
                 }
                 case "resource-exists-in-api-metadata", "resource-capabilities-resolvable" -> validateCrudResourcePresent(operationId, planOperation, config, failures);
                 case "resource-path-canonical", "schema-url-canonical", "submit-url-canonical" -> validateCrudCanonicalRelativeUrls(operationId, planOperation, failures);
@@ -1832,6 +1871,166 @@ public final class AgenticAuthoringValidatorRegistry {
         if (!mode.isBlank()
                 && !Set.of("hydrate-seed", "coerce-types", "apply-defaults", "preserve-advanced-properties").contains(mode)) {
             failures.add("validator normalization-preserves-canonical-fields failed for " + operationId + ": unsupported mode " + mode);
+        }
+    }
+
+    private void validateManualFieldIdUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String fieldName = text(planOperation.path("input"), "fieldName");
+        if (!fieldName.isBlank() && manualFieldExists(config, fieldName)) {
+            failures.add("validator manual-field-id-unique failed for " + operationId + ": duplicate fieldName " + fieldName);
+        }
+    }
+
+    private void validateManualFieldExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String fieldName = firstNonBlank(text(planOperation.path("input"), "fieldName"), targetText(planOperation.path("target")));
+        if (fieldName.isBlank() || !manualFieldExists(config, fieldName)) {
+            failures.add("validator manual-field-exists failed for " + operationId + ": field not found " + fieldName);
+        }
+    }
+
+    private void validateManualControlTypeDiscovered(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String controlType = text(planOperation.path("input"), "controlType");
+        if (!controlType.isBlank() && !hasControlType(config, controlType)) {
+            failures.add("validator control-type-discovered failed for " + operationId + ": controlType is not discoverable " + controlType);
+        }
+    }
+
+    private void validateManualMetadataBridgeNoSchemaRedefinition(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("schema", "schemaPatch", "jsonSchema", "resourceSchema", "backendSchema")) {
+            if (input.has(field)) {
+                failures.add("validator metadata-bridge-does-not-redefine-schema failed for " + operationId
+                        + ": manual-form must not redefine backend schema via " + field);
+            }
+        }
+    }
+
+    private void validateManualFieldRemovalConfirmed(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if ((input.path("clearPersistedValue").asBoolean(false) || input.path("removeFromLayout").asBoolean(false))
+                && !planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator field-removal-confirmed failed for " + operationId + ": explicit confirmation is required");
+        }
+    }
+
+    private void validateManualLayoutFieldReferences(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        Set<String> known = manualFieldNames(config);
+        for (String field : manualLayoutInputFields(planOperation.path("input"))) {
+            if (!field.isBlank() && !known.contains(field)) {
+                failures.add("validator layout-field-references-valid failed for " + operationId + ": unknown field " + field);
+            }
+        }
+    }
+
+    private void validateManualFieldLabelValid(String operationId, JsonNode planOperation, List<String> failures) {
+        String label = text(planOperation.path("input"), "label");
+        if (label.isBlank()) {
+            failures.add("validator field-label-valid failed for " + operationId + ": label is required");
+        }
+    }
+
+    private void validateManualLayoutHostTemplate(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("hostTemplate") || input.has("template") || input.has("templateHtml")) {
+            failures.add("validator manual-layout-does-not-replace-host-template failed for " + operationId
+                    + ": host template replacement is not allowed");
+        }
+    }
+
+    private void validateManualDelegatesFormConfig(String operationId, JsonNode planOperation, List<String> failures) {
+        String delegate = firstNonBlank(text(planOperation.path("input"), "delegateAdvancedFormConfigTo"),
+                text(planOperation.path("input"), "delegateFormSubmitTo"));
+        if (!delegate.isBlank() && !"praxis-dynamic-form".equals(delegate)) {
+            failures.add("validator delegates-form-config failed for " + operationId + ": must delegate to praxis-dynamic-form");
+        }
+    }
+
+    private void validateManualToolbarFlags(String operationId, JsonNode planOperation, List<String> failures) {
+        Set<String> supported = Set.of("required", "readOnly", "hidden", "disabled", "openMetadataEditor");
+        for (JsonNode flag : planOperation.path("input").path("editableFlags")) {
+            String value = flag.asText("");
+            if (!supported.contains(value)) {
+                failures.add("validator toolbar-flags-supported failed for " + operationId + ": unsupported flag " + value);
+            }
+        }
+    }
+
+    private void validateManualMetadataBridgeGated(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        boolean asksBridge = input.path("enabled").asBoolean(false)
+                || "praxis-metadata-editor".equals(text(input, "delegateFieldMetadataTo"))
+                || "openMetadataEditor".equals(text(input, "openMode"));
+        boolean customizationEnabled = input.path("enableCustomization").asBoolean(config.path("enableCustomization").asBoolean(false));
+        if (asksBridge && !customizationEnabled && input.has("enableCustomization")) {
+            failures.add("validator metadata-bridge-gated-by-customization failed for " + operationId
+                    + ": metadata bridge requires enableCustomization");
+        }
+    }
+
+    private void validateManualAutosaveExplicit(String operationId, JsonNode planOperation, List<String> failures) {
+        if (!planOperation.path("input").has("enabled")) {
+            failures.add("validator autosave-explicit failed for " + operationId + ": enabled is required");
+        }
+    }
+
+    private void validateManualAutosaveDebounce(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode debounce = planOperation.path("input").path("debounceMs");
+        if (!debounce.isMissingNode() && (debounce.asLong(-1) < 100 || debounce.asLong() > 60000)) {
+            failures.add("validator autosave-debounce-safe failed for " + operationId + ": debounceMs must be between 100 and 60000");
+        }
+    }
+
+    private void validateManualAutosaveStorage(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!planOperation.path("input").path("enabled").asBoolean(false)) {
+            return;
+        }
+        boolean storageAvailable = config.path("storageAvailable").asBoolean(false)
+                || config.path("asyncConfigStorageAvailable").asBoolean(false)
+                || !text(planOperation.path("input"), "storageKey").isBlank();
+        if (!storageAvailable) {
+            failures.add("validator autosave-storage-available failed for " + operationId + ": storageKey or storage provider is required");
+        }
+    }
+
+    private void validateManualPersistenceKey(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String storageKey = text(input, "storageKey");
+        if (!storageKey.isBlank() && (storageKey.contains(" ") || storageKey.contains("..") || storageKey.startsWith("/"))) {
+            failures.add("validator persistence-key-deterministic failed for " + operationId + ": storageKey is not deterministic");
+        }
+    }
+
+    private void validateManualSubmitBehavior(String operationId, JsonNode planOperation, List<String> failures) {
+        String action = text(planOperation.path("input"), "action");
+        if (!action.isBlank() && !Set.of("submit", "saveDraft", "reset", "cancel", "custom").contains(action)) {
+            failures.add("validator submit-behavior-supported failed for " + operationId + ": unsupported action " + action);
+        }
+    }
+
+    private void validateManualDelegatesFieldMetadata(String operationId, JsonNode planOperation, List<String> failures) {
+        String delegate = text(planOperation.path("input"), "delegateFieldMetadataTo");
+        if (!delegate.isBlank() && !"praxis-metadata-editor".equals(delegate)) {
+            failures.add("validator delegates-field-metadata failed for " + operationId + ": must delegate to praxis-metadata-editor");
+        }
+        String discovery = text(planOperation.path("input"), "delegateControlDiscoveryTo");
+        if (!discovery.isBlank() && !"praxis-dynamic-fields".equals(discovery)) {
+            failures.add("validator delegates-field-metadata failed for " + operationId + ": control discovery must delegate to praxis-dynamic-fields");
         }
     }
 
@@ -3255,6 +3454,63 @@ public final class AgenticAuthoringValidatorRegistry {
             }
         }
         return false;
+    }
+
+    private boolean manualFieldExists(JsonNode config, String fieldName) {
+        return manualFieldNames(config).contains(fieldName);
+    }
+
+    private Set<String> manualFieldNames(JsonNode config) {
+        Set<String> names = new HashSet<>();
+        for (String path : List.of("currentConfig.fieldMetadata", "currentFieldMetadata", "fieldMetadata", "form.fieldMetadata")) {
+            JsonNode fields = resolvePath(config, path);
+            if (fields.isArray()) {
+                for (JsonNode field : fields) {
+                    String name = firstNonBlank(text(field, "name"), text(field, "field"), text(field, "id"));
+                    if (!name.isBlank()) {
+                        names.add(name);
+                    }
+                }
+            }
+        }
+        return names;
+    }
+
+    private Set<String> manualLayoutInputFields(JsonNode input) {
+        Set<String> fields = new HashSet<>();
+        collectManualLayoutFields(input.path("sections"), fields);
+        collectManualLayoutFields(input.path("rows"), fields);
+        collectManualLayoutFields(input.path("columns"), fields);
+        for (JsonNode field : input.path("fieldOrder")) {
+            fields.add(field.asText(""));
+        }
+        return fields;
+    }
+
+    private void collectManualLayoutFields(JsonNode node, Set<String> fields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                collectManualLayoutFields(child, fields);
+            }
+            return;
+        }
+        if (node.isObject()) {
+            String field = firstNonBlank(text(node, "field"), text(node, "fieldName"), text(node, "name"));
+            String type = firstNonBlank(text(node, "type"), text(node, "kind"));
+            if (!field.isBlank() && ("field".equals(type) || node.has("field") || node.has("fieldName"))) {
+                fields.add(field);
+            }
+            for (JsonNode value : node.path("fields")) {
+                fields.add(value.asText(""));
+            }
+            Iterator<JsonNode> values = node.elements();
+            while (values.hasNext()) {
+                collectManualLayoutFields(values.next(), fields);
+            }
+        }
     }
 
     private Set<String> metadataFieldPaths() {
