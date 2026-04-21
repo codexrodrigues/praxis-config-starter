@@ -626,6 +626,95 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesStepperLabelChangeFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-stepper",
+                payloadFromClasspathSnapshot("praxis-stepper"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "steps": [
+                      { "id": "account", "label": "Conta" },
+                      { "id": "review", "label": "Revisao" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "step.label.set",
+                    "target": "Conta",
+                    "input": {
+                      "label": "Dados da conta"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: step-exists for step.label.set");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("step.label.set");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");
+        assertThat(operation.path("resolvedPath").asText()).isEqualTo("steps[]/0");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("account");
+        assertThat(operation.path("value").path("label").asText()).isEqualTo("Dados da conta");
+        assertThat(result.patch().path("proposedConfig").path("steps").get(0).path("label").asText())
+                .isEqualTo("Dados da conta");
+    }
+
+    @Test
+    void warnsOnStepperDomainPatchAndRejectsCompilationWithoutHandler() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-stepper",
+                payloadFromClasspathSnapshot("praxis-stepper"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "steps": [
+                      { "id": "account", "label": "Conta" },
+                      { "id": "review", "label": "Revisao" }
+                    ],
+                    "selectedIndex": 0
+                  },
+                  "plan": {
+                    "operationId": "step.order.set",
+                    "target": "account",
+                    "input": {
+                      "beforeStepId": "review"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings()).contains("operation requires domain compiler: step.order.set");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isFalse();
+        assertThat(result.failures()).contains("domain compiler is required for operation: step.order.set");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
