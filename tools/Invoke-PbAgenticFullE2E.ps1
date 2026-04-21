@@ -9,7 +9,8 @@ param(
     [int] $BackendPort = 8088,
     [int] $UiPort = 4003,
     [int] $StartupTimeoutSec = 180,
-    [int] $StreamProcessingTimeoutSeconds = 180
+    [int] $StreamProcessingTimeoutSeconds = 180,
+    [int] $Retries = 1
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,7 +119,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:PLAYWRIGHT_BASE_URL = $uiUrl
         $env:PRAXIS_E2E_AGENTIC_VALIDATION_MODE = "full"
         $env:PRAXIS_E2E_TEST_TIMEOUT_MS = "900000"
-        & cmd.exe /c "npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts"
+        & cmd.exe /c "npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts --retries=$Retries"
         if ($LASTEXITCODE -ne 0) { throw "Page-builder agentic full E2E failed with exit code $LASTEXITCODE." }
     } finally {
         Pop-Location

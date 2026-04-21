@@ -52,7 +52,7 @@ Release e Gate de Authoring
 - Workflow: `.github/workflows/agentic-authoring-smoke.yml`.
 - O workflow instala o starter do checkout no Maven local do runner, empacota `praxis-api-quickstart` contra essa versao local e roda o smoke HTTP/SSE completo.
 - Para mudancas que toquem fluxo agentic do page-builder, SSE browser, patch/apply ou contrato ponta a ponta com Angular, habilitar tambem o input `run_page_builder_full_e2e=true` nesse mesmo workflow.
-- O full gate opcional faz checkout de `praxis-ui-angular`, sobe o quickstart em `8088`, Angular em `4003` e executa `praxis-page-builder-agentic-validation.playwright.config.ts` contra LLM real e stream em modo `signed-url-token`.
+- O full gate opcional faz checkout de `praxis-ui-angular`, sobe o quickstart em `8088`, Angular em `4003` e executa `praxis-page-builder-agentic-validation.playwright.config.ts` contra LLM real e stream em modo `signed-url-token`, com retry controlado para absorver variacao nao deterministica do provedor.
 - Secrets do gate:
   - `PRAXIS_AI_OPENAI_API_KEY` para `provider=openai`;
   - `PRAXIS_AI_GEMINI_API_KEY` para `provider=gemini`;
