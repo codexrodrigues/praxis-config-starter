@@ -404,6 +404,18 @@ mvn "-Dtest=AiPatchSchemaResolutionIsolatedIntegrationTest" test
 mvn "-Dtest=AgenticAuthoringStreamIsolatedIntegrationTest" test
 ```
 
+Full quickstart smoke:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart
+```
+
+GitHub Actions gate:
+- Run `Agentic Authoring HTTP Smoke` manually before publishing a new Maven Central version.
+- Use `provider=openai` and `quickstart_ref=main` as the default release gate.
+- Required repository secret for the default gate: `PRAXIS_AI_OPENAI_API_KEY`.
+- The workflow installs the checked-out starter locally, packages `praxis-api-quickstart` against that local version and validates plan, compile, preview, apply, SSE, replay and cleanup.
+
 ### Usage Example (Java)
 
 ```java

@@ -25,14 +25,47 @@ Este documento descreve o fluxo de CI e release no GitHub Actions para publicar 
 - `GPG_PASSPHRASE`
 - `GPG_KEY_ID` (opcional)
 - `RELEASE_PAT` (opcional, recomendado quando `GITHUB_TOKEN` nao consegue criar/push de tags por regras de branch/protecao)
+- `PRAXIS_AI_OPENAI_API_KEY` (necessario para o gate manual `Agentic Authoring HTTP Smoke` com `provider=openai`)
+- `PRAXIS_AI_GEMINI_API_KEY` (necessario apenas quando o gate manual for executado com `provider=gemini`)
+
+## Gate de authoring antes de publicar
+Antes de criar a tag de release, execute o smoke ponta a ponta contra o `praxis-api-quickstart`.
+Esse gate valida a integracao real entre o starter publicado/local, o host de referencia, endpoints HTTP de authoring,
+aplicacao de config e streaming SSE.
+
+Fluxo recomendado:
+1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
+2) Executar com `provider=openai` e `quickstart_ref=main`.
+3) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso.
+4) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
+
+O smoke manual:
+- instala o `praxis-config-starter` do checkout no Maven local do runner;
+- empacota o `praxis-api-quickstart` contra essa versao local, sem depender do Maven Central;
+- sobe o quickstart empacotado;
+- valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
+
+Para reproduzir localmente, primeiro empacote o quickstart e depois rode:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart
+```
+
+Quando a versao ja estiver publicada no Maven Central, valide tambem o consumidor sem override local:
+
+```powershell
+cd ..\praxis-api-quickstart
+mvn -B verify
+```
 
 ## Fluxo recomendado (mais simples)
-1) Entrar em **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow**.
-2) Manter `create_tag=true`.
-3) Preencher:
+1) Executar o gate **Agentic Authoring HTTP Smoke**.
+2) Entrar em **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow**.
+3) Manter `create_tag=true`.
+4) Preencher:
    - `version` (opcional) para fixar exatamente a versao, ou
    - `bump` (`patch`, `minor`, `major`, `prerelease`) e `preid` (ex.: `rc`).
-4) Executar.
+5) Executar.
 
 Resultado:
 - A workflow cria/push da tag `vX.Y.Z` (ou `vX.Y.Z-rc.N`).
