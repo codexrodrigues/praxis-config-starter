@@ -66,6 +66,12 @@ public final class AgenticAuthoringValidatorRegistry {
             "section-id-unique",
             "destructive-removal-confirmation",
             "remote-resource-binding-safe",
+            "endpoint-url-safe",
+            "endpoint-uses-praxis-backend-surface",
+            "presign-endpoint-fixed-contract",
+            "presign-cross-origin-fields-safe",
+            "upload-endpoint-fixed-contract",
+            "bulk-endpoint-fixed-contract",
             "sanitization-policy-explicit",
             "unsafe-html-rejected",
             "unsafe-url-rejected",
@@ -147,6 +153,12 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "lazy-content-compatible", "nested-widget-contract-delegated" -> validateWidgetEventDelegated(operationId, planOperation, failures);
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
+                case "endpoint-url-safe" -> validateFilesEndpointUrlSafe(operationId, planOperation, failures);
+                case "endpoint-uses-praxis-backend-surface" -> validateFilesEndpointPraxisSurface(operationId, planOperation, failures);
+                case "presign-endpoint-fixed-contract" -> validateFilesEndpointPathContract(operationId, planOperation, failures, "presign");
+                case "upload-endpoint-fixed-contract" -> validateFilesEndpointPathContract(operationId, planOperation, failures, "upload");
+                case "bulk-endpoint-fixed-contract" -> validateFilesEndpointPathContract(operationId, planOperation, failures, "bulk");
+                case "presign-cross-origin-fields-safe" -> validatePresignCrossOriginFieldsSafe(operationId, planOperation, failures);
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
                 case "unsafe-html-rejected" -> validateUnsafeHtmlRejected(operationId, planOperation, failures);
                 case "unsafe-url-rejected" -> validateUnsafeUrlRejected(operationId, planOperation, failures);
@@ -650,6 +662,17 @@ public final class AgenticAuthoringValidatorRegistry {
         return false;
     }
 
+    private String normalizeFilesBaseUrl(String baseUrl) {
+        if (baseUrl == null) {
+            return "";
+        }
+        String normalized = baseUrl.trim();
+        while (normalized.length() > 1 && normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
     private Set<String> safeRichContentUrlProtocols() {
         return Set.of("http", "https", "mailto", "tel");
     }
@@ -828,6 +851,58 @@ public final class AgenticAuthoringValidatorRegistry {
             return Integer.parseInt(resolvedPath.substring(slash + 1));
         } catch (NumberFormatException ex) {
             return -1;
+        }
+    }
+
+    private void validateFilesEndpointUrlSafe(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String baseUrl = text(planOperation.path("input"), "baseUrl");
+        if (baseUrl.isBlank()) {
+            failures.add("validator endpoint-url-safe failed for " + operationId + ": baseUrl is required");
+            return;
+        }
+        if (baseUrl.startsWith("http://") || baseUrl.startsWith("https://") || baseUrl.startsWith("//")) {
+            failures.add("validator endpoint-url-safe failed for " + operationId
+                    + ": absolute endpoint URLs are not allowed");
+        }
+        if (baseUrl.contains("?") || baseUrl.contains("#")) {
+            failures.add("validator endpoint-url-safe failed for " + operationId
+                    + ": baseUrl must not include query string or fragment");
+        }
+    }
+
+    private void validateFilesEndpointPraxisSurface(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String baseUrl = normalizeFilesBaseUrl(text(planOperation.path("input"), "baseUrl"));
+        if (!baseUrl.startsWith("/api/") || !baseUrl.contains("/files")) {
+            failures.add("validator endpoint-uses-praxis-backend-surface failed for " + operationId
+                    + ": baseUrl must point to a relative Praxis files API surface");
+        }
+    }
+
+    private void validateFilesEndpointPathContract(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures,
+            String forbiddenSegment) {
+        String baseUrl = normalizeFilesBaseUrl(text(planOperation.path("input"), "baseUrl"));
+        if (baseUrl.endsWith("/" + forbiddenSegment) || baseUrl.contains("/" + forbiddenSegment + "/")) {
+            failures.add("validator " + forbiddenSegment + "-endpoint-fixed-contract failed for " + operationId
+                    + ": baseUrl must not include the derived /" + forbiddenSegment + " path");
+        }
+    }
+
+    private void validatePresignCrossOriginFieldsSafe(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        if (planOperation.path("input").path("allowCrossOriginPresignedTarget").asBoolean(false)) {
+            failures.add("validator presign-cross-origin-fields-safe failed for " + operationId
+                    + ": cross-origin presigned targets are not configurable through component authoring");
         }
     }
 

@@ -1192,6 +1192,58 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("panels").get(1).path("expanded").asBoolean()).isTrue();
     }
 
+    @Test
+    void shouldCompileFilesUploadPresignBaseUrlAndDerivedPaths() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "baseUrl": "/api/praxis/files",
+                  "strategy": "direct"
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-files-upload",
+                operationWithHandler("endpoint.presign.set", "presignEndpoint", "files-api-base-url-presign-contract", false,
+                        "compile-domain-patch", "files-upload-presign-base-url", "baseUrl"),
+                plan("null", "{ \"baseUrl\": \"/api/praxis/files/uploads\", \"strategy\": \"presign\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-files-upload-endpoint-base-url");
+        assertThat(patchOperation.path("previousBaseUrl").asText()).isEqualTo("/api/praxis/files");
+        assertThat(patchOperation.path("baseUrl").asText()).isEqualTo("/api/praxis/files/uploads");
+        assertThat(patchOperation.path("strategy").asText()).isEqualTo("presign");
+        assertThat(patchOperation.path("derivedPresignPath").asText()).isEqualTo("/api/praxis/files/uploads/upload/presign");
+        assertThat(proposedConfig.path("baseUrl").asText()).isEqualTo("/api/praxis/files/uploads");
+        assertThat(proposedConfig.path("strategy").asText()).isEqualTo("presign");
+    }
+
+    @Test
+    void shouldRejectFilesUploadEndpointPathOverrides() throws Exception {
+        ObjectNode proposedConfig = objectMapper.createObjectNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-files-upload",
+                operationWithHandler("endpoint.upload.set", "uploadEndpoint", "files-api-base-url-upload-contract", false,
+                        "compile-domain-patch", "files-upload-direct-base-url", "baseUrl"),
+                plan("null", "{ \"baseUrl\": \"/api/praxis/files/upload\", \"strategy\": \"direct\" }"),
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains("files-upload-direct-base-url rejects unsafe baseUrl: /api/praxis/files/upload");
+        assertThat(proposedConfig.path("baseUrl").isMissingNode()).isTrue();
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

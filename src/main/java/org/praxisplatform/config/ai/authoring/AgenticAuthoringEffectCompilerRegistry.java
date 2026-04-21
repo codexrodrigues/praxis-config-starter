@@ -92,7 +92,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "rich-content-preset-apply".equals(handler)
                 || "expansion-panel-remove".equals(handler)
                 || "expansion-multi-expand-set".equals(handler)
-                || "expansion-default-expanded-upsert".equals(handler);
+                || "expansion-default-expanded-upsert".equals(handler)
+                || "files-upload-presign-base-url".equals(handler)
+                || "files-upload-direct-base-url".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -308,6 +310,22 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     resolved,
                     proposedConfig,
                     failures);
+            case "files-upload-presign-base-url" -> compileFilesUploadEndpointBaseUrl(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures,
+                    "presign");
+            case "files-upload-direct-base-url" -> compileFilesUploadEndpointBaseUrl(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures,
+                    "direct");
             default -> {
                 failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
                 yield null;
@@ -1586,6 +1604,53 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileFilesUploadEndpointBaseUrl(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures,
+            String defaultStrategy) {
+        JsonNode input = planOperation.path("input");
+        String baseUrl = normalizeFilesBaseUrl(text(input, "baseUrl"));
+        if (baseUrl.isBlank()) {
+            failures.add(text(effect, "handler") + " requires baseUrl");
+            return null;
+        }
+        if (isUnsafeFilesBaseUrl(baseUrl)) {
+            failures.add(text(effect, "handler") + " rejects unsafe baseUrl: " + baseUrl);
+            return null;
+        }
+        String strategy = text(input, "strategy");
+        if (strategy.isBlank()) {
+            strategy = defaultStrategy;
+        }
+        if (!Set.of("direct", "presign", "auto").contains(strategy)) {
+            failures.add(text(effect, "handler") + " strategy must be direct, presign or auto");
+            return null;
+        }
+
+        String previousBaseUrl = text(proposedConfig, "baseUrl");
+        String previousStrategy = text(proposedConfig, "strategy");
+        proposedConfig.put("baseUrl", baseUrl);
+        proposedConfig.put("strategy", strategy);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-files-upload-endpoint-base-url");
+        compiled.put("path", "baseUrl");
+        compiled.put("previousBaseUrl", previousBaseUrl);
+        compiled.put("baseUrl", baseUrl);
+        compiled.put("previousStrategy", previousStrategy);
+        compiled.put("strategy", strategy);
+        compiled.put("derivedUploadPath", baseUrl + "/upload");
+        compiled.put("derivedBulkPath", baseUrl + "/bulk");
+        if ("presign".equals(strategy) || "files-upload-presign-base-url".equals(text(effect, "handler"))) {
+            compiled.put("derivedPresignPath", baseUrl + "/upload/presign");
+        }
+        return compiled;
+    }
+
     private ObjectNode compileExpansionMultiExpandSet(
             String componentId,
             JsonNode operation,
@@ -1701,6 +1766,33 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
         }
         return "";
+    }
+
+    private boolean isUnsafeFilesBaseUrl(String baseUrl) {
+        return baseUrl.startsWith("http://")
+                || baseUrl.startsWith("https://")
+                || baseUrl.startsWith("//")
+                || baseUrl.contains("?")
+                || baseUrl.contains("#")
+                || !baseUrl.startsWith("/api/")
+                || !baseUrl.contains("/files")
+                || baseUrl.endsWith("/upload")
+                || baseUrl.endsWith("/bulk")
+                || baseUrl.endsWith("/presign")
+                || baseUrl.contains("/upload/")
+                || baseUrl.contains("/bulk/")
+                || baseUrl.contains("/presign/");
+    }
+
+    private String normalizeFilesBaseUrl(String baseUrl) {
+        if (baseUrl == null) {
+            return "";
+        }
+        String normalized = baseUrl.trim();
+        while (normalized.length() > 1 && normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private void applyMergeByKey(

@@ -36,6 +36,14 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "stepper-navigation-config",
             "stepper-layout-config",
             "tabs-layout-config",
+            "files-accept-list",
+            "max-file-size-policy",
+            "max-files-per-bulk-policy",
+            "files-api-base-url-presign-contract",
+            "files-api-base-url-upload-contract",
+            "upload-security-policy",
+            "upload-error-code-message",
+            "files-upload-display-mode-and-ui",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
