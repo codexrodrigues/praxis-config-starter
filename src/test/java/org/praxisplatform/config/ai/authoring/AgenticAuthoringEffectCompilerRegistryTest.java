@@ -503,6 +503,52 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(updatedBlock.path("avatar").path("imageSrc").asText()).isEqualTo("/assets/person.png");
     }
 
+    @Test
+    void shouldCompileRichContentLinkRemoveDomainPatchPreservingLabelAsText() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      { "id": "intro", "type": "text", "text": "Intro" },
+                      { "id": "terms-link", "type": "link", "label": "Terms", "href": "/terms" },
+                      { "id": "footer", "type": "text", "text": "End" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("link.remove", "link", "rich-link-node-by-id-or-path", true,
+                        "compile-domain-patch", "rich-content-link-remove", "document.nodes[]"),
+                plan("\"terms-link\"", "{ \"preserveLabelAsText\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("replace-rich-link-with-text");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-link-remove");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("terms-link");
+        assertThat(patchOperation.path("removedIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("removedValue").path("type").asText()).isEqualTo("link");
+        assertThat(patchOperation.path("replacementValue").path("id").asText()).isEqualTo("terms-link-text");
+        assertThat(patchOperation.path("replacementValue").path("type").asText()).isEqualTo("text");
+        assertThat(patchOperation.path("replacementValue").path("text").asText()).isEqualTo("Terms");
+        JsonNode replacement = proposedConfig.path("document").path("nodes").get(1);
+        assertThat(replacement.path("id").asText()).isEqualTo("terms-link-text");
+        assertThat(replacement.path("type").asText()).isEqualTo("text");
+        assertThat(replacement.path("text").asText()).isEqualTo("Terms");
+        assertThat(proposedConfig.path("document").path("nodes")).hasSize(3);
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

@@ -77,7 +77,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "tabs.remove-tab-and-reselect".equals(handler)
                 || "tabs.set-active-item".equals(handler)
                 || "rich-content-block-add".equals(handler)
-                || "rich-content-media-block-update".equals(handler);
+                || "rich-content-media-block-update".equals(handler)
+                || "rich-content-link-remove".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -175,6 +176,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "rich-content-media-block-update" -> compileRichContentMediaBlockUpdate(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "rich-content-link-remove" -> compileRichContentLinkRemove(
                     componentId,
                     operation,
                     effect,
@@ -415,6 +424,89 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.set("value", node);
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", input);
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileRichContentLinkRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode nodes = arrayAt(proposedConfig, "document.nodes", false);
+        if (nodes == null) {
+            failures.add("rich-content-link-remove path is not an array: document.nodes[]");
+            return null;
+        }
+        int removedIndex = indexOfResolvedArrayTarget(resolved);
+        if (removedIndex < 0 || removedIndex >= nodes.size()) {
+            String linkId = resolved != null ? text(resolved.value(), "id") : "";
+            removedIndex = indexOfObjectByKey(nodes, "id", linkId);
+        }
+        if (removedIndex < 0 || removedIndex >= nodes.size()) {
+            failures.add("rich-content-link-remove target not found in document.nodes[]");
+            return null;
+        }
+        JsonNode removedNode = nodes.get(removedIndex);
+        String nodeType = firstText(removedNode, "type", "kind");
+        if (!"link".equals(nodeType)) {
+            failures.add("rich-content-link-remove target is not link: " + nodeType);
+            return null;
+        }
+        String linkId = text(removedNode, "id");
+        if (linkId.isBlank()) {
+            failures.add("rich-content-link-remove requires link id");
+            return null;
+        }
+
+        boolean preserveLabelAsText = planOperation.path("input").path("preserveLabelAsText").asBoolean(false);
+        ObjectNode replacement = null;
+        if (preserveLabelAsText) {
+            String replacementId = linkId + "-text";
+            if (indexOfObjectByKey(nodes, "id", replacementId) >= 0) {
+                failures.add("rich-content-link-remove duplicate replacement node id: document.nodes[] id=" + replacementId);
+                return null;
+            }
+            String label = firstText(removedNode, "label", "text", "title");
+            if (label.isBlank()) {
+                failures.add("rich-content-link-remove preserveLabelAsText requires link label");
+                return null;
+            }
+            replacement = objectMapper.createObjectNode();
+            replacement.put("id", replacementId);
+            replacement.put("type", "text");
+            replacement.put("text", label);
+        }
+
+        JsonNode removed = nodes.remove(removedIndex);
+        if (replacement != null) {
+            nodes.insert(removedIndex, replacement);
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", preserveLabelAsText ? "replace-rich-link-with-text" : "remove-rich-link");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "document.nodes[]");
+        compiled.put("resolvedPath", resolved == null ? "" : resolved.path());
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", linkId);
+        compiled.put("removedIndex", removedIndex);
+        compiled.set("removedValue", removed);
+        compiled.put("preserveLabelAsText", preserveLabelAsText);
+        if (replacement != null) {
+            compiled.set("replacementValue", replacement);
+        }
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
         compiled.set("affectedPaths", operation.path("affectedPaths"));
         compiled.set("submissionImpact", operation.path("submissionImpact"));
         return compiled;

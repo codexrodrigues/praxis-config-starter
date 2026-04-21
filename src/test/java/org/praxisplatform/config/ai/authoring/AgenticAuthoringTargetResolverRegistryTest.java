@@ -152,6 +152,28 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldResolveRichLinkNodeById() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-rich-content",
+                operation("link.remove", "link", "rich-link-node-by-id-or-path", "fail", true),
+                objectMapper.readTree("\"terms-link\""),
+                objectMapper.readTree("""
+                        {
+                          "document": {
+                            "nodes": [
+                              { "id": "terms-link", "type": "link", "label": "Terms", "href": "/terms" }
+                            ]
+                          }
+                        }
+                        """));
+
+        assertThat(result.status()).isEqualTo("resolved");
+        assertThat(result.resolver()).isEqualTo("rich-link-node-by-id-or-path");
+        assertThat(result.path()).isEqualTo("document.nodes[]/0");
+        assertThat(result.value().path("type").asText()).isEqualTo("link");
+    }
+
+    @Test
     void shouldResolveTableConditionalRendererById() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-table",

@@ -997,6 +997,66 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesRichContentLinkRemoveFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "intro", "type": "text", "text": "Intro" },
+                        { "id": "terms-link", "type": "link", "label": "Terms", "href": "/terms" },
+                        { "id": "footer", "type": "text", "text": "End" }
+                      ]
+                    }
+                  },
+                  "plan": {
+                    "operationId": "link.remove",
+                    "target": "terms-link",
+                    "input": {
+                      "preserveLabelAsText": true
+                    },
+                    "confirmed": true
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: link-target-exists for link.remove")
+                .contains("validator declared without backend implementation: destructive-removal-confirmed for link.remove")
+                .contains("validator declared without backend implementation: document-shape-canonical for link.remove");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("link.remove");
+        assertThat(operation.path("op").asText()).isEqualTo("replace-rich-link-with-text");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("rich-content-link-remove");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("terms-link");
+        assertThat(operation.path("removedIndex").asInt()).isEqualTo(1);
+        JsonNode replacement = result.patch().path("proposedConfig").path("document").path("nodes").get(1);
+        assertThat(replacement.path("id").asText()).isEqualTo("terms-link-text");
+        assertThat(replacement.path("type").asText()).isEqualTo("text");
+        assertThat(replacement.path("text").asText()).isEqualTo("Terms");
+        assertThat(result.patch().path("proposedConfig").path("document").path("nodes")).hasSize(3);
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
