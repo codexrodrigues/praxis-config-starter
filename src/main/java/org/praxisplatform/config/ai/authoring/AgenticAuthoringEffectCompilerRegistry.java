@@ -78,7 +78,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "tabs.set-active-item".equals(handler)
                 || "rich-content-block-add".equals(handler)
                 || "rich-content-media-block-update".equals(handler)
-                || "rich-content-link-remove".equals(handler);
+                || "rich-content-link-remove".equals(handler)
+                || "rich-content-timeline-item-add".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -184,6 +185,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "rich-content-link-remove" -> compileRichContentLinkRemove(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "rich-content-timeline-item-add" -> compileRichContentTimelineItemAdd(
                     componentId,
                     operation,
                     effect,
@@ -505,6 +514,110 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         if (replacement != null) {
             compiled.set("replacementValue", replacement);
         }
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileRichContentTimelineItemAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null ? MissingNode.getInstance() : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode timelineBlock)) {
+            failures.add("rich-content-timeline-item-add target not found: " + (resolved == null ? "" : resolved.path()));
+            return null;
+        }
+        String nodeType = firstText(timelineBlock, "type", "kind");
+        if (!"timeline".equals(nodeType) && !"timelineBlock".equals(nodeType)) {
+            failures.add("rich-content-timeline-item-add target is not timeline: " + nodeType);
+            return null;
+        }
+        String timelineBlockId = text(timelineBlock, "id");
+        String inputTimelineBlockId = text(planOperation.path("input"), "timelineBlockId");
+        if (timelineBlockId.isBlank()) {
+            failures.add("rich-content-timeline-item-add requires timeline block id");
+            return null;
+        }
+        if (!inputTimelineBlockId.isBlank() && !timelineBlockId.equals(inputTimelineBlockId)) {
+            failures.add("rich-content-timeline-item-add target does not match input timelineBlockId: " + inputTimelineBlockId);
+            return null;
+        }
+        if (!(planOperation.path("input").path("item") instanceof ObjectNode inputItem)) {
+            failures.add("rich-content-timeline-item-add requires item object");
+            return null;
+        }
+
+        ArrayNode items;
+        if (timelineBlock.path("items").isMissingNode() || timelineBlock.path("items").isNull()) {
+            items = timelineBlock.putArray("items");
+        } else if (timelineBlock.path("items") instanceof ArrayNode existingItems) {
+            items = existingItems;
+        } else {
+            failures.add("rich-content-timeline-item-add path is not an array: document.nodes[].items[]");
+            return null;
+        }
+
+        ObjectNode item = inputItem.deepCopy();
+        if (!item.hasNonNull("id")) {
+            item.put("id", nextRichTimelineItemId(items));
+        }
+        String itemId = text(item, "id");
+        if (itemId.isBlank()) {
+            failures.add("rich-content-timeline-item-add requires item.id or generated id");
+            return null;
+        }
+        if (indexOfObjectByKey(items, "id", itemId) >= 0) {
+            failures.add("rich-content-timeline-item-add duplicate item id: document.nodes[].items[] id=" + itemId);
+            return null;
+        }
+
+        int insertedIndex = items.size();
+        String beforeItemId = text(planOperation.path("input"), "beforeItemId");
+        String afterItemId = text(planOperation.path("input"), "afterItemId");
+        if (!beforeItemId.isBlank()) {
+            insertedIndex = indexOfObjectByKey(items, "id", beforeItemId);
+            if (insertedIndex < 0) {
+                failures.add("rich-content-timeline-item-add before item not found: document.nodes[].items[] id=" + beforeItemId);
+                return null;
+            }
+        } else if (!afterItemId.isBlank()) {
+            int afterIndex = indexOfObjectByKey(items, "id", afterItemId);
+            if (afterIndex < 0) {
+                failures.add("rich-content-timeline-item-add after item not found: document.nodes[].items[] id=" + afterItemId);
+                return null;
+            }
+            insertedIndex = afterIndex + 1;
+        }
+        items.insert(insertedIndex, item);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "insert-rich-timeline-item");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "document.nodes[].items[]");
+        compiled.put("resolvedPath", resolved == null ? "" : resolved.path());
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("timelineBlockId", timelineBlockId);
+        compiled.put("keyValue", itemId);
+        compiled.put("insertedIndex", insertedIndex);
+        if (!beforeItemId.isBlank()) {
+            compiled.put("beforeItemId", beforeItemId);
+        }
+        if (!afterItemId.isBlank()) {
+            compiled.put("afterItemId", afterItemId);
+        }
+        compiled.set("value", item);
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
         compiled.set("affectedPaths", operation.path("affectedPaths"));
@@ -983,6 +1096,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         for (int i = nodes.size() + 1; ; i++) {
             String candidate = normalizedType + "-" + i;
             if (indexOfObjectByKey(nodes, "id", candidate) < 0) {
+                return candidate;
+            }
+        }
+    }
+
+    private String nextRichTimelineItemId(ArrayNode items) {
+        for (int i = items.size() + 1; ; i++) {
+            String candidate = "timeline-item-" + i;
+            if (indexOfObjectByKey(items, "id", candidate) < 0) {
                 return candidate;
             }
         }

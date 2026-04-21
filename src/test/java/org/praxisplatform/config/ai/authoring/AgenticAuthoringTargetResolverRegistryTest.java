@@ -174,6 +174,28 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldResolveRichTimelineNodeById() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-rich-content",
+                operation("timeline.item.add", "timelineItem", "rich-timeline-node-by-id-or-path", "fail", true),
+                objectMapper.readTree("\"history\""),
+                objectMapper.readTree("""
+                        {
+                          "document": {
+                            "nodes": [
+                              { "id": "history", "type": "timeline", "items": [] }
+                            ]
+                          }
+                        }
+                        """));
+
+        assertThat(result.status()).isEqualTo("resolved");
+        assertThat(result.resolver()).isEqualTo("rich-timeline-node-by-id-or-path");
+        assertThat(result.path()).isEqualTo("document.nodes[]/0");
+        assertThat(result.value().path("type").asText()).isEqualTo("timeline");
+    }
+
+    @Test
     void shouldResolveTableConditionalRendererById() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-table",

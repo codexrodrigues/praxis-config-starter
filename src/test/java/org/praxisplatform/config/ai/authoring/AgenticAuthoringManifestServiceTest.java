@@ -1057,6 +1057,75 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesRichContentTimelineItemAddFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        {
+                          "id": "history",
+                          "type": "timeline",
+                          "items": [
+                            { "id": "created", "title": "Created" },
+                            { "id": "published", "title": "Published" }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "plan": {
+                    "operationId": "timeline.item.add",
+                    "target": "history",
+                    "input": {
+                      "timelineBlockId": "history",
+                      "item": {
+                        "id": "reviewed",
+                        "title": "Reviewed"
+                      },
+                      "afterItemId": "created"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: block-exists for timeline.item.add")
+                .contains("validator declared without backend implementation: timeline-target-valid for timeline.item.add")
+                .contains("validator declared without backend implementation: timeline-item-id-unique for timeline.item.add");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("timeline.item.add");
+        assertThat(operation.path("op").asText()).isEqualTo("insert-rich-timeline-item");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("rich-content-timeline-item-add");
+        assertThat(operation.path("timelineBlockId").asText()).isEqualTo("history");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("reviewed");
+        assertThat(operation.path("insertedIndex").asInt()).isEqualTo(1);
+        JsonNode items = result.patch().path("proposedConfig").path("document").path("nodes").get(0).path("items");
+        assertThat(items).hasSize(3);
+        assertThat(items.get(1).path("id").asText()).isEqualTo("reviewed");
+        assertThat(items.get(2).path("id").asText()).isEqualTo("published");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
