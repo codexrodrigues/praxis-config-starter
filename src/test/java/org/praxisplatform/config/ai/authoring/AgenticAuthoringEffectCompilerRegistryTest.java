@@ -1667,6 +1667,107 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("runtimeCoverage").get(0).path("validated").asBoolean()).isTrue();
     }
 
+    @Test
+    void shouldCompileCrudResourceActionDefaultsAndPermissions() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "actions": [
+                    { "id": "create" },
+                    { "id": "delete", "disabled": true }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-crud",
+                operationWithHandler("resource.bind", "resourceBinding", "crud-resource-by-path-or-key", true,
+                        "compile-domain-patch", "crud-resource-bind", "resource.path"),
+                plan("{ \"resourcePath\": \"/customers\" }", "{ \"resourcePath\": \"/customers\", \"resourceKey\": \"customers\", \"idField\": \"id\", \"queryContext\": { \"pageSize\": 25 } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-crud",
+                operationWithHandler("surface.create.configure", "createSurface", "crud-action-by-id:create", true,
+                        "compile-domain-patch", "crud-create-surface-configure", "actions[].form"),
+                plan("\"create\"", "{ \"actionId\": \"create\", \"openMode\": \"modal\", \"formId\": \"customer-create\", \"form\": { \"schemaUrl\": \"/api/customers/schema\", \"submitUrl\": \"/api/customers\", \"submitMethod\": \"post\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-crud",
+                operationWithHandler("dialog.size.set", "dialogHost", "crud-dialog-host-defaults", true,
+                        "compile-domain-patch", "crud-dialog-host-set", "defaults.modal"),
+                plan("{}", "{ \"defaultOpenMode\": \"modal\", \"modal\": { \"width\": \"640px\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-crud",
+                operationWithHandler("permissions.set", "permissions", "crud-resource-capabilities", true,
+                        "compile-domain-patch", "crud-permissions-set", "actions[].disabled"),
+                plan("{}", "{ \"requiredCapabilities\": [\"create\"], \"denyWhenMissingCapability\": true, \"actionPermissions\": { \"delete\": { \"disabled\": false, \"requiresConfirmation\": true } } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(4);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("bind-crud-resource");
+        assertThat(patchOperations.get(1).path("op").asText()).isEqualTo("configure-crud-action-surface");
+        assertThat(patchOperations.get(2).path("op").asText()).isEqualTo("set-crud-dialog-host-defaults");
+        assertThat(patchOperations.get(3).path("op").asText()).isEqualTo("set-crud-permissions");
+        assertThat(proposedConfig.path("resource").path("path").asText()).isEqualTo("/customers");
+        assertThat(proposedConfig.path("actions").get(0).path("form").path("submitMethod").asText()).isEqualTo("post");
+        assertThat(proposedConfig.path("defaults").path("modal").path("width").asText()).isEqualTo("640px");
+        assertThat(proposedConfig.path("actions").get(1).path("requiresConfirmation").asBoolean()).isTrue();
+    }
+
+    @Test
+    void shouldCompileCrudDeleteAndChildDelegation() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "actions": [
+                    { "id": "delete", "disabled": true }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-crud",
+                operationWithHandler("delete.enabled.set", "deleteAction", "crud-action-by-id:delete", true,
+                        "compile-domain-patch", "crud-delete-behavior-set", "actions[].autoDelete"),
+                plan("\"delete\"", "{ \"enabled\": true, \"autoDelete\": true, \"requiresConfirmation\": true, \"form\": { \"submitUrl\": \"/api/customers/{id}\", \"submitMethod\": \"delete\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-crud",
+                operationWithHandler("form.childOperation.delegate", "childOperation", "child-authoring-manifest-operation", false,
+                        "compile-domain-patch", "crud-child-operation-delegate", "delegatedAuthoringOperations"),
+                plan("null", "{ \"childComponentId\": \"praxis-dynamic-form\", \"childOperationId\": \"field.label.set\", \"reason\": \"field labels belong to form manifest\", \"childTarget\": { \"name\": \"email\" }, \"childParams\": { \"label\": \"Email\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(2);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("set-crud-delete-behavior");
+        assertThat(patchOperations.get(1).path("op").asText()).isEqualTo("delegate-crud-child-operation");
+        assertThat(proposedConfig.path("actions").get(0).path("disabled").asBoolean()).isFalse();
+        assertThat(proposedConfig.path("delegatedAuthoringOperations").get(0).path("childComponentId").asText()).isEqualTo("praxis-dynamic-form");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

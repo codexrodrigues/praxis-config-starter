@@ -260,6 +260,69 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateCrudResourceUrlsDeleteAndDelegationSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-crud",
+                operation("resource.bind", "resourceBinding", "crud-resource-by-path-or-key", true,
+                        "resource-exists-in-api-metadata,resource-path-canonical,resource-key-stable,id-field-known"),
+                plan("{ \"resourcePath\": \"/customers\" }", "{ \"resourcePath\": \"https://evil.example/customers\", \"resourceKey\": \"bad key\", \"idField\": \"missing\" }"),
+                objectMapper.readTree("""
+                        {
+                          "fieldMetadata": [
+                            { "name": "id" }
+                          ]
+                        }
+                        """),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator url-canonical failed for resource.bind: resourcePath must be a relative canonical Praxis path",
+                        "validator resource-key-stable failed for resource.bind: resourceKey must be stable identifier text",
+                        "validator id-field-known failed for resource.bind: idField is not known missing");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-crud",
+                operation("delete.enabled.set", "deleteAction", "crud-action-by-id:delete", true,
+                        "delete-action-exists,destructive-delete-confirmed,submit-url-canonical"),
+                plan("\"delete\"", "{ \"enabled\": true, \"autoDelete\": true, \"form\": { \"submitUrl\": \"https://evil.example/delete\" } }"),
+                objectMapper.readTree("""
+                        {
+                          "actions": [
+                            { "id": "delete" }
+                          ]
+                        }
+                        """),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator destructive-delete-confirmed failed for delete.enabled.set: delete changes require confirmation",
+                        "validator url-canonical failed for delete.enabled.set: form.submitUrl must be a relative canonical Praxis path");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-crud",
+                operation("form.childOperation.delegate", "childOperation", "child-authoring-manifest-operation", false,
+                        "child-manifest-available,child-operation-known,no-local-form-config-write"),
+                plan("null", "{ \"childComponentId\": \"unknown\", \"formConfig\": { \"fields\": [] } }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator child-operation-known failed for form.childOperation.delegate: childComponentId and childOperationId are required",
+                        "validator child-manifest-available failed for form.childOperation.delegate: unsupported childComponentId unknown",
+                        "validator no-local-child-config-write failed for form.childOperation.delegate: child config must be delegated");
+    }
+
+    @Test
     void shouldValidateDialogPresetAndAccessibilitySemantics() throws Exception {
         List<String> failures = new ArrayList<>();
 

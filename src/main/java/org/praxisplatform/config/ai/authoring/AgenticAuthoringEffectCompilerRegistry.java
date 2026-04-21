@@ -115,6 +115,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "dynamic-fields-selector-mapping-set".equals(handler)
                 || "dynamic-fields-editor-coverage-validation".equals(handler)
                 || "dynamic-fields-runtime-coverage-validation".equals(handler)
+                || "crud-resource-bind".equals(handler)
+                || "crud-list-surface-configure".equals(handler)
+                || "crud-create-surface-configure".equals(handler)
+                || "crud-edit-surface-configure".equals(handler)
+                || "crud-view-surface-configure".equals(handler)
+                || "crud-delete-behavior-set".equals(handler)
+                || "crud-dialog-host-set".equals(handler)
+                || "crud-permissions-set".equals(handler)
+                || "crud-child-operation-delegate".equals(handler)
                 || "settings-panel-size-set".equals(handler)
                 || "settings-panel-apply-behavior-set".equals(handler)
                 || "settings-panel-save-behavior-set".equals(handler)
@@ -466,6 +475,69 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     "runtimeCoverage",
                     "validate-dynamic-fields-runtime-coverage");
+            case "crud-resource-bind" -> compileCrudResourceBind(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "crud-list-surface-configure" -> compileCrudListSurfaceConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig);
+            case "crud-create-surface-configure" -> compileCrudActionSurfaceConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "create",
+                    failures);
+            case "crud-edit-surface-configure" -> compileCrudActionSurfaceConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "edit",
+                    failures);
+            case "crud-view-surface-configure" -> compileCrudActionSurfaceConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "view",
+                    failures);
+            case "crud-delete-behavior-set" -> compileCrudDeleteBehaviorSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "crud-dialog-host-set" -> compileCrudDialogHostSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig);
+            case "crud-permissions-set" -> compileCrudPermissionsSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig);
+            case "crud-child-operation-delegate" -> compileCrudChildOperationDelegate(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
             case "settings-panel-size-set" -> compileSettingsPanelSizeSet(
                     componentId,
                     operation,
@@ -2441,6 +2513,243 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileCrudResourceBind(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String resourcePath = text(input, "resourcePath");
+        if (resourcePath.isBlank()) {
+            failures.add("crud-resource-bind requires resourcePath");
+            return null;
+        }
+        ObjectNode resource = objectAt(proposedConfig, "resource", true);
+        JsonNode previousResource = resource.deepCopy();
+        resource.put("path", resourcePath);
+        if (input.has("resourceKey")) {
+            resource.set("resourceKey", input.path("resourceKey"));
+        }
+        if (input.has("idField")) {
+            resource.set("idField", input.path("idField"));
+        }
+        if (input.has("endpointKey")) {
+            resource.set("endpointKey", input.path("endpointKey"));
+        }
+        if (input.has("queryContext")) {
+            proposedConfig.set("queryContext", input.path("queryContext").deepCopy());
+        }
+        if (!proposedConfig.has("filterCriteria")) {
+            proposedConfig.set("filterCriteria", objectMapper.createObjectNode());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "bind-crud-resource");
+        compiled.put("path", "resource");
+        compiled.set("previousResource", previousResource);
+        compiled.set("resource", resource.deepCopy());
+        compiled.set("queryContext", proposedConfig.path("queryContext"));
+        return compiled;
+    }
+
+    private ObjectNode compileCrudListSurfaceConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        JsonNode previousTable = proposedConfig.path("table").deepCopy();
+        if (input.has("tablePatch")) {
+            ObjectNode table = objectAt(proposedConfig, "table", true);
+            mergeObject(table, input.path("tablePatch"));
+        }
+        if (input.has("queryContext")) {
+            proposedConfig.set("queryContext", input.path("queryContext").deepCopy());
+        }
+        if (input.has("filterCriteria")) {
+            proposedConfig.set("filterCriteria", input.path("filterCriteria").deepCopy());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-crud-list-surface");
+        compiled.put("path", "table");
+        compiled.set("previousTable", previousTable);
+        compiled.set("table", proposedConfig.path("table"));
+        compiled.set("queryContext", proposedConfig.path("queryContext"));
+        compiled.set("filterCriteria", proposedConfig.path("filterCriteria"));
+        return compiled;
+    }
+
+    private ObjectNode compileCrudActionSurfaceConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            String expectedActionId,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String actionId = textOrDefault(input, "actionId", expectedActionId);
+        if (!expectedActionId.equals(actionId)) {
+            failures.add("crud surface configure expected actionId " + expectedActionId + " but received " + actionId);
+            return null;
+        }
+        ObjectNode action = crudAction(proposedConfig, actionId, true);
+        JsonNode previousAction = action.deepCopy();
+        copyCrudActionFields(input, action);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-crud-action-surface");
+        compiled.put("path", "actions[]");
+        compiled.put("actionId", actionId);
+        compiled.set("previousAction", previousAction);
+        compiled.set("action", action.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileCrudDeleteBehaviorSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode action = crudAction(proposedConfig, "delete", true);
+        JsonNode previousAction = action.deepCopy();
+        if (input.has("enabled")) {
+            action.put("disabled", !input.path("enabled").asBoolean());
+        }
+        copyIfPresent(input, action, "requiresConfirmation");
+        copyIfPresent(input, action, "autoDelete");
+        if (input.has("form")) {
+            ObjectNode form = action.path("form") instanceof ObjectNode object ? object : action.putObject("form");
+            mergeObject(form, input.path("form"));
+        }
+        if (action.path("autoDelete").asBoolean(false) && !action.path("requiresConfirmation").asBoolean(false)) {
+            failures.add("crud-delete-behavior-set autoDelete requires requiresConfirmation");
+            return null;
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-crud-delete-behavior");
+        compiled.put("path", "actions[]");
+        compiled.set("previousAction", previousAction);
+        compiled.set("action", action.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileCrudDialogHostSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode defaults = objectAt(proposedConfig, "defaults", true);
+        JsonNode previousDefaults = defaults.deepCopy();
+        if (input.has("defaultOpenMode")) {
+            defaults.set("openMode", input.path("defaultOpenMode"));
+        }
+        if (input.has("modal")) {
+            ObjectNode modal = defaults.path("modal") instanceof ObjectNode object ? object : defaults.putObject("modal");
+            mergeObject(modal, input.path("modal"));
+        }
+        if (input.has("back")) {
+            defaults.set("back", input.path("back").deepCopy());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-crud-dialog-host-defaults");
+        compiled.put("path", "defaults");
+        compiled.set("previousDefaults", previousDefaults);
+        compiled.set("defaults", defaults.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileCrudPermissionsSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        ArrayNode actions = arrayAt(proposedConfig, "actions", true);
+        JsonNode previousActions = actions.deepCopy();
+        boolean denyWhenMissing = input.path("denyWhenMissingCapability").asBoolean(true);
+        Set<String> requiredCapabilities = textSet(input.path("requiredCapabilities"));
+        JsonNode actionPermissions = input.path("actionPermissions");
+        for (JsonNode actionNode : actions) {
+            if (!(actionNode instanceof ObjectNode action)) {
+                continue;
+            }
+            String actionId = firstText(action, "id", "action", "name");
+            JsonNode permission = actionPermissions.path(actionId);
+            if (!permission.isMissingNode()) {
+                if (permission.has("disabled")) {
+                    action.set("disabled", permission.path("disabled"));
+                }
+                if (permission.has("visibleWhen")) {
+                    action.set("visibleWhen", permission.path("visibleWhen"));
+                }
+                if (permission.has("requiresConfirmation")) {
+                    action.set("requiresConfirmation", permission.path("requiresConfirmation"));
+                }
+            } else if (denyWhenMissing && !requiredCapabilities.isEmpty() && !requiredCapabilities.contains(actionId)) {
+                action.put("disabled", true);
+            }
+            if ("delete".equals(actionId)) {
+                action.put("requiresConfirmation", true);
+            }
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-crud-permissions");
+        compiled.put("path", "actions[]");
+        compiled.set("previousActions", previousActions);
+        compiled.set("actions", actions.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileCrudChildOperationDelegate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String childComponentId = text(input, "childComponentId");
+        String childOperationId = text(input, "childOperationId");
+        if (childComponentId.isBlank() || childOperationId.isBlank() || text(input, "reason").isBlank()) {
+            failures.add("crud-child-operation-delegate requires childComponentId, childOperationId, and reason");
+            return null;
+        }
+        ArrayNode delegated = arrayAt(proposedConfig, "delegatedAuthoringOperations", true);
+        ObjectNode entry = objectMapper.createObjectNode();
+        entry.put("childComponentId", childComponentId);
+        entry.put("childOperationId", childOperationId);
+        entry.put("reason", text(input, "reason"));
+        if (input.has("childTarget")) {
+            entry.set("childTarget", input.path("childTarget").deepCopy());
+        }
+        if (input.has("childParams")) {
+            entry.set("childParams", input.path("childParams").deepCopy());
+        }
+        entry.put("status", "delegated-to-child-manifest");
+        delegated.add(entry);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "delegate-crud-child-operation");
+        compiled.put("path", "delegatedAuthoringOperations[]");
+        compiled.put("appendedIndex", delegated.size() - 1);
+        compiled.set("delegatedOperation", entry);
+        return compiled;
+    }
+
     private ObjectNode compileExpansionMultiExpandSet(
             String componentId,
             JsonNode operation,
@@ -2741,6 +3050,44 @@ public final class AgenticAuthoringEffectCompilerRegistry {
 
     private String normalizeControlToken(String value) {
         return value == null ? "" : value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
+    }
+
+    private ObjectNode crudAction(ObjectNode proposedConfig, String actionId, boolean create) {
+        ArrayNode actions = arrayAt(proposedConfig, "actions", create);
+        if (actions == null || actionId == null || actionId.isBlank()) {
+            return null;
+        }
+        ObjectNode action = findObjectByKey(actions, "id", actionId);
+        if (action == null) {
+            action = findObjectByKey(actions, "action", actionId);
+        }
+        if (action == null && create) {
+            action = objectMapper.createObjectNode();
+            action.put("id", actionId);
+            actions.add(action);
+        }
+        return action;
+    }
+
+    private void copyCrudActionFields(JsonNode input, ObjectNode action) {
+        copyIfPresent(input, action, "openMode");
+        copyIfPresent(input, action, "route");
+        copyIfPresent(input, action, "formId");
+        copyIfPresent(input, action, "params");
+        copyIfPresent(input, action, "back");
+        if (input.has("form")) {
+            ObjectNode form = action.path("form") instanceof ObjectNode object ? object : action.putObject("form");
+            mergeObject(form, input.path("form"));
+        }
+    }
+
+    private Set<String> textSet(JsonNode array) {
+        if (!array.isArray()) {
+            return Set.of();
+        }
+        java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>();
+        array.forEach(item -> values.add(item.asText("")));
+        return values;
     }
 
     private boolean isUnsafeFilesBaseUrl(String baseUrl) {

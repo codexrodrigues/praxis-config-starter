@@ -65,6 +65,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "schedule-timezone",
             "schedule-validation-request",
             "schedule-preview-config",
+            "crud-resource-by-path-or-key",
+            "crud-list-surface",
+            "crud-dialog-host-defaults",
+            "crud-resource-capabilities",
+            "child-authoring-manifest-operation",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -163,6 +168,10 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 addArrayMatches(candidates, config, "toolbar.actions[]", List.of("id", "name", "action"), targetValue);
                 addArrayMatches(candidates, config, "actions.row.actions[]", List.of("id", "name", "action"), targetValue);
             }
+            case "crud-action-by-id:create" -> addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), "create");
+            case "crud-action-by-id:edit" -> addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), "edit");
+            case "crud-action-by-id:view" -> addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), "view");
+            case "crud-action-by-id:delete" -> addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), "delete");
             case "renderer-in-column" -> addArrayMatches(candidates, config, "columns[]", List.of("field", "id", "key"), targetValue);
             case "conditional-renderer-in-column" -> addRecursiveArrayMatches(candidates, config, "conditionalRenderers", List.of("id", "key"), targetValue);
             case "style-rule-in-column-or-row" -> {
@@ -268,6 +277,10 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "action-by-id",
                 "actions-by-id",
                 "form-action-by-id",
+                "crud-action-by-id:create",
+                "crud-action-by-id:edit",
+                "crud-action-by-id:view",
+                "crud-action-by-id:delete",
                 "renderer-in-column",
                 "conditional-renderer-in-column",
                 "style-rule-in-column-or-row",

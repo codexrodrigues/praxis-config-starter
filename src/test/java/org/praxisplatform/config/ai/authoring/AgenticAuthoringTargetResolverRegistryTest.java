@@ -345,6 +345,42 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(coverage.path()).isEqualTo("editorCoverage[]/0");
     }
 
+    @Test
+    void shouldResolveCrudActionAndGlobalCrudTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "resource": { "path": "/customers" },
+                  "actions": [
+                    { "id": "create" },
+                    { "id": "delete" }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget createAction = registry.resolve(
+                "praxis-crud",
+                operation("surface.create.configure", "createSurface", "crud-action-by-id:create", "fail", true),
+                objectMapper.readTree("\"create\""),
+                config);
+        AgenticAuthoringResolvedTarget resource = registry.resolve(
+                "praxis-crud",
+                operation("resource.bind", "resourceBinding", "crud-resource-by-path-or-key", "fail", true),
+                objectMapper.readTree("{\"resourcePath\":\"/customers\"}"),
+                config);
+        AgenticAuthoringResolvedTarget permissions = registry.resolve(
+                "praxis-crud",
+                operation("permissions.set", "permissions", "crud-resource-capabilities", "fail", true),
+                objectMapper.readTree("{}"),
+                config);
+
+        assertThat(createAction.status()).isEqualTo("resolved");
+        assertThat(createAction.path()).isEqualTo("actions[]/0");
+        assertThat(resource.status()).isEqualTo("resolved");
+        assertThat(resource.path()).isEqualTo("$");
+        assertThat(permissions.status()).isEqualTo("resolved");
+        assertThat(permissions.path()).isEqualTo("$");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

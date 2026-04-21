@@ -158,7 +158,40 @@ public final class AgenticAuthoringValidatorRegistry {
             "selector-mapping-deterministic",
             "metadata-capability-aligned",
             "runtime-editor-coverage-not-divergent",
-            "coverage-evidence-present");
+            "coverage-evidence-present",
+            "resource-exists-in-api-metadata",
+            "resource-path-canonical",
+            "resource-key-stable",
+            "id-field-known",
+            "resource-capabilities-resolvable",
+            "table-child-operation-delegated",
+            "query-context-valid",
+            "filter-criteria-bridge-valid",
+            "crud-context-stable",
+            "open-mode-binding-complete",
+            "schema-url-canonical",
+            "submit-url-canonical",
+            "resource-create-supported",
+            "resource-edit-supported",
+            "resource-view-supported",
+            "form-child-operation-delegated",
+            "delete-action-exists",
+            "resource-delete-supported",
+            "destructive-delete-confirmed",
+            "permissions-delete-valid",
+            "open-mode-supported",
+            "modal-size-valid",
+            "drawer-adapter-available-when-needed",
+            "back-policy-valid",
+            "settings-panel-shell-compatible",
+            "action-permission-supported",
+            "delete-permission-requires-confirmation",
+            "permissions-do-not-shadow-backend",
+            "child-manifest-available",
+            "child-operation-known",
+            "no-local-form-config-write",
+            "no-local-table-config-write",
+            "delegation-target-valid");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
@@ -300,6 +333,21 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "editor-tooling-discovers-control" -> validateDynamicEditorToolingDiscoversControl(operationId, planOperation, config, failures);
                 case "runtime-editor-coverage-not-divergent" -> validateDynamicRuntimeEditorCoverageNotDivergent(operationId, planOperation, config, failures);
                 case "coverage-evidence-present" -> validateDynamicCoverageEvidencePresent(operationId, planOperation, failures);
+                case "resource-exists-in-api-metadata", "resource-capabilities-resolvable" -> validateCrudResourcePresent(operationId, planOperation, config, failures);
+                case "resource-path-canonical", "schema-url-canonical", "submit-url-canonical" -> validateCrudCanonicalRelativeUrls(operationId, planOperation, failures);
+                case "resource-key-stable" -> validateCrudResourceKeyStable(operationId, planOperation, failures);
+                case "id-field-known" -> validateCrudIdFieldKnown(operationId, planOperation, config, failures);
+                case "table-child-operation-delegated", "form-child-operation-delegated" -> validateCrudChildPatchDelegated(operationId, planOperation, failures);
+                case "query-context-valid", "filter-criteria-bridge-valid", "crud-context-stable" -> validateCrudSerializableObjectInputs(operationId, planOperation, failures);
+                case "open-mode-binding-complete", "open-mode-supported", "drawer-adapter-available-when-needed" -> validateCrudOpenMode(operationId, planOperation, failures);
+                case "resource-create-supported", "resource-edit-supported", "resource-view-supported", "resource-delete-supported" -> validateCrudResourceCapability(operationId, validatorId, planOperation, config, failures);
+                case "delete-action-exists" -> validateCrudDeleteActionExists(operationId, config, failures);
+                case "destructive-delete-confirmed", "delete-permission-requires-confirmation" -> validateCrudDeleteConfirmed(operationId, planOperation, failures);
+                case "permissions-delete-valid", "action-permission-supported", "permissions-do-not-shadow-backend" -> validateCrudPermissions(operationId, planOperation, failures);
+                case "modal-size-valid" -> validateCrudModalSize(operationId, planOperation, failures);
+                case "back-policy-valid", "settings-panel-shell-compatible" -> validateCrudSerializableObjectInputs(operationId, planOperation, failures);
+                case "child-manifest-available", "child-operation-known", "delegation-target-valid" -> validateCrudChildDelegation(operationId, planOperation, failures);
+                case "no-local-form-config-write", "no-local-table-config-write" -> validateCrudNoLocalChildConfigWrite(operationId, planOperation, failures);
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
         }
@@ -1124,6 +1172,163 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private void validateCrudResourcePresent(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String resourcePath = text(input, "resourcePath");
+        if (resourcePath.isBlank()) {
+            resourcePath = text(config.path("resource"), "path");
+        }
+        if (resourcePath.isBlank()) {
+            failures.add("validator resource-exists-in-api-metadata failed for " + operationId + ": resourcePath is required");
+        }
+    }
+
+    private void validateCrudCanonicalRelativeUrls(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("resourcePath", "schemaUrl", "submitUrl")) {
+            String value = text(input, field);
+            if (!value.isBlank() && isUnsafeCrudUrl(value)) {
+                failures.add("validator url-canonical failed for " + operationId + ": " + field + " must be a relative canonical Praxis path");
+            }
+        }
+        JsonNode form = input.path("form");
+        for (String field : List.of("schemaUrl", "submitUrl")) {
+            String value = text(form, field);
+            if (!value.isBlank() && isUnsafeCrudUrl(value)) {
+                failures.add("validator url-canonical failed for " + operationId + ": form." + field + " must be a relative canonical Praxis path");
+            }
+        }
+    }
+
+    private void validateCrudResourceKeyStable(String operationId, JsonNode planOperation, List<String> failures) {
+        String resourceKey = text(planOperation.path("input"), "resourceKey");
+        if (!resourceKey.isBlank() && !resourceKey.matches("^[A-Za-z][A-Za-z0-9_-]*$")) {
+            failures.add("validator resource-key-stable failed for " + operationId + ": resourceKey must be stable identifier text");
+        }
+    }
+
+    private void validateCrudIdFieldKnown(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String idField = text(input, "idField");
+        if (idField.isBlank() || "id".equals(idField)) {
+            return;
+        }
+        boolean known = !findObjectByKey(config.path("fieldMetadata"), "name", idField).isMissingNode()
+                || !findObjectByKey(config.path("table").path("columns"), "field", idField).isMissingNode();
+        if (!known) {
+            failures.add("validator id-field-known failed for " + operationId + ": idField is not known " + idField);
+        }
+    }
+
+    private void validateCrudChildPatchDelegated(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("tablePatch") && text(input.path("tablePatch"), "delegatedTo").isBlank()) {
+            failures.add("validator child-operation-delegated failed for " + operationId + ": tablePatch must declare delegatedTo");
+        }
+        if (input.has("formPatch") && text(input.path("formPatch"), "delegatedTo").isBlank()) {
+            failures.add("validator child-operation-delegated failed for " + operationId + ": formPatch must declare delegatedTo");
+        }
+    }
+
+    private void validateCrudSerializableObjectInputs(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("queryContext", "filterCriteria", "back", "modal", "actionPermissions")) {
+            JsonNode value = input.path(field);
+            if (!value.isMissingNode() && !value.isObject()) {
+                failures.add("validator crud-object-input-valid failed for " + operationId + ": " + field + " must be an object");
+            }
+            if (containsUnsafeAbsoluteUrl(value)) {
+                failures.add("validator crud-object-input-valid failed for " + operationId + ": " + field + " must not contain absolute URLs");
+            }
+        }
+    }
+
+    private void validateCrudOpenMode(String operationId, JsonNode planOperation, List<String> failures) {
+        String openMode = firstNonBlank(text(planOperation.path("input"), "openMode"), text(planOperation.path("input"), "defaultOpenMode"));
+        if (!openMode.isBlank() && !Set.of("route", "modal", "drawer").contains(openMode)) {
+            failures.add("validator open-mode-supported failed for " + operationId + ": unsupported openMode " + openMode);
+        }
+        if ("route".equals(openMode) && text(planOperation.path("input"), "route").isBlank()) {
+            failures.add("validator open-mode-binding-complete failed for " + operationId + ": route openMode requires route");
+        }
+    }
+
+    private void validateCrudResourceCapability(
+            String operationId,
+            String validatorId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String capability = validatorId.replace("resource-", "").replace("-supported", "");
+        JsonNode capabilities = firstPresent(planOperation.path("input"), "requiredCapabilities", "capabilities");
+        if (capabilities.isMissingNode()) {
+            capabilities = config.path("capabilities");
+        }
+        if (capabilities.isArray() && !arrayContainsText(capabilities, capability)) {
+            failures.add("validator " + validatorId + " failed for " + operationId + ": capability not available " + capability);
+        }
+    }
+
+    private void validateCrudDeleteActionExists(String operationId, JsonNode config, List<String> failures) {
+        if (findObjectByKey(config.path("actions"), "id", "delete").isMissingNode()
+                && findObjectByKey(config.path("actions"), "action", "delete").isMissingNode()) {
+            failures.add("validator delete-action-exists failed for " + operationId + ": delete action not found");
+        }
+    }
+
+    private void validateCrudDeleteConfirmed(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        boolean destructive = input.path("enabled").asBoolean(false)
+                || input.path("autoDelete").asBoolean(false)
+                || input.path("actionPermissions").path("delete").path("disabled").asBoolean(false);
+        if (destructive && !input.path("requiresConfirmation").asBoolean(false) && !planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator destructive-delete-confirmed failed for " + operationId + ": delete changes require confirmation");
+        }
+    }
+
+    private void validateCrudPermissions(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode actionPermissions = planOperation.path("input").path("actionPermissions");
+        if (!actionPermissions.isMissingNode() && !actionPermissions.isObject()) {
+            failures.add("validator action-permission-supported failed for " + operationId + ": actionPermissions must be an object");
+        }
+        JsonNode deletePermission = actionPermissions.path("delete");
+        if (deletePermission.isObject()
+                && deletePermission.has("requiresConfirmation")
+                && !deletePermission.path("requiresConfirmation").asBoolean(false)) {
+            failures.add("validator delete-permission-requires-confirmation failed for " + operationId + ": delete permission must require confirmation");
+        }
+    }
+
+    private void validateCrudModalSize(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode modal = planOperation.path("input").path("modal");
+        for (String field : List.of("width", "height", "minWidth", "maxWidth")) {
+            String value = text(modal, field);
+            if (!value.isBlank() && !isSafeCssSize(value)) {
+                failures.add("validator modal-size-valid failed for " + operationId + ": invalid " + field);
+            }
+        }
+    }
+
+    private void validateCrudChildDelegation(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String childComponentId = text(input, "childComponentId");
+        String childOperationId = text(input, "childOperationId");
+        if (childComponentId.isBlank() || childOperationId.isBlank()) {
+            failures.add("validator child-operation-known failed for " + operationId + ": childComponentId and childOperationId are required");
+        }
+        if (!childComponentId.isBlank()
+                && !Set.of("praxis-dynamic-form", "praxis-table", "praxis-dialog", "praxis-settings-panel").contains(childComponentId)) {
+            failures.add("validator child-manifest-available failed for " + operationId + ": unsupported childComponentId " + childComponentId);
+        }
+    }
+
+    private void validateCrudNoLocalChildConfigWrite(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("formConfig") || input.has("tableConfig")) {
+            failures.add("validator no-local-child-config-write failed for " + operationId + ": child config must be delegated");
+        }
+    }
+
     private void validateInputFieldsExist(String operationId, JsonNode input, JsonNode config, List<String> failures) {
         Set<String> existing = new HashSet<>();
         config.path("columns").forEach(column -> existing.add(text(column, "field")));
@@ -1802,6 +2007,27 @@ public final class AgenticAuthoringValidatorRegistry {
 
     private String normalizeControlToken(String value) {
         return value == null ? "" : value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
+    }
+
+    private boolean isUnsafeCrudUrl(String value) {
+        return value.startsWith("http://")
+                || value.startsWith("https://")
+                || value.startsWith("//")
+                || value.contains("?")
+                || value.contains("#")
+                || !(value.startsWith("/") || value.startsWith("./"));
+    }
+
+    private boolean arrayContainsText(JsonNode array, String value) {
+        if (!array.isArray()) {
+            return false;
+        }
+        for (JsonNode item : array) {
+            if (value.equals(item.asText(""))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String text(JsonNode node, String field) {
