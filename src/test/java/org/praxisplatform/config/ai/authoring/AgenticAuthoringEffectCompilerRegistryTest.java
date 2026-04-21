@@ -277,6 +277,46 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileStepperRemoveDomainPatchAndReselectSafely() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "steps": [
+                    { "id": "account", "label": "Conta" },
+                    { "id": "review", "label": "Revisao" },
+                    { "id": "confirm", "label": "Confirmar" }
+                  ],
+                  "selectedIndex": 1
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-stepper",
+                operationWithHandler("step.remove", "step", "step-by-id-or-label", true,
+                        "compile-domain-patch", "stepper-step-remove", "steps[]"),
+                plan("\"review\"", "{ }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("remove-step-and-reselect");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("stepper-step-remove");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("review");
+        assertThat(patchOperation.path("removedIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("removedValue").path("label").asText()).isEqualTo("Revisao");
+        assertThat(patchOperation.path("selectedIndexBefore").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("selectedIndexAfter").asInt()).isEqualTo(1);
+        assertThat(proposedConfig.path("steps")).hasSize(2);
+        assertThat(proposedConfig.path("steps").get(1).path("id").asText()).isEqualTo("confirm");
+        assertThat(proposedConfig.path("selectedIndex").asInt()).isEqualTo(1);
+    }
+
+    @Test
     void shouldCompileTabsReorderDomainPatchAndPreserveSelectedIndexIdentity() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {

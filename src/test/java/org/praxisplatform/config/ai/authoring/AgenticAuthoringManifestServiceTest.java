@@ -791,7 +791,7 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
         assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: step-exists for step.label.set");
+                .contains("validator declared without backend implementation: step-label-valid for step.label.set");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-stepper",
@@ -841,7 +841,6 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
         assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: step-exists for step.order.set")
                 .contains("validator declared without backend implementation: step-order-deterministic for step.order.set")
                 .contains("validator declared without backend implementation: selected-index-preserved for step.order.set");
 
@@ -864,6 +863,58 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(result.patch().path("proposedConfig").path("steps").get(1).path("id").asText())
                 .isEqualTo("account");
         assertThat(result.patch().path("proposedConfig").path("selectedIndex").asInt()).isZero();
+    }
+
+    @Test
+    void compilesStepperRemoveFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-stepper",
+                payloadFromClasspathSnapshot("praxis-stepper"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "steps": [
+                      { "id": "account", "label": "Conta" },
+                      { "id": "review", "label": "Revisao" },
+                      { "id": "confirm", "label": "Confirmar" }
+                    ],
+                    "selectedIndex": 1
+                  },
+                  "plan": {
+                    "operationId": "step.remove",
+                    "confirmed": true,
+                    "target": "review",
+                    "input": {}
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings()).isEmpty();
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-stepper",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("remove-step-and-reselect");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("stepper-step-remove");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("review");
+        assertThat(operation.path("removedIndex").asInt()).isEqualTo(1);
+        assertThat(operation.path("selectedIndexBefore").asInt()).isEqualTo(1);
+        assertThat(operation.path("selectedIndexAfter").asInt()).isEqualTo(1);
+        JsonNode steps = result.patch().path("proposedConfig").path("steps");
+        assertThat(steps).hasSize(2);
+        assertThat(steps.get(0).path("id").asText()).isEqualTo("account");
+        assertThat(steps.get(1).path("id").asText()).isEqualTo("confirm");
+        assertThat(result.patch().path("proposedConfig").path("selectedIndex").asInt()).isEqualTo(1);
     }
 
     @Test

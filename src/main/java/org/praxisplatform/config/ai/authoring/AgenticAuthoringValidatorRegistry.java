@@ -22,6 +22,9 @@ public final class AgenticAuthoringValidatorRegistry {
             "rule-exists",
             "action-exists",
             "target-exists",
+            "step-exists",
+            "selected-step-removal-safe",
+            "step-content-removal-confirmed",
             "field-is-local",
             "field-name-unique",
             "field-exists-in-layout",
@@ -94,7 +97,8 @@ public final class AgenticAuthoringValidatorRegistry {
             }
             switch (validatorId) {
                 case "target-column-exists", "column-exists", "field-exists", "section-exists",
-                     "row-exists", "layout-column-exists", "rule-exists", "action-exists", "target-exists" -> {
+                     "row-exists", "layout-column-exists", "rule-exists", "action-exists", "target-exists",
+                     "step-exists" -> {
                     if (operation.path("target").path("required").asBoolean(false)) {
                         AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
                                 componentId,
@@ -107,6 +111,8 @@ public final class AgenticAuthoringValidatorRegistry {
                         }
                     }
                 }
+                case "selected-step-removal-safe" -> validateSelectedStepRemovalSafe(operationId, planOperation, config, failures);
+                case "step-content-removal-confirmed" -> validateStepContentRemovalConfirmed(operationId, planOperation, failures);
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
@@ -121,6 +127,42 @@ public final class AgenticAuthoringValidatorRegistry {
                         validateInputFieldsExist(operationId, planOperation.path("input"), config, failures);
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
+        }
+    }
+
+    private void validateSelectedStepRemovalSafe(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode steps = config.path("steps");
+        if (steps.isArray() && steps.size() <= 1) {
+            failures.add("validator selected-step-removal-safe failed for " + operationId
+                    + ": cannot remove the only step");
+        }
+        String replacementStepId = text(planOperation.path("input"), "replacementStepId");
+        if (!replacementStepId.isBlank()) {
+            boolean found = false;
+            for (JsonNode step : steps) {
+                if (replacementStepId.equals(text(step, "id"))) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                failures.add("validator selected-step-removal-safe failed for " + operationId
+                        + ": replacement step not found " + replacementStepId);
+            }
+        }
+    }
+
+    private void validateStepContentRemovalConfirmed(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        if (!planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator step-content-removal-confirmed failed for " + operationId
+                    + ": explicit confirmation is required");
         }
     }
 

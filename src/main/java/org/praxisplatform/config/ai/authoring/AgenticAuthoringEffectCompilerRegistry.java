@@ -74,6 +74,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
 
     boolean supportsDomainPatchHandler(String handler) {
         return "stepper-step-reorder".equals(handler)
+                || "stepper-step-remove".equals(handler)
                 || "tabs.reorder-tab-and-preserve-selection".equals(handler)
                 || "tabs.remove-tab-and-reselect".equals(handler)
                 || "tabs.set-active-item".equals(handler)
@@ -143,6 +144,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         String handler = text(effect, "handler");
         return switch (handler) {
             case "stepper-step-reorder" -> compileStepperStepReorder(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "stepper-step-remove" -> compileStepperStepRemove(
                     componentId,
                     operation,
                     effect,
@@ -309,6 +318,86 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("beforeStepId", beforeStepId);
         compiled.put("selectedIndexBefore", selectedIndexBefore);
         compiled.put("selectedIndexAfter", selectedIndexAfter);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileStepperStepRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode steps = arrayAt(proposedConfig, "steps", false);
+        if (steps == null) {
+            failures.add("stepper-step-remove path is not an array: steps[]");
+            return null;
+        }
+        String stepId = resolved != null ? text(resolved.value(), "id") : "";
+        int removedIndex = indexOfObjectByKey(steps, "id", stepId);
+        if (removedIndex < 0) {
+            failures.add("stepper-step-remove target not found: steps[] id=" + stepId);
+            return null;
+        }
+        if (steps.size() == 1) {
+            failures.add("stepper-step-remove cannot remove the only step");
+            return null;
+        }
+
+        int selectedIndexBefore = proposedConfig.path("selectedIndex").asInt(-1);
+        String selectedStepId = selectedIndexBefore >= 0 && selectedIndexBefore < steps.size()
+                ? text(steps.get(selectedIndexBefore), "id")
+                : "";
+        String replacementStepId = text(planOperation.path("input"), "replacementStepId");
+        int replacementIndexBeforeRemoval = -1;
+        if (!replacementStepId.isBlank()) {
+            replacementIndexBeforeRemoval = indexOfObjectByKey(steps, "id", replacementStepId);
+            if (replacementIndexBeforeRemoval < 0 || replacementIndexBeforeRemoval == removedIndex) {
+                failures.add("stepper-step-remove replacement step not found: steps[] id=" + replacementStepId);
+                return null;
+            }
+        }
+        JsonNode removedValue = steps.get(removedIndex).deepCopy();
+        steps.remove(removedIndex);
+
+        int selectedIndexAfter = selectedIndexBefore;
+        if (!replacementStepId.isBlank()) {
+            selectedIndexAfter = replacementIndexBeforeRemoval > removedIndex
+                    ? replacementIndexBeforeRemoval - 1
+                    : replacementIndexBeforeRemoval;
+        } else if (stepId.equals(selectedStepId)) {
+            selectedIndexAfter = Math.min(removedIndex, steps.size() - 1);
+        } else if (selectedIndexBefore > removedIndex) {
+            selectedIndexAfter = selectedIndexBefore - 1;
+        }
+        if (selectedIndexAfter >= 0) {
+            proposedConfig.put("selectedIndex", selectedIndexAfter);
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "remove-step-and-reselect");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "steps[]");
+        compiled.put("resolvedPath", resolved != null ? resolved.path() : "");
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", stepId);
+        compiled.put("removedIndex", removedIndex);
+        compiled.set("removedValue", removedValue);
+        compiled.put("selectedIndexBefore", selectedIndexBefore);
+        compiled.put("selectedIndexAfter", selectedIndexAfter);
+        if (!replacementStepId.isBlank()) {
+            compiled.put("replacementStepId", replacementStepId);
+        }
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
         compiled.set("affectedPaths", operation.path("affectedPaths"));
