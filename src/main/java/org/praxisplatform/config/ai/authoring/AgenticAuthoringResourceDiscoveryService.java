@@ -14,12 +14,21 @@ public class AgenticAuthoringResourceDiscoveryService {
 
     private final AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog;
     private final ObjectMapper objectMapper;
+    private final String domainCatalogServiceKey;
 
     public AgenticAuthoringResourceDiscoveryService(
             AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
             ObjectMapper objectMapper) {
+        this(candidateCatalog, objectMapper, AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY);
+    }
+
+    public AgenticAuthoringResourceDiscoveryService(
+            AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
+            ObjectMapper objectMapper,
+            String domainCatalogServiceKey) {
         this.candidateCatalog = candidateCatalog;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.domainCatalogServiceKey = domainCatalogServiceKey;
     }
 
     public AgenticAuthoringResourceCandidatesResult search(
@@ -50,7 +59,7 @@ public class AgenticAuthoringResourceDiscoveryService {
         if (candidates.isEmpty()) {
             warnings.add("resource-candidates-empty");
         }
-        List<AgenticAuthoringQuickReply> quickReplies = candidateResourceQuickReplies(candidates, artifactKind);
+        List<AgenticAuthoringQuickReply> quickReplies = candidateResourceQuickReplies(candidates, artifactKind, retrievalQuery);
         return new AgenticAuthoringResourceCandidatesResult(
                 true,
                 TOOL_NAME,
@@ -83,7 +92,8 @@ public class AgenticAuthoringResourceDiscoveryService {
 
     private List<AgenticAuthoringQuickReply> candidateResourceQuickReplies(
             List<AgenticAuthoringCandidate> candidates,
-            String artifactKind) {
+            String artifactKind,
+            String retrievalQuery) {
         if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
@@ -100,6 +110,12 @@ public class AgenticAuthoringResourceDiscoveryService {
                     contextHints.put("schemaUrl", candidate.schemaUrl());
                     contextHints.put("submitMethod", candidate.submitMethod());
                     contextHints.put("artifactKind", artifactKind);
+                    AgenticAuthoringDomainCatalogHints.enrich(
+                            contextHints,
+                            candidate,
+                            artifactKind,
+                            retrievalQuery,
+                            domainCatalogServiceKey);
                     boolean duplicatedResourcePath = resourcePathCounts.getOrDefault(
                             valueOrDefault(candidate.resourcePath(), ""),
                             0L) > 1L;

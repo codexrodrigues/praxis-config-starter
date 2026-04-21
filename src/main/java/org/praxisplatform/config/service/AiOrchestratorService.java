@@ -48,6 +48,7 @@ import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.dto.ActionCheck;
 import org.praxisplatform.config.dto.IntentAction;
 import org.praxisplatform.config.dto.IntentPlan;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -184,6 +185,9 @@ public class AiOrchestratorService {
     private final AiApiKeyCryptoService apiKeyCryptoService;
     private final AiThreadService threadService;
     private final AiMessageService messageService;
+
+    @Autowired(required = false)
+    private DomainCatalogPromptContextService domainCatalogPromptContextService;
 
     public AiOrchestratorResponse generatePatch(
             AiOrchestratorRequest request,
@@ -335,6 +339,13 @@ public class AiOrchestratorService {
                 componentContext,
                 context.getTemplate() != null ? context.getTemplate().getTemplateMeta() : null,
                 embeddingConfig);
+        ragHints = appendOptionalPromptBlock(
+                ragHints,
+                domainCatalogPromptContext(
+                        request.getUserPrompt(),
+                        request.getContextHints(),
+                        tenantId,
+                        environment));
         String ragHintsBlock = truncateBlock(
                 "rag_hints",
                 safeMetadata(ragHints),
@@ -8514,6 +8525,27 @@ public class AiOrchestratorService {
 
     private String safeMetadata(String metadata) {
         return metadata == null || metadata.isBlank() ? "N/A" : metadata;
+    }
+
+    private String domainCatalogPromptContext(
+            String userPrompt,
+            JsonNode contextHints,
+            String tenantId,
+            String environment) {
+        if (domainCatalogPromptContextService == null) {
+            return "";
+        }
+        return domainCatalogPromptContextService.buildPromptContext(userPrompt, contextHints, tenantId, environment);
+    }
+
+    private String appendOptionalPromptBlock(String base, String extra) {
+        if (extra == null || extra.isBlank()) {
+            return base;
+        }
+        if (base == null || base.isBlank()) {
+            return extra;
+        }
+        return base + "\n\n" + extra;
     }
 
     private String buildContextDescription(AiContextDTO context, AiSchemaContext schemaContext) {

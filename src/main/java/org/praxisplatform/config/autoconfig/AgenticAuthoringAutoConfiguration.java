@@ -36,6 +36,7 @@ import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -97,13 +98,15 @@ public class AgenticAuthoringAutoConfiguration {
             AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
             AgenticAuthoringApiCatalogConversationService apiCatalogConversationService,
             ObjectProvider<AgenticAuthoringLlmIntentResolverService> llmIntentResolverService,
-            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService) {
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey) {
         return new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 apiMetadataCandidateCatalog,
                 apiCatalogConversationService,
                 llmIntentResolverService.getIfAvailable(),
-                componentCapabilitiesService);
+                componentCapabilitiesService,
+                domainCatalogServiceKey);
     }
 
     @Bean
@@ -162,8 +165,12 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnMissingBean
     public AgenticAuthoringResourceDiscoveryService agenticAuthoringResourceDiscoveryService(
             AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
-            ObjectMapper objectMapper) {
-        return new AgenticAuthoringResourceDiscoveryService(apiMetadataCandidateCatalog, objectMapper);
+            ObjectMapper objectMapper,
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey) {
+        return new AgenticAuthoringResourceDiscoveryService(
+                apiMetadataCandidateCatalog,
+                objectMapper,
+                domainCatalogServiceKey);
     }
 
     @Bean

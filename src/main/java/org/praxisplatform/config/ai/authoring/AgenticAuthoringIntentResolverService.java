@@ -26,6 +26,7 @@ public class AgenticAuthoringIntentResolverService {
     private final AgenticAuthoringLlmIntentResolverService llmIntentResolverService;
     private final AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService;
     private final ObjectMapper objectMapper;
+    private final String domainCatalogServiceKey;
     private final AgenticAuthoringFormCapabilityCatalog formCapabilityCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
@@ -60,6 +61,21 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringApiCatalogConversationService apiCatalogConversationService,
             AgenticAuthoringLlmIntentResolverService llmIntentResolverService,
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService) {
+        this(objectMapper,
+                apiMetadataCandidateCatalog,
+                apiCatalogConversationService,
+                llmIntentResolverService,
+                componentCapabilitiesService,
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY);
+    }
+
+    public AgenticAuthoringIntentResolverService(
+            ObjectMapper objectMapper,
+            AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
+            AgenticAuthoringApiCatalogConversationService apiCatalogConversationService,
+            AgenticAuthoringLlmIntentResolverService llmIntentResolverService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            String domainCatalogServiceKey) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.currentPageAnalyzer = new AgenticAuthoringCurrentPageAnalyzer(objectMapper);
         this.eligibilityGate = new AgenticAuthoringCandidateEligibilityGate();
@@ -67,6 +83,7 @@ public class AgenticAuthoringIntentResolverService {
         this.apiCatalogConversationService = apiCatalogConversationService;
         this.llmIntentResolverService = llmIntentResolverService;
         this.componentCapabilitiesService = componentCapabilitiesService;
+        this.domainCatalogServiceKey = domainCatalogServiceKey;
     }
 
     public AgenticAuthoringIntentResolutionResult resolve(AgenticAuthoringIntentResolutionRequest request) {
@@ -1405,6 +1422,12 @@ public class AgenticAuthoringIntentResolverService {
                     contextHints.put("submitUrl", candidate.submitUrl());
                     contextHints.put("operation", candidate.operation());
                     contextHints.put("schemaUrl", candidate.schemaUrl());
+                    AgenticAuthoringDomainCatalogHints.enrich(
+                            contextHints,
+                            candidate,
+                            null,
+                            effectivePrompt,
+                            domainCatalogServiceKey);
                     boolean duplicatedResourcePath = resourcePathCounts.getOrDefault(
                             valueOrDefault(candidate.resourcePath(), ""),
                             0L) > 1L;

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-rc.1] - 2026-04-21
+
+### Added
+- Domain Catalog Foundation with Flyway V17 tables `domain_catalog_release` and `domain_catalog_item`.
+- Runtime ingestion and retrieval endpoints under `/api/praxis/config/domain-catalog`.
+- LLM-ready domain context response for semantic vocabulary retrieval.
+- Prompt context bridge from `contextHints.domainCatalog` into AI orchestration.
+- Agentic authoring quick replies enriched with `domainCatalog` hints.
+- Configurable `praxis.domain-catalog.service-key` for host applications.
+
+### Changed
+- RAG resource typing now includes `domain_catalog`.
+- Domain catalog persistence remains resilient when vector publication is unavailable.
+
 ## [0.0.1] - 2025-12-02
 
 ### Added
