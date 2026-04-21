@@ -16,6 +16,21 @@ on:
         required: false
         default: main
         type: string
+      ui_ref:
+        description: 'praxis-ui-angular ref to test against when the page-builder full E2E gate is enabled.'
+        required: false
+        default: main
+        type: string
+      run_page_builder_full_e2e:
+        description: 'Run the full page-builder agentic Playwright gate after the HTTP/SSE smoke.'
+        required: false
+        default: false
+        type: boolean
+      stream_processing_timeout_seconds:
+        description: 'Backend LLM stream processing timeout used by HTTP smoke and page-builder E2E.'
+        required: false
+        default: '180'
+        type: string
 
 concurrency:
   group: agentic-authoring-smoke-${{ github.ref }}
@@ -23,8 +38,9 @@ concurrency:
 
 jobs:
   quickstart-http-smoke:
-    name: Quickstart HTTP/SSE smoke
+    name: Quickstart HTTP/SSE smoke and optional page-builder full E2E
     runs-on: windows-latest
+    timeout-minutes: 75
     permissions:
       contents: read
     env:
@@ -46,12 +62,29 @@ jobs:
           path: praxis-api-quickstart
           token: ${{ secrets.RELEASE_PAT || github.token }}
 
+      - name: Checkout praxis-ui-angular
+        if: inputs.run_page_builder_full_e2e == true
+        uses: actions/checkout@v4
+        with:
+          repository: codexrodrigues/praxis-ui-angular
+          ref: ${{ inputs.ui_ref }}
+          path: praxis-ui-angular
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
       - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
+
+      - name: Set up Node.js 20
+        if: inputs.run_page_builder_full_e2e == true
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: npm
+          cache-dependency-path: praxis-ui-angular/package-lock.json
 
       - name: Prepare AI env file
         shell: pwsh
@@ -97,6 +130,18 @@ jobs:
         working-directory: praxis-api-quickstart
         run: mvn -B -DskipTests "-Dpraxis.config.version=$env:STARTER_VERSION" package
 
+      - name: Install praxis-ui-angular dependencies
+        if: inputs.run_page_builder_full_e2e == true
+        shell: pwsh
+        working-directory: praxis-ui-angular
+        run: npm ci --no-audit --fund=false
+
+      - name: Install Playwright Chromium
+        if: inputs.run_page_builder_full_e2e == true
+        shell: pwsh
+        working-directory: praxis-ui-angular
+        run: npx playwright install chromium
+
       - name: Run quickstart authoring HTTP/SSE smoke suite
         shell: pwsh
         working-directory: praxis-config-starter
@@ -105,7 +150,21 @@ jobs:
             -Provider '${{ inputs.provider }}' `
             -JavaHome "$env:JAVA_HOME" `
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
-            -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1"
+            -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
+            -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
+
+      - name: Run page-builder agentic full E2E gate
+        if: inputs.run_page_builder_full_e2e == true
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          .\tools\Invoke-PbAgenticFullE2E.ps1 `
+            -Provider '${{ inputs.provider }}' `
+            -JavaHome "$env:JAVA_HOME" `
+            -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
+            -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
+            -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
+            -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
 
       - name: Upload smoke artifacts
         if: always()
@@ -114,5 +173,8 @@ jobs:
           name: agentic-authoring-smoke-artifacts
           path: |
             artifacts/ai-sse-smoke/**
+            artifacts/page-builder-agentic-full-e2e/**
             praxis-api-quickstart/logs/**
+            praxis-ui-angular/test-results/**
+            praxis-ui-angular/tools/e2e/playwright/playwright-agentic-report/**
           if-no-files-found: ignore
