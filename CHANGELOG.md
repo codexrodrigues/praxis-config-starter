@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-rc.2] - 2026-04-21
+
+### Added
+- Full page-builder agentic E2E gate option in the authoring smoke workflow.
+- Release guidance for running the page-builder full gate before publishing authoring-sensitive releases.
+- Domain catalog prompt context enrichment for governed surface/resource/action selection.
+
+### Changed
+- Authoring smoke workflow now uses a pinned quickstart ref by default to keep starter release validation independent from unpublished downstream dependencies.
+- Payroll dashboard confirmation accepts the canonical payroll collection candidate as well as the analytics view candidate.
+
 ## [0.1.0-rc.1] - 2026-04-21
 
 ### Added

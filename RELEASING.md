@@ -35,15 +35,18 @@ aplicacao de config e streaming SSE.
 
 Fluxo recomendado:
 1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
-2) Executar com `provider=openai` e `quickstart_ref=main`.
-3) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso.
-4) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
+2) Executar com `provider=openai` e manter o `quickstart_ref` padrao do workflow, salvo quando a validacao exigir explicitamente outro ref.
+3) Para releases que alterem authoring, page-builder, manifestos executaveis, SSE ou compilacao de patches, marcar `run_page_builder_full_e2e=true`.
+4) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso. Quando `run_page_builder_full_e2e=true`, confirmar tambem que o gate Playwright completo do page-builder terminou com sucesso.
+5) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
 
 O smoke manual:
 - instala o `praxis-config-starter` do checkout no Maven local do runner;
 - empacota o `praxis-api-quickstart` contra essa versao local, sem depender do Maven Central;
+- usa por padrao um ref pinado do `praxis-api-quickstart` para evitar que releases do starter fiquem bloqueados por dependencias ainda nao publicadas no consumidor;
 - sobe o quickstart empacotado;
 - valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
+- quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic completo do page-builder com browser real;
 - usa `praxis.ai.stream.processing-timeout-seconds=180` por padrao para acomodar turnos reais com discovery, RAG e LLM.
 
 Para reproduzir localmente, primeiro empacote o quickstart e depois rode:
