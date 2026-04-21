@@ -1376,6 +1376,108 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("preview")).hasSize(2);
     }
 
+    @Test
+    void shouldCompileSettingsPanelSizeIntoConfigAndRuntimeWidth() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "config": {
+                    "id": "table-settings",
+                    "minWidth": "480px"
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-settings-panel",
+                operationWithHandler("panel.size.set", "panelSize", "settings-panel-size-and-resize", false,
+                        "compile-domain-patch", "settings-panel-size-set", "config.minWidth"),
+                plan("null", "{ \"width\": \"920px\", \"minWidth\": \"640px\", \"maxWidth\": \"1200px\", \"resizable\": true, \"persistSizeKey\": \"settings:table\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-settings-panel-size");
+        assertThat(patchOperation.path("previousConfig").path("minWidth").asText()).isEqualTo("480px");
+        assertThat(proposedConfig.path("config").path("minWidth").asText()).isEqualTo("640px");
+        assertThat(proposedConfig.path("config").path("resizable").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("runtime").path("width").asText()).isEqualTo("920px");
+    }
+
+    @Test
+    void shouldCompileSettingsPanelRuntimeBehaviorsWithoutMutatingConfigSemantics() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "config": {
+                    "id": "table-settings"
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-settings-panel",
+                operationWithHandler("panel.applyBehavior.set", "applyBehavior", "settings-value-provider-apply-contract", false,
+                        "compile-domain-patch", "settings-panel-apply-behavior-set", "ref.applied$"),
+                plan("null", "{ \"requireDirty\": true, \"requireValid\": true, \"blockWhileBusy\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("set-settings-panel-apply-behavior");
+        assertThat(patchOperations.get(0).path("path").asText()).isEqualTo("runtime.settingsPanel.applyBehavior");
+        assertThat(proposedConfig.path("config").has("applyBehavior")).isFalse();
+        assertThat(proposedConfig.path("runtime").path("settingsPanel").path("applyBehavior").path("requireDirty").asBoolean()).isTrue();
+    }
+
+    @Test
+    void shouldCompileSettingsPanelEditorHostAndDelegateConsumerConfig() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "config": {
+                    "id": "table-settings",
+                    "content": {
+                      "component": "old-editor"
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-settings-panel",
+                operationWithHandler("editor.host.configure", "editorHost", "settings-panel-editor-host", true,
+                        "compile-domain-patch", "settings-panel-editor-host-configure", "config.content.component"),
+                plan("{ \"componentId\": \"praxis-table\" }", """
+                        {
+                          "componentId": "praxis-table",
+                          "inputs": { "tableId": "orders" },
+                          "configManifestComponentId": "praxis-table",
+                          "editorContract": "SettingsValueProvider"
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("configure-settings-panel-editor-host");
+        assertThat(patchOperation.path("previousContent").path("component").asText()).isEqualTo("old-editor");
+        assertThat(proposedConfig.path("config").path("content").path("component").asText()).isEqualTo("praxis-table");
+        assertThat(proposedConfig.path("config").path("content").path("inputs").path("tableId").asText()).isEqualTo("orders");
+        assertThat(proposedConfig.path("delegatedConsumerPatch").path("componentId").asText()).isEqualTo("praxis-table");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

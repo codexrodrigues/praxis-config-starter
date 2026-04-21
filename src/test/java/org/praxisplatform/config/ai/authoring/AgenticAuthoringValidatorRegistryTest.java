@@ -142,6 +142,73 @@ class AgenticAuthoringValidatorRegistryTest {
                 .contains("validator declared without backend implementation: not-implemented-validator for column.header.set");
     }
 
+    @Test
+    void shouldValidateSettingsPanelSizeAndApplySemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-settings-panel",
+                operation("panel.size.set", "panelSize", "settings-panel-size-and-resize", false,
+                        "panel-size-safe,panel-min-max-consistent,resize-persistence-explicit"),
+                plan("null", "{ \"width\": \"calc(100vw - 1rem)\", \"minWidth\": \"900px\", \"maxWidth\": \"640px\", \"persistSizeKey\": \"\" }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator panel-size-safe failed for panel.size.set: invalid width",
+                        "validator panel-min-max-consistent failed for panel.size.set: minWidth must not exceed maxWidth",
+                        "validator resize-persistence-explicit failed for panel.size.set: persistSizeKey must not be blank when provided");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-settings-panel",
+                operation("panel.applyBehavior.set", "applyBehavior", "settings-value-provider-apply-contract", false,
+                        "apply-does-not-close-panel"),
+                plan("null", "{ \"closeAfterSave\": true }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains("validator apply-does-not-close-panel failed for panel.applyBehavior.set: apply behavior must not close the settings panel");
+    }
+
+    @Test
+    void shouldValidateSettingsPanelResetConfirmationAndEditorInputs() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-settings-panel",
+                operation("panel.resetBehavior.set", "resetBehavior", "settings-value-provider-reset-contract", false,
+                        "reset-requires-confirmation"),
+                plan("null", "{ \"requireConfirmation\": false }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator reset-requires-confirmation failed for panel.resetBehavior.set: explicit confirmation is required",
+                        "validator reset-requires-confirmation failed for panel.resetBehavior.set: reset confirmation cannot be disabled");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-settings-panel",
+                operation("editor.host.configure", "editorHost", "settings-panel-editor-host", true,
+                        "editor-component-registered,editor-inputs-serializable"),
+                plan("{ \"id\": \"settings\" }", "{ \"componentId\": \"\", \"inputs\": { \"resourcePath\": \"https://evil.example/config\" } }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator editor-component-registered failed for editor.host.configure: componentId is required",
+                        "validator editor-inputs-serializable failed for editor.host.configure: absolute remote URLs are not allowed in editor inputs");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

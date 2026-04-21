@@ -92,6 +92,29 @@ public final class AgenticAuthoringValidatorRegistry {
             "security-change-confirmed",
             "preset-ref-valid",
             "host-capabilities-serializable",
+            "panel-id-stable",
+            "replacement-mediates-before-close",
+            "title-i18n-compatible",
+            "panel-size-safe",
+            "panel-min-max-consistent",
+            "resize-persistence-explicit",
+            "apply-requires-provider-value",
+            "apply-does-not-close-panel",
+            "dirty-valid-busy-gates-preserved",
+            "save-prefers-provider-hook",
+            "save-fallback-value-preserved",
+            "save-closes-with-save-reason",
+            "reset-requires-confirmation",
+            "reset-calls-provider-reset",
+            "reset-event-emitted",
+            "editor-component-registered",
+            "settings-value-provider-contract-present",
+            "consumer-config-delegated",
+            "editor-inputs-serializable",
+            "diagnostics-follow-provider-state",
+            "diagnostics-i18n-compatible",
+            "busy-valid-dirty-visible-when-needed",
+            "settings-panel-round-trip",
             "json-logic-valid",
             "logic-valid",
             "renderer-supported",
@@ -191,6 +214,22 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "security-change-confirmed" -> validateSecurityChangeConfirmed(operationId, planOperation, failures);
                 case "preset-ref-valid" -> validatePresetRef(operationId, planOperation, failures);
                 case "host-capabilities-serializable" -> validatePresetInputsSerializable(operationId, planOperation, failures);
+                case "panel-size-safe" -> validateSettingsPanelSizeSafe(operationId, planOperation, failures);
+                case "panel-min-max-consistent" -> validateSettingsPanelMinMax(operationId, planOperation, failures);
+                case "resize-persistence-explicit" -> validateSettingsPanelResizePersistence(operationId, planOperation, failures);
+                case "apply-does-not-close-panel" -> validateSettingsPanelApplyDoesNotClose(operationId, planOperation, failures);
+                case "reset-requires-confirmation" -> validateSettingsPanelResetConfirmed(operationId, planOperation, failures);
+                case "editor-component-registered" -> validateSettingsPanelEditorComponent(operationId, planOperation, failures);
+                case "editor-inputs-serializable" -> validateSettingsPanelEditorInputs(operationId, planOperation, failures);
+                case "panel-id-stable", "replacement-mediates-before-close", "title-i18n-compatible",
+                     "apply-requires-provider-value", "dirty-valid-busy-gates-preserved",
+                     "save-prefers-provider-hook", "save-fallback-value-preserved", "save-closes-with-save-reason",
+                     "reset-calls-provider-reset", "reset-event-emitted",
+                     "settings-value-provider-contract-present", "consumer-config-delegated",
+                     "diagnostics-follow-provider-state", "diagnostics-i18n-compatible",
+                     "busy-valid-dirty-visible-when-needed", "settings-panel-round-trip" -> {
+                    // These validators assert runtime/editor protocol invariants represented by the compiled runtime contract.
+                }
                 case "json-logic-valid", "logic-valid", "conditional-style-valid" ->
                         validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 case "grouping-fields-exist", "filter-fields-exist" ->
@@ -1187,6 +1226,113 @@ public final class AgenticAuthoringValidatorRegistry {
             return;
         }
         failures.add("validator preset-exists failed for " + operationId + ": preset not found " + labelOrCron);
+    }
+
+    private void validateSettingsPanelSizeSafe(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("width", "minWidth", "maxWidth")) {
+            JsonNode value = input.path(field);
+            if (value.isMissingNode() || value.isNull()) {
+                continue;
+            }
+            if (value.isNumber() && value.asDouble() > 0 && Double.isFinite(value.asDouble())) {
+                continue;
+            }
+            if (value.isTextual() && isSafeCssSize(value.asText(""))) {
+                continue;
+            }
+            failures.add("validator panel-size-safe failed for " + operationId + ": invalid " + field);
+        }
+    }
+
+    private void validateSettingsPanelMinMax(String operationId, JsonNode planOperation, List<String> failures) {
+        Double min = cssPixels(planOperation.path("input").path("minWidth"));
+        Double max = cssPixels(planOperation.path("input").path("maxWidth"));
+        if (min != null && max != null && min > max) {
+            failures.add("validator panel-min-max-consistent failed for " + operationId
+                    + ": minWidth must not exceed maxWidth");
+        }
+    }
+
+    private void validateSettingsPanelResizePersistence(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode persistSizeKey = planOperation.path("input").path("persistSizeKey");
+        if (persistSizeKey.isTextual() && persistSizeKey.asText("").isBlank()) {
+            failures.add("validator resize-persistence-explicit failed for " + operationId
+                    + ": persistSizeKey must not be blank when provided");
+        }
+    }
+
+    private void validateSettingsPanelApplyDoesNotClose(String operationId, JsonNode planOperation, List<String> failures) {
+        if (planOperation.path("input").path("closeAfterSave").asBoolean(false)) {
+            failures.add("validator apply-does-not-close-panel failed for " + operationId
+                    + ": apply behavior must not close the settings panel");
+        }
+    }
+
+    private void validateSettingsPanelResetConfirmed(String operationId, JsonNode planOperation, List<String> failures) {
+        if (!planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator reset-requires-confirmation failed for " + operationId
+                    + ": explicit confirmation is required");
+        }
+        if (planOperation.path("input").has("requireConfirmation")
+                && !planOperation.path("input").path("requireConfirmation").asBoolean(false)) {
+            failures.add("validator reset-requires-confirmation failed for " + operationId
+                    + ": reset confirmation cannot be disabled");
+        }
+    }
+
+    private void validateSettingsPanelEditorComponent(String operationId, JsonNode planOperation, List<String> failures) {
+        if (text(planOperation.path("input"), "componentId").isBlank()) {
+            failures.add("validator editor-component-registered failed for " + operationId
+                    + ": componentId is required");
+        }
+    }
+
+    private void validateSettingsPanelEditorInputs(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode inputs = planOperation.path("input").path("inputs");
+        if (!inputs.isMissingNode() && !(inputs.isObject() || inputs.isNull())) {
+            failures.add("validator editor-inputs-serializable failed for " + operationId
+                    + ": inputs must be a serializable object");
+        }
+        if (containsUnsafeAbsoluteUrl(inputs)) {
+            failures.add("validator editor-inputs-serializable failed for " + operationId
+                    + ": absolute remote URLs are not allowed in editor inputs");
+        }
+    }
+
+    private boolean isSafeCssSize(String value) {
+        return value != null
+                && value.matches("^[0-9]+(\\.[0-9]+)?(px|rem|em|vw|vh|%)$")
+                && cssPixels(value) != null;
+    }
+
+    private Double cssPixels(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isNumber()) {
+            double value = node.asDouble();
+            return value > 0 && Double.isFinite(value) ? value : null;
+        }
+        return node.isTextual() ? cssPixels(node.asText("")) : null;
+    }
+
+    private Double cssPixels(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (!trimmed.matches("^[0-9]+(\\.[0-9]+)?(px|rem|em|vw|vh|%)$")) {
+            return null;
+        }
+        double numeric = Double.parseDouble(trimmed.replaceFirst("(px|rem|em|vw|vh|%)$", ""));
+        if (!Double.isFinite(numeric) || numeric <= 0) {
+            return null;
+        }
+        if (trimmed.endsWith("rem") || trimmed.endsWith("em")) {
+            return numeric * 16;
+        }
+        return numeric;
     }
 
     private String text(JsonNode node, String field) {

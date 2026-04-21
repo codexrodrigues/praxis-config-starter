@@ -105,7 +105,12 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "cron-timezone-set".equals(handler)
                 || "cron-preset-apply".equals(handler)
                 || "cron-validation-diagnostics".equals(handler)
-                || "cron-preview-generate".equals(handler);
+                || "cron-preview-generate".equals(handler)
+                || "settings-panel-size-set".equals(handler)
+                || "settings-panel-apply-behavior-set".equals(handler)
+                || "settings-panel-save-behavior-set".equals(handler)
+                || "settings-panel-reset-behavior-set".equals(handler)
+                || "settings-panel-editor-host-configure".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -387,6 +392,42 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     planOperation,
                     proposedConfig,
                     failures);
+            case "settings-panel-size-set" -> compileSettingsPanelSizeSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig);
+            case "settings-panel-apply-behavior-set" -> compileSettingsPanelBehaviorSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "applyBehavior",
+                    "set-settings-panel-apply-behavior");
+            case "settings-panel-save-behavior-set" -> compileSettingsPanelBehaviorSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "saveBehavior",
+                    "set-settings-panel-save-behavior");
+            case "settings-panel-reset-behavior-set" -> compileSettingsPanelBehaviorSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "resetBehavior",
+                    "set-settings-panel-reset-behavior");
+            case "settings-panel-editor-host-configure" -> compileSettingsPanelEditorHostConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig);
             default -> {
                 failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
                 yield null;
@@ -1923,6 +1964,86 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileSettingsPanelSizeSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode config = objectAt(proposedConfig, "config", true);
+        JsonNode previousConfig = config.deepCopy();
+        copyIfPresent(input, config, "minWidth");
+        copyIfPresent(input, config, "maxWidth");
+        copyIfPresent(input, config, "resizable");
+        copyIfPresent(input, config, "persistSizeKey");
+        copyIfPresent(input, config, "expanded");
+        if (input.has("width")) {
+            objectAt(proposedConfig, "runtime", true).set("width", input.path("width"));
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-settings-panel-size");
+        compiled.put("path", "config");
+        compiled.set("previousConfig", previousConfig);
+        compiled.set("config", config.deepCopy());
+        compiled.set("runtime", proposedConfig.path("runtime"));
+        return compiled;
+    }
+
+    private ObjectNode compileSettingsPanelBehaviorSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            String behaviorName,
+            String opName) {
+        ObjectNode runtimeContracts = objectAt(proposedConfig, "runtime.settingsPanel", true);
+        JsonNode previousValue = runtimeContracts.path(behaviorName);
+        runtimeContracts.set(behaviorName, planOperation.path("input").deepCopy());
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", opName);
+        compiled.put("path", "runtime.settingsPanel." + behaviorName);
+        compiled.set("previousValue", previousValue.isMissingNode() ? MissingNode.getInstance() : previousValue);
+        compiled.set("value", runtimeContracts.path(behaviorName));
+        return compiled;
+    }
+
+    private ObjectNode compileSettingsPanelEditorHostConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode content = objectAt(proposedConfig, "config.content", true);
+        JsonNode previousContent = content.deepCopy();
+        content.put("component", text(input, "componentId"));
+        if (input.has("inputs")) {
+            content.set("inputs", input.path("inputs").deepCopy());
+        }
+        if (input.has("editorContract")) {
+            objectAt(proposedConfig, "runtime.settingsPanel.editorHost", true)
+                    .set("editorContract", input.path("editorContract"));
+        }
+        String delegatedComponentId = text(input, "configManifestComponentId");
+        if (!delegatedComponentId.isBlank()) {
+            ObjectNode delegatedPatch = objectAt(proposedConfig, "delegatedConsumerPatch", true);
+            delegatedPatch.put("componentId", delegatedComponentId);
+            delegatedPatch.put("status", "delegated-to-component-manifest");
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-settings-panel-editor-host");
+        compiled.put("path", "config.content");
+        compiled.set("previousContent", previousContent);
+        compiled.set("content", content.deepCopy());
+        compiled.set("delegatedConsumerPatch", proposedConfig.path("delegatedConsumerPatch"));
+        return compiled;
+    }
+
     private ObjectNode compileExpansionMultiExpandSet(
             String componentId,
             JsonNode operation,
@@ -2437,6 +2558,12 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return input.path(tail);
         }
         return input == null ? MissingNode.getInstance() : input;
+    }
+
+    private void copyIfPresent(JsonNode source, ObjectNode target, String field) {
+        if (source != null && source.has(field)) {
+            target.set(field, source.path(field));
+        }
     }
 
     private void mergeObject(ObjectNode target, JsonNode input) {
