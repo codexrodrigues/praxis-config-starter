@@ -49,6 +49,8 @@ public final class AgenticAuthoringValidatorRegistry {
             "unsafe-html-rejected",
             "unsafe-url-rejected",
             "security-change-confirmed",
+            "preset-ref-valid",
+            "host-capabilities-serializable",
             "json-logic-valid",
             "logic-valid",
             "renderer-supported",
@@ -111,6 +113,8 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "unsafe-html-rejected" -> validateUnsafeHtmlRejected(operationId, planOperation, failures);
                 case "unsafe-url-rejected" -> validateUnsafeUrlRejected(operationId, planOperation, failures);
                 case "security-change-confirmed" -> validateSecurityChangeConfirmed(operationId, planOperation, failures);
+                case "preset-ref-valid" -> validatePresetRef(operationId, planOperation, failures);
+                case "host-capabilities-serializable" -> validatePresetInputsSerializable(operationId, planOperation, failures);
                 case "json-logic-valid", "logic-valid", "conditional-style-valid" ->
                         validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 case "grouping-fields-exist", "filter-fields-exist" ->
@@ -118,6 +122,65 @@ public final class AgenticAuthoringValidatorRegistry {
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
         }
+    }
+
+    private void validatePresetRef(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode ref = planOperation.path("input").path("ref");
+        if (!ref.isObject()) {
+            failures.add("validator preset-ref-valid failed for " + operationId + ": ref object is required");
+            return;
+        }
+        if (!"rich-block".equals(text(ref, "kind"))) {
+            failures.add("validator preset-ref-valid failed for " + operationId + ": ref.kind must be rich-block");
+        }
+        if (text(ref, "namespace").isBlank()) {
+            failures.add("validator preset-ref-valid failed for " + operationId + ": ref.namespace is required");
+        }
+        if (text(ref, "presetId").isBlank()) {
+            failures.add("validator preset-ref-valid failed for " + operationId + ": ref.presetId is required");
+        }
+    }
+
+    private void validatePresetInputsSerializable(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode inputs = planOperation.path("input").path("inputs");
+        if (!inputs.isMissingNode() && !isSerializablePresetInputs(inputs)) {
+            failures.add("validator host-capabilities-serializable failed for " + operationId
+                    + ": preset inputs must not serialize host capability functions or resolvers");
+        }
+    }
+
+    private boolean isSerializablePresetInputs(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull() || node.isValueNode()) {
+            return true;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (!isSerializablePresetInputs(child)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                if ("function".equals(field.getKey()) || "resolver".equals(field.getKey())) {
+                    return false;
+                }
+                if (!isSerializablePresetInputs(field.getValue())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     private void validateSanitizationPolicyExplicit(

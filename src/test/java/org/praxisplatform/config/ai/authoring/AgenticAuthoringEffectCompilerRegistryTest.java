@@ -777,6 +777,108 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(policy.path("maxNodeCount").asInt()).isEqualTo(200);
     }
 
+    @Test
+    void shouldCompileRichContentPresetApplyDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      { "id": "intro", "type": "text", "text": "Intro" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("preset.apply", "preset", "rich-block-preset-ref", false,
+                        "compile-domain-patch", "rich-content-preset-apply", "document.nodes[]"),
+                plan("null", """
+                        {
+                          "ref": {
+                            "kind": "rich-block",
+                            "namespace": "praxis.rich-content",
+                            "presetId": "profile-summary",
+                            "version": "1.0.0"
+                          },
+                          "inputs": {
+                            "title": "Ana Silva",
+                            "subtitle": "Account owner"
+                          }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("insert-rich-preset");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-preset-apply");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("profile-summary");
+        assertThat(patchOperation.path("value").path("type").asText()).isEqualTo("preset");
+        assertThat(patchOperation.path("value").path("ref").path("presetId").asText()).isEqualTo("profile-summary");
+        assertThat(patchOperation.path("value").path("inputs").path("title").asText()).isEqualTo("Ana Silva");
+        JsonNode nodes = proposedConfig.path("document").path("nodes");
+        assertThat(nodes).hasSize(2);
+        assertThat(nodes.get(1).path("id").asText()).isEqualTo("profile-summary");
+    }
+
+    @Test
+    void shouldCompileRichContentPresetApplyReplacementDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      { "id": "profile", "type": "mediaBlock", "title": "Old" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("preset.apply", "preset", "rich-block-preset-ref", false,
+                        "compile-domain-patch", "rich-content-preset-apply", "document.nodes[]"),
+                plan("null", """
+                        {
+                          "ref": {
+                            "kind": "rich-block",
+                            "namespace": "praxis.rich-content",
+                            "presetId": "profile-summary"
+                          },
+                          "replaceBlockId": "profile",
+                          "inputs": {
+                            "title": "New"
+                          }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("replace-rich-block-with-preset");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("profile");
+        assertThat(patchOperation.path("previousValue").path("type").asText()).isEqualTo("mediaBlock");
+        JsonNode node = proposedConfig.path("document").path("nodes").get(0);
+        assertThat(node.path("id").asText()).isEqualTo("profile");
+        assertThat(node.path("type").asText()).isEqualTo("preset");
+        assertThat(node.path("ref").path("presetId").asText()).isEqualTo("profile-summary");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

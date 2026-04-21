@@ -1360,6 +1360,108 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesRichContentPresetApplyFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "intro", "type": "text", "text": "Intro" }
+                      ]
+                    }
+                  },
+                  "plan": {
+                    "operationId": "preset.apply",
+                    "input": {
+                      "ref": {
+                        "kind": "rich-block",
+                        "namespace": "praxis.rich-content",
+                        "presetId": "profile-summary",
+                        "version": "1.0.0"
+                      },
+                      "inputs": {
+                        "title": "Ana Silva",
+                        "subtitle": "Account owner"
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: preset-exists-or-host-mediated for preset.apply")
+                .contains("validator declared without backend implementation: document-shape-canonical for preset.apply")
+                .contains("validator declared without backend implementation: editor-runtime-round-trip for preset.apply");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("preset.apply");
+        assertThat(operation.path("op").asText()).isEqualTo("insert-rich-preset");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("rich-content-preset-apply");
+        assertThat(operation.path("value").path("type").asText()).isEqualTo("preset");
+        assertThat(operation.path("value").path("ref").path("presetId").asText()).isEqualTo("profile-summary");
+        JsonNode nodes = result.patch().path("proposedConfig").path("document").path("nodes");
+        assertThat(nodes).hasSize(2);
+        assertThat(nodes.get(1).path("type").asText()).isEqualTo("preset");
+        assertThat(nodes.get(1).path("inputs").path("title").asText()).isEqualTo("Ana Silva");
+    }
+
+    @Test
+    void rejectsNonSerializableRichContentPresetInputsFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": []
+                    }
+                  },
+                  "plan": {
+                    "operationId": "preset.apply",
+                    "input": {
+                      "ref": {
+                        "kind": "rich-block",
+                        "namespace": "praxis.rich-content",
+                        "presetId": "profile-summary"
+                      },
+                      "inputs": {
+                        "resolver": "hostCapabilities.resolvePreset"
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isFalse();
+        assertThat(validation.failures())
+                .anyMatch(failure -> failure.contains("validator host-capabilities-serializable failed for preset.apply"));
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""

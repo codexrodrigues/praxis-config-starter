@@ -83,7 +83,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "rich-content-timeline-item-add".equals(handler)
                 || "rich-content-timeline-item-update".equals(handler)
                 || "rich-content-timeline-item-remove".equals(handler)
-                || "rich-content-sanitization-policy".equals(handler);
+                || "rich-content-sanitization-policy".equals(handler)
+                || "rich-content-preset-apply".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -174,6 +175,13 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "rich-content-block-add" -> compileRichContentBlockAdd(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "rich-content-preset-apply" -> compileRichContentPresetApply(
                     componentId,
                     operation,
                     effect,
@@ -456,6 +464,82 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         }
         if (!afterBlockId.isBlank()) {
             compiled.put("afterBlockId", afterBlockId);
+        }
+        compiled.set("value", node);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileRichContentPresetApply(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode nodes = arrayAt(proposedConfig, "document.nodes", true);
+        if (nodes == null) {
+            failures.add("rich-content-preset-apply path is not an array: document.nodes[]");
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        if (!(input.path("ref") instanceof ObjectNode ref)) {
+            failures.add("rich-content-preset-apply requires ref object");
+            return null;
+        }
+        if (!validatePresetRef(ref, failures)) {
+            return null;
+        }
+        JsonNode inputs = input.path("inputs").isObject()
+                ? input.path("inputs").deepCopy()
+                : objectMapper.createObjectNode();
+        if (!isSerializablePresetInputs(inputs)) {
+            failures.add("rich-content-preset-apply inputs must be serializable JSON");
+            return null;
+        }
+
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "preset");
+        node.put("id", presetNodeId(ref, nodes));
+        node.set("ref", ref.deepCopy());
+        node.set("inputs", inputs);
+
+        String replaceBlockId = text(input, "replaceBlockId");
+        int index = nodes.size();
+        JsonNode previousValue = MissingNode.getInstance();
+        String op = "insert-rich-preset";
+        if (!replaceBlockId.isBlank()) {
+            index = indexOfObjectByKey(nodes, "id", replaceBlockId);
+            if (index < 0) {
+                failures.add("rich-content-preset-apply replace block not found: document.nodes[] id=" + replaceBlockId);
+                return null;
+            }
+            previousValue = nodes.get(index).deepCopy();
+            node.put("id", replaceBlockId);
+            nodes.set(index, node);
+            op = "replace-rich-block-with-preset";
+        } else {
+            String nodeId = text(node, "id");
+            if (indexOfObjectByKey(nodes, "id", nodeId) >= 0) {
+                node.put("id", nextRichContentNodeId(nodes, "preset"));
+            }
+            nodes.add(node);
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", op);
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "document.nodes[]");
+        compiled.put("keyValue", text(node, "id"));
+        compiled.put("index", index);
+        if (!previousValue.isMissingNode()) {
+            compiled.set("previousValue", previousValue);
         }
         compiled.set("value", node);
         compiled.set("target", planOperation.path("target"));
@@ -1378,6 +1462,63 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     private String timelineBlockPathFromItemPath(String itemPath) {
         int marker = itemPath == null ? -1 : itemPath.lastIndexOf(".items[]/");
         return marker < 0 ? "" : itemPath.substring(0, marker);
+    }
+
+    private boolean validatePresetRef(ObjectNode ref, List<String> failures) {
+        String kind = text(ref, "kind");
+        String namespace = text(ref, "namespace");
+        String presetId = text(ref, "presetId");
+        if (!"rich-block".equals(kind)) {
+            failures.add("rich-content-preset-apply ref.kind must be rich-block");
+        }
+        if (namespace.isBlank()) {
+            failures.add("rich-content-preset-apply ref.namespace is required");
+        }
+        if (presetId.isBlank()) {
+            failures.add("rich-content-preset-apply ref.presetId is required");
+        }
+        return failures.stream().noneMatch(failure -> failure.startsWith("rich-content-preset-apply"));
+    }
+
+    private boolean isSerializablePresetInputs(JsonNode inputs) {
+        if (inputs == null || inputs.isMissingNode()) {
+            return true;
+        }
+        if (inputs.isValueNode() || inputs.isArray()) {
+            for (JsonNode child : inputs) {
+                if (!isSerializablePresetInputs(child)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (inputs.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = inputs.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                if ("function".equals(field.getKey()) || "resolver".equals(field.getKey())) {
+                    return false;
+                }
+                if (!isSerializablePresetInputs(field.getValue())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private String presetNodeId(ObjectNode ref, ArrayNode nodes) {
+        String presetId = text(ref, "presetId");
+        String normalized = presetId.isBlank()
+                ? "preset"
+                : presetId.replaceAll("[^A-Za-z0-9]+", "-").replaceAll("(^-|-$)", "").toLowerCase();
+        String candidateBase = normalized.isBlank() ? "preset" : normalized;
+        String candidate = candidateBase;
+        for (int suffix = 2; indexOfObjectByKey(nodes, "id", candidate) >= 0; suffix++) {
+            candidate = candidateBase + "-" + suffix;
+        }
+        return candidate;
     }
 
     private Set<String> safeRichContentUrlProtocols() {
