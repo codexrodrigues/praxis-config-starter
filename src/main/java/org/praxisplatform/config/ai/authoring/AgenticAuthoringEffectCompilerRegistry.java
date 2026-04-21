@@ -89,7 +89,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "rich-content-timeline-item-update".equals(handler)
                 || "rich-content-timeline-item-remove".equals(handler)
                 || "rich-content-sanitization-policy".equals(handler)
-                || "rich-content-preset-apply".equals(handler);
+                || "rich-content-preset-apply".equals(handler)
+                || "expansion-panel-remove".equals(handler)
+                || "expansion-multi-expand-set".equals(handler)
+                || "expansion-default-expanded-upsert".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -280,6 +283,29 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     operation,
                     effect,
                     planOperation,
+                    proposedConfig,
+                    failures);
+            case "expansion-panel-remove" -> compileExpansionPanelRemove(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "expansion-multi-expand-set" -> compileExpansionMultiExpandSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "expansion-default-expanded-upsert" -> compileExpansionDefaultExpandedUpsert(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
                     proposedConfig,
                     failures);
             default -> {
@@ -1512,6 +1538,169 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.set("affectedPaths", operation.path("affectedPaths"));
         compiled.set("submissionImpact", operation.path("submissionImpact"));
         return compiled;
+    }
+
+    private ObjectNode compileExpansionPanelRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode panels = arrayAt(proposedConfig, "panels", false);
+        if (panels == null) {
+            failures.add("expansion-panel-remove path is not an array: panels[]");
+            return null;
+        }
+        String panelId = resolved != null ? text(resolved.value(), "id") : "";
+        int removedIndex = indexOfObjectByKey(panels, "id", panelId);
+        if (removedIndex < 0) {
+            failures.add("expansion-panel-remove target not found: panels[] id=" + panelId);
+            return null;
+        }
+        boolean removedWasExpanded = panels.get(removedIndex).path("expanded").asBoolean(false);
+        JsonNode removedValue = panels.remove(removedIndex);
+        String replacementPanelId = text(planOperation.path("input"), "replacementExpandedPanelId");
+        int replacementIndex = -1;
+        if (removedWasExpanded && !replacementPanelId.isBlank()) {
+            replacementIndex = indexOfObjectByKey(panels, "id", replacementPanelId);
+            if (replacementIndex < 0) {
+                panels.insert(removedIndex, removedValue);
+                failures.add("expansion-panel-remove replacement panel not found: panels[] id=" + replacementPanelId);
+                return null;
+            }
+            collapseAllPanelsExcept(panels, replacementPanelId);
+            ((ObjectNode) panels.get(replacementIndex)).put("expanded", true);
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "remove-expansion-panel");
+        compiled.put("path", "panels[]");
+        compiled.put("keyValue", panelId);
+        compiled.put("removedIndex", removedIndex);
+        compiled.put("removedWasExpanded", removedWasExpanded);
+        compiled.put("replacementExpandedPanelId", replacementPanelId);
+        compiled.put("replacementIndex", replacementIndex);
+        compiled.set("removedValue", removedValue);
+        return compiled;
+    }
+
+    private ObjectNode compileExpansionMultiExpandSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.path("multi").isBoolean()) {
+            failures.add("expansion-multi-expand-set requires boolean input.multi");
+            return null;
+        }
+        boolean multi = input.path("multi").asBoolean();
+        ObjectNode accordion = objectAt(proposedConfig, "accordion", true);
+        boolean previousMulti = accordion.path("multi").asBoolean(false);
+        accordion.put("multi", multi);
+
+        ArrayNode panels = arrayAt(proposedConfig, "panels", false);
+        String preservedExpandedPanelId = "";
+        if (!multi && panels != null) {
+            preservedExpandedPanelId = firstExpandedPanelId(panels);
+            if (!preservedExpandedPanelId.isBlank()) {
+                collapseAllPanelsExcept(panels, preservedExpandedPanelId);
+            }
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-expansion-multi-expand");
+        compiled.put("path", "accordion.multi");
+        compiled.put("previousValue", previousMulti);
+        compiled.put("value", multi);
+        compiled.put("preservedExpandedPanelId", preservedExpandedPanelId);
+        return compiled;
+    }
+
+    private ObjectNode compileExpansionDefaultExpandedUpsert(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode panels = arrayAt(proposedConfig, "panels", false);
+        if (panels == null) {
+            failures.add("expansion-default-expanded-upsert path is not an array: panels[]");
+            return null;
+        }
+        String panelId = resolved != null ? text(resolved.value(), "id") : text(planOperation.path("input"), "panelId");
+        int panelIndex = indexOfObjectByKey(panels, "id", panelId);
+        if (panelIndex < 0 || !(panels.get(panelIndex) instanceof ObjectNode targetPanel)) {
+            failures.add("expansion-default-expanded-upsert target not found: panels[] id=" + panelId);
+            return null;
+        }
+        if (targetPanel.path("disabled").asBoolean(false) && planOperation.path("input").path("expanded").asBoolean(false)) {
+            failures.add("expansion-default-expanded-upsert cannot expand disabled panel: " + panelId);
+            return null;
+        }
+        boolean expanded = planOperation.path("input").path("expanded").asBoolean(false);
+        boolean previousExpanded = targetPanel.path("expanded").asBoolean(false);
+        boolean multi = proposedConfig.path("accordion").path("multi").asBoolean(false);
+        boolean collapseOthers = planOperation.path("input").path("collapseOthers").asBoolean(false);
+        if (expanded && (!multi || collapseOthers)) {
+            collapseAllPanelsExcept(panels, panelId);
+        }
+        targetPanel.put("expanded", expanded);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "set-expansion-default-expanded");
+        compiled.put("path", "panels[].expanded");
+        compiled.put("keyValue", panelId);
+        compiled.put("panelIndex", panelIndex);
+        compiled.put("previousValue", previousExpanded);
+        compiled.put("value", expanded);
+        compiled.put("collapseOthers", collapseOthers || (expanded && !multi));
+        return compiled;
+    }
+
+    private ObjectNode baseDomainPatch(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved) {
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        if (resolved != null) {
+            compiled.put("resolvedPath", resolved.path());
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private void collapseAllPanelsExcept(ArrayNode panels, String expandedPanelId) {
+        for (JsonNode panel : panels) {
+            if (panel instanceof ObjectNode object) {
+                object.put("expanded", expandedPanelId.equals(text(object, "id")));
+            }
+        }
+    }
+
+    private String firstExpandedPanelId(ArrayNode panels) {
+        for (JsonNode panel : panels) {
+            if (panel.path("expanded").asBoolean(false)) {
+                return text(panel, "id");
+            }
+        }
+        return "";
     }
 
     private void applyMergeByKey(

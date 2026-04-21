@@ -1089,6 +1089,109 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(node.path("ref").path("presetId").asText()).isEqualTo("profile-summary");
     }
 
+    @Test
+    void shouldCompileExpansionPanelRemoveAndPromoteReplacementExpandedPanel() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "accordion": { "multi": false },
+                  "panels": [
+                    { "id": "summary", "title": "Summary", "expanded": true },
+                    { "id": "details", "title": "Details", "expanded": false },
+                    { "id": "audit", "title": "Audit", "expanded": false }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-expansion",
+                operationWithHandler("panel.remove", "panel", "panel-by-id-or-title", true,
+                        "compile-domain-patch", "expansion-panel-remove", "panels[]"),
+                plan("\"summary\"", "{ \"replacementExpandedPanelId\": \"details\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("remove-expansion-panel");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("summary");
+        assertThat(patchOperation.path("removedWasExpanded").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("panels")).hasSize(2);
+        assertThat(proposedConfig.path("panels").get(0).path("id").asText()).isEqualTo("details");
+        assertThat(proposedConfig.path("panels").get(0).path("expanded").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("panels").get(1).path("expanded").asBoolean()).isFalse();
+    }
+
+    @Test
+    void shouldCompileExpansionMultiExpandSetAndCollapseCompetingPanels() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "accordion": { "multi": true },
+                  "panels": [
+                    { "id": "summary", "expanded": true },
+                    { "id": "details", "expanded": true }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-expansion",
+                operationWithHandler("behavior.multiExpand.set", "behavior", "expansion-behavior-config", true,
+                        "compile-domain-patch", "expansion-multi-expand-set", "accordion.multi"),
+                plan("{}", "{ \"multi\": false }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-expansion-multi-expand");
+        assertThat(patchOperation.path("previousValue").asBoolean()).isTrue();
+        assertThat(patchOperation.path("value").asBoolean()).isFalse();
+        assertThat(proposedConfig.path("accordion").path("multi").asBoolean()).isFalse();
+        assertThat(proposedConfig.path("panels").get(0).path("expanded").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("panels").get(1).path("expanded").asBoolean()).isFalse();
+    }
+
+    @Test
+    void shouldCompileExpansionDefaultExpandedUpsertAndCollapseOthersInSingleMode() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "accordion": { "multi": false },
+                  "panels": [
+                    { "id": "summary", "expanded": true },
+                    { "id": "details", "expanded": false, "disabled": false }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-expansion",
+                operationWithHandler("behavior.defaultExpanded.set", "expandedState", "panel-by-id-or-title", true,
+                        "compile-domain-patch", "expansion-default-expanded-upsert", "panels[].expanded"),
+                plan("\"details\"", "{ \"expanded\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-expansion-default-expanded");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("details");
+        assertThat(patchOperation.path("collapseOthers").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("panels").get(0).path("expanded").asBoolean()).isFalse();
+        assertThat(proposedConfig.path("panels").get(1).path("expanded").asBoolean()).isTrue();
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

@@ -23,6 +23,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "export-config",
             "appearance-config",
             "expansion-config",
+            "expansion-behavior-config",
             "pagination-config",
             "sorting-config",
             "meta-config",

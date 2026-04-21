@@ -33,6 +33,16 @@ public final class AgenticAuthoringValidatorRegistry {
             "active-tab-visibility-safe",
             "tab-content-valid",
             "widget-event-delegated",
+            "panel-exists",
+            "default-expanded-panel-exists",
+            "default-expanded-removal-safe",
+            "panel-content-removal-confirmed",
+            "multi-expand-default-compatible",
+            "disabled-expanded-compatible",
+            "accordion-values-valid",
+            "panel-content-valid",
+            "lazy-content-compatible",
+            "nested-widget-contract-delegated",
             "field-is-local",
             "field-name-unique",
             "field-exists-in-layout",
@@ -106,7 +116,7 @@ public final class AgenticAuthoringValidatorRegistry {
             switch (validatorId) {
                 case "target-column-exists", "column-exists", "field-exists", "section-exists",
                      "row-exists", "layout-column-exists", "rule-exists", "action-exists", "target-exists",
-                     "step-exists", "tab-or-link-exists" -> {
+                     "step-exists", "tab-or-link-exists", "panel-exists", "default-expanded-panel-exists" -> {
                     if (operation.path("target").path("required").asBoolean(false)) {
                         AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
                                 componentId,
@@ -128,6 +138,13 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "active-tab-visibility-safe" -> validateTabsActiveBooleanSafe(operationId, operation, planOperation, config, failures, "visible");
                 case "tab-content-valid" -> validateTabsContentValid(operationId, planOperation, failures);
                 case "widget-event-delegated" -> validateWidgetEventDelegated(operationId, planOperation, failures);
+                case "default-expanded-removal-safe" -> validateExpansionRemovalSafe(operationId, planOperation, config, failures);
+                case "panel-content-removal-confirmed" -> validateExpansionContentRemovalConfirmed(operationId, planOperation, config, failures);
+                case "multi-expand-default-compatible" -> validateExpansionMultiDefaultCompatible(operationId, operation, planOperation, config, failures);
+                case "disabled-expanded-compatible" -> validateExpansionDisabledExpandedCompatible(operationId, operation, planOperation, config, failures);
+                case "accordion-values-valid" -> validateAccordionValuesValid(operationId, planOperation, failures);
+                case "panel-content-valid" -> validateExpansionPanelContentValid(operationId, planOperation, failures);
+                case "lazy-content-compatible", "nested-widget-contract-delegated" -> validateWidgetEventDelegated(operationId, planOperation, failures);
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
@@ -290,6 +307,152 @@ public final class AgenticAuthoringValidatorRegistry {
                         + ": widget events must be delegated, not inline functions");
                 return;
             }
+        }
+    }
+
+    private void validateExpansionRemovalSafe(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode panels = config.path("panels");
+        if (panels.isArray() && panels.size() <= 1) {
+            failures.add("validator default-expanded-removal-safe failed for " + operationId
+                    + ": cannot remove the only panel");
+        }
+        String replacementPanelId = text(planOperation.path("input"), "replacementExpandedPanelId");
+        if (!replacementPanelId.isBlank() && findObjectByKey(panels, "id", replacementPanelId).isMissingNode()) {
+            failures.add("validator default-expanded-removal-safe failed for " + operationId
+                    + ": replacement panel not found " + replacementPanelId);
+        }
+    }
+
+    private void validateExpansionContentRemovalConfirmed(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (planOperation.path("confirmed").asBoolean(false)) {
+            return;
+        }
+        JsonNode targetPanel = resolvePanelFromTarget(planOperation, config);
+        boolean hasContent = targetPanel.path("content").isArray() && !targetPanel.path("content").isEmpty();
+        boolean hasWidgets = targetPanel.path("widgets").isArray() && !targetPanel.path("widgets").isEmpty();
+        boolean hasActionButtons = targetPanel.path("actionButtons").isArray() && !targetPanel.path("actionButtons").isEmpty();
+        if (targetPanel.isMissingNode() || hasContent || hasWidgets || hasActionButtons) {
+            failures.add("validator panel-content-removal-confirmed failed for " + operationId
+                    + ": explicit confirmation is required");
+        }
+    }
+
+    private void validateExpansionMultiDefaultCompatible(
+            String operationId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("multi") && !input.path("multi").asBoolean(true) && expandedPanelCount(config.path("panels")) > 1) {
+            failures.add("validator multi-expand-default-compatible failed for " + operationId
+                    + ": switching to single-expand requires deterministic collapse of competing expanded panels");
+            return;
+        }
+        if (input.has("expanded") && input.path("expanded").asBoolean(false)) {
+            boolean multi = config.path("accordion").path("multi").asBoolean(false);
+            boolean collapseOthers = input.path("collapseOthers").asBoolean(false);
+            if (!multi && !collapseOthers && hasOtherExpandedPanel(operation, planOperation, config)) {
+                failures.add("validator multi-expand-default-compatible failed for " + operationId
+                        + ": single-expand mode requires collapseOthers when another panel is expanded");
+            }
+        }
+    }
+
+    private void validateExpansionDisabledExpandedCompatible(
+            String operationId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        JsonNode targetPanel = resolveTarget(operation, planOperation, config);
+        if (input.path("disabled").asBoolean(false) && targetPanel.path("expanded").asBoolean(false)) {
+            failures.add("validator disabled-expanded-compatible failed for " + operationId
+                    + ": expanded panel cannot be disabled without collapsing it");
+        }
+        if (input.path("expanded").asBoolean(false) && targetPanel.path("disabled").asBoolean(false)) {
+            failures.add("validator disabled-expanded-compatible failed for " + operationId
+                    + ": disabled panel cannot be expanded");
+        }
+    }
+
+    private boolean hasOtherExpandedPanel(JsonNode operation, JsonNode planOperation, JsonNode config) {
+        String targetId = text(resolveTarget(operation, planOperation, config), "id");
+        for (JsonNode panel : config.path("panels")) {
+            if (panel.path("expanded").asBoolean(false) && !targetId.equals(text(panel, "id"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int expandedPanelCount(JsonNode panels) {
+        int count = 0;
+        if (panels.isArray()) {
+            for (JsonNode panel : panels) {
+                if (panel.path("expanded").asBoolean(false)) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private JsonNode resolveTarget(JsonNode operation, JsonNode planOperation, JsonNode config) {
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                "",
+                operation,
+                planOperation.path("target"),
+                config);
+        return AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())
+                ? resolved.value()
+                : MissingNode.getInstance();
+    }
+
+    private JsonNode resolvePanelFromTarget(JsonNode planOperation, JsonNode config) {
+        String targetId = planOperation.path("target").isTextual()
+                ? planOperation.path("target").asText("")
+                : firstPresent(planOperation.path("target"), "id", "panelId", "title", "label").asText("");
+        JsonNode panel = findObjectByKey(config.path("panels"), "id", targetId);
+        if (!panel.isMissingNode()) {
+            return panel;
+        }
+        panel = findObjectByKey(config.path("panels"), "title", targetId);
+        return panel.isMissingNode() ? findObjectByKey(config.path("panels"), "label", targetId) : panel;
+    }
+
+    private void validateAccordionValuesValid(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("multi") && !input.path("multi").isBoolean()) {
+            failures.add("validator accordion-values-valid failed for " + operationId + ": multi must be boolean");
+        }
+    }
+
+    private void validateExpansionPanelContentValid(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("content") && !input.path("content").isArray()) {
+            failures.add("validator panel-content-valid failed for " + operationId + ": content must be an array");
+        }
+        if (input.has("widgets") && !input.path("widgets").isArray()) {
+            failures.add("validator panel-content-valid failed for " + operationId + ": widgets must be an array");
+        }
+        if (input.has("actionButtons") && !input.path("actionButtons").isArray()) {
+            failures.add("validator panel-content-valid failed for " + operationId + ": actionButtons must be an array");
         }
     }
 
