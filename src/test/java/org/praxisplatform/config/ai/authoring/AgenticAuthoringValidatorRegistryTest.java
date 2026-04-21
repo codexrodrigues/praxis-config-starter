@@ -209,6 +209,67 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator editor-inputs-serializable failed for editor.host.configure: absolute remote URLs are not allowed in editor inputs");
     }
 
+    @Test
+    void shouldValidateDialogPresetAndAccessibilitySemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-dialog",
+                operation("dialog.preset.apply", "preset", "praxis-dialog-global-preset-by-type-variant", false,
+                        "preset-exists,accessibility-label-preserved"),
+                plan("null", "{ \"dialogType\": \"confirm\", \"variant\": \"missing\", \"localConfig\": { } }"),
+                objectMapper.readTree("""
+                        {
+                          "globalPresets": {
+                            "confirm": { "ariaRole": "alertdialog" },
+                            "variants": { "danger": { "themeColor": "dark" } }
+                          },
+                          "config": { }
+                        }
+                        """),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator preset-exists failed for dialog.preset.apply: variant not found missing",
+                        "validator accessibility-label-preserved failed for dialog.preset.apply: dialog requires title, ariaLabel or ariaLabelledBy");
+    }
+
+    @Test
+    void shouldValidateDialogClosePolicyAndChildDelegationInputs() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-dialog",
+                operation("dialog.closePolicy.set", "closePolicy", "praxis-dialog-close-policy-fields", false,
+                        "close-policy-explicit,unsafe-close-confirmed-when-needed,alertdialog-focus-preserved"),
+                plan("null", "{ \"disableClose\": true, \"autoFocus\": false }"),
+                objectMapper.readTree("{ \"config\": { \"ariaRole\": \"alertdialog\" } }"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator unsafe-close-confirmed-when-needed failed for dialog.closePolicy.set: unsafe close/focus changes require confirmation",
+                        "validator alertdialog-focus-preserved failed for dialog.closePolicy.set: alertdialog must keep an autofocus target reachable");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-dialog",
+                operation("childHost.configure", "childHost", "praxis-dialog-child-component-or-template-host", false,
+                        "child-host-registered,child-inputs-serializable"),
+                plan("null", "{ \"contentType\": \"component\", \"inputs\": { \"resourcePath\": \"https://evil.example/custom\" } }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator child-host-registered failed for childHost.configure: componentId is required",
+                        "validator child-inputs-serializable failed for childHost.configure: inputs must not contain absolute remote URLs");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

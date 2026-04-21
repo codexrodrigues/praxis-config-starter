@@ -1478,6 +1478,103 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("delegatedConsumerPatch").path("componentId").asText()).isEqualTo("praxis-table");
     }
 
+    @Test
+    void shouldCompileDialogPresetApplyWithTypeVariantLocalMergeOrder() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "globalPresets": {
+                    "confirm": { "ariaRole": "alertdialog", "themeColor": "light", "width": "480px" },
+                    "variants": {
+                      "danger": { "themeColor": "dark", "disableClose": true }
+                    }
+                  },
+                  "config": {
+                    "title": "Old"
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-dialog",
+                operationWithHandler("dialog.preset.apply", "preset", "praxis-dialog-global-preset-by-type-variant", false,
+                        "compile-domain-patch", "dialog-preset-apply", "config"),
+                plan("null", "{ \"dialogType\": \"confirm\", \"variant\": \"danger\", \"localConfig\": { \"title\": \"Delete record\", \"width\": \"640px\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("apply-dialog-preset");
+        assertThat(proposedConfig.path("config").path("ariaRole").asText()).isEqualTo("alertdialog");
+        assertThat(proposedConfig.path("config").path("themeColor").asText()).isEqualTo("dark");
+        assertThat(proposedConfig.path("config").path("width").asText()).isEqualTo("640px");
+        assertThat(proposedConfig.path("variant").asText()).isEqualTo("danger");
+    }
+
+    @Test
+    void shouldCompileDialogChildHostConfigure() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "content": { "type": "template", "templateId": "old" }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-dialog",
+                operationWithHandler("childHost.configure", "childHost", "praxis-dialog-child-component-or-template-host", false,
+                        "compile-domain-patch", "dialog-child-host-configure", "content"),
+                plan("null", "{ \"contentType\": \"component\", \"componentId\": \"praxis-dynamic-form\", \"inputs\": { \"formId\": \"customer\" }, \"data\": { \"mode\": \"create\" }, \"childManifestComponentId\": \"praxis-dynamic-form\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("configure-dialog-child-host");
+        assertThat(patchOperation.path("previousContent").path("templateId").asText()).isEqualTo("old");
+        assertThat(proposedConfig.path("content").path("type").asText()).isEqualTo("component");
+        assertThat(proposedConfig.path("componentId").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(proposedConfig.path("inputs").path("formId").asText()).isEqualTo("customer");
+        assertThat(proposedConfig.path("delegatedChildManifest").path("componentId").asText()).isEqualTo("praxis-dynamic-form");
+    }
+
+    @Test
+    void shouldCompileDialogChildOperationDelegateIntoHostEnvelope() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "content": { "type": "component", "componentId": "praxis-table" },
+                  "inputs": { "tableId": "orders" }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-dialog",
+                operationWithHandler("childOperation.delegate", "childHost", "praxis-dialog-child-component-or-template-host", true,
+                        "compile-domain-patch", "dialog-child-operation-delegate", "inputs"),
+                plan("{ \"componentId\": \"praxis-table\" }", "{ \"childManifestComponentId\": \"praxis-table\", \"operationId\": \"column.header.set\", \"target\": \"email\", \"params\": { \"header\": \"Email\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode delegated = proposedConfig.path("inputs").path("__praxisAuthoringDelegatedPatch");
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("delegate-dialog-child-operation");
+        assertThat(delegated.path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(delegated.path("operationId").asText()).isEqualTo("column.header.set");
+        assertThat(delegated.path("input").path("header").asText()).isEqualTo("Email");
+        assertThat(proposedConfig.path("data").path("__praxisAuthoringDelegatedPatch").path("componentId").asText()).isEqualTo("praxis-table");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

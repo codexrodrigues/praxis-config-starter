@@ -106,6 +106,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "cron-preset-apply".equals(handler)
                 || "cron-validation-diagnostics".equals(handler)
                 || "cron-preview-generate".equals(handler)
+                || "dialog-preset-apply".equals(handler)
+                || "dialog-child-host-configure".equals(handler)
+                || "dialog-child-operation-delegate".equals(handler)
                 || "settings-panel-size-set".equals(handler)
                 || "settings-panel-apply-behavior-set".equals(handler)
                 || "settings-panel-save-behavior-set".equals(handler)
@@ -386,6 +389,27 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     planOperation,
                     proposedConfig);
             case "cron-preview-generate" -> compileCronPreviewGenerate(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "dialog-preset-apply" -> compileDialogPresetApply(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "dialog-child-host-configure" -> compileDialogChildHostConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "dialog-child-operation-delegate" -> compileDialogChildOperationDelegate(
                     componentId,
                     operation,
                     effect,
@@ -1991,6 +2015,138 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileDialogPresetApply(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String dialogType = text(input, "dialogType");
+        String variant = text(input, "variant");
+        ObjectNode mergedConfig = objectMapper.createObjectNode();
+        mergeObject(mergedConfig, dialogPresetConfig(proposedConfig, dialogType));
+        if (!variant.isBlank()) {
+            JsonNode variantConfig = dialogPresetVariants(proposedConfig).path(variant);
+            if (!variantConfig.isObject()) {
+                failures.add("dialog-preset-apply variant not found: " + variant);
+                return null;
+            }
+            mergeObject(mergedConfig, variantConfig);
+        }
+        mergeObject(mergedConfig, input.path("localConfig"));
+        ObjectNode config = objectAt(proposedConfig, "config", true);
+        JsonNode previousConfig = config.deepCopy();
+        mergeObject(config, mergedConfig);
+        if (!variant.isBlank()) {
+            proposedConfig.put("variant", variant);
+        }
+        proposedConfig.put("dialogType", dialogType);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "apply-dialog-preset");
+        compiled.put("path", "config");
+        compiled.put("dialogType", dialogType);
+        compiled.put("variant", variant);
+        compiled.set("previousConfig", previousConfig);
+        compiled.set("config", config.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileDialogChildHostConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String contentType = text(input, "contentType");
+        ObjectNode content = objectAt(proposedConfig, "content", true);
+        JsonNode previousContent = content.deepCopy();
+        content.put("type", contentType);
+        if ("component".equals(contentType)) {
+            String childComponentId = text(input, "componentId");
+            if (childComponentId.isBlank()) {
+                failures.add("dialog-child-host-configure componentId is required for component content");
+                return null;
+            }
+            content.put("componentId", childComponentId);
+            proposedConfig.put("componentId", childComponentId);
+        } else if ("template".equals(contentType)) {
+            String templateId = text(input, "templateId");
+            if (templateId.isBlank()) {
+                failures.add("dialog-child-host-configure templateId is required for template content");
+                return null;
+            }
+            content.put("templateId", templateId);
+        } else {
+            failures.add("dialog-child-host-configure unsupported contentType: " + contentType);
+            return null;
+        }
+        if (input.has("inputs")) {
+            proposedConfig.set("inputs", input.path("inputs").deepCopy());
+            content.set("inputs", input.path("inputs").deepCopy());
+        }
+        if (input.has("data")) {
+            proposedConfig.set("data", input.path("data").deepCopy());
+            content.set("data", input.path("data").deepCopy());
+        }
+        String childManifestComponentId = text(input, "childManifestComponentId");
+        if (!childManifestComponentId.isBlank()) {
+            ObjectNode delegated = objectAt(proposedConfig, "delegatedChildManifest", true);
+            delegated.put("componentId", childManifestComponentId);
+            delegated.put("status", "child-config-owned-by-child-manifest");
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-dialog-child-host");
+        compiled.put("path", "content");
+        compiled.set("previousContent", previousContent);
+        compiled.set("content", content.deepCopy());
+        compiled.set("inputs", proposedConfig.path("inputs"));
+        compiled.set("data", proposedConfig.path("data"));
+        return compiled;
+    }
+
+    private ObjectNode compileDialogChildOperationDelegate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String childManifestComponentId = text(input, "childManifestComponentId");
+        String childOperationId = text(input, "operationId");
+        if (childManifestComponentId.isBlank() || childOperationId.isBlank()) {
+            failures.add("dialog-child-operation-delegate requires childManifestComponentId and operationId");
+            return null;
+        }
+        ObjectNode delegatedOperation = objectMapper.createObjectNode();
+        delegatedOperation.put("componentId", childManifestComponentId);
+        delegatedOperation.put("operationId", childOperationId);
+        if (input.has("target")) {
+            delegatedOperation.set("target", input.path("target"));
+        }
+        delegatedOperation.set("input", input.path("params").deepCopy());
+        delegatedOperation.put("status", "delegated-to-child-manifest");
+
+        ObjectNode inputs = objectAt(proposedConfig, "inputs", true);
+        JsonNode previousInputs = inputs.deepCopy();
+        inputs.set("__praxisAuthoringDelegatedPatch", delegatedOperation);
+        ObjectNode data = objectAt(proposedConfig, "data", true);
+        data.set("__praxisAuthoringDelegatedPatch", delegatedOperation.deepCopy());
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "delegate-dialog-child-operation");
+        compiled.put("path", "inputs.__praxisAuthoringDelegatedPatch");
+        compiled.set("previousInputs", previousInputs);
+        compiled.set("delegatedOperation", delegatedOperation);
+        return compiled;
+    }
+
     private ObjectNode compileSettingsPanelBehaviorSet(
             String componentId,
             JsonNode operation,
@@ -2275,6 +2431,29 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             failures.add(handler + " invalid timezone: " + timezone);
             return null;
         }
+    }
+
+    private JsonNode dialogPresetConfig(ObjectNode proposedConfig, String dialogType) {
+        if (dialogType == null || dialogType.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (String rootPath : List.of("globalPresets", "dialogPresets", "metadata.globalPresets", "metadata.dialogPresets")) {
+            JsonNode preset = resolvePath(proposedConfig, rootPath + "." + dialogType);
+            if (preset.isObject()) {
+                return preset;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private JsonNode dialogPresetVariants(ObjectNode proposedConfig) {
+        for (String rootPath : List.of("globalPresets.variants", "dialogPresets.variants", "metadata.globalPresets.variants", "metadata.dialogPresets.variants")) {
+            JsonNode variants = resolvePath(proposedConfig, rootPath);
+            if (variants.isObject()) {
+                return variants;
+            }
+        }
+        return MissingNode.getInstance();
     }
 
     private String timezoneFromConfig(ObjectNode proposedConfig) {

@@ -86,6 +86,27 @@ public final class AgenticAuthoringValidatorRegistry {
             "invalid-schedules-return-diagnostics",
             "preset-exists",
             "preset-maps-to-canonical-expression",
+            "accessibility-label-preserved",
+            "aria-role-valid",
+            "shell-fields-supported",
+            "size-values-safe",
+            "size-min-max-consistent",
+            "position-values-safe",
+            "position-not-conflicting",
+            "backdrop-policy-explicit",
+            "backdrop-class-safe",
+            "close-policy-explicit",
+            "unsafe-close-confirmed-when-needed",
+            "restore-focus-preserved",
+            "alertdialog-focus-preserved",
+            "preset-merge-order-preserved",
+            "child-host-registered",
+            "child-config-delegates-to-child-manifest",
+            "child-inputs-serializable",
+            "child-manifest-resolvable",
+            "child-operation-authorized",
+            "dialog-shell-boundary-preserved",
+            "dialog-round-trip",
             "sanitization-policy-explicit",
             "unsafe-html-rejected",
             "unsafe-url-rejected",
@@ -207,7 +228,30 @@ public final class AgenticAuthoringValidatorRegistry {
                     // These are enforced by the domain compiler, which emits diagnostics before mutating derived paths.
                 }
                 case "timezone-valid" -> validateCronTimezoneValid(operationId, planOperation, config, failures);
-                case "preset-exists" -> validateCronPresetExists(operationId, planOperation, config, failures);
+                case "preset-exists" -> {
+                    if ("praxis-dialog".equals(componentId) || operationId.startsWith("dialog.preset")) {
+                        validateDialogPresetExists(operationId, planOperation, config, failures);
+                    } else {
+                        validateCronPresetExists(operationId, planOperation, config, failures);
+                    }
+                }
+                case "accessibility-label-preserved" -> validateDialogAccessibilityLabel(operationId, planOperation, config, failures);
+                case "aria-role-valid" -> validateDialogAriaRole(operationId, planOperation, failures);
+                case "size-values-safe", "position-values-safe" -> validateDialogCssValues(operationId, planOperation, failures);
+                case "size-min-max-consistent" -> validateDialogSizeMinMax(operationId, planOperation, failures);
+                case "backdrop-class-safe" -> validateDialogClassValue(operationId, planOperation.path("input").path("backdropClass"), "backdrop-class-safe", failures);
+                case "close-policy-explicit" -> validateDialogClosePolicyExplicit(operationId, planOperation, failures);
+                case "unsafe-close-confirmed-when-needed", "restore-focus-preserved", "alertdialog-focus-preserved" ->
+                        validateDialogClosePolicySafe(operationId, planOperation, config, failures);
+                case "child-host-registered" -> validateDialogChildHostRegistered(operationId, planOperation, failures);
+                case "child-inputs-serializable" -> validateDialogChildInputsSerializable(operationId, planOperation, failures);
+                case "child-manifest-resolvable" -> validateDialogChildManifestResolvable(operationId, planOperation, failures);
+                case "child-operation-authorized" -> validateDialogChildOperationAuthorized(operationId, planOperation, failures);
+                case "shell-fields-supported", "position-not-conflicting", "backdrop-policy-explicit",
+                     "preset-merge-order-preserved", "child-config-delegates-to-child-manifest",
+                     "dialog-shell-boundary-preserved", "dialog-round-trip" -> {
+                    // These invariants are structural in the manifest and compiler: shell edits stay scoped and child edits are delegated.
+                }
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
                 case "unsafe-html-rejected" -> validateUnsafeHtmlRejected(operationId, planOperation, failures);
                 case "unsafe-url-rejected" -> validateUnsafeUrlRejected(operationId, planOperation, failures);
@@ -1228,6 +1272,189 @@ public final class AgenticAuthoringValidatorRegistry {
         failures.add("validator preset-exists failed for " + operationId + ": preset not found " + labelOrCron);
     }
 
+    private void validateDialogPresetExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String dialogType = text(planOperation.path("input"), "dialogType");
+        if (dialogType.isBlank()) {
+            failures.add("validator preset-exists failed for " + operationId + ": dialogType is required");
+            return;
+        }
+        if (!"custom".equals(dialogType) && !dialogPresetConfig(config, dialogType).isObject()) {
+            failures.add("validator preset-exists failed for " + operationId + ": preset not found " + dialogType);
+        }
+        String variant = text(planOperation.path("input"), "variant");
+        if (!variant.isBlank() && !dialogPresetVariants(config).path(variant).isObject()) {
+            failures.add("validator preset-exists failed for " + operationId + ": variant not found " + variant);
+        }
+    }
+
+    private void validateDialogAccessibilityLabel(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String title = firstNonBlank(text(input, "title"), text(config.path("config"), "title"), text(config, "title"));
+        String ariaLabel = firstNonBlank(text(input, "ariaLabel"), text(config.path("config"), "ariaLabel"), text(config, "ariaLabel"));
+        String labelledBy = firstNonBlank(text(input, "ariaLabelledBy"), text(config.path("config"), "ariaLabelledBy"), text(config, "ariaLabelledBy"));
+        if (title.isBlank() && ariaLabel.isBlank() && labelledBy.isBlank()) {
+            failures.add("validator accessibility-label-preserved failed for " + operationId
+                    + ": dialog requires title, ariaLabel or ariaLabelledBy");
+        }
+    }
+
+    private void validateDialogAriaRole(String operationId, JsonNode planOperation, List<String> failures) {
+        String role = text(planOperation.path("input"), "ariaRole");
+        if (!role.isBlank() && !Set.of("dialog", "alertdialog").contains(role)) {
+            failures.add("validator aria-role-valid failed for " + operationId + ": invalid ariaRole " + role);
+        }
+    }
+
+    private void validateDialogCssValues(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("width", "height", "minWidth", "maxWidth", "minHeight", "maxHeight", "top", "bottom", "left", "right")) {
+            JsonNode value = input.path(field);
+            if (value.isMissingNode() || value.isNull()) {
+                continue;
+            }
+            if (value.isNumber() && value.asDouble() > 0 && Double.isFinite(value.asDouble())) {
+                continue;
+            }
+            if (value.isTextual() && isSafeCssSize(value.asText(""))) {
+                continue;
+            }
+            failures.add("validator css-values-safe failed for " + operationId + ": invalid " + field);
+        }
+    }
+
+    private void validateDialogSizeMinMax(String operationId, JsonNode planOperation, List<String> failures) {
+        validateDialogMinMaxPair(operationId, planOperation, "minWidth", "maxWidth", failures);
+        validateDialogMinMaxPair(operationId, planOperation, "minHeight", "maxHeight", failures);
+    }
+
+    private void validateDialogMinMaxPair(
+            String operationId,
+            JsonNode planOperation,
+            String minField,
+            String maxField,
+            List<String> failures) {
+        Double min = cssPixels(planOperation.path("input").path(minField));
+        Double max = cssPixels(planOperation.path("input").path(maxField));
+        if (min != null && max != null && min > max) {
+            failures.add("validator size-min-max-consistent failed for " + operationId
+                    + ": " + minField + " must not exceed " + maxField);
+        }
+    }
+
+    private void validateDialogClassValue(
+            String operationId,
+            JsonNode classValue,
+            String validatorId,
+            List<String> failures) {
+        if (classValue.isMissingNode() || classValue.isNull()) {
+            return;
+        }
+        if (containsUnsafeAbsoluteUrl(classValue)) {
+            failures.add("validator " + validatorId + " failed for " + operationId
+                    + ": class value must not contain remote URLs");
+        }
+    }
+
+    private void validateDialogClosePolicyExplicit(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.has("disableClose") && !input.has("closeOnBackdropClick") && !input.has("closeOnNavigation")) {
+            failures.add("validator close-policy-explicit failed for " + operationId
+                    + ": close policy must describe disableClose, backdrop or navigation behavior");
+        }
+    }
+
+    private void validateDialogClosePolicySafe(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if ((input.path("disableClose").asBoolean(false)
+                || input.path("restoreFocus").asBoolean(true) == false)
+                && !planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator unsafe-close-confirmed-when-needed failed for " + operationId
+                    + ": unsafe close/focus changes require confirmation");
+        }
+        String role = firstNonBlank(text(input, "ariaRole"), text(config.path("config"), "ariaRole"), text(config, "ariaRole"));
+        if ("alertdialog".equals(role) && input.has("autoFocus") && !input.path("autoFocus").asBoolean(true)) {
+            failures.add("validator alertdialog-focus-preserved failed for " + operationId
+                    + ": alertdialog must keep an autofocus target reachable");
+        }
+    }
+
+    private void validateDialogChildHostRegistered(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String contentType = text(input, "contentType");
+        if ("component".equals(contentType) && text(input, "componentId").isBlank()) {
+            failures.add("validator child-host-registered failed for " + operationId + ": componentId is required");
+        } else if ("template".equals(contentType) && text(input, "templateId").isBlank()) {
+            failures.add("validator child-host-registered failed for " + operationId + ": templateId is required");
+        } else if (!Set.of("component", "template").contains(contentType)) {
+            failures.add("validator child-host-registered failed for " + operationId + ": unsupported contentType " + contentType);
+        }
+    }
+
+    private void validateDialogChildInputsSerializable(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("inputs", "data", "params")) {
+            JsonNode value = input.path(field);
+            if (!value.isMissingNode() && containsUnsafeAbsoluteUrl(value)) {
+                failures.add("validator child-inputs-serializable failed for " + operationId
+                        + ": " + field + " must not contain absolute remote URLs");
+            }
+        }
+    }
+
+    private void validateDialogChildManifestResolvable(String operationId, JsonNode planOperation, List<String> failures) {
+        if (text(planOperation.path("input"), "childManifestComponentId").isBlank()) {
+            failures.add("validator child-manifest-resolvable failed for " + operationId
+                    + ": childManifestComponentId is required");
+        }
+    }
+
+    private void validateDialogChildOperationAuthorized(String operationId, JsonNode planOperation, List<String> failures) {
+        if (text(planOperation.path("input"), "operationId").isBlank()) {
+            failures.add("validator child-operation-authorized failed for " + operationId
+                    + ": child operationId is required");
+        }
+    }
+
+    private JsonNode dialogPresetConfig(JsonNode config, String dialogType) {
+        if (dialogType == null || dialogType.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (String rootPath : List.of("globalPresets", "dialogPresets", "metadata.globalPresets", "metadata.dialogPresets")) {
+            JsonNode preset = resolvePath(config, rootPath + "." + dialogType);
+            if (preset.isObject()) {
+                return preset;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private JsonNode dialogPresetVariants(JsonNode config) {
+        for (String rootPath : List.of("globalPresets.variants", "dialogPresets.variants", "metadata.globalPresets.variants", "metadata.dialogPresets.variants")) {
+            JsonNode variants = resolvePath(config, rootPath);
+            if (variants.isObject()) {
+                return variants;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
     private void validateSettingsPanelSizeSafe(String operationId, JsonNode planOperation, List<String> failures) {
         JsonNode input = planOperation.path("input");
         for (String field : List.of("width", "minWidth", "maxWidth")) {
@@ -1333,6 +1560,23 @@ public final class AgenticAuthoringValidatorRegistry {
             return numeric * 16;
         }
         return numeric;
+    }
+
+    private JsonNode resolvePath(JsonNode root, String dottedPath) {
+        JsonNode current = root;
+        if (current == null || dottedPath == null || dottedPath.isBlank()) {
+            return current == null ? MissingNode.getInstance() : current;
+        }
+        for (String segment : dottedPath.split("\\.")) {
+            if (segment.isBlank()) {
+                continue;
+            }
+            current = current.path(segment);
+            if (current.isMissingNode()) {
+                return current;
+            }
+        }
+        return current;
     }
 
     private String text(JsonNode node, String field) {
