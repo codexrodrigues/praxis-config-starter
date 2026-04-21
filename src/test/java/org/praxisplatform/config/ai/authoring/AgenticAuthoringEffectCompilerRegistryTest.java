@@ -2460,6 +2460,98 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 .path("fieldBindings").path("email").path("contextPath").asText()).isEqualTo("customer.email");
     }
 
+    @Test
+    void shouldCompilePageBuilderAuthoringPatches() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "title": "Old",
+                  "canvas": { "columns": 12, "rowUnit": 8, "gap": 8, "items": [] },
+                  "widgets": [],
+                  "composition": { "links": [] },
+                  "componentRegistry": [
+                    { "componentId": "praxis-dynamic-form" },
+                    { "componentId": "praxis-table" }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("page.configure", "page", "widget-page-definition-root", false,
+                        "compile-domain-patch", "page-builder-page-configure", "title"),
+                plan("{}", "{ \"title\": \"Dashboard\", \"layoutPreset\": \"analytics\", \"context\": { \"tenant\": \"acme\" } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("canvas.configure", "canvas", "widget-page-canvas", true,
+                        "compile-domain-patch", "page-builder-canvas-configure", "canvas"),
+                plan("{}", "{ \"columns\": 16, \"rowUnit\": 10, \"gap\": 12 }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.add", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-add", "widgets[]"),
+                plan("\"formA\"", "{ \"widgetKey\": \"formA\", \"componentId\": \"praxis-dynamic-form\", \"title\": \"Form\", \"canvasItem\": { \"x\": 0, \"y\": 0, \"w\": 8, \"h\": 4 } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.shell.configure", "widgetShell", "widget-shell-by-widget-key", true,
+                        "compile-domain-patch", "page-builder-widget-shell-configure", "widgets[].shell"),
+                plan("\"formA\"", "{ \"widgetKey\": \"formA\", \"shell\": { \"title\": \"Customer form\" } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.moveResize", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-move-resize", "canvas.items[]"),
+                plan("\"formA\"", "{ \"widgetKey\": \"formA\", \"canvasItem\": { \"x\": 2, \"y\": 1, \"w\": 6, \"h\": 5 } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("composition.link.add", "compositionLink", "composition-link-by-id", true,
+                        "compile-domain-patch", "page-builder-composition-link-add", "composition.links[]"),
+                plan("\"link1\"", "{ \"linkId\": \"link1\", \"from\": { \"widgetKey\": \"formA\", \"port\": \"submit\" }, \"to\": { \"widgetKey\": \"formA\", \"port\": \"refresh\" } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("state.set", "state", "page-state-path", true,
+                        "compile-domain-patch", "page-builder-state-set", "state"),
+                plan("{ \"path\": \"filters.status\", \"layer\": \"page\" }", "{ \"path\": \"filters.status\", \"layer\": \"page\", \"value\": \"active\" }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("childOperation.delegate", "childOperation", "widget-child-authoring-manifest-operation", false,
+                        "compile-domain-patch", "page-builder-child-operation-delegate", "widgets[].definition.inputs"),
+                plan("{}", "{ \"widgetKey\": \"formA\", \"childComponentId\": \"praxis-dynamic-form\", \"childOperationId\": \"field.label.set\", \"reason\": \"delegate child semantics\", \"childTarget\": { \"fieldName\": \"email\" }, \"childParams\": { \"label\": \"Work email\" } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("composition.plan.compile", "agenticPreview", "agentic-preview-result", true,
+                        "compile-domain-patch", "page-builder-ui-composition-plan-compile", "compiledFormPatch.patch.page"),
+                plan("{}", "{ \"uiCompositionPlan\": { \"id\": \"plan1\", \"page\": { \"title\": \"Compiled\", \"widgets\": [ { \"widgetKey\": \"formA\", \"definition\": { \"componentId\": \"praxis-dynamic-form\", \"inputs\": {} } } ], \"canvas\": { \"items\": [ { \"widgetKey\": \"formA\", \"x\": 2, \"y\": 1, \"w\": 6, \"h\": 5 } ] }, \"composition\": { \"links\": [ { \"linkId\": \"link1\", \"from\": { \"widgetKey\": \"formA\", \"port\": \"submit\" }, \"to\": { \"widgetKey\": \"formA\", \"port\": \"refresh\" } } ] } } } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("page.preview.apply", "agenticPreview", "agentic-preview-result", true,
+                        "compile-domain-patch", "page-builder-preview-apply", "page"),
+                plan("{}", "{ \"previewId\": \"preview1\" }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("page.persist.save", "pageIdentity", "page-builder-persistence-identity", true,
+                        "compile-domain-patch", "page-builder-page-persist-save", "page"),
+                plan("{}", "{ \"pageIdentity\": { \"componentType\": \"page\", \"componentId\": \"dashboard\", \"scope\": \"default\" }, \"etag\": \"v1\" }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("composition.link.remove", "compositionLink", "composition-link-by-id", true,
+                        "compile-domain-patch", "page-builder-composition-link-remove", "composition.links[]"),
+                plan("\"link1\"", "{ \"linkId\": \"link1\", \"confirmed\": true }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.remove", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-remove", "widgets[]"),
+                plan("\"formA\"", "{ \"widgetKey\": \"formA\", \"confirmed\": true }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(13);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("configure-page-builder-page");
+        assertThat(patchOperations.get(12).path("op").asText()).isEqualTo("remove-page-builder-widget");
+        assertThat(proposedConfig.path("pageIdentity").path("componentId").asText()).isEqualTo("dashboard");
+        assertThat(proposedConfig.path("delegatedAuthoringOperations")).hasSize(1);
+        assertThat(proposedConfig.path("widgets")).isEmpty();
+    }
+
     private ObjectNode dynamicFormConfig() throws Exception {
         return (ObjectNode) objectMapper.readTree("""
                 {

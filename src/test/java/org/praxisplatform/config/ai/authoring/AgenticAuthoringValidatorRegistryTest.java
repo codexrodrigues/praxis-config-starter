@@ -950,6 +950,102 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator delegates-field-metadata failed for fieldBinding.set: must delegate to praxis-metadata-editor");
     }
 
+    @Test
+    void shouldValidatePageBuilderAuthoringSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "canvas": {
+                    "items": [
+                      { "widgetKey": "formA", "x": 0, "y": 0, "w": 4, "h": 3 }
+                    ]
+                  },
+                  "widgets": [
+                    { "widgetKey": "formA", "definition": { "componentId": "praxis-dynamic-form", "inputs": {} } },
+                    { "widgetKey": "formA" }
+                  ],
+                  "composition": {
+                    "links": [
+                      { "linkId": "link1", "from": { "widgetKey": "formA" }, "to": { "widgetKey": "missing" } }
+                    ]
+                  },
+                  "componentRegistry": [
+                    { "componentId": "praxis-dynamic-form" }
+                  ]
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation("canvas.configure", "canvas", "widget-page-canvas", true,
+                        "canvas-columns-integer,canvas-row-unit-valid,canvas-gap-valid,canvas-items-reference-existing-widgets"),
+                plan("{}", "{ \"columns\": 0, \"rowUnit\": -1, \"gap\": -1, \"items\": [ { \"widgetKey\": \"missing\" } ] }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation("widget.add", "widget", "widget-by-stable-key", true,
+                        "widget-key-unique,component-registered,canvas-item-valid,widget-key-not-array-index"),
+                plan("\"0\"", "{ \"widgetKey\": \"0\", \"componentId\": \"missing\", \"canvasItem\": { \"x\": -1 } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation("widget.remove", "widget", "widget-by-stable-key", true,
+                        "widget-exists,destructive-removal-confirmed"),
+                plan("\"missing\"", "{ \"widgetKey\": \"missing\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation("composition.link.add", "compositionLink", "composition-link-by-id", true,
+                        "composition-link-id-unique,composition-endpoints-resolve,nested-path-terminal-widget-key-required"),
+                plan("\"link1\"", "{ \"linkId\": \"link1\", \"from\": { \"nestedPath\": \"value\" }, \"to\": { \"widgetKey\": \"missing\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation("state.set", "state", "page-state-path", true,
+                        "state-path-valid,state-layer-valid"),
+                plan("{ \"path\": \"../bad\", \"layer\": \"local\" }", "{ \"path\": \"../bad\", \"layer\": \"local\", \"value\": true }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation("childOperation.delegate", "childOperation", "widget-child-authoring-manifest-operation", false,
+                        "widget-exists,child-manifest-available,child-operation-known,no-local-child-input-write"),
+                plan("{}", "{ \"widgetKey\": \"missing\", \"childComponentId\": \"other\", \"childOperationId\": \"\", \"formConfig\": {} }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator canvas-columns-integer failed for canvas.configure: columns must be a positive integer",
+                        "validator canvas-row-unit-valid failed for canvas.configure: rowUnit must be positive",
+                        "validator canvas-gap-valid failed for canvas.configure: gap must be non-negative",
+                        "validator canvas-items-reference-existing-widgets failed for canvas.configure: widget not found missing",
+                        "validator component-registered failed for widget.add: component not registered missing",
+                        "validator canvas-item-valid failed for widget.add: x must be a non-negative integer",
+                        "validator widget-key-not-array-index failed for widget.add: widgetKey must not be an array index",
+                        "validator widget-exists failed for widget.remove: widget not found missing",
+                        "validator destructive-removal-confirmation failed for widget.remove: explicit confirmation is required",
+                        "validator composition-link-id-unique failed for composition.link.add: duplicate linkId link1",
+                        "validator composition-endpoints-resolve failed for composition.link.add: widget not found missing",
+                        "validator nested-path-terminal-widget-key-required failed for composition.link.add: nestedPath endpoint requires widgetKey",
+                        "validator state-path-valid failed for state.set: path is invalid",
+                        "validator state-layer-valid failed for state.set: unsupported layer local",
+                        "validator widget-exists failed for childOperation.delegate: widget not found missing",
+                        "validator child-operation-known failed for childOperation.delegate: childComponentId and childOperationId are required",
+                        "validator child-manifest-available failed for childOperation.delegate: unsupported childComponentId other",
+                        "validator no-local-child-input-write failed for childOperation.delegate: child config must be delegated");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

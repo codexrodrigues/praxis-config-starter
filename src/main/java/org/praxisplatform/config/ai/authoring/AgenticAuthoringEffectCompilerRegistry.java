@@ -86,7 +86,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "visual-builder-edge-connect".equals(handler)
                 || "visual-builder-variable-add".equals(handler)
                 || "manual-field-add".equals(handler)
-                || "editorial-data-block-add".equals(handler);
+                || "editorial-data-block-add".equals(handler)
+                || "page-builder-widget-add".equals(handler)
+                || "page-builder-composition-link-add".equals(handler)
+                || "page-builder-ui-composition-plan-compile".equals(handler);
     }
 
     boolean supportsDomainPatchHandler(String handler) {
@@ -190,6 +193,19 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "chart-data-resource-bind".equals(handler)
                 || "chart-event-cross-filter-configure".equals(handler)
                 || "chart-event-drilldown-configure".equals(handler)
+                || "page-builder-page-configure".equals(handler)
+                || "page-builder-canvas-configure".equals(handler)
+                || "page-builder-widget-add".equals(handler)
+                || "page-builder-widget-remove".equals(handler)
+                || "page-builder-widget-move-resize".equals(handler)
+                || "page-builder-widget-shell-configure".equals(handler)
+                || "page-builder-composition-link-add".equals(handler)
+                || "page-builder-composition-link-remove".equals(handler)
+                || "page-builder-ui-composition-plan-compile".equals(handler)
+                || "page-builder-state-set".equals(handler)
+                || "page-builder-preview-apply".equals(handler)
+                || "page-builder-page-persist-save".equals(handler)
+                || "page-builder-child-operation-delegate".equals(handler)
                 || "settings-panel-size-set".equals(handler)
                 || "settings-panel-apply-behavior-set".equals(handler)
                 || "settings-panel-save-behavior-set".equals(handler)
@@ -781,6 +797,32 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     "drillDown",
                     "configure-chart-drilldown-event",
                     failures);
+            case "page-builder-page-configure" -> compilePageBuilderPageConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "page-builder-canvas-configure" -> compilePageBuilderCanvasConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "page-builder-widget-add" -> compilePageBuilderWidgetAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-widget-remove" -> compilePageBuilderWidgetRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-widget-move-resize" -> compilePageBuilderWidgetMoveResize(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-widget-shell-configure" -> compilePageBuilderWidgetShellConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-composition-link-add" -> compilePageBuilderCompositionLinkAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-composition-link-remove" -> compilePageBuilderCompositionLinkRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-ui-composition-plan-compile" -> compilePageBuilderUiCompositionPlan(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-state-set" -> compilePageBuilderStateSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-preview-apply" -> compilePageBuilderPreviewApply(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-page-persist-save" -> compilePageBuilderPagePersistSave(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "page-builder-child-operation-delegate" -> compilePageBuilderChildOperationDelegate(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
             case "settings-panel-size-set" -> compileSettingsPanelSizeSet(
                     componentId,
                     operation,
@@ -2350,6 +2392,272 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("path", "preview");
         compiled.set("preview", preview);
         compiled.set("diagnostics", diagnostics);
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderPageConfigure(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        copyIfPresent(input, proposedConfig, "title");
+        copyIfPresent(input, proposedConfig, "layoutPreset");
+        if (input.path("context").isObject()) {
+            mergeObject(objectAt(proposedConfig, "context", true), input.path("context"));
+        }
+        if (input.path("metadata").isObject()) {
+            mergeObject(objectAt(proposedConfig, "metadata", true), input.path("metadata"));
+        }
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-page-builder-page");
+        compiled.put("path", "$");
+        compiled.set("page", proposedConfig.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderCanvasConfigure(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig) {
+        ObjectNode canvas = objectAt(proposedConfig, "canvas", true);
+        JsonNode input = planOperation.path("input");
+        copyIfPresent(input, canvas, "columns");
+        copyIfPresent(input, canvas, "rowUnit");
+        copyIfPresent(input, canvas, "gap");
+        copyIfPresent(input, canvas, "items");
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-page-builder-canvas");
+        compiled.put("path", "canvas");
+        compiled.set("canvas", canvas.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderWidgetAdd(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String widgetKey = text(input, "widgetKey");
+        String childComponentId = text(input, "componentId");
+        if (widgetKey.isBlank() || childComponentId.isBlank()) {
+            failures.add("page-builder-widget-add requires widgetKey and componentId");
+            return null;
+        }
+        ArrayNode widgets = pageWidgets(proposedConfig, true);
+        if (findObjectByAnyKey(widgets, List.of("widgetKey", "key", "id"), widgetKey) != null) {
+            failures.add("page-builder-widget-add duplicate widgetKey: " + widgetKey);
+            return null;
+        }
+        ObjectNode widget = objectMapper.createObjectNode();
+        widget.put("widgetKey", widgetKey);
+        widget.put("key", widgetKey);
+        widget.put("componentId", childComponentId);
+        copyIfPresent(input, widget, "title");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("componentId", childComponentId);
+        if (input.path("inputs").isObject()) {
+            definition.set("inputs", input.path("inputs").deepCopy());
+        }
+        widgets.add(widget);
+        ArrayNode items = pageCanvasItems(proposedConfig, true);
+        ObjectNode item = input.path("canvasItem").isObject() ? input.path("canvasItem").deepCopy() : objectMapper.createObjectNode();
+        item.put("widgetKey", widgetKey);
+        copyIfMissing(item, "x", 0);
+        copyIfMissing(item, "y", items.size());
+        copyIfMissing(item, "w", 4);
+        copyIfMissing(item, "h", 3);
+        items.add(item);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-page-builder-widget");
+        compiled.put("path", "widgets[]");
+        compiled.put("key", "widgetKey");
+        compiled.put("keyValue", widgetKey);
+        compiled.set("widget", widget.deepCopy());
+        compiled.set("canvasItem", item.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderWidgetRemove(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        String widgetKey = firstNonBlank(text(planOperation.path("input"), "widgetKey"), targetText(planOperation.path("target")));
+        ArrayNode widgets = pageWidgets(proposedConfig, false);
+        int index = indexOfObjectByAnyKey(widgets, List.of("widgetKey", "key", "id"), widgetKey);
+        if (index < 0) {
+            failures.add("page-builder-widget-remove widget not found: " + widgetKey);
+            return null;
+        }
+        JsonNode removed = widgets.remove(index);
+        int removedItems = removeObjectsByAnyKey(pageCanvasItems(proposedConfig, false), List.of("widgetKey", "key", "id"), widgetKey);
+        int removedLinks = removeCompositionLinksForWidget(proposedConfig, widgetKey);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-page-builder-widget");
+        compiled.put("path", "widgets[]");
+        compiled.put("key", "widgetKey");
+        compiled.put("keyValue", widgetKey);
+        compiled.put("removedCanvasItems", removedItems);
+        compiled.put("removedCompositionLinks", removedLinks);
+        compiled.set("removedWidget", removed);
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderWidgetMoveResize(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String widgetKey = text(input, "widgetKey");
+        ObjectNode item = pageCanvasItem(proposedConfig, widgetKey, true);
+        if (item == null) {
+            failures.add("page-builder-widget-move-resize canvas item not found: " + widgetKey);
+            return null;
+        }
+        mergeObject(item, input.path("canvasItem"));
+        item.put("widgetKey", widgetKey);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "move-resize-page-builder-widget");
+        compiled.put("path", "canvas.items[]");
+        compiled.put("key", "widgetKey");
+        compiled.put("keyValue", widgetKey);
+        compiled.set("canvasItem", item.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderWidgetShellConfigure(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        String widgetKey = text(planOperation.path("input"), "widgetKey");
+        ObjectNode widget = pageWidget(proposedConfig, widgetKey);
+        if (widget == null) {
+            failures.add("page-builder-widget-shell-configure widget not found: " + widgetKey);
+            return null;
+        }
+        ObjectNode shell = widget.path("shell") instanceof ObjectNode object ? object : widget.putObject("shell");
+        mergeObject(shell, planOperation.path("input").path("shell"));
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-page-builder-widget-shell");
+        compiled.put("path", "widgets[].shell");
+        compiled.put("key", "widgetKey");
+        compiled.put("keyValue", widgetKey);
+        compiled.set("shell", shell.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderCompositionLinkAdd(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String linkId = text(input, "linkId");
+        ArrayNode links = pageCompositionLinks(proposedConfig, true);
+        if (linkId.isBlank() || findObjectByAnyKey(links, List.of("linkId", "id"), linkId) != null) {
+            failures.add("page-builder-composition-link-add duplicate or blank linkId: " + linkId);
+            return null;
+        }
+        ObjectNode link = objectMapper.createObjectNode();
+        link.put("linkId", linkId);
+        link.put("id", linkId);
+        link.set("from", input.path("from").deepCopy());
+        link.set("to", input.path("to").deepCopy());
+        copyIfPresent(input, link, "condition");
+        copyIfPresent(input, link, "policy");
+        links.add(link);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-page-builder-composition-link");
+        compiled.put("path", "composition.links[]");
+        compiled.put("key", "linkId");
+        compiled.put("keyValue", linkId);
+        compiled.set("value", link.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderCompositionLinkRemove(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        String linkId = firstNonBlank(text(planOperation.path("input"), "linkId"), targetText(planOperation.path("target")));
+        ArrayNode links = pageCompositionLinks(proposedConfig, false);
+        int index = indexOfObjectByAnyKey(links, List.of("linkId", "id"), linkId);
+        if (index < 0) {
+            failures.add("page-builder-composition-link-remove link not found: " + linkId);
+            return null;
+        }
+        JsonNode removed = links.remove(index);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-page-builder-composition-link");
+        compiled.put("path", "composition.links[]");
+        compiled.put("key", "linkId");
+        compiled.put("keyValue", linkId);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderUiCompositionPlan(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode plan = planOperation.path("input").path("uiCompositionPlan");
+        if (!plan.isObject()) {
+            failures.add("page-builder-ui-composition-plan-compile requires uiCompositionPlan");
+            return null;
+        }
+        JsonNode page = plan.path("page").isObject() ? plan.path("page").deepCopy() : proposedConfig.deepCopy();
+        objectAt(proposedConfig, "compiledFormPatch.patch", true).set("page", page);
+        proposedConfig.set("uiCompositionPlan", plan.deepCopy());
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "compile-page-builder-ui-composition-plan");
+        compiled.put("path", "compiledFormPatch.patch.page");
+        compiled.set("page", page);
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderStateSet(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String path = text(input, "path");
+        if (path.isBlank()) {
+            failures.add("page-builder-state-set requires path");
+            return null;
+        }
+        String layerName = textOrDefault(input, "layer", "page");
+        ObjectNode layer = objectAt(objectAt(proposedConfig, "state", true), layerName, true);
+        setDottedValue(layer, path, input.path("value").deepCopy());
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-page-builder-state");
+        compiled.put("path", "state." + layerName + "." + path);
+        compiled.set("value", input.path("value").deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderPreviewApply(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode page = planOperation.path("input").path("compiledFormPatch").path("patch").path("page");
+        if (!page.isObject()) {
+            page = proposedConfig.path("compiledFormPatch").path("patch").path("page");
+        }
+        if (!page.isObject()) {
+            failures.add("page-builder-preview-apply requires compiledFormPatch.patch.page");
+            return null;
+        }
+        mergeObject(proposedConfig, page);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "apply-page-builder-preview");
+        compiled.put("path", "page");
+        compiled.set("page", page.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderPagePersistSave(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode identity = planOperation.path("input").path("pageIdentity");
+        if (!identity.isObject()) {
+            failures.add("page-builder-page-persist-save requires pageIdentity");
+            return null;
+        }
+        proposedConfig.set("pageIdentity", identity.deepCopy());
+        copyIfPresent(planOperation.path("input"), proposedConfig, "etag");
+        JsonNode page = planOperation.path("input").path("page").isObject() ? planOperation.path("input").path("page") : proposedConfig;
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "persist-page-builder-page");
+        compiled.put("path", "/api/praxis/config/ui-user-config");
+        compiled.set("pageIdentity", identity.deepCopy());
+        compiled.set("page", page.deepCopy());
+        compiled.set("etag", planOperation.path("input").path("etag"));
+        return compiled;
+    }
+
+    private ObjectNode compilePageBuilderChildOperationDelegate(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String widgetKey = text(input, "widgetKey");
+        if (pageWidget(proposedConfig, widgetKey) == null) {
+            failures.add("page-builder-child-operation-delegate widget not found: " + widgetKey);
+            return null;
+        }
+        ObjectNode delegation = objectMapper.createObjectNode();
+        delegation.put("componentId", text(input, "childComponentId"));
+        delegation.put("operationId", text(input, "childOperationId"));
+        delegation.put("widgetKey", widgetKey);
+        delegation.set("target", input.path("childTarget").deepCopy());
+        delegation.set("input", input.path("childParams").deepCopy());
+        arrayAt(proposedConfig, "delegatedAuthoringOperations", true).add(delegation);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "delegate-page-builder-child-operation");
+        compiled.put("path", "delegatedAuthoringOperations[]");
+        compiled.put("key", "widgetKey");
+        compiled.put("keyValue", widgetKey);
+        compiled.set("delegation", delegation);
         return compiled;
     }
 
@@ -6096,6 +6404,80 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
         }
         return null;
+    }
+
+    private ArrayNode pageWidgets(ObjectNode proposedConfig, boolean create) {
+        return arrayAt(proposedConfig, "widgets", create);
+    }
+
+    private ArrayNode pageCanvasItems(ObjectNode proposedConfig, boolean create) {
+        return arrayAt(proposedConfig, "canvas.items", create);
+    }
+
+    private ArrayNode pageCompositionLinks(ObjectNode proposedConfig, boolean create) {
+        return arrayAt(proposedConfig, "composition.links", create);
+    }
+
+    private ObjectNode pageWidget(ObjectNode proposedConfig, String widgetKey) {
+        return findObjectByAnyKey(pageWidgets(proposedConfig, false), List.of("widgetKey", "key", "id"), widgetKey);
+    }
+
+    private ObjectNode pageCanvasItem(ObjectNode proposedConfig, String widgetKey, boolean create) {
+        ArrayNode items = pageCanvasItems(proposedConfig, create);
+        ObjectNode existing = findObjectByAnyKey(items, List.of("widgetKey", "key", "id"), widgetKey);
+        if (existing != null || !create || items == null) {
+            return existing;
+        }
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("widgetKey", widgetKey);
+        items.add(item);
+        return item;
+    }
+
+    private int removeObjectsByAnyKey(ArrayNode array, List<String> keys, String value) {
+        if (array == null) {
+            return 0;
+        }
+        int removed = 0;
+        for (int i = array.size() - 1; i >= 0; i--) {
+            JsonNode item = array.get(i);
+            for (String key : keys) {
+                if (value.equals(text(item, key))) {
+                    array.remove(i);
+                    removed++;
+                    break;
+                }
+            }
+        }
+        return removed;
+    }
+
+    private int removeCompositionLinksForWidget(ObjectNode proposedConfig, String widgetKey) {
+        ArrayNode links = pageCompositionLinks(proposedConfig, false);
+        if (links == null) {
+            return 0;
+        }
+        int removed = 0;
+        for (int i = links.size() - 1; i >= 0; i--) {
+            JsonNode link = links.get(i);
+            if (endpointReferencesWidget(link.path("from"), widgetKey) || endpointReferencesWidget(link.path("to"), widgetKey)) {
+                links.remove(i);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    private boolean endpointReferencesWidget(JsonNode endpoint, String widgetKey) {
+        return widgetKey.equals(text(endpoint, "widgetKey"))
+                || widgetKey.equals(text(endpoint, "sourceWidgetKey"))
+                || widgetKey.equals(text(endpoint, "targetWidgetKey"));
+    }
+
+    private void copyIfMissing(ObjectNode target, String field, int value) {
+        if (!target.has(field)) {
+            target.put(field, value);
+        }
     }
 
     private int indexOfObjectByAnyKey(ArrayNode array, List<String> keys, String value) {

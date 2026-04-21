@@ -92,6 +92,10 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "editorial-runtime-snapshot",
             "editorial-runtime-fallback-state",
             "editorial-solution-presentation",
+            "widget-page-definition-root",
+            "widget-page-canvas",
+            "page-builder-persistence-identity",
+            "agentic-preview-result",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -148,7 +152,9 @@ public final class AgenticAuthoringTargetResolverRegistry {
     private boolean objectTargetResolverAcceptsBlankValue(String resolver) {
         return "rich-timeline-item-by-block-id-and-item-id".equals(resolver)
                 || "editorial-journey-step-block-by-id".equals(resolver)
-                || "editorial-data-block-field-binding".equals(resolver);
+                || "editorial-data-block-field-binding".equals(resolver)
+                || "page-state-path".equals(resolver)
+                || "widget-child-authoring-manifest-operation".equals(resolver);
     }
 
     AgenticAuthoringResolvedTarget unresolved(
@@ -240,6 +246,10 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "editorial-data-block-adapter-registry" -> addEditorialAdapterMatches(candidates, config, targetValue);
             case "editorial-journey-step-block-by-id" -> addEditorialBlockMatches(candidates, config, target, targetValue);
             case "editorial-data-block-field-binding" -> addEditorialFieldBindingMatches(candidates, config, target);
+            case "widget-by-stable-key", "widget-shell-by-widget-key" -> addArrayMatches(candidates, config, "widgets[]", List.of("widgetKey", "key", "id"), targetValue);
+            case "composition-link-by-id" -> addArrayMatches(candidates, config, "composition.links[]", List.of("linkId", "id"), targetValue);
+            case "page-state-path" -> addPageStatePathMatch(candidates, config, target);
+            case "widget-child-authoring-manifest-operation" -> addPageBuilderChildOperationMatch(candidates, config, target);
             default -> {
                 if (kind != null && !kind.isBlank()) {
                     addRecursiveObjectMatches(candidates, config, List.of("id", "field", "name", "key", "label", "title"), targetValue);
@@ -362,6 +372,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "editorial-data-block-adapter-registry",
                 "editorial-journey-step-block-by-id",
                 "editorial-data-block-field-binding",
+                "widget-by-stable-key",
+                "widget-shell-by-widget-key",
+                "composition-link-by-id",
+                "page-state-path",
+                "widget-child-authoring-manifest-operation",
                 "json-logic-condition-by-node",
                 "property-effect-by-node").contains(resolver);
     }
@@ -700,6 +715,36 @@ public final class AgenticAuthoringTargetResolverRegistry {
             } else {
                 candidates.add(new ResolvedCandidate(block.path(), block.value()));
             }
+        }
+    }
+
+    private void addPageStatePathMatch(List<ResolvedCandidate> candidates, JsonNode config, JsonNode target) {
+        String path = target.isObject() ? firstText(target, "path", "id", "value") : target.asText("");
+        String layer = target.isObject() ? firstNonBlank(firstText(target, "layer"), "page") : "page";
+        JsonNode value = resolvePath(config, "state." + layer + "." + path);
+        if (!path.isBlank()) {
+            candidates.add(new ResolvedCandidate(
+                    "state." + layer + "." + path,
+                    value.isMissingNode() ? target.deepCopy() : value));
+        }
+    }
+
+    private void addPageBuilderChildOperationMatch(List<ResolvedCandidate> candidates, JsonNode config, JsonNode target) {
+        String widgetKey = firstText(target, "widgetKey", "key", "id");
+        String childComponentId = firstText(target, "childComponentId", "componentId");
+        String childOperationId = firstText(target, "childOperationId", "operationId");
+        if (widgetKey.isBlank() || childComponentId.isBlank() || childOperationId.isBlank()) {
+            return;
+        }
+        List<ResolvedCandidate> widgets = new ArrayList<>();
+        addArrayMatches(widgets, config, "widgets[]", List.of("widgetKey", "key", "id"), widgetKey);
+        for (ResolvedCandidate widget : widgets) {
+            ObjectNode value = JsonNodeFactory.instance.objectNode();
+            value.put("widgetKey", widgetKey);
+            value.put("childComponentId", childComponentId);
+            value.put("childOperationId", childOperationId);
+            value.set("widget", widget.value());
+            candidates.add(new ResolvedCandidate(widget.path() + ".definition.inputs", value));
         }
     }
 

@@ -657,6 +657,74 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(binding.path()).isEqualTo("solution.journeys[]/0.steps[]/0.blocks[]/0.fieldBindings.email");
     }
 
+    @Test
+    void shouldResolvePageBuilderTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "canvas": {
+                    "items": [
+                      { "widgetKey": "formA", "x": 0, "y": 0 }
+                    ]
+                  },
+                  "widgets": [
+                    { "widgetKey": "formA", "definition": { "componentId": "praxis-dynamic-form", "inputs": {} } }
+                  ],
+                  "composition": {
+                    "links": [
+                      { "linkId": "link1", "from": { "widgetKey": "formA" }, "to": { "widgetKey": "formA" } }
+                    ]
+                  },
+                  "state": {
+                    "page": {
+                      "filters": { "status": "active" }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget page = registry.resolve(
+                "praxis-page-builder",
+                operation("page.configure", "page", "widget-page-definition-root", "fail", false),
+                objectMapper.readTree("{}"),
+                config);
+        AgenticAuthoringResolvedTarget widget = registry.resolve(
+                "praxis-page-builder",
+                operation("widget.remove", "widget", "widget-by-stable-key", "fail", true),
+                objectMapper.readTree("\"formA\""),
+                config);
+        AgenticAuthoringResolvedTarget shell = registry.resolve(
+                "praxis-page-builder",
+                operation("widget.shell.configure", "widgetShell", "widget-shell-by-widget-key", "fail", true),
+                objectMapper.readTree("\"formA\""),
+                config);
+        AgenticAuthoringResolvedTarget link = registry.resolve(
+                "praxis-page-builder",
+                operation("composition.link.remove", "compositionLink", "composition-link-by-id", "fail", true),
+                objectMapper.readTree("\"link1\""),
+                config);
+        AgenticAuthoringResolvedTarget state = registry.resolve(
+                "praxis-page-builder",
+                operation("state.set", "state", "page-state-path", "fail", true),
+                objectMapper.readTree("{ \"path\": \"filters.status\", \"layer\": \"page\" }"),
+                config);
+        AgenticAuthoringResolvedTarget child = registry.resolve(
+                "praxis-page-builder",
+                operation("childOperation.delegate", "childOperation", "widget-child-authoring-manifest-operation", "fail", true),
+                objectMapper.readTree("{ \"widgetKey\": \"formA\", \"childComponentId\": \"praxis-dynamic-form\", \"childOperationId\": \"field.label.set\" }"),
+                config);
+
+        assertThat(page.status()).isEqualTo("not-required");
+        assertThat(widget.status()).isEqualTo("resolved");
+        assertThat(widget.path()).isEqualTo("widgets[]/0");
+        assertThat(shell.status()).isEqualTo("resolved");
+        assertThat(link.status()).isEqualTo("resolved");
+        assertThat(link.path()).isEqualTo("composition.links[]/0");
+        assertThat(state.status()).isEqualTo("resolved");
+        assertThat(state.path()).isEqualTo("state.page.filters.status");
+        assertThat(child.status()).isEqualTo("resolved");
+        assertThat(child.path()).isEqualTo("widgets[]/0.definition.inputs");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

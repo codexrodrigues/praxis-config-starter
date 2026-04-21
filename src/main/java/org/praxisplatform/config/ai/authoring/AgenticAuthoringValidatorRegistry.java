@@ -213,6 +213,48 @@ public final class AgenticAuthoringValidatorRegistry {
             "data-block-exists",
             "field-binding-target-exists",
             "field-binding-path-valid",
+            "widget-page-definition-valid",
+            "no-legacy-grid-page-definition",
+            "page-context-json-valid",
+            "settings-panel-round-trip-valid",
+            "canvas-columns-integer",
+            "canvas-row-unit-valid",
+            "canvas-gap-valid",
+            "canvas-items-reference-existing-widgets",
+            "widget-key-unique",
+            "component-registered",
+            "canvas-item-valid",
+            "child-inputs-delegated",
+            "widget-key-not-array-index",
+            "widget-exists",
+            "composition-links-cleaned",
+            "canvas-item-targets-existing-widget",
+            "canvas-overlap-policy-valid",
+            "widget-shell-shape-valid",
+            "settings-panel-bridge-available",
+            "child-inputs-not-mutated",
+            "composition-link-id-unique",
+            "composition-endpoints-resolve",
+            "nested-path-terminal-widget-key-required",
+            "json-logic-condition-valid",
+            "no-legacy-connections-write",
+            "composition-link-exists",
+            "composition-links-still-valid",
+            "ui-composition-plan-valid",
+            "compiled-page-valid",
+            "widget-keys-unique",
+            "state-path-valid",
+            "state-layer-valid",
+            "state-json-valid",
+            "composition-state-links-still-valid",
+            "preview-result-valid",
+            "compiled-page-patch-present",
+            "no-envelope-runtime-persistence",
+            "runtime-page-valid",
+            "page-identity-complete",
+            "etag-policy-valid",
+            "component-config-editor-respected",
+            "no-local-child-input-write",
             "resource-exists-in-api-metadata",
             "resource-path-canonical",
             "resource-key-stable",
@@ -534,6 +576,40 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "data-block-exists" -> validateEditorialDataBlockExists(operationId, planOperation, config, failures);
                 case "field-binding-target-exists" -> validateEditorialFieldBindingTargetExists(operationId, planOperation, config, failures);
                 case "field-binding-path-valid" -> validateEditorialFieldBindingPath(operationId, planOperation, failures);
+                case "widget-page-definition-valid", "runtime-page-valid", "compiled-page-valid" ->
+                        validatePageBuilderPageShape(operationId, planOperation, config, validatorId, failures);
+                case "no-legacy-grid-page-definition", "no-legacy-connections-write", "no-envelope-runtime-persistence",
+                     "settings-panel-round-trip-valid", "settings-panel-bridge-available",
+                     "child-inputs-delegated", "child-inputs-not-mutated", "composition-links-cleaned",
+                     "canvas-overlap-policy-valid", "composition-links-still-valid",
+                     "composition-state-links-still-valid", "component-config-editor-respected" -> {
+                    // Structural page-builder invariants are enforced by compiling only WidgetPageDefinition paths and delegation envelopes.
+                }
+                case "page-context-json-valid", "state-json-valid" -> validatePageBuilderSerializableInput(operationId, planOperation, validatorId, failures);
+                case "canvas-columns-integer" -> validatePageBuilderPositiveInt(operationId, planOperation.path("input"), "columns", validatorId, failures);
+                case "canvas-row-unit-valid" -> validatePageBuilderPositiveNumber(operationId, planOperation.path("input"), "rowUnit", validatorId, failures);
+                case "canvas-gap-valid" -> validatePageBuilderNonNegativeNumber(operationId, planOperation.path("input"), "gap", validatorId, failures);
+                case "canvas-items-reference-existing-widgets" -> validatePageBuilderCanvasItemsReferenceWidgets(operationId, planOperation, config, failures);
+                case "canvas-item-valid" -> validatePageBuilderCanvasItem(operationId, planOperation, failures);
+                case "canvas-item-targets-existing-widget" -> validatePageBuilderCanvasItemTarget(operationId, planOperation, config, failures);
+                case "widget-key-unique" -> validatePageBuilderWidgetKeyUnique(operationId, planOperation, config, failures);
+                case "widget-keys-unique" -> validatePageBuilderWidgetKeysUnique(operationId, planOperation, config, failures);
+                case "widget-key-not-array-index" -> validatePageBuilderWidgetKeyNotIndex(operationId, planOperation, failures);
+                case "widget-exists" -> validatePageBuilderWidgetExists(operationId, planOperation, config, failures);
+                case "component-registered" -> validatePageBuilderComponentRegistered(operationId, planOperation, config, failures);
+                case "widget-shell-shape-valid" -> validatePageBuilderShellShape(operationId, planOperation, failures);
+                case "composition-link-id-unique" -> validatePageBuilderCompositionLinkUnique(operationId, planOperation, config, failures);
+                case "composition-link-exists" -> validatePageBuilderCompositionLinkExists(operationId, planOperation, config, failures);
+                case "composition-endpoints-resolve" -> validatePageBuilderCompositionEndpoints(operationId, planOperation, config, failures);
+                case "nested-path-terminal-widget-key-required" -> validatePageBuilderNestedPathTerminal(operationId, planOperation, failures);
+                case "json-logic-condition-valid" -> validateJsonLogicLikeInput(operationId, planOperation.path("input").path("condition"), failures);
+                case "ui-composition-plan-valid" -> validatePageBuilderUiCompositionPlan(operationId, planOperation, failures);
+                case "state-path-valid" -> validatePageBuilderStatePath(operationId, planOperation, failures);
+                case "state-layer-valid" -> validatePageBuilderStateLayer(operationId, planOperation, failures);
+                case "preview-result-valid", "compiled-page-patch-present" -> validatePageBuilderPreviewPatch(operationId, planOperation, config, failures);
+                case "page-identity-complete" -> validatePageBuilderPageIdentity(operationId, planOperation, failures);
+                case "etag-policy-valid" -> validatePageBuilderEtag(operationId, planOperation, failures);
+                case "no-local-child-input-write" -> validatePageBuilderNoLocalChildInputWrite(operationId, planOperation, failures);
                 case "resource-exists-in-api-metadata", "resource-capabilities-resolvable" -> validateCrudResourcePresent(operationId, planOperation, config, failures);
                 case "resource-path-canonical", "schema-url-canonical", "submit-url-canonical" -> validateCrudCanonicalRelativeUrls(operationId, planOperation, failures);
                 case "resource-key-stable" -> validateCrudResourceKeyStable(operationId, planOperation, failures);
@@ -2309,6 +2385,236 @@ public final class AgenticAuthoringValidatorRegistry {
         }
         for (JsonNode field : block.path("fields")) {
             if (fieldName.equals(field.asText("")) || matchesAnyKey(field, List.of("name", "fieldName", "field"), fieldName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void validatePageBuilderPageShape(String operationId, JsonNode planOperation, JsonNode config, String validatorId, List<String> failures) {
+        JsonNode page = firstPresent(planOperation.path("input"), "page");
+        if (page.isMissingNode()) {
+            page = planOperation.path("input").path("compiledFormPatch").path("patch").path("page");
+        }
+        if (page.isMissingNode()) {
+            page = config;
+        }
+        if (!page.isObject()) {
+            failures.add("validator " + validatorId + " failed for " + operationId + ": page must be an object");
+        }
+    }
+
+    private void validatePageBuilderSerializableInput(String operationId, JsonNode planOperation, String validatorId, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (("page-context-json-valid".equals(validatorId) && input.has("context") && !input.path("context").isObject())
+                || ("state-json-valid".equals(validatorId) && input.path("value").isMissingNode())) {
+            failures.add("validator " + validatorId + " failed for " + operationId + ": value must be JSON compatible");
+        }
+    }
+
+    private void validatePageBuilderPositiveInt(String operationId, JsonNode input, String field, String validatorId, List<String> failures) {
+        if (input.has(field) && (!input.path(field).canConvertToInt() || input.path(field).asInt() <= 0)) {
+            failures.add("validator " + validatorId + " failed for " + operationId + ": " + field + " must be a positive integer");
+        }
+    }
+
+    private void validatePageBuilderPositiveNumber(String operationId, JsonNode input, String field, String validatorId, List<String> failures) {
+        if (input.has(field) && (!input.path(field).isNumber() || input.path(field).asDouble() <= 0)) {
+            failures.add("validator " + validatorId + " failed for " + operationId + ": " + field + " must be positive");
+        }
+    }
+
+    private void validatePageBuilderNonNegativeNumber(String operationId, JsonNode input, String field, String validatorId, List<String> failures) {
+        if (input.has(field) && (!input.path(field).isNumber() || input.path(field).asDouble() < 0)) {
+            failures.add("validator " + validatorId + " failed for " + operationId + ": " + field + " must be non-negative");
+        }
+    }
+
+    private void validatePageBuilderCanvasItemsReferenceWidgets(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode items = planOperation.path("input").path("items").isArray() ? planOperation.path("input").path("items") : config.path("canvas").path("items");
+        for (JsonNode item : items) {
+            String widgetKey = firstNonBlank(text(item, "widgetKey"), text(item, "key"), text(item, "id"));
+            if (!widgetKey.isBlank() && pageBuilderWidget(config, widgetKey).isMissingNode()) {
+                failures.add("validator canvas-items-reference-existing-widgets failed for " + operationId + ": widget not found " + widgetKey);
+            }
+        }
+    }
+
+    private void validatePageBuilderCanvasItem(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode item = planOperation.path("input").path("canvasItem");
+        if (item.isMissingNode()) {
+            return;
+        }
+        for (String field : List.of("x", "y", "w", "h")) {
+            if (item.has(field) && (!item.path(field).canConvertToInt() || item.path(field).asInt() < 0)) {
+                failures.add("validator canvas-item-valid failed for " + operationId + ": " + field + " must be a non-negative integer");
+            }
+        }
+    }
+
+    private void validatePageBuilderCanvasItemTarget(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String widgetKey = text(planOperation.path("input"), "widgetKey");
+        if (!widgetKey.isBlank() && pageBuilderWidget(config, widgetKey).isMissingNode()) {
+            failures.add("validator canvas-item-targets-existing-widget failed for " + operationId + ": widget not found " + widgetKey);
+        }
+    }
+
+    private void validatePageBuilderWidgetKeyUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String widgetKey = text(planOperation.path("input"), "widgetKey");
+        if (!widgetKey.isBlank() && !pageBuilderWidget(config, widgetKey).isMissingNode()) {
+            failures.add("validator widget-key-unique failed for " + operationId + ": duplicate widgetKey " + widgetKey);
+        }
+    }
+
+    private void validatePageBuilderWidgetKeysUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        Set<String> seen = new HashSet<>();
+        JsonNode widgets = planOperation.path("input").path("uiCompositionPlan").path("page").path("widgets").isArray()
+                ? planOperation.path("input").path("uiCompositionPlan").path("page").path("widgets")
+                : config.path("widgets");
+        for (JsonNode widget : widgets) {
+            String widgetKey = firstNonBlank(text(widget, "widgetKey"), text(widget, "key"), text(widget, "id"));
+            if (!widgetKey.isBlank() && !seen.add(widgetKey)) {
+                failures.add("validator widget-keys-unique failed for " + operationId + ": duplicate widgetKey " + widgetKey);
+            }
+        }
+    }
+
+    private void validatePageBuilderWidgetKeyNotIndex(String operationId, JsonNode planOperation, List<String> failures) {
+        String widgetKey = text(planOperation.path("input"), "widgetKey");
+        if (widgetKey.matches("\\d+")) {
+            failures.add("validator widget-key-not-array-index failed for " + operationId + ": widgetKey must not be an array index");
+        }
+    }
+
+    private void validatePageBuilderWidgetExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String widgetKey = firstNonBlank(text(planOperation.path("input"), "widgetKey"), targetText(planOperation.path("target")));
+        if (widgetKey.isBlank() || pageBuilderWidget(config, widgetKey).isMissingNode()) {
+            failures.add("validator widget-exists failed for " + operationId + ": widget not found " + widgetKey);
+        }
+    }
+
+    private void validatePageBuilderComponentRegistered(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String componentId = text(planOperation.path("input"), "componentId");
+        if (componentId.isBlank()) {
+            failures.add("validator component-registered failed for " + operationId + ": componentId is required");
+            return;
+        }
+        JsonNode registry = firstPresent(config, "componentRegistry", "componentCatalog", "availableComponents");
+        if (registry.isArray() && !arrayContainsObjectKey(registry, List.of("componentId", "id", "selector"), componentId)) {
+            failures.add("validator component-registered failed for " + operationId + ": component not registered " + componentId);
+        }
+    }
+
+    private void validatePageBuilderShellShape(String operationId, JsonNode planOperation, List<String> failures) {
+        if (planOperation.path("input").has("shell") && !planOperation.path("input").path("shell").isObject()) {
+            failures.add("validator widget-shell-shape-valid failed for " + operationId + ": shell must be an object");
+        }
+    }
+
+    private void validatePageBuilderCompositionLinkUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String linkId = text(planOperation.path("input"), "linkId");
+        if (!linkId.isBlank() && !pageBuilderCompositionLink(config, linkId).isMissingNode()) {
+            failures.add("validator composition-link-id-unique failed for " + operationId + ": duplicate linkId " + linkId);
+        }
+    }
+
+    private void validatePageBuilderCompositionLinkExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String linkId = firstNonBlank(text(planOperation.path("input"), "linkId"), targetText(planOperation.path("target")));
+        if (linkId.isBlank() || pageBuilderCompositionLink(config, linkId).isMissingNode()) {
+            failures.add("validator composition-link-exists failed for " + operationId + ": link not found " + linkId);
+        }
+    }
+
+    private void validatePageBuilderCompositionEndpoints(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        for (JsonNode endpoint : List.of(planOperation.path("input").path("from"), planOperation.path("input").path("to"))) {
+            String widgetKey = text(endpoint, "widgetKey");
+            if (!widgetKey.isBlank() && pageBuilderWidget(config, widgetKey).isMissingNode()) {
+                failures.add("validator composition-endpoints-resolve failed for " + operationId + ": widget not found " + widgetKey);
+            }
+        }
+    }
+
+    private void validatePageBuilderNestedPathTerminal(String operationId, JsonNode planOperation, List<String> failures) {
+        for (JsonNode endpoint : List.of(planOperation.path("input").path("from"), planOperation.path("input").path("to"))) {
+            if (endpoint.has("nestedPath") && text(endpoint, "widgetKey").isBlank()) {
+                failures.add("validator nested-path-terminal-widget-key-required failed for " + operationId + ": nestedPath endpoint requires widgetKey");
+            }
+        }
+    }
+
+    private void validatePageBuilderUiCompositionPlan(String operationId, JsonNode planOperation, List<String> failures) {
+        if (!planOperation.path("input").path("uiCompositionPlan").isObject()) {
+            failures.add("validator ui-composition-plan-valid failed for " + operationId + ": uiCompositionPlan must be an object");
+        }
+    }
+
+    private void validatePageBuilderStatePath(String operationId, JsonNode planOperation, List<String> failures) {
+        String path = text(planOperation.path("input"), "path");
+        if (path.isBlank() || path.startsWith("$") || path.contains("..") || path.contains("://")) {
+            failures.add("validator state-path-valid failed for " + operationId + ": path is invalid");
+        }
+    }
+
+    private void validatePageBuilderStateLayer(String operationId, JsonNode planOperation, List<String> failures) {
+        String layer = text(planOperation.path("input"), "layer");
+        if (!layer.isBlank() && !Set.of("page", "session").contains(layer)) {
+            failures.add("validator state-layer-valid failed for " + operationId + ": unsupported layer " + layer);
+        }
+    }
+
+    private void validatePageBuilderPreviewPatch(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode page = planOperation.path("input").path("compiledFormPatch").path("patch").path("page");
+        if (!page.isObject()) {
+            page = config.path("compiledFormPatch").path("patch").path("page");
+        }
+        if (!page.isObject()) {
+            failures.add("validator compiled-page-patch-present failed for " + operationId + ": compiledFormPatch.patch.page is required");
+        }
+    }
+
+    private void validatePageBuilderPageIdentity(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode identity = planOperation.path("input").path("pageIdentity");
+        for (String field : List.of("componentType", "componentId", "scope")) {
+            if (text(identity, field).isBlank()) {
+                failures.add("validator page-identity-complete failed for " + operationId + ": " + field + " is required");
+            }
+        }
+    }
+
+    private void validatePageBuilderEtag(String operationId, JsonNode planOperation, List<String> failures) {
+        if (planOperation.path("input").has("etag") && !planOperation.path("input").path("etag").isTextual()) {
+            failures.add("validator etag-policy-valid failed for " + operationId + ": etag must be a string");
+        }
+    }
+
+    private void validatePageBuilderNoLocalChildInputWrite(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("inputs") || input.has("childInputs") || input.has("formConfig") || input.has("tableConfig")) {
+            failures.add("validator no-local-child-input-write failed for " + operationId + ": child config must be delegated");
+        }
+    }
+
+    private JsonNode pageBuilderWidget(JsonNode config, String widgetKey) {
+        for (JsonNode widget : config.path("widgets")) {
+            if (matchesAnyKey(widget, List.of("widgetKey", "key", "id"), widgetKey)) {
+                return widget;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private JsonNode pageBuilderCompositionLink(JsonNode config, String linkId) {
+        for (JsonNode link : config.path("composition").path("links")) {
+            if (matchesAnyKey(link, List.of("linkId", "id"), linkId)) {
+                return link;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private boolean arrayContainsObjectKey(JsonNode array, List<String> keys, String value) {
+        for (JsonNode item : array) {
+            if (matchesAnyKey(item, keys, value)) {
                 return true;
             }
         }
