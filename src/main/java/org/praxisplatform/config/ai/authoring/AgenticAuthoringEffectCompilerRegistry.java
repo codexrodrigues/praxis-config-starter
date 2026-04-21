@@ -73,7 +73,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
 
     boolean supportsDomainPatchHandler(String handler) {
         return "stepper-step-reorder".equals(handler)
-                || "tabs.reorder-tab-and-preserve-selection".equals(handler);
+                || "tabs.reorder-tab-and-preserve-selection".equals(handler)
+                || "tabs.remove-tab-and-reselect".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -140,6 +141,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "tabs.reorder-tab-and-preserve-selection" -> compileTabsReorderAndPreserveSelection(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "tabs.remove-tab-and-reselect" -> compileTabsRemoveAndReselect(
                     componentId,
                     operation,
                     effect,
@@ -221,6 +230,80 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("beforeStepId", beforeStepId);
         compiled.put("selectedIndexBefore", selectedIndexBefore);
         compiled.put("selectedIndexAfter", selectedIndexAfter);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileTabsRemoveAndReselect(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode tabs = arrayAt(proposedConfig, "tabs", false);
+        if (tabs == null) {
+            failures.add("tabs.remove-tab-and-reselect path is not an array: tabs[]");
+            return null;
+        }
+        String tabId = resolved != null ? text(resolved.value(), "id") : "";
+        int removedIndex = indexOfObjectByKey(tabs, "id", tabId);
+        if (removedIndex < 0) {
+            failures.add("tabs.remove-tab-and-reselect target not found: tabs[] id=" + tabId);
+            return null;
+        }
+
+        JsonNode group = proposedConfig.path("group");
+        int selectedIndexBefore = group.path("selectedIndex").asInt(-1);
+        String selectedTabId = selectedIndexBefore >= 0 && selectedIndexBefore < tabs.size()
+                ? text(tabs.get(selectedIndexBefore), "id")
+                : "";
+        String replacementActiveTabId = text(planOperation.path("input"), "replacementActiveTabId");
+
+        tabs.remove(removedIndex);
+
+        int selectedIndexAfter = selectedIndexBefore;
+        if (tabs.isEmpty()) {
+            selectedIndexAfter = -1;
+            objectAt(proposedConfig, "group", true).put("selectedIndex", selectedIndexAfter);
+        } else if (!replacementActiveTabId.isBlank()) {
+            int replacementIndex = indexOfObjectByKey(tabs, "id", replacementActiveTabId);
+            if (replacementIndex < 0) {
+                failures.add("tabs.remove-tab-and-reselect replacement tab not found: tabs[] id=" + replacementActiveTabId);
+                return null;
+            }
+            selectedIndexAfter = replacementIndex;
+            objectAt(proposedConfig, "group", true).put("selectedIndex", selectedIndexAfter);
+        } else if (tabId.equals(selectedTabId)) {
+            selectedIndexAfter = Math.min(removedIndex, tabs.size() - 1);
+            objectAt(proposedConfig, "group", true).put("selectedIndex", selectedIndexAfter);
+        } else if (selectedIndexBefore > removedIndex) {
+            selectedIndexAfter = selectedIndexBefore - 1;
+            objectAt(proposedConfig, "group", true).put("selectedIndex", selectedIndexAfter);
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "remove-by-key");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "tabs[]");
+        compiled.put("resolvedPath", resolved != null ? resolved.path() : "");
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", tabId);
+        compiled.put("removedIndex", removedIndex);
+        compiled.put("selectedIndexBefore", selectedIndexBefore);
+        compiled.put("selectedIndexAfter", selectedIndexAfter);
+        if (!replacementActiveTabId.isBlank()) {
+            compiled.put("replacementActiveTabId", replacementActiveTabId);
+        }
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
         compiled.set("affectedPaths", operation.path("affectedPaths"));

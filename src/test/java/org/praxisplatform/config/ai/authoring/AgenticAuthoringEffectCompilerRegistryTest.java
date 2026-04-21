@@ -317,6 +317,48 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("group").path("selectedIndex").asInt()).isZero();
     }
 
+    @Test
+    void shouldCompileTabsRemoveDomainPatchAndReselectSafely() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "tabs": [
+                    { "id": "general", "textLabel": "Geral" },
+                    { "id": "security", "textLabel": "Seguranca" },
+                    { "id": "audit", "textLabel": "Auditoria" }
+                  ],
+                  "group": {
+                    "selectedIndex": 1
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                operationWithHandler("tab.remove", "tab", "tab-by-id-or-label", true,
+                        "compile-domain-patch", "tabs.remove-tab-and-reselect", "tabs[]"),
+                plan("\"security\"", "{ }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("remove-by-key");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("tabs.remove-tab-and-reselect");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("security");
+        assertThat(patchOperation.path("removedIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("selectedIndexBefore").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("selectedIndexAfter").asInt()).isEqualTo(1);
+        assertThat(proposedConfig.path("tabs")).hasSize(2);
+        assertThat(proposedConfig.path("tabs").get(0).path("id").asText()).isEqualTo("general");
+        assertThat(proposedConfig.path("tabs").get(1).path("id").asText()).isEqualTo("audit");
+        assertThat(proposedConfig.path("group").path("selectedIndex").asInt()).isEqualTo(1);
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,
