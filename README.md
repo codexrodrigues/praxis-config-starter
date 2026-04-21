@@ -410,6 +410,10 @@ Full quickstart smoke:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart
 ```
 
+The quickstart smoke uses `PRAXIS_AI_STREAM_PROCESSING_TIMEOUT_SECONDS=180` by default.
+Keep that value for real provider runs; reduce it only for deterministic mocks or
+isolated unit/integration tests.
+
 GitHub Actions gate:
 - Run `Agentic Authoring HTTP Smoke` manually before publishing a new Maven Central version.
 - Use `provider=openai` and `quickstart_ref=main` as the default release gate.
