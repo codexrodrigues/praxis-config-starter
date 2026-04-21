@@ -79,6 +79,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "tabs.reorder-tab-and-preserve-selection".equals(handler)
                 || "tabs.remove-tab-and-reselect".equals(handler)
                 || "tabs.set-active-item".equals(handler)
+                || "tabs.set-tab-or-link-disabled".equals(handler)
+                || "tabs.set-tab-or-link-visible".equals(handler)
+                || "tabs.set-tab-or-link-content".equals(handler)
                 || "rich-content-block-add".equals(handler)
                 || "rich-content-media-block-update".equals(handler)
                 || "rich-content-link-remove".equals(handler)
@@ -185,6 +188,32 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "tabs.set-active-item" -> compileTabsSetActiveItem(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "tabs.set-tab-or-link-disabled" -> compileTabsSetTabOrLinkBoolean(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures,
+                    "disabled");
+            case "tabs.set-tab-or-link-visible" -> compileTabsSetTabOrLinkBoolean(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures,
+                    "visible");
+            case "tabs.set-tab-or-link-content" -> compileTabsSetTabOrLinkContent(
                     componentId,
                     operation,
                     effect,
@@ -1240,6 +1269,97 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         }
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileTabsSetTabOrLinkBoolean(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures,
+            String fieldName) {
+        JsonNode resolvedNode = resolved == null ? MissingNode.getInstance() : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode item)) {
+            failures.add(text(effect, "handler") + " target not found: " + (resolved == null ? "" : resolved.path()));
+            return null;
+        }
+        JsonNode inputValue = planOperation.path("input").path(fieldName);
+        if (!inputValue.isBoolean()) {
+            failures.add(text(effect, "handler") + " requires boolean input field: " + fieldName);
+            return null;
+        }
+        boolean before = item.has(fieldName) ? item.path(fieldName).asBoolean(!"visible".equals(fieldName)) : !"visible".equals(fieldName);
+        boolean after = inputValue.asBoolean();
+        item.put(fieldName, after);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "set-tab-or-link-" + fieldName);
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", resolved == null ? "" : resolved.path() + "." + fieldName);
+        compiled.put("resolvedPath", resolved == null ? "" : resolved.path());
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", text(item, "id"));
+        compiled.put("field", fieldName);
+        compiled.put("before", before);
+        compiled.put("after", after);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileTabsSetTabOrLinkContent(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null ? MissingNode.getInstance() : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode item)) {
+            failures.add("tabs.set-tab-or-link-content target not found: " + (resolved == null ? "" : resolved.path()));
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        ObjectNode value = objectMapper.createObjectNode();
+        for (String field : List.of("textLabel", "icon", "disabled", "visible", "content", "widgets")) {
+            if (input.has(field)) {
+                item.set(field, input.path(field));
+                value.set(field, input.path(field));
+            }
+        }
+        if (value.isEmpty()) {
+            failures.add("tabs.set-tab-or-link-content requires at least one supported content field");
+            return null;
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "merge-tab-or-link-content");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", resolved == null ? "" : resolved.path());
+        compiled.put("resolvedPath", resolved == null ? "" : resolved.path());
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", text(item, "id"));
+        compiled.set("value", value);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
         compiled.set("affectedPaths", operation.path("affectedPaths"));
         compiled.set("submissionImpact", operation.path("submissionImpact"));
         return compiled;

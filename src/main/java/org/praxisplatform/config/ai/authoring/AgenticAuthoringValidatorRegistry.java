@@ -28,6 +28,11 @@ public final class AgenticAuthoringValidatorRegistry {
             "validation-rule-target-exists",
             "validation-rule-compatible",
             "server-validation-delegated",
+            "tab-or-link-exists",
+            "active-tab-disabled-safe",
+            "active-tab-visibility-safe",
+            "tab-content-valid",
+            "widget-event-delegated",
             "field-is-local",
             "field-name-unique",
             "field-exists-in-layout",
@@ -101,7 +106,7 @@ public final class AgenticAuthoringValidatorRegistry {
             switch (validatorId) {
                 case "target-column-exists", "column-exists", "field-exists", "section-exists",
                      "row-exists", "layout-column-exists", "rule-exists", "action-exists", "target-exists",
-                     "step-exists" -> {
+                     "step-exists", "tab-or-link-exists" -> {
                     if (operation.path("target").path("required").asBoolean(false)) {
                         AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
                                 componentId,
@@ -119,6 +124,10 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "validation-rule-target-exists" -> validateStepperValidationRuleTargetExists(operationId, planOperation, config, failures);
                 case "validation-rule-compatible" -> validateStepperValidationRuleCompatible(operationId, planOperation, failures);
                 case "server-validation-delegated" -> validateStepperServerValidationDelegated(operationId, planOperation, failures);
+                case "active-tab-disabled-safe" -> validateTabsActiveBooleanSafe(operationId, operation, planOperation, config, failures, "disabled");
+                case "active-tab-visibility-safe" -> validateTabsActiveBooleanSafe(operationId, operation, planOperation, config, failures, "visible");
+                case "tab-content-valid" -> validateTabsContentValid(operationId, planOperation, failures);
+                case "widget-event-delegated" -> validateWidgetEventDelegated(operationId, planOperation, failures);
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
                 case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
@@ -223,6 +232,93 @@ public final class AgenticAuthoringValidatorRegistry {
             failures.add("validator server-validation-delegated failed for " + operationId
                     + ": remote validation requires childComponentId for host delegation");
         }
+    }
+
+    private void validateTabsActiveBooleanSafe(
+            String operationId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures,
+            String fieldName) {
+        JsonNode inputValue = planOperation.path("input").path(fieldName);
+        boolean disablesOrHides = "disabled".equals(fieldName)
+                ? inputValue.asBoolean(false)
+                : inputValue.isBoolean() && !inputValue.asBoolean(true);
+        if (!disablesOrHides) {
+            return;
+        }
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                "",
+                operation,
+                planOperation.path("target"),
+                config);
+        if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+            return;
+        }
+        String path = resolved.path();
+        int activeIndex = path.startsWith("nav.links[]")
+                ? config.path("nav").path("selectedIndex").asInt(-1)
+                : config.path("group").path("selectedIndex").asInt(-1);
+        int targetIndex = resolvedArrayIndex(path);
+        if (activeIndex >= 0 && activeIndex == targetIndex) {
+            failures.add("validator " + ("disabled".equals(fieldName) ? "active-tab-disabled-safe" : "active-tab-visibility-safe")
+                    + " failed for " + operationId + ": active item cannot be "
+                    + ("disabled".equals(fieldName) ? "disabled" : "hidden")
+                    + " without explicit reselection");
+        }
+    }
+
+    private void validateTabsContentValid(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("content") && !input.path("content").isArray()) {
+            failures.add("validator tab-content-valid failed for " + operationId + ": content must be an array");
+        }
+        if (input.has("widgets") && !input.path("widgets").isArray()) {
+            failures.add("validator tab-content-valid failed for " + operationId + ": widgets must be an array");
+        }
+    }
+
+    private void validateWidgetEventDelegated(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode widgets = planOperation.path("input").path("widgets");
+        if (!widgets.isArray()) {
+            return;
+        }
+        for (JsonNode widget : widgets) {
+            if (containsUnsafeInlineHandler(widget)) {
+                failures.add("validator widget-event-delegated failed for " + operationId
+                        + ": widget events must be delegated, not inline functions");
+                return;
+            }
+        }
+    }
+
+    private boolean containsUnsafeInlineHandler(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String key = field.getKey();
+                if ("function".equals(key) || "handler".equals(key) || "callback".equals(key)) {
+                    return true;
+                }
+                if (containsUnsafeInlineHandler(field.getValue())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (containsUnsafeInlineHandler(child)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void validatePresetRef(
@@ -555,6 +651,21 @@ public final class AgenticAuthoringValidatorRegistry {
             }
         }
         return MissingNode.getInstance();
+    }
+
+    private int resolvedArrayIndex(String resolvedPath) {
+        if (resolvedPath == null || resolvedPath.isBlank()) {
+            return -1;
+        }
+        int slash = resolvedPath.lastIndexOf('/');
+        if (slash < 0 || slash == resolvedPath.length() - 1) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(resolvedPath.substring(slash + 1));
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
     }
 
     private String text(JsonNode node, String field) {

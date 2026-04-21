@@ -117,6 +117,10 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "panel-by-id-or-title", "panel-content-by-id" -> addArrayMatches(candidates, config, "panels[]", List.of("id", "title", "label"), targetValue);
             case "step-by-id-or-label", "step-content-by-id", "step-validation-by-id" -> addArrayMatches(candidates, config, "steps[]", List.of("id", "label", "textLabel", "title"), targetValue);
             case "tab-by-id-or-label" -> addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
+            case "tab-or-link-by-id" -> {
+                addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
+                addArrayMatches(candidates, config, "nav.links[]", List.of("id", "label", "textLabel", "title"), targetValue);
+            }
             case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
             case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
             case "rich-timeline-item-by-block-id-and-item-id" -> addRichTimelineItemMatches(candidates, config, target, targetValue);
@@ -210,6 +214,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "step-content-by-id",
                 "step-validation-by-id",
                 "tab-by-id-or-label",
+                "tab-or-link-by-id",
                 "tab-index-or-id",
                 "rich-block-by-id-or-index",
                 "rich-text-node-by-id-or-path",

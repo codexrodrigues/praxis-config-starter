@@ -762,6 +762,148 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesTabsDisabledFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-tabs",
+                payloadFromClasspathSnapshot("praxis-tabs"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "tabs": [
+                      { "id": "general", "textLabel": "Geral" },
+                      { "id": "security", "textLabel": "Seguranca", "disabled": false }
+                    ],
+                    "group": { "selectedIndex": 0 }
+                  },
+                  "plan": {
+                    "operationId": "tab.disabled.set",
+                    "target": "security",
+                    "input": {
+                      "disabled": true
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings()).isEmpty();
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("set-tab-or-link-disabled");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("tabs.set-tab-or-link-disabled");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("security");
+        assertThat(operation.path("after").asBoolean()).isTrue();
+        assertThat(result.patch().path("proposedConfig").path("tabs").get(1).path("disabled").asBoolean()).isTrue();
+    }
+
+    @Test
+    void compilesTabsVisibleForNavLinkFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-tabs",
+                payloadFromClasspathSnapshot("praxis-tabs"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "nav": {
+                      "links": [
+                        { "id": "home", "textLabel": "Home" },
+                        { "id": "audit", "textLabel": "Auditoria", "visible": true }
+                      ],
+                      "selectedIndex": 0
+                    }
+                  },
+                  "plan": {
+                    "operationId": "tab.visible.set",
+                    "target": "audit",
+                    "input": {
+                      "visible": false
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings()).isEmpty();
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("set-tab-or-link-visible");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("tabs.set-tab-or-link-visible");
+        assertThat(operation.path("path").asText()).isEqualTo("nav.links[]/1.visible");
+        assertThat(result.patch().path("proposedConfig").path("nav").path("links").get(1).path("visible").asBoolean()).isFalse();
+    }
+
+    @Test
+    void compilesTabsContentForNavLinkFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-tabs",
+                payloadFromClasspathSnapshot("praxis-tabs"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "nav": {
+                      "links": [
+                        { "id": "home", "textLabel": "Home" },
+                        { "id": "audit", "textLabel": "Auditoria" }
+                      ]
+                    }
+                  },
+                  "plan": {
+                    "operationId": "tab.content.set",
+                    "target": "audit",
+                    "input": {
+                      "widgets": [
+                        { "id": "audit-table", "component": "praxis-table" }
+                      ]
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings()).isEmpty();
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("merge-tab-or-link-content");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("tabs.set-tab-or-link-content");
+        assertThat(operation.path("value").path("widgets").get(0).path("id").asText()).isEqualTo("audit-table");
+        assertThat(result.patch().path("proposedConfig").path("nav").path("links").get(1)
+                .path("widgets").get(0).path("component").asText()).isEqualTo("praxis-table");
+    }
+
+    @Test
     void compilesStepperLabelChangeFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-stepper",

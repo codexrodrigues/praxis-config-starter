@@ -501,6 +501,119 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileTabsDisabledPatchForGroupTab() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "tabs": [
+                    { "id": "general", "textLabel": "Geral" },
+                    { "id": "security", "textLabel": "Seguranca", "disabled": false }
+                  ],
+                  "group": { "selectedIndex": 0 }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                operationWithHandler("tab.disabled.set", "disabledState", "tab-or-link-by-id", true,
+                        "compile-domain-patch", "tabs.set-tab-or-link-disabled", "tabs[].disabled"),
+                plan("\"security\"", "{ \"disabled\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-tab-or-link-disabled");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("tabs.set-tab-or-link-disabled");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("security");
+        assertThat(patchOperation.path("before").asBoolean()).isFalse();
+        assertThat(patchOperation.path("after").asBoolean()).isTrue();
+        assertThat(proposedConfig.path("tabs").get(1).path("disabled").asBoolean()).isTrue();
+    }
+
+    @Test
+    void shouldCompileTabsVisiblePatchForNavLink() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "nav": {
+                    "links": [
+                      { "id": "home", "textLabel": "Home" },
+                      { "id": "audit", "textLabel": "Auditoria", "visible": true }
+                    ],
+                    "selectedIndex": 0
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                operationWithHandler("tab.visible.set", "visibility", "tab-or-link-by-id", true,
+                        "compile-domain-patch", "tabs.set-tab-or-link-visible", "nav.links[].visible"),
+                plan("\"audit\"", "{ \"visible\": false }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-tab-or-link-visible");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("tabs.set-tab-or-link-visible");
+        assertThat(patchOperation.path("path").asText()).isEqualTo("nav.links[]/1.visible");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("audit");
+        assertThat(proposedConfig.path("nav").path("links").get(1).path("visible").asBoolean()).isFalse();
+    }
+
+    @Test
+    void shouldCompileTabsContentPatchForNavLink() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "nav": {
+                    "links": [
+                      { "id": "home", "textLabel": "Home" },
+                      { "id": "audit", "textLabel": "Auditoria" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                operationWithHandler("tab.content.set", "tabContent", "tab-or-link-by-id", true,
+                        "compile-domain-patch", "tabs.set-tab-or-link-content", "nav.links[].widgets"),
+                plan("\"audit\"", """
+                        {
+                          "widgets": [
+                            { "id": "audit-table", "component": "praxis-table" }
+                          ]
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("merge-tab-or-link-content");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("tabs.set-tab-or-link-content");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("audit");
+        assertThat(patchOperation.path("value").path("widgets").get(0).path("id").asText()).isEqualTo("audit-table");
+        assertThat(proposedConfig.path("nav").path("links").get(1).path("widgets").get(0).path("component").asText())
+                .isEqualTo("praxis-table");
+    }
+
+    @Test
     void shouldCompileRichContentBlockAddDomainPatch() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {
