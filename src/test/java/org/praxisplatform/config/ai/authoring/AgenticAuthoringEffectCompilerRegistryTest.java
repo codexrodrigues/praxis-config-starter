@@ -2047,6 +2047,90 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("chartDocument").path("events").path("crossFilter").path("mapping").path("date").asText()).isEqualTo("month");
     }
 
+    @Test
+    void shouldCompileVisualBuilderGraphDomainPatches() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "nodes": [
+                    { "id": "root", "nodeId": "root", "nodeType": "group", "children": ["condition"], "config": {} },
+                    { "id": "condition", "nodeId": "condition", "nodeType": "condition", "parentId": "root", "children": [], "config": { "condition": { "==": [{ "var": "status" }, "open"] } } }
+                  ],
+                  "rootNodes": ["root"],
+                  "contextVariables": [
+                    { "name": "status", "scope": "row", "type": "string" }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-visual-builder",
+                operationWithHandler("node.add", "node", "rule-node-by-id", true,
+                        "compile-domain-patch", "visual-builder-node-add", "RuleBuilderState.nodes"),
+                plan("{}", "{ \"nodeId\": \"effect-node\", \"nodeType\": \"effect\", \"label\": \"Paint row\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-visual-builder",
+                operationWithHandler("edge.connect", "edge", "rule-node-edge-by-source-target", true,
+                        "compile-domain-patch", "visual-builder-edge-connect", "RuleBuilderState.nodes[].children"),
+                plan("{}", "{ \"sourceNodeId\": \"condition\", \"targetNodeId\": \"effect-node\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-visual-builder",
+                operationWithHandler("condition.set", "condition", "json-logic-condition-by-node", true,
+                        "compile-domain-patch", "visual-builder-condition-set", "RuleBuilderState.nodes[].config.condition"),
+                plan("\"condition\"", "{ \"nodeId\": \"condition\", \"condition\": { \"==\": [{ \"var\": \"status\" }, \"approved\"] } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-visual-builder",
+                operationWithHandler("effect.set", "effect", "property-effect-by-node", true,
+                        "compile-domain-patch", "visual-builder-effect-set", "RuleBuilderState.nodes[].config"),
+                plan("\"effect-node\"", "{ \"nodeId\": \"effect-node\", \"targetType\": \"row\", \"targets\": [\"status\"], \"properties\": { \"class\": \"approved\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-visual-builder",
+                operationWithHandler("variable.add", "contextVariable", "context-variable-by-name-scope", true,
+                        "compile-domain-patch", "visual-builder-variable-add", "RuleBuilderConfig.contextVariables"),
+                plan("{}", "{ \"name\": \"priority\", \"scope\": \"row\", \"type\": \"number\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-visual-builder",
+                operationWithHandler("dsl.roundTrip.validate", "dslDocument", "rule-builder-json-logic-document", false,
+                        "compile-domain-patch", "visual-builder-dsl-round-trip-validate", "RuleBuilderState.currentJSON"),
+                plan("{}", "{}"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(6);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("add-visual-builder-node");
+        assertThat(patchOperations.get(1).path("op").asText()).isEqualTo("connect-visual-builder-edge");
+        assertThat(patchOperations.get(5).path("op").asText()).isEqualTo("validate-visual-builder-dsl-round-trip");
+        assertThat(proposedConfig.path("nodes").get(1).path("children").get(0).asText()).isEqualTo("effect-node");
+        assertThat(proposedConfig.path("nodes").get(2).path("config").path("properties").path("class").asText()).isEqualTo("approved");
+        assertThat(proposedConfig.path("contextVariables").get(1).path("name").asText()).isEqualTo("priority");
+        assertThat(proposedConfig.path("currentJSON").path("kind").asText()).isEqualTo("praxis.visual-builder.dsl");
+        assertThat(proposedConfig.path("validationErrors")).isEmpty();
+    }
+
     private ObjectNode dynamicFormConfig() throws Exception {
         return (ObjectNode) objectMapper.readTree("""
                 {

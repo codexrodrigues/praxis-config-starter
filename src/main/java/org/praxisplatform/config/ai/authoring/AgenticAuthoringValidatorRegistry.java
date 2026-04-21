@@ -241,7 +241,25 @@ public final class AgenticAuthoringValidatorRegistry {
             "animation-override-valid",
             "animation-runtime-supported",
             "table-manifest-operation-known",
-            "table-target-valid");
+            "table-target-valid",
+            "node-id-unique",
+            "node-type-supported",
+            "parent-node-exists",
+            "node-exists",
+            "node-config-compatible",
+            "edges-reference-existing-nodes",
+            "edge-exists",
+            "graph-valid",
+            "graph-acyclic-where-required",
+            "dsl-round-trip-stable",
+            "variable-id-unique",
+            "variable-scope-exists",
+            "context-variable-reference-valid",
+            "effect-targets-exist",
+            "effect-properties-governed",
+            "effect-values-valid",
+            "registry-integrity-valid",
+            "destructive-removal-confirmed");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
@@ -449,6 +467,25 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "table-owned-config-delegated", "table-renderer-references-clean", "preview-class-not-persisted",
                      "runtime-effect-compilable", "empty-rule-policy-valid" -> {
                     // Enforced by compiled delegation and by refusing direct writes to table-owned config paths.
+                }
+                case "node-id-unique" -> validateVisualNodeIdUnique(operationId, planOperation, config, failures);
+                case "node-type-supported" -> validateVisualNodeTypeSupported(operationId, planOperation, failures);
+                case "parent-node-exists" -> validateVisualParentNodeExists(operationId, planOperation, config, failures);
+                case "node-exists" -> validateVisualNodeExists(operationId, planOperation, config, failures);
+                case "node-config-compatible" -> validateVisualNodeConfigCompatible(operationId, planOperation, failures);
+                case "edges-reference-existing-nodes" -> validateVisualEdgesReferenceExistingNodes(operationId, planOperation, config, failures);
+                case "edge-exists" -> validateVisualEdgeExists(operationId, planOperation, config, failures);
+                case "graph-valid", "graph-acyclic-where-required" -> validateVisualGraphValid(operationId, config, failures);
+                case "variable-id-unique" -> validateVisualVariableIdUnique(operationId, planOperation, config, failures);
+                case "variable-scope-exists" -> validateVisualVariableScope(operationId, planOperation, failures);
+                case "context-variable-reference-valid" -> validateVisualContextVariableReference(operationId, planOperation, failures);
+                case "effect-targets-exist" -> validateVisualEffectTargets(operationId, planOperation, failures);
+                case "effect-properties-governed" -> validateVisualEffectPropertiesGoverned(operationId, planOperation, failures);
+                case "effect-values-valid" -> validateVisualEffectValues(operationId, planOperation, failures);
+                case "destructive-removal-confirmed" -> validateDestructiveRemovalConfirmation(operationId, planOperation, failures);
+                case "dsl-round-trip-stable", "registry-integrity-valid" -> {
+                    validateVisualGraphValid(operationId, config, failures);
+                    validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 }
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
@@ -2714,6 +2751,237 @@ public final class AgenticAuthoringValidatorRegistry {
             return numeric * 16;
         }
         return numeric;
+    }
+
+    private void validateVisualNodeIdUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String nodeId = text(planOperation.path("input"), "nodeId");
+        if (!nodeId.isBlank() && visualNodeExists(config, nodeId)) {
+            failures.add("validator node-id-unique failed for " + operationId + ": duplicate nodeId " + nodeId);
+        }
+    }
+
+    private void validateVisualNodeTypeSupported(String operationId, JsonNode planOperation, List<String> failures) {
+        String nodeType = text(planOperation.path("input"), "nodeType");
+        if (!nodeType.isBlank() && !Set.of(
+                "root",
+                "group",
+                "condition",
+                "effect",
+                "operator",
+                "value",
+                "variable",
+                "action",
+                "branch").contains(nodeType)) {
+            failures.add("validator node-type-supported failed for " + operationId + ": unsupported nodeType " + nodeType);
+        }
+    }
+
+    private void validateVisualParentNodeExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String parentId = text(planOperation.path("input"), "parentId");
+        if (!parentId.isBlank() && !visualNodeExists(config, parentId)) {
+            failures.add("validator parent-node-exists failed for " + operationId + ": parent node not found " + parentId);
+        }
+    }
+
+    private void validateVisualNodeExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String nodeId = firstNonBlank(
+                text(planOperation.path("input"), "nodeId"),
+                targetText(planOperation.path("target")));
+        if (!nodeId.isBlank() && !visualNodeExists(config, nodeId)) {
+            failures.add("validator node-exists failed for " + operationId + ": node not found " + nodeId);
+        }
+    }
+
+    private void validateVisualNodeConfigCompatible(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        for (String field : List.of("config", "configPatch", "metadata", "metadataPatch")) {
+            JsonNode value = input.path(field);
+            if (!value.isMissingNode() && !value.isObject()) {
+                failures.add("validator node-config-compatible failed for " + operationId + ": " + field + " must be an object");
+            }
+        }
+    }
+
+    private void validateVisualEdgesReferenceExistingNodes(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String sourceNodeId = text(planOperation.path("input"), "sourceNodeId");
+        String targetNodeId = text(planOperation.path("input"), "targetNodeId");
+        if (!sourceNodeId.isBlank() && !visualNodeExists(config, sourceNodeId)) {
+            failures.add("validator edges-reference-existing-nodes failed for " + operationId + ": source node not found " + sourceNodeId);
+        }
+        if (!targetNodeId.isBlank() && !visualNodeExists(config, targetNodeId)) {
+            failures.add("validator edges-reference-existing-nodes failed for " + operationId + ": target node not found " + targetNodeId);
+        }
+        validateVisualGraphReferences(operationId, config, failures);
+    }
+
+    private void validateVisualEdgeExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String sourceNodeId = text(planOperation.path("input"), "sourceNodeId");
+        String targetNodeId = text(planOperation.path("input"), "targetNodeId");
+        JsonNode source = visualNode(config, sourceNodeId);
+        if (source.isMissingNode() || !arrayContainsText(source.path("children"), targetNodeId)) {
+            failures.add("validator edge-exists failed for " + operationId + ": edge not found "
+                    + sourceNodeId + " -> " + targetNodeId);
+        }
+    }
+
+    private void validateVisualGraphValid(String operationId, JsonNode config, List<String> failures) {
+        JsonNode nodes = config.path("nodes");
+        if (!nodes.isArray()) {
+            failures.add("validator graph-valid failed for " + operationId + ": nodes array is required");
+            return;
+        }
+        Set<String> ids = new HashSet<>();
+        for (JsonNode node : nodes) {
+            String nodeId = firstNonBlank(text(node, "id"), text(node, "nodeId"));
+            if (nodeId.isBlank()) {
+                failures.add("validator graph-valid failed for " + operationId + ": node id is required");
+            } else if (!ids.add(nodeId)) {
+                failures.add("validator graph-valid failed for " + operationId + ": duplicate node id " + nodeId);
+            }
+        }
+        validateVisualGraphReferences(operationId, config, failures);
+        for (String nodeId : ids) {
+            if (visualNodeHasCycle(config, nodeId, new HashSet<>())) {
+                failures.add("validator graph-acyclic-where-required failed for " + operationId + ": cycle detected at " + nodeId);
+                return;
+            }
+        }
+    }
+
+    private void validateVisualGraphReferences(String operationId, JsonNode config, List<String> failures) {
+        JsonNode nodes = config.path("nodes");
+        if (!nodes.isArray()) {
+            return;
+        }
+        for (JsonNode node : nodes) {
+            String sourceNodeId = firstNonBlank(text(node, "id"), text(node, "nodeId"));
+            for (JsonNode child : node.path("children")) {
+                String childId = child.asText("");
+                if (!visualNodeExists(config, childId)) {
+                    failures.add("validator edges-reference-existing-nodes failed for " + operationId
+                            + ": child node not found " + childId);
+                }
+                JsonNode childNode = visualNode(config, childId);
+                if (!childNode.isMissingNode() && !text(childNode, "parentId").isBlank()
+                        && !sourceNodeId.equals(text(childNode, "parentId"))) {
+                    failures.add("validator graph-valid failed for " + operationId + ": parentId mismatch for " + childId);
+                }
+            }
+        }
+    }
+
+    private void validateVisualVariableIdUnique(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String name = text(planOperation.path("input"), "name");
+        String scope = text(planOperation.path("input"), "scope");
+        if (!name.isBlank() && !scope.isBlank()) {
+            for (JsonNode variable : config.path("contextVariables")) {
+                if (name.equals(text(variable, "name")) && scope.equals(text(variable, "scope"))) {
+                    failures.add("validator variable-id-unique failed for " + operationId + ": duplicate variable " + scope + "." + name);
+                    return;
+                }
+            }
+        }
+    }
+
+    private void validateVisualVariableScope(String operationId, JsonNode planOperation, List<String> failures) {
+        String scope = text(planOperation.path("input"), "scope");
+        if (!scope.isBlank() && !Set.of("row", "table", "global", "context", "form").contains(scope)) {
+            failures.add("validator variable-scope-exists failed for " + operationId + ": unsupported scope " + scope);
+        }
+    }
+
+    private void validateVisualContextVariableReference(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (text(input, "name").isBlank() || text(input, "scope").isBlank()) {
+            failures.add("validator context-variable-reference-valid failed for " + operationId
+                    + ": name and scope are required");
+        }
+        if (containsUnsafeAbsoluteUrl(input.path("defaultValue"))) {
+            failures.add("validator context-variable-reference-valid failed for " + operationId
+                    + ": defaultValue must not contain remote absolute URLs");
+        }
+    }
+
+    private void validateVisualEffectTargets(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode targets = planOperation.path("input").path("targets");
+        if (!targets.isArray() || targets.isEmpty()) {
+            failures.add("validator effect-targets-exist failed for " + operationId + ": targets must contain at least one target");
+        }
+    }
+
+    private void validateVisualEffectPropertiesGoverned(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode properties = planOperation.path("input").path("properties");
+        if (!properties.isObject()) {
+            failures.add("validator effect-properties-governed failed for " + operationId + ": properties must be an object");
+            return;
+        }
+        if (containsUnsafeInlineHandler(properties)
+                || containsUnsafeTemplateHtml(properties)
+                || containsUnsafeAbsoluteUrl(properties)) {
+            failures.add("validator effect-properties-governed failed for " + operationId
+                    + ": unsafe inline handlers or HTML are not allowed");
+        }
+    }
+
+    private void validateVisualEffectValues(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (containsUnsafeAbsoluteUrl(input.path("properties"))
+                || containsUnsafeAbsoluteUrl(input.path("propertiesWhenFalse"))) {
+            failures.add("validator effect-values-valid failed for " + operationId
+                    + ": remote absolute URLs are not allowed in effect values");
+        }
+    }
+
+    private boolean visualNodeExists(JsonNode config, String nodeId) {
+        return !visualNode(config, nodeId).isMissingNode();
+    }
+
+    private JsonNode visualNode(JsonNode config, String nodeId) {
+        if (nodeId == null || nodeId.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode node : config.path("nodes")) {
+            if (nodeId.equals(text(node, "id")) || nodeId.equals(text(node, "nodeId"))) {
+                return node;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private boolean visualNodeReachable(JsonNode config, String sourceNodeId, String targetNodeId, Set<String> visited) {
+        if (sourceNodeId == null || sourceNodeId.isBlank() || !visited.add(sourceNodeId)) {
+            return false;
+        }
+        if (sourceNodeId.equals(targetNodeId)) {
+            return true;
+        }
+        JsonNode source = visualNode(config, sourceNodeId);
+        if (source.isMissingNode()) {
+            return false;
+        }
+        for (JsonNode child : source.path("children")) {
+            if (visualNodeReachable(config, child.asText(""), targetNodeId, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean visualNodeHasCycle(JsonNode config, String sourceNodeId, Set<String> visited) {
+        if (sourceNodeId == null || sourceNodeId.isBlank() || !visited.add(sourceNodeId)) {
+            return false;
+        }
+        JsonNode source = visualNode(config, sourceNodeId);
+        if (source.isMissingNode()) {
+            return false;
+        }
+        for (JsonNode child : source.path("children")) {
+            String childId = child.asText("");
+            if (sourceNodeId.equals(childId) || visualNodeReachable(config, childId, sourceNodeId, new HashSet<>())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JsonNode resolvePath(JsonNode root, String dottedPath) {

@@ -463,6 +463,51 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(effect.path()).isEqualTo("ruleEffects.rules[]/0.effects[]/0");
     }
 
+    @Test
+    void shouldResolveVisualBuilderNodeEdgeVariableAndGlobalDslTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "nodes": [
+                    { "id": "root", "nodeId": "root", "children": ["condition"] },
+                    { "id": "condition", "nodeId": "condition", "parentId": "root", "children": [] }
+                  ],
+                  "contextVariables": [
+                    { "name": "status", "scope": "row", "type": "string" }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget node = registry.resolve(
+                "praxis-visual-builder",
+                operation("node.configure", "node", "rule-node-by-id", "fail", true),
+                objectMapper.readTree("\"condition\""),
+                config);
+        AgenticAuthoringResolvedTarget edge = registry.resolve(
+                "praxis-visual-builder",
+                operation("edge.remove", "edge", "rule-node-edge-by-source-target", "fail", true),
+                objectMapper.readTree("{ \"sourceNodeId\": \"root\", \"targetNodeId\": \"condition\" }"),
+                config);
+        AgenticAuthoringResolvedTarget variable = registry.resolve(
+                "praxis-visual-builder",
+                operation("variable.update", "contextVariable", "context-variable-by-name-scope", "fail", true),
+                objectMapper.readTree("{ \"name\": \"status\", \"scope\": \"row\" }"),
+                config);
+        AgenticAuthoringResolvedTarget dsl = registry.resolve(
+                "praxis-visual-builder",
+                operation("dsl.roundTrip.validate", "dslDocument", "rule-builder-json-logic-document", "fail", false),
+                objectMapper.readTree("{}"),
+                config);
+
+        assertThat(node.status()).isEqualTo("resolved");
+        assertThat(node.path()).isEqualTo("nodes[]/1");
+        assertThat(edge.status()).isEqualTo("resolved");
+        assertThat(edge.path()).isEqualTo("nodes[]/0.children[]/0");
+        assertThat(variable.status()).isEqualTo("resolved");
+        assertThat(variable.path()).isEqualTo("contextVariables[]/0");
+        assertThat(dsl.status()).isEqualTo("not-required");
+        assertThat(dsl.path()).isEmpty();
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

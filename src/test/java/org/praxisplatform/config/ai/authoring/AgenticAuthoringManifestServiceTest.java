@@ -1291,7 +1291,6 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.failures()).isEmpty();
         assertThat(validation.warnings())
                 .contains("validator declared without backend implementation: link-target-exists for link.remove")
-                .contains("validator declared without backend implementation: destructive-removal-confirmed for link.remove")
                 .contains("validator declared without backend implementation: document-shape-canonical for link.remove");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
@@ -1498,8 +1497,7 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.failures()).isEmpty();
         assertThat(validation.warnings())
                 .contains("validator declared without backend implementation: timeline-target-valid for timeline.item.remove")
-                .contains("validator declared without backend implementation: timeline-item-exists for timeline.item.remove")
-                .contains("validator declared without backend implementation: destructive-removal-confirmed for timeline.item.remove");
+                .contains("validator declared without backend implementation: timeline-item-exists for timeline.item.remove");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",

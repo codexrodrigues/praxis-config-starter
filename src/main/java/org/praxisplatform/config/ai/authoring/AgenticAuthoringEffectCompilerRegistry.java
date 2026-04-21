@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -80,7 +81,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     private boolean domainHandlerCreatesTarget(String handler) {
         return "table-rule-builder-rule-add".equals(handler)
                 || "table-rule-builder-effect-add".equals(handler)
-                || "table-rule-builder-animation-set".equals(handler);
+                || "table-rule-builder-animation-set".equals(handler)
+                || "visual-builder-node-add".equals(handler)
+                || "visual-builder-edge-connect".equals(handler)
+                || "visual-builder-variable-add".equals(handler);
     }
 
     boolean supportsDomainPatchHandler(String handler) {
@@ -147,6 +151,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "table-rule-builder-preset-apply".equals(handler)
                 || "table-rule-builder-animation-set".equals(handler)
                 || "table-rule-builder-table-delegate".equals(handler)
+                || "visual-builder-node-add".equals(handler)
+                || "visual-builder-node-remove".equals(handler)
+                || "visual-builder-node-configure".equals(handler)
+                || "visual-builder-edge-connect".equals(handler)
+                || "visual-builder-edge-remove".equals(handler)
+                || "visual-builder-variable-add".equals(handler)
+                || "visual-builder-condition-set".equals(handler)
+                || "visual-builder-effect-set".equals(handler)
+                || "visual-builder-dsl-round-trip-validate".equals(handler)
                 || "chart-series-add".equals(handler)
                 || "chart-axis-configure".equals(handler)
                 || "chart-data-resource-bind".equals(handler)
@@ -639,6 +652,24 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             case "table-rule-builder-animation-set" -> compileTableRuleBuilderAnimationSet(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
             case "table-rule-builder-table-delegate" -> compileTableRuleBuilderTableDelegate(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-node-add" -> compileVisualBuilderNodeAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-node-remove" -> compileVisualBuilderNodeRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-node-configure" -> compileVisualBuilderNodeConfigure(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-edge-connect" -> compileVisualBuilderEdgeConnect(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-edge-remove" -> compileVisualBuilderEdgeRemove(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-variable-add" -> compileVisualBuilderVariableAdd(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-condition-set" -> compileVisualBuilderConditionSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-effect-set" -> compileVisualBuilderEffectSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "visual-builder-dsl-round-trip-validate" -> compileVisualBuilderDslRoundTripValidate(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
             case "chart-series-add" -> compileChartSeriesAdd(
                     componentId,
@@ -3511,6 +3542,323 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileVisualBuilderNodeAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String nodeId = text(input, "nodeId");
+        if (nodeId.isBlank()) {
+            failures.add("visual-builder-node-add requires input.nodeId");
+            return null;
+        }
+        ArrayNode nodes = visualNodes(proposedConfig, true);
+        if (findObjectByAnyKey(nodes, List.of("id", "nodeId"), nodeId) != null) {
+            failures.add("visual-builder-node-add duplicate nodeId: " + nodeId);
+            return null;
+        }
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("id", nodeId);
+        node.put("nodeId", nodeId);
+        copyIfPresent(input, node, "nodeType");
+        copyIfPresent(input, node, "nodeType", "type");
+        copyIfPresent(input, node, "label");
+        copyIfPresent(input, node, "parentId");
+        if (input.has("config")) {
+            node.set("config", input.path("config").deepCopy());
+        }
+        if (input.has("metadata")) {
+            node.set("metadata", input.path("metadata").deepCopy());
+        }
+        node.putArray("children");
+        nodes.add(node);
+        String parentId = text(input, "parentId");
+        if (!parentId.isBlank()) {
+            ObjectNode parent = visualNodeById(proposedConfig, parentId);
+            if (parent == null) {
+                failures.add("visual-builder-node-add parent not found: " + parentId);
+                return null;
+            }
+            addTextUnique(visualChildren(parent, true), nodeId);
+        } else {
+            addTextUnique(visualRootNodes(proposedConfig, true), nodeId);
+        }
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-visual-builder-node");
+        compiled.put("path", "nodes[]");
+        compiled.put("key", "id");
+        compiled.put("keyValue", nodeId);
+        compiled.set("value", node);
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderNodeRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String nodeId = firstNonBlank(text(planOperation.path("input"), "nodeId"), targetText(planOperation.path("target")));
+        ArrayNode nodes = visualNodes(proposedConfig, false);
+        int index = nodes == null ? -1 : indexOfObjectByAnyKey(nodes, List.of("id", "nodeId"), nodeId);
+        if (index < 0) {
+            failures.add("visual-builder-node-remove target not found: " + nodeId);
+            return null;
+        }
+        if (planOperation.path("input").path("removeDescendants").asBoolean(false)) {
+            removeVisualDescendants(proposedConfig, nodeId);
+            nodes = visualNodes(proposedConfig, false);
+            index = indexOfObjectByAnyKey(nodes, List.of("id", "nodeId"), nodeId);
+        } else if (visualNodeById(proposedConfig, nodeId).path("children").isArray()
+                && visualNodeById(proposedConfig, nodeId).path("children").size() > 0
+                && !planOperation.path("input").path("preserveDisconnectedChildren").asBoolean(false)) {
+            failures.add("visual-builder-node-remove requires removeDescendants or preserveDisconnectedChildren for node with children: " + nodeId);
+            return null;
+        } else if (planOperation.path("input").path("preserveDisconnectedChildren").asBoolean(false)) {
+            for (JsonNode childId : visualNodeById(proposedConfig, nodeId).path("children")) {
+                ObjectNode child = visualNodeById(proposedConfig, childId.asText(""));
+                if (child != null) {
+                    child.remove("parentId");
+                    addTextUnique(visualRootNodes(proposedConfig, true), text(child, "id"));
+                }
+            }
+        }
+        JsonNode removed = nodes.remove(index);
+        removeVisualEdgesTo(proposedConfig, nodeId);
+        removeTextValue(visualRootNodes(proposedConfig, false), nodeId);
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-visual-builder-node");
+        compiled.put("path", "nodes[]");
+        compiled.put("key", "id");
+        compiled.put("keyValue", nodeId);
+        compiled.put("removedIndex", index);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderNodeConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode node = visualNodeById(proposedConfig, text(planOperation.path("input"), "nodeId"));
+        if (node == null) {
+            failures.add("visual-builder-node-configure target not found: " + text(planOperation.path("input"), "nodeId"));
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        copyIfPresent(input, node, "label");
+        copyIfPresent(input, node, "expanded");
+        if (input.path("configPatch").isObject()) {
+            ObjectNode config = node.path("config") instanceof ObjectNode object ? object : node.putObject("config");
+            mergeObject(config, input.path("configPatch"));
+        }
+        if (input.path("metadataPatch").isObject()) {
+            ObjectNode metadata = node.path("metadata") instanceof ObjectNode object ? object : node.putObject("metadata");
+            mergeObject(metadata, input.path("metadataPatch"));
+        }
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-visual-builder-node");
+        compiled.put("path", "nodes[].config");
+        compiled.put("key", "id");
+        compiled.put("keyValue", text(node, "id"));
+        compiled.set("value", node);
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderEdgeConnect(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode source = visualNodeById(proposedConfig, text(input, "sourceNodeId"));
+        ObjectNode target = visualNodeById(proposedConfig, text(input, "targetNodeId"));
+        if (source == null || target == null) {
+            failures.add("visual-builder-edge-connect requires existing source and target nodes");
+            return null;
+        }
+        if (visualNodeReachable(proposedConfig, text(input, "targetNodeId"), text(input, "sourceNodeId"))) {
+            failures.add("visual-builder-edge-connect would create a cycle: "
+                    + text(input, "sourceNodeId") + " -> " + text(input, "targetNodeId"));
+            return null;
+        }
+        ArrayNode children = visualChildren(source, true);
+        int index = input.has("insertIndex")
+                ? boundedRawInsertIndex(input.path("insertIndex"), children.size(), failures, "visual-builder-edge-connect")
+                : boundedInsertIndex(input, children.size(), failures, "visual-builder-edge-connect");
+        if (index < 0) {
+            return null;
+        }
+        removeTextValue(children, text(input, "targetNodeId"));
+        children.insert(Math.min(index, children.size()), text(input, "targetNodeId"));
+        target.put("parentId", text(input, "sourceNodeId"));
+        removeTextValue(visualRootNodes(proposedConfig, false), text(input, "targetNodeId"));
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "connect-visual-builder-edge");
+        compiled.put("path", "nodes[].children");
+        compiled.put("sourceNodeId", text(input, "sourceNodeId"));
+        compiled.put("targetNodeId", text(input, "targetNodeId"));
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderEdgeRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode source = visualNodeById(proposedConfig, text(input, "sourceNodeId"));
+        ObjectNode target = visualNodeById(proposedConfig, text(input, "targetNodeId"));
+        if (source == null || !removeTextValue(visualChildren(source, false), text(input, "targetNodeId"))) {
+            failures.add("visual-builder-edge-remove edge not found");
+            return null;
+        }
+        if (target != null && text(input, "sourceNodeId").equals(text(target, "parentId"))) {
+            target.remove("parentId");
+            if (!input.path("removeOrphanTarget").asBoolean(false)) {
+                addTextUnique(visualRootNodes(proposedConfig, true), text(input, "targetNodeId"));
+            } else {
+                removeVisualDescendants(proposedConfig, text(input, "targetNodeId"));
+                ArrayNode nodes = visualNodes(proposedConfig, false);
+                int index = indexOfObjectByAnyKey(nodes, List.of("id", "nodeId"), text(input, "targetNodeId"));
+                if (index >= 0) {
+                    nodes.remove(index);
+                }
+            }
+        }
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-visual-builder-edge");
+        compiled.put("path", "nodes[].children");
+        compiled.put("sourceNodeId", text(input, "sourceNodeId"));
+        compiled.put("targetNodeId", text(input, "targetNodeId"));
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderVariableAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String name = text(input, "name");
+        String scope = text(input, "scope");
+        ArrayNode variables = arrayAt(proposedConfig, "contextVariables", true);
+        if (findVisualVariable(variables, name, scope) != null) {
+            failures.add("visual-builder-variable-add duplicate variable: " + scope + "." + name);
+            return null;
+        }
+        ObjectNode variable = objectMapper.createObjectNode();
+        copyIfPresent(input, variable, "name");
+        copyIfPresent(input, variable, "scope");
+        copyIfPresent(input, variable, "type");
+        copyIfPresent(input, variable, "valueType");
+        copyIfPresent(input, variable, "defaultValue");
+        copyIfPresent(input, variable, "description");
+        variables.add(variable);
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-visual-builder-variable");
+        compiled.put("path", "contextVariables[]");
+        compiled.put("key", "name");
+        compiled.put("keyValue", name);
+        compiled.set("value", variable);
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderConditionSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode node = visualNodeById(proposedConfig, text(planOperation.path("input"), "nodeId"));
+        if (node == null) {
+            failures.add("visual-builder-condition-set target not found: " + text(planOperation.path("input"), "nodeId"));
+            return null;
+        }
+        ObjectNode config = node.path("config") instanceof ObjectNode object ? object : node.putObject("config");
+        if ("merge".equals(text(planOperation.path("input"), "mode")) && config.path("condition").isObject()) {
+            mergeObject((ObjectNode) config.path("condition"), planOperation.path("input").path("condition"));
+        } else {
+            config.set("condition", planOperation.path("input").path("condition").deepCopy());
+        }
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-visual-builder-condition");
+        compiled.put("path", "nodes[].config.condition");
+        compiled.put("key", "id");
+        compiled.put("keyValue", text(node, "id"));
+        compiled.set("value", config.path("condition"));
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderEffectSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode node = visualNodeById(proposedConfig, text(planOperation.path("input"), "nodeId"));
+        if (node == null) {
+            failures.add("visual-builder-effect-set target not found: " + text(planOperation.path("input"), "nodeId"));
+            return null;
+        }
+        ObjectNode config = node.path("config") instanceof ObjectNode object ? object : node.putObject("config");
+        JsonNode input = planOperation.path("input");
+        copyIfPresent(input, config, "targetType");
+        copyIfPresent(input, config, "targets");
+        copyIfPresent(input, config, "properties");
+        copyIfPresent(input, config, "propertiesWhenFalse");
+        copyIfPresent(input, config, "conditionNodeId");
+        writeVisualCurrentJson(proposedConfig);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-visual-builder-effect");
+        compiled.put("path", "nodes[].config");
+        compiled.put("key", "id");
+        compiled.put("keyValue", text(node, "id"));
+        compiled.set("value", config);
+        return compiled;
+    }
+
+    private ObjectNode compileVisualBuilderDslRoundTripValidate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        writeVisualCurrentJson(proposedConfig);
+        ArrayNode validationErrors = arrayAt(proposedConfig, "validationErrors", true);
+        validationErrors.removeAll();
+        appendVisualGraphValidationErrors(proposedConfig, validationErrors);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "validate-visual-builder-dsl-round-trip");
+        compiled.put("path", "currentJSON");
+        compiled.set("value", proposedConfig.path("currentJSON"));
+        compiled.set("validationErrors", validationErrors);
+        return compiled;
+    }
+
     private ObjectNode baseDomainPatch(
             String componentId,
             JsonNode operation,
@@ -4537,6 +4885,193 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return -1;
         }
         return index;
+    }
+
+    private int boundedRawInsertIndex(JsonNode indexNode, int size, List<String> failures, String handler) {
+        if (!indexNode.canConvertToInt()) {
+            failures.add(handler + " insertIndex must be an integer");
+            return -1;
+        }
+        int index = indexNode.asInt();
+        if (index < 0 || index > size) {
+            failures.add(handler + " insertIndex is out of bounds: " + index);
+            return -1;
+        }
+        return index;
+    }
+
+    private ArrayNode visualNodes(ObjectNode proposedConfig, boolean create) {
+        return arrayAt(proposedConfig, "nodes", create);
+    }
+
+    private ArrayNode visualRootNodes(ObjectNode proposedConfig, boolean create) {
+        return arrayAt(proposedConfig, "rootNodes", create);
+    }
+
+    private ArrayNode visualChildren(ObjectNode node, boolean create) {
+        JsonNode children = node.path("children");
+        if (children instanceof ArrayNode array) {
+            return array;
+        }
+        return create ? node.putArray("children") : null;
+    }
+
+    private ObjectNode visualNodeById(ObjectNode proposedConfig, String nodeId) {
+        ArrayNode nodes = visualNodes(proposedConfig, false);
+        return nodes == null ? null : findObjectByAnyKey(nodes, List.of("id", "nodeId"), nodeId);
+    }
+
+    private ObjectNode findVisualVariable(ArrayNode variables, String name, String scope) {
+        if (variables == null) {
+            return null;
+        }
+        for (JsonNode variable : variables) {
+            if (variable instanceof ObjectNode object
+                    && name.equals(text(object, "name"))
+                    && scope.equals(text(object, "scope"))) {
+                return object;
+            }
+        }
+        return null;
+    }
+
+    private boolean removeTextValue(ArrayNode array, String value) {
+        if (array == null) {
+            return false;
+        }
+        boolean removed = false;
+        for (int i = array.size() - 1; i >= 0; i--) {
+            if (value.equals(array.get(i).asText(""))) {
+                array.remove(i);
+                removed = true;
+            }
+        }
+        return removed;
+    }
+
+    private void addTextUnique(ArrayNode array, String value) {
+        if (array == null || value == null || value.isBlank()) {
+            return;
+        }
+        for (JsonNode item : array) {
+            if (value.equals(item.asText(""))) {
+                return;
+            }
+        }
+        array.add(value);
+    }
+
+    private void removeVisualEdgesTo(ObjectNode proposedConfig, String nodeId) {
+        ArrayNode nodes = visualNodes(proposedConfig, false);
+        if (nodes == null) {
+            return;
+        }
+        for (JsonNode node : nodes) {
+            if (node instanceof ObjectNode object) {
+                removeTextValue(visualChildren(object, false), nodeId);
+            }
+        }
+    }
+
+    private void removeVisualDescendants(ObjectNode proposedConfig, String nodeId) {
+        ObjectNode node = visualNodeById(proposedConfig, nodeId);
+        if (node == null) {
+            return;
+        }
+        for (JsonNode childId : node.path("children")) {
+            String child = childId.asText("");
+            if (!child.isBlank()) {
+                removeVisualDescendants(proposedConfig, child);
+                ArrayNode nodes = visualNodes(proposedConfig, false);
+                int childIndex = indexOfObjectByAnyKey(nodes, List.of("id", "nodeId"), child);
+                if (childIndex >= 0) {
+                    nodes.remove(childIndex);
+                }
+                removeTextValue(visualRootNodes(proposedConfig, false), child);
+            }
+        }
+    }
+
+    private boolean visualNodeReachable(ObjectNode proposedConfig, String sourceNodeId, String targetNodeId) {
+        return visualNodeReachable(proposedConfig, sourceNodeId, targetNodeId, new HashSet<>());
+    }
+
+    private boolean visualNodeReachable(ObjectNode proposedConfig, String sourceNodeId, String targetNodeId, Set<String> visited) {
+        if (sourceNodeId == null || sourceNodeId.isBlank() || !visited.add(sourceNodeId)) {
+            return false;
+        }
+        if (sourceNodeId.equals(targetNodeId)) {
+            return true;
+        }
+        ObjectNode source = visualNodeById(proposedConfig, sourceNodeId);
+        if (source == null) {
+            return false;
+        }
+        for (JsonNode child : source.path("children")) {
+            if (visualNodeReachable(proposedConfig, child.asText(""), targetNodeId, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void appendVisualGraphValidationErrors(ObjectNode proposedConfig, ArrayNode validationErrors) {
+        ArrayNode nodes = visualNodes(proposedConfig, false);
+        if (nodes == null) {
+            validationErrors.add("nodes array is missing");
+            return;
+        }
+        Set<String> ids = new HashSet<>();
+        for (JsonNode node : nodes) {
+            String nodeId = firstNonBlank(text(node, "id"), text(node, "nodeId"));
+            if (nodeId.isBlank()) {
+                validationErrors.add("node id is missing");
+            } else if (!ids.add(nodeId)) {
+                validationErrors.add("duplicate node id: " + nodeId);
+            }
+        }
+        for (JsonNode node : nodes) {
+            String sourceId = firstNonBlank(text(node, "id"), text(node, "nodeId"));
+            for (JsonNode child : node.path("children")) {
+                String childId = child.asText("");
+                ObjectNode childNode = visualNodeById(proposedConfig, childId);
+                if (childNode == null) {
+                    validationErrors.add("edge references missing node: " + sourceId + " -> " + childId);
+                } else if (!text(childNode, "parentId").isBlank() && !sourceId.equals(text(childNode, "parentId"))) {
+                    validationErrors.add("child parentId mismatch: " + childId);
+                }
+            }
+            if (visualNodeHasCycle(proposedConfig, sourceId, new HashSet<>())) {
+                validationErrors.add("cycle detected at node: " + sourceId);
+            }
+        }
+    }
+
+    private boolean visualNodeHasCycle(ObjectNode proposedConfig, String sourceNodeId, Set<String> visited) {
+        if (sourceNodeId == null || sourceNodeId.isBlank() || !visited.add(sourceNodeId)) {
+            return false;
+        }
+        ObjectNode source = visualNodeById(proposedConfig, sourceNodeId);
+        if (source == null) {
+            return false;
+        }
+        for (JsonNode child : source.path("children")) {
+            String childId = child.asText("");
+            if (sourceNodeId.equals(childId) || visualNodeReachable(proposedConfig, childId, sourceNodeId, new HashSet<>())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void writeVisualCurrentJson(ObjectNode proposedConfig) {
+        ObjectNode currentJson = objectMapper.createObjectNode();
+        currentJson.put("kind", "praxis.visual-builder.dsl");
+        currentJson.put("version", "1.0.0");
+        currentJson.set("nodes", proposedConfig.path("nodes").deepCopy());
+        currentJson.set("rootNodes", proposedConfig.path("rootNodes").deepCopy());
+        currentJson.set("contextVariables", proposedConfig.path("contextVariables").deepCopy());
+        proposedConfig.set("currentJSON", currentJson);
     }
 
     private ArrayNode tableRuleRules(ObjectNode proposedConfig, boolean create) {

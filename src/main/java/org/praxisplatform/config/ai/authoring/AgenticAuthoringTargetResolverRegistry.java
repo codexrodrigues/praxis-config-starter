@@ -82,6 +82,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "x-ui-chart-tooltip-feature",
             "default-effect-preset-by-key",
             "praxis-table-authoring-operation",
+            "rule-builder-json-logic-document",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {
@@ -204,6 +205,10 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "layout-item-by-id" -> addRecursiveArrayMatches(candidates, config, "items", List.of("id", "key"), targetValue);
             case "table-rule-by-stable-id", "table-rule-condition-by-rule-id" -> addArrayMatches(candidates, config, "ruleEffects.rules[]", List.of("ruleId", "id"), targetValue);
             case "rule-effect-by-rule-and-effect-id", "rule-animation-by-rule-and-effect-id" -> addTableRuleEffectMatches(candidates, config, target, targetValue);
+            case "rule-node-by-id", "json-logic-condition-by-node", "property-effect-by-node" ->
+                    addArrayMatches(candidates, config, "nodes[]", List.of("id", "nodeId"), targetValue);
+            case "rule-node-edge-by-source-target" -> addVisualBuilderEdgeMatches(candidates, config, target);
+            case "context-variable-by-name-scope" -> addVisualBuilderVariableMatches(candidates, config, target);
             default -> {
                 if (kind != null && !kind.isBlank()) {
                     addRecursiveObjectMatches(candidates, config, List.of("id", "field", "name", "key", "label", "title"), targetValue);
@@ -312,7 +317,12 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "table-rule-by-stable-id",
                 "table-rule-condition-by-rule-id",
                 "rule-effect-by-rule-and-effect-id",
-                "rule-animation-by-rule-and-effect-id").contains(resolver);
+                "rule-animation-by-rule-and-effect-id",
+                "rule-node-by-id",
+                "rule-node-edge-by-source-target",
+                "context-variable-by-name-scope",
+                "json-logic-condition-by-node",
+                "property-effect-by-node").contains(resolver);
     }
 
     private void addArrayMatches(
@@ -469,6 +479,55 @@ public final class AgenticAuthoringTargetResolverRegistry {
         }
     }
 
+    private void addVisualBuilderEdgeMatches(List<ResolvedCandidate> candidates, JsonNode config, JsonNode target) {
+        String sourceNodeId = target.isObject() ? firstText(target, "sourceNodeId", "sourceId", "parentId") : "";
+        String targetNodeId = target.isObject() ? firstText(target, "targetNodeId", "targetId", "childId", "id") : "";
+        if (sourceNodeId.isBlank() || targetNodeId.isBlank()) {
+            return;
+        }
+        JsonNode nodes = resolvePath(config, "nodes");
+        if (!nodes.isArray()) {
+            return;
+        }
+        for (int i = 0; i < nodes.size(); i++) {
+            JsonNode node = nodes.get(i);
+            if (!matchesAnyKey(node, List.of("id", "nodeId"), sourceNodeId)) {
+                continue;
+            }
+            JsonNode children = node.path("children");
+            if (!children.isArray()) {
+                return;
+            }
+            for (int childIndex = 0; childIndex < children.size(); childIndex++) {
+                if (targetNodeId.equals(children.get(childIndex).asText(""))) {
+                    ObjectNode value = JsonNodeFactory.instance.objectNode();
+                    value.put("sourceNodeId", sourceNodeId);
+                    value.put("targetNodeId", targetNodeId);
+                    candidates.add(new ResolvedCandidate("nodes[]/" + i + ".children[]/" + childIndex, value));
+                }
+            }
+            return;
+        }
+    }
+
+    private void addVisualBuilderVariableMatches(List<ResolvedCandidate> candidates, JsonNode config, JsonNode target) {
+        String name = target.isObject() ? firstText(target, "name", "id", "key", "value") : target.asText("");
+        String scope = target.isObject() ? firstText(target, "scope") : "";
+        if (name.isBlank() || scope.isBlank()) {
+            return;
+        }
+        JsonNode variables = resolvePath(config, "contextVariables");
+        if (!variables.isArray()) {
+            return;
+        }
+        for (int i = 0; i < variables.size(); i++) {
+            JsonNode variable = variables.get(i);
+            if (name.equals(text(variable, "name")) && scope.equals(text(variable, "scope"))) {
+                candidates.add(new ResolvedCandidate("contextVariables[]/" + i, variable));
+            }
+        }
+    }
+
     private void addRecursiveArrayMatches(
             List<ResolvedCandidate> candidates,
             JsonNode node,
@@ -597,7 +656,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
         if (target.isTextual() || target.isNumber() || target.isBoolean()) {
             return target.asText("");
         }
-        for (String field : List.of("id", "field", "name", "key", "value", "slot", "ruleId", "effectId", "presetKey", "tableOperationId")) {
+        for (String field : List.of("id", "field", "name", "key", "value", "slot", "ruleId", "effectId", "presetKey", "tableOperationId", "nodeId", "sourceNodeId", "targetNodeId")) {
             if (target.has(field)) {
                 return target.path(field).asText("");
             }

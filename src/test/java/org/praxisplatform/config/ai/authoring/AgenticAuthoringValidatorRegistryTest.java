@@ -575,6 +575,68 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator chart-fields-exist failed for crossFilter.configure: unknown field missing");
     }
 
+    @Test
+    void shouldValidateVisualBuilderGraphVariablesAndEffects() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "nodes": [
+                    { "id": "root", "nodeId": "root", "nodeType": "group", "children": ["condition"] },
+                    { "id": "condition", "nodeId": "condition", "nodeType": "condition", "parentId": "root", "children": [] }
+                  ],
+                  "contextVariables": [
+                    { "name": "status", "scope": "row", "type": "string" }
+                  ]
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-visual-builder",
+                operation("node.add", "node", "rule-node-by-id", true,
+                        "node-id-unique,node-type-supported,parent-node-exists,node-config-compatible"),
+                plan("{}", "{ \"nodeId\": \"root\", \"nodeType\": \"unsupported\", \"parentId\": \"missing\", \"configPatch\": [] }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-visual-builder",
+                operation("edge.remove", "edge", "rule-node-edge-by-source-target", true,
+                        "edge-exists,destructive-removal-confirmed"),
+                plan("{ \"sourceNodeId\": \"condition\", \"targetNodeId\": \"missing\" }", "{ \"sourceNodeId\": \"condition\", \"targetNodeId\": \"missing\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-visual-builder",
+                operation("variable.add", "contextVariable", "context-variable-by-name-scope", true,
+                        "variable-id-unique,variable-scope-exists,context-variable-reference-valid"),
+                plan("{}", "{ \"name\": \"status\", \"scope\": \"row\", \"defaultValue\": \"https://evil.example\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-visual-builder",
+                operation("effect.set", "effect", "property-effect-by-node", true,
+                        "effect-targets-exist,effect-properties-governed,effect-values-valid"),
+                plan("\"condition\"", "{ \"nodeId\": \"condition\", \"targetType\": \"row\", \"targets\": [], \"properties\": { \"onclick\": \"alert(1)\", \"href\": \"https://evil.example\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator node-id-unique failed for node.add: duplicate nodeId root",
+                        "validator node-type-supported failed for node.add: unsupported nodeType unsupported",
+                        "validator parent-node-exists failed for node.add: parent node not found missing",
+                        "validator node-config-compatible failed for node.add: configPatch must be an object",
+                        "validator edge-exists failed for edge.remove: edge not found condition -> missing",
+                        "validator destructive-removal-confirmation failed for edge.remove: explicit confirmation is required",
+                        "validator variable-id-unique failed for variable.add: duplicate variable row.status",
+                        "validator effect-targets-exist failed for effect.set: targets must contain at least one target",
+                        "validator effect-properties-governed failed for effect.set: unsafe inline handlers or HTML are not allowed",
+                        "validator effect-values-valid failed for effect.set: remote absolute URLs are not allowed in effect values");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {
