@@ -182,6 +182,56 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void buildExecutionPromptPreservesDomainCatalogGovernanceInRagHints() {
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .aiMode("assist")
+                .componentDefinition(objectMapper.createObjectNode())
+                .currentState(objectMapper.createObjectNode())
+                .build();
+
+        String domainCatalogContext = """
+                DOMAIN_CATALOG_CONTEXT
+                schemaVersion: praxis.domain-catalog-context/v0.1
+                releaseKey: praxis-service:human-resources.funcionarios:latest
+                serviceKey: praxis-service
+                query: cpf
+                itemType: governance
+                guidance:
+                - Use governance items to respect privacy, compliance and AI visibility constraints.
+                items:
+                - [governance/-] governance:human-resources.funcionarios.field.cpf:privacy | classification=confidential | dataCategory=personal | visibility=mask | trainingUse=deny | ruleAuthoring=review_required | complianceTags=LGPD,GDPR
+                """;
+
+        String prompt = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildExecutionPrompt",
+                "Crie uma tabela de funcionarios respeitando LGPD.",
+                context,
+                objectMapper.createObjectNode(),
+                List.of(),
+                "",
+                "",
+                null,
+                null,
+                "N/A",
+                null,
+                domainCatalogContext,
+                "N/A",
+                null);
+
+        assertThat(prompt)
+                .contains("DOMAIN_CATALOG_CONTEXT")
+                .contains("governance:human-resources.funcionarios.field.cpf:privacy")
+                .contains("classification=confidential")
+                .contains("visibility=mask")
+                .contains("trainingUse=deny")
+                .contains("ruleAuthoring=review_required")
+                .contains("complianceTags=LGPD,GDPR");
+    }
+
+    @Test
     void componentEditPlanResponsePreservesDeclarativePlanForFrontendAdapter() throws Exception {
         JsonNode result = objectMapper.readTree("""
                 {
