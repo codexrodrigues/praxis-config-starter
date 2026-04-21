@@ -133,7 +133,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 "perfil", "perfis");
         boolean referencesPayrollByBreakdown = containsAny(prompt,
                 "departamento", "departamentos", "competencia", "competencias", "mes", "mensal",
-                "status", "situacao", "cargo", "cargos", "equipe", "equipes", "base", "bases",
+                "status", "situacao", "setor", "setores", "cargo", "cargos", "equipe", "equipes", "base", "bases",
                 "perfil", "perfis", "profile")
                 && containsAny(prompt, "folha", "pagamento", "salario", "salarios");
         return (asksForChart && asksForDrillDown && referencesPayrollOrDepartment)

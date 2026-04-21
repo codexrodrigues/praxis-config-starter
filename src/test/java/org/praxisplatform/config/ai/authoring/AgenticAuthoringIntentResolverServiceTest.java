@@ -46,6 +46,55 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void prioritizesFuncionariosPostFormWhenEmployeeFormPromptHasCompetingSemanticCandidates() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate employeeSkillCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionario-habilidades",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/funcionario-habilidades/all&operation=get&schemaType=response",
+                "/api/human-resources/funcionario-habilidades/all",
+                "get",
+                1.0d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringCandidate employeeCollectionCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/all&operation=get&schemaType=response",
+                "/api/human-resources/funcionarios/all",
+                "get",
+                1.0d,
+                "api_metadata collection retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString()))
+                .thenReturn(List.of(employeeSkillCandidate, employeeCollectionCandidate));
+        AgenticAuthoringIntentResolverService serviceWithCatalog =
+                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+
+        AgenticAuthoringIntentResolutionResult result = serviceWithCatalog.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "faz ela simples pra salva funcionario",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.candidates().get(0).resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.candidates().get(0).operation()).isEqualTo("post");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("post");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+    }
+
+    @Test
     void resolvesCreateChartDrillDownForQuickstartPayrollAnalytics() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Use um chart para criar drill down da folha por departamento",
@@ -328,6 +377,72 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies())
                 .extracting(AgenticAuthoringQuickReply::id)
                 .containsExactly("payroll-by-department");
+    }
+
+    @Test
+    void treatsConfirmedPayrollAnalyticsSourceWithDashboardBreakdownAsCreateEvenWhenLlmKeepsExploring() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "dashboard",
+                        "recommend_dashboard_visualization",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "clarification_answer",
+                        "Vou usar a fonte confirmada e manter o painel por setor.",
+                        List.of(),
+                        List.of("Posso aplicar a base ao painel?"),
+                        List.of("llm-kept-exploring"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
+        contextHints.put("submitUrl", "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        contextHints.put("operation", "post");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Use Fonte confirmada (/api/human-resources/vw-analytics-folha-pagamento) como data source. Mantenha o painel por setor com grafico e lista.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.pendingClarification()).isNull();
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-used", "deterministic-payroll-dashboard-confirmation-applied");
     }
 
     @Test
