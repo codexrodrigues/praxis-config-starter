@@ -76,7 +76,16 @@ try {
     if ($null -ne (Get-ListenPid $BackendPort)) { throw "Port $BackendPort is already in use." }
     if ($null -ne (Get-ListenPid $UiPort)) { throw "Port $UiPort is already in use." }
 
-    $authoringRoot = Join-Path $workspaceRoot "docs\ai\agentic-authoring"
+    $starterAuthoringRoot = Join-Path $starterRoot "docs\ai\agentic-authoring"
+    $workspaceAuthoringRoot = Join-Path $workspaceRoot "docs\ai\agentic-authoring"
+    $authoringRoot = if (Test-Path -LiteralPath (Join-Path $starterAuthoringRoot "contracts")) {
+        $starterAuthoringRoot
+    } elseif (Test-Path -LiteralPath (Join-Path $workspaceAuthoringRoot "contracts")) {
+        $workspaceAuthoringRoot
+    } else {
+        throw "Authoring contracts directory not found under starter or workspace roots."
+    }
+    New-Item -ItemType Directory -Force -Path (Join-Path $authoringRoot "proofs") | Out-Null
     $backendScript = @"
 Set-Location '$QuickstartRoot'
 . '$EnvFile'
