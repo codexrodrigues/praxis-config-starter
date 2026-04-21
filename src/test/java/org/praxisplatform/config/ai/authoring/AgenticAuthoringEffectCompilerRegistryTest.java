@@ -238,6 +238,92 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileDynamicFormLayoutDomainPatches() throws Exception {
+        ObjectNode proposedConfig = dynamicFormConfig();
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-dynamic-form",
+                operationWithHandler("layout.field.move", "field", "field-by-name-or-label", true,
+                        "compile-domain-patch", "form-layout-reconciler", "sections[].rows[].columns[].items"),
+                plan("\"status\"", "{ \"targetSectionId\": \"secondary\", \"targetRowId\": \"r2\", \"targetColumnId\": \"c2\", \"index\": 0 }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-form",
+                operationWithHandler("layout.visualBlock.add", "column", "column-by-id-in-row", true,
+                        "compile-domain-patch", "form-layout-visual-block-add", "sections[].rows[].columns[].items"),
+                plan("\"c2\"", "{ \"id\": \"help\", \"document\": { \"kind\": \"praxis.rich-content\", \"version\": \"1.0.0\", \"nodes\": [] }, \"index\": 1 }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-form",
+                operationWithHandler("layout.visualBlock.update", "visualBlock", "layout-item-by-id", true,
+                        "compile-domain-patch", "form-layout-visual-block-update", "sections[].rows[].columns[].items"),
+                plan("\"intro\"", "{ \"rootClassName\": \"form-intro\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-form",
+                operationWithHandler("layout.visualBlock.move", "visualBlock", "layout-item-by-id", true,
+                        "compile-domain-patch", "form-layout-visual-block-move", "sections[].rows[].columns[].items"),
+                plan("\"intro\"", "{ \"targetSectionId\": \"secondary\", \"targetRowId\": \"r2\", \"targetColumnId\": \"c2\", \"index\": 2 }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-form",
+                operationWithHandler("layout.visualBlock.remove", "visualBlock", "layout-item-by-id", true,
+                        "compile-domain-patch", "form-layout-visual-block-remove", "sections[].rows[].columns[].items"),
+                plan("\"help\"", "{}"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-form",
+                operationWithHandler("field.local.remove", "localField", "field-by-name", true,
+                        "compile-domain-patch", "form-layout-field-cleanup", "fieldMetadata[]"),
+                plan("\"email\"", "{}"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-form",
+                operationWithHandler("layout.section.remove", "section", "section-by-id-or-title", true,
+                        "compile-domain-patch", "form-layout-section-cleanup", "sections[]"),
+                plan("\"secondary\"", "{}"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).extracting(node -> node.path("op").asText())
+                .containsExactly(
+                        "move-form-field-layout-ref",
+                        "add-form-visual-block",
+                        "update-form-visual-block",
+                        "move-form-visual-block",
+                        "remove-form-visual-block",
+                        "remove-form-local-field-and-layout-refs",
+                        "remove-form-section-and-layout");
+        assertThat(proposedConfig.path("fieldMetadata")).hasSize(1);
+        assertThat(proposedConfig.path("fieldMetadata").get(0).path("name").asText()).isEqualTo("status");
+        assertThat(proposedConfig.path("sections")).hasSize(1);
+        assertThat(proposedConfig.toString()).doesNotContain("\"email\"");
+    }
+
+    @Test
     void shouldCompileStepperReorderDomainPatchAndPreserveSelectedIndexIdentity() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {
@@ -1834,6 +1920,48 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("chartDocument").path("source").path("resource").asText()).isEqualTo("/api/sales/stats");
         assertThat(proposedConfig.path("chartDocument").path("metrics").get(0).path("field").asText()).isEqualTo("revenue");
         assertThat(proposedConfig.path("chartDocument").path("events").path("crossFilter").path("mapping").path("date").asText()).isEqualTo("month");
+    }
+
+    private ObjectNode dynamicFormConfig() throws Exception {
+        return (ObjectNode) objectMapper.readTree("""
+                {
+                  "fieldMetadata": [
+                    { "name": "email", "label": "Email", "source": "local" },
+                    { "name": "status", "label": "Status", "source": "schema" }
+                  ],
+                  "sections": [
+                    {
+                      "id": "main",
+                      "rows": [
+                        {
+                          "id": "r1",
+                          "columns": [
+                            {
+                              "id": "c1",
+                              "fields": ["email"],
+                              "items": [
+                                { "id": "intro", "type": "richContent", "document": { "kind": "praxis.rich-content", "version": "1.0.0", "nodes": [] } },
+                                { "type": "field", "field": "status" }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "secondary",
+                      "rows": [
+                        {
+                          "id": "r2",
+                          "columns": [
+                            { "id": "c2", "items": [] }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
     }
 
     private JsonNode operation(

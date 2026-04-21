@@ -124,6 +124,13 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "crud-dialog-host-set".equals(handler)
                 || "crud-permissions-set".equals(handler)
                 || "crud-child-operation-delegate".equals(handler)
+                || "form-layout-field-cleanup".equals(handler)
+                || "form-layout-section-cleanup".equals(handler)
+                || "form-layout-reconciler".equals(handler)
+                || "form-layout-visual-block-add".equals(handler)
+                || "form-layout-visual-block-update".equals(handler)
+                || "form-layout-visual-block-move".equals(handler)
+                || "form-layout-visual-block-remove".equals(handler)
                 || "chart-series-add".equals(handler)
                 || "chart-axis-configure".equals(handler)
                 || "chart-data-resource-bind".equals(handler)
@@ -541,6 +548,62 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     operation,
                     effect,
                     planOperation,
+                    proposedConfig,
+                    failures);
+            case "form-layout-field-cleanup" -> compileFormLayoutFieldCleanup(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "form-layout-section-cleanup" -> compileFormLayoutSectionCleanup(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "form-layout-reconciler" -> compileFormLayoutReconciler(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "form-layout-visual-block-add" -> compileFormLayoutVisualBlockAdd(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "form-layout-visual-block-update" -> compileFormLayoutVisualBlockUpdate(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "form-layout-visual-block-move" -> compileFormLayoutVisualBlockMove(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "form-layout-visual-block-remove" -> compileFormLayoutVisualBlockRemove(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
                     proposedConfig,
                     failures);
             case "chart-series-add" -> compileChartSeriesAdd(
@@ -2872,6 +2935,251 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileFormLayoutFieldCleanup(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String fieldName = firstNonBlank(text(resolved == null ? MissingNode.getInstance() : resolved.value(), "name"), targetText(planOperation.path("target")));
+        if (fieldName.isBlank()) {
+            failures.add("form-layout-field-cleanup requires a resolved field name");
+            return null;
+        }
+        ArrayNode fields = arrayAt(proposedConfig, "fieldMetadata", false);
+        int removedIndex = -1;
+        if (fields != null) {
+            removedIndex = indexOfObjectByKey(fields, "name", fieldName);
+            if (removedIndex >= 0) {
+                fields.remove(removedIndex);
+            }
+        }
+        int removedRefs = removeFormFieldLayoutRefs(proposedConfig, fieldName);
+        if (removedIndex < 0 && removedRefs == 0) {
+            failures.add("form-layout-field-cleanup target not found: " + fieldName);
+            return null;
+        }
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "remove-form-local-field-and-layout-refs");
+        compiled.put("path", "fieldMetadata[]");
+        compiled.put("key", "name");
+        compiled.put("keyValue", fieldName);
+        compiled.put("removedIndex", removedIndex);
+        compiled.put("layoutRefsRemoved", removedRefs);
+        return compiled;
+    }
+
+    private ObjectNode compileFormLayoutSectionCleanup(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String sectionId = firstNonBlank(text(resolved == null ? MissingNode.getInstance() : resolved.value(), "id"), targetText(planOperation.path("target")));
+        ArrayNode sections = arrayAt(proposedConfig, "sections", false);
+        if (sectionId.isBlank() || sections == null) {
+            failures.add("form-layout-section-cleanup requires an existing section target");
+            return null;
+        }
+        int removedIndex = indexOfObjectByKey(sections, "id", sectionId);
+        if (removedIndex < 0) {
+            failures.add("form-layout-section-cleanup target not found: " + sectionId);
+            return null;
+        }
+        JsonNode removed = sections.remove(removedIndex);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "remove-form-section-and-layout");
+        compiled.put("path", "sections[]");
+        compiled.put("key", "id");
+        compiled.put("keyValue", sectionId);
+        compiled.put("removedIndex", removedIndex);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode compileFormLayoutReconciler(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String fieldName = firstNonBlank(text(resolved == null ? MissingNode.getInstance() : resolved.value(), "name"), targetText(planOperation.path("target")));
+        JsonNode input = planOperation.path("input");
+        ObjectNode targetColumn = formColumnByIds(proposedConfig, text(input, "targetSectionId"), text(input, "targetRowId"), text(input, "targetColumnId"));
+        if (fieldName.isBlank() || targetColumn == null) {
+            failures.add("form-layout-reconciler requires field and target section/row/column");
+            return null;
+        }
+        int removedRefs = removeFormFieldLayoutRefs(proposedConfig, fieldName);
+        boolean useItems = targetColumn.path("items").isArray();
+        int insertedIndex;
+        if (useItems) {
+            ArrayNode items = formColumnItems(targetColumn, true);
+            ObjectNode fieldItem = objectMapper.createObjectNode();
+            fieldItem.put("type", "field");
+            fieldItem.put("field", fieldName);
+            insertedIndex = boundedInsertIndex(input, items.size(), failures, "form-layout-reconciler");
+            if (insertedIndex < 0) {
+                return null;
+            }
+            items.insert(insertedIndex, fieldItem);
+        } else {
+            ArrayNode fields = formColumnFields(targetColumn, true);
+            insertedIndex = boundedInsertIndex(input, fields.size(), failures, "form-layout-reconciler");
+            if (insertedIndex < 0) {
+                return null;
+            }
+            fields.insert(insertedIndex, fieldName);
+        }
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "move-form-field-layout-ref");
+        compiled.put("path", useItems ? "sections[].rows[].columns[].items" : "sections[].rows[].columns[].fields");
+        compiled.put("key", "field");
+        compiled.put("keyValue", fieldName);
+        compiled.put("layoutRefsRemoved", removedRefs);
+        compiled.put("insertedIndex", insertedIndex);
+        compiled.put("targetSectionId", text(input, "targetSectionId"));
+        compiled.put("targetRowId", text(input, "targetRowId"));
+        compiled.put("targetColumnId", text(input, "targetColumnId"));
+        return compiled;
+    }
+
+    private ObjectNode compileFormLayoutVisualBlockAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String id = text(input, "id");
+        ObjectNode targetColumn = formColumnFromResolved(proposedConfig, resolved);
+        if (id.isBlank() || targetColumn == null) {
+            failures.add("form-layout-visual-block-add requires input.id and a resolved column");
+            return null;
+        }
+        ArrayNode items = formColumnItems(targetColumn, true);
+        int insertedIndex = boundedInsertIndex(input, items.size(), failures, "form-layout-visual-block-add");
+        if (insertedIndex < 0) {
+            return null;
+        }
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("id", id);
+        item.put("type", "richContent");
+        item.put("kind", "richContent");
+        item.set("document", input.path("document").deepCopy());
+        copyIfPresent(input, item, "layout");
+        copyIfPresent(input, item, "rootClassName");
+        items.insert(insertedIndex, item);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "add-form-visual-block");
+        compiled.put("path", "sections[].rows[].columns[].items");
+        compiled.put("key", "id");
+        compiled.put("keyValue", id);
+        compiled.put("insertedIndex", insertedIndex);
+        compiled.set("value", item);
+        return compiled;
+    }
+
+    private ObjectNode compileFormLayoutVisualBlockUpdate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null ? MissingNode.getInstance() : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode item)) {
+            failures.add("form-layout-visual-block-update requires a resolved visual block");
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        copyIfPresent(input, item, "document");
+        copyIfPresent(input, item, "layout");
+        copyIfPresent(input, item, "rootClassName");
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "update-form-visual-block");
+        compiled.put("path", resolved.path());
+        compiled.put("key", "id");
+        compiled.put("keyValue", text(item, "id"));
+        compiled.set("value", item);
+        return compiled;
+    }
+
+    private ObjectNode compileFormLayoutVisualBlockMove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode targetColumn = formColumnByIds(proposedConfig, text(input, "targetSectionId"), text(input, "targetRowId"), text(input, "targetColumnId"));
+        ArrayNode sourceItems = formItemsArrayFromResolvedPath(proposedConfig, resolved == null ? "" : resolved.path());
+        if (targetColumn == null || sourceItems == null || resolved == null) {
+            failures.add("form-layout-visual-block-move requires resolved block and target section/row/column");
+            return null;
+        }
+        int sourceIndex = indexFromResolvedArrayPath(resolved.path());
+        if (sourceIndex < 0 || sourceIndex >= sourceItems.size()) {
+            failures.add("form-layout-visual-block-move source index is invalid");
+            return null;
+        }
+        JsonNode item = sourceItems.remove(sourceIndex);
+        ArrayNode targetItems = formColumnItems(targetColumn, true);
+        int insertedIndex = boundedInsertIndex(input, targetItems.size(), failures, "form-layout-visual-block-move");
+        if (insertedIndex < 0) {
+            return null;
+        }
+        targetItems.insert(insertedIndex, item);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "move-form-visual-block");
+        compiled.put("path", "sections[].rows[].columns[].items");
+        compiled.put("key", "id");
+        compiled.put("keyValue", text(item, "id"));
+        compiled.put("sourceIndex", sourceIndex);
+        compiled.put("insertedIndex", insertedIndex);
+        compiled.put("targetSectionId", text(input, "targetSectionId"));
+        compiled.put("targetRowId", text(input, "targetRowId"));
+        compiled.put("targetColumnId", text(input, "targetColumnId"));
+        return compiled;
+    }
+
+    private ObjectNode compileFormLayoutVisualBlockRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode sourceItems = formItemsArrayFromResolvedPath(proposedConfig, resolved == null ? "" : resolved.path());
+        int sourceIndex = indexFromResolvedArrayPath(resolved == null ? "" : resolved.path());
+        if (sourceItems == null || sourceIndex < 0 || sourceIndex >= sourceItems.size()) {
+            failures.add("form-layout-visual-block-remove requires a resolved visual block");
+            return null;
+        }
+        JsonNode removed = sourceItems.remove(sourceIndex);
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "remove-form-visual-block");
+        compiled.put("path", "sections[].rows[].columns[].items");
+        compiled.put("key", "id");
+        compiled.put("keyValue", text(removed, "id"));
+        compiled.put("removedIndex", sourceIndex);
+        compiled.set("removedValue", removed);
+        return compiled;
+    }
+
     private ObjectNode baseDomainPatch(
             String componentId,
             JsonNode operation,
@@ -3752,6 +4060,154 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return -1;
     }
 
+    private ObjectNode formColumnFromResolved(ObjectNode proposedConfig, AgenticAuthoringResolvedTarget resolved) {
+        if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
+            return null;
+        }
+        JsonNode node = nodeAtResolvedPath(proposedConfig, resolved.path());
+        return node instanceof ObjectNode object ? object : null;
+    }
+
+    private ObjectNode formColumnByIds(ObjectNode proposedConfig, String sectionId, String rowId, String columnId) {
+        if (sectionId.isBlank() || rowId.isBlank() || columnId.isBlank()) {
+            return null;
+        }
+        JsonNode sections = proposedConfig.path("sections");
+        if (!sections.isArray()) {
+            return null;
+        }
+        for (JsonNode section : sections) {
+            if (!sectionId.equals(text(section, "id"))) {
+                continue;
+            }
+            for (JsonNode row : section.path("rows")) {
+                if (!rowId.equals(text(row, "id"))) {
+                    continue;
+                }
+                for (JsonNode column : row.path("columns")) {
+                    if (column instanceof ObjectNode object && columnId.equals(text(column, "id"))) {
+                        return object;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private ArrayNode formColumnItems(ObjectNode column, boolean create) {
+        JsonNode items = column.path("items");
+        if (items instanceof ArrayNode array) {
+            return array;
+        }
+        return create ? column.putArray("items") : null;
+    }
+
+    private ArrayNode formColumnFields(ObjectNode column, boolean create) {
+        JsonNode fields = column.path("fields");
+        if (fields instanceof ArrayNode array) {
+            return array;
+        }
+        return create ? column.putArray("fields") : null;
+    }
+
+    private int removeFormFieldLayoutRefs(JsonNode node, String fieldName) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return 0;
+        }
+        int removed = 0;
+        if (node instanceof ObjectNode object) {
+            JsonNode fields = object.path("fields");
+            if (fields instanceof ArrayNode fieldArray) {
+                for (int i = fieldArray.size() - 1; i >= 0; i--) {
+                    if (fieldName.equals(fieldArray.get(i).asText(""))) {
+                        fieldArray.remove(i);
+                        removed++;
+                    }
+                }
+            }
+            JsonNode items = object.path("items");
+            if (items instanceof ArrayNode itemArray) {
+                for (int i = itemArray.size() - 1; i >= 0; i--) {
+                    JsonNode item = itemArray.get(i);
+                    if (isFormFieldLayoutItem(item, fieldName)) {
+                        itemArray.remove(i);
+                        removed++;
+                    } else {
+                        removed += removeFormFieldLayoutRefs(item, fieldName);
+                    }
+                }
+            }
+            Iterator<JsonNode> children = object.elements();
+            while (children.hasNext()) {
+                JsonNode child = children.next();
+                if (child != fields && child != items) {
+                    removed += removeFormFieldLayoutRefs(child, fieldName);
+                }
+            }
+        } else if (node.isArray()) {
+            for (JsonNode child : node) {
+                removed += removeFormFieldLayoutRefs(child, fieldName);
+            }
+        }
+        return removed;
+    }
+
+    private boolean isFormFieldLayoutItem(JsonNode item, String fieldName) {
+        if (item == null || item.isMissingNode() || item.isNull()) {
+            return false;
+        }
+        if (item.isTextual()) {
+            return fieldName.equals(item.asText(""));
+        }
+        if (!item.isObject()) {
+            return false;
+        }
+        String type = firstNonBlank(text(item, "type"), text(item, "kind"));
+        return ("field".equals(type) || type.isBlank())
+                && fieldName.equals(firstNonBlank(text(item, "field"), text(item, "fieldName"), text(item, "name")));
+    }
+
+    private ArrayNode formItemsArrayFromResolvedPath(ObjectNode proposedConfig, String resolvedPath) {
+        int marker = resolvedPath == null ? -1 : resolvedPath.lastIndexOf(".items[]/");
+        if (marker < 0) {
+            return null;
+        }
+        String columnPath = resolvedPath.substring(0, marker);
+        JsonNode column = nodeAtResolvedPath(proposedConfig, columnPath);
+        if (column instanceof ObjectNode object) {
+            return formColumnItems(object, false);
+        }
+        return null;
+    }
+
+    private int indexFromResolvedArrayPath(String resolvedPath) {
+        int marker = resolvedPath == null ? -1 : resolvedPath.lastIndexOf("[]/");
+        if (marker < 0) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(resolvedPath.substring(marker + 3));
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+    }
+
+    private int boundedInsertIndex(JsonNode input, int size, List<String> failures, String handler) {
+        if (!input.has("index")) {
+            return size;
+        }
+        if (!input.path("index").canConvertToInt()) {
+            failures.add(handler + " index must be an integer");
+            return -1;
+        }
+        int index = input.path("index").asInt();
+        if (index < 0 || index > size) {
+            failures.add(handler + " index is out of bounds: " + index);
+            return -1;
+        }
+        return index;
+    }
+
     private ObjectNode objectAt(ObjectNode root, String dottedPath, boolean create) {
         JsonNode node = nodeAt(root, dottedPath, create, true);
         return node instanceof ObjectNode object ? object : null;
@@ -3883,6 +4339,25 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
         }
         return "";
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String targetText(JsonNode target) {
+        if (target == null || target.isMissingNode() || target.isNull()) {
+            return "";
+        }
+        if (target.isTextual()) {
+            return target.asText("");
+        }
+        return firstNonBlank(text(target, "name"), text(target, "field"), text(target, "id"), text(target, "value"), text(target, "label"));
     }
 
     private JsonNode firstPresent(JsonNode node, String... fields) {

@@ -394,6 +394,41 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(permissions.path()).isEqualTo("$");
     }
 
+    @Test
+    void shouldResolveDynamicFormLayoutItemById() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-dynamic-form",
+                operation("layout.visualBlock.update", "visualBlock", "layout-item-by-id", "fail", true),
+                objectMapper.readTree("\"intro\""),
+                objectMapper.readTree("""
+                        {
+                          "sections": [
+                            {
+                              "id": "main",
+                              "rows": [
+                                {
+                                  "id": "r1",
+                                  "columns": [
+                                    {
+                                      "id": "c1",
+                                      "items": [
+                                        { "id": "intro", "type": "richContent" }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                        """));
+
+        assertThat(result.status()).isEqualTo("resolved");
+        assertThat(result.resolver()).isEqualTo("layout-item-by-id");
+        assertThat(result.path()).isEqualTo("sections[]/0.rows[]/0.columns[]/0.items[]/0");
+        assertThat(result.value().path("type").asText()).isEqualTo("richContent");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

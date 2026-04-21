@@ -283,6 +283,14 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "panel-content-valid" -> validateExpansionPanelContentValid(operationId, planOperation, failures);
                 case "lazy-content-compatible", "nested-widget-contract-delegated" -> validateWidgetEventDelegated(operationId, planOperation, failures);
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
+                case "field-exists-in-layout" -> validateFormFieldExistsInLayout(componentId, operation, planOperation, config, failures);
+                case "visual-block-exists" -> validateResolvedTarget(componentId, operation, planOperation, config, validatorId, failures);
+                case "visual-block-id-unique" -> validateFormVisualBlockIdUnique(operationId, planOperation, config, failures);
+                case "layout-target-exists" -> validateFormLayoutTargetExists(operationId, planOperation, config, failures);
+                case "rich-content-document-valid" -> validateFormRichContentDocument(operationId, planOperation, failures);
+                case "editor-round-trip-preserve", "no-index-as-identity" -> {
+                    // These are structural: operations resolve by stable ids and compile only canonical editor/runtime paths.
+                }
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
                 case "endpoint-url-safe" -> validateFilesEndpointUrlSafe(operationId, planOperation, failures);
                 case "endpoint-uses-praxis-backend-surface" -> validateFilesEndpointPraxisSurface(operationId, planOperation, failures);
@@ -859,6 +867,166 @@ public final class AgenticAuthoringValidatorRegistry {
                 && !"local".equals(text(resolved.value(), "source"))) {
             failures.add("validator field-is-local failed for " + text(operation, "operationId") + ": target field is not local");
         }
+    }
+
+    private void validateResolvedTarget(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            String validatorId,
+            List<String> failures) {
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                componentId,
+                operation,
+                planOperation.path("target"),
+                config);
+        if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+            failures.add("validator " + validatorId + " failed for " + text(operation, "operationId") + ": "
+                    + String.join(", ", resolved.failures()));
+        }
+    }
+
+    private void validateFormFieldExistsInLayout(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                componentId,
+                operation,
+                planOperation.path("target"),
+                config);
+        String fieldName = AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())
+                ? text(resolved.value(), "name")
+                : targetText(planOperation.path("target"));
+        if (fieldName.isBlank() || !formLayoutContainsField(config.path("sections"), fieldName)) {
+            failures.add("validator field-exists-in-layout failed for " + text(operation, "operationId")
+                    + ": field is not referenced in layout " + fieldName);
+        }
+    }
+
+    private void validateFormVisualBlockIdUnique(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String id = text(planOperation.path("input"), "id");
+        if (!id.isBlank() && formLayoutContainsVisualBlock(config, id)) {
+            failures.add("validator visual-block-id-unique failed for " + operationId + ": duplicate visual block id " + id);
+        }
+    }
+
+    private void validateFormLayoutTargetExists(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String sectionId = text(input, "targetSectionId");
+        String rowId = text(input, "targetRowId");
+        String columnId = text(input, "targetColumnId");
+        if (sectionId.isBlank() && rowId.isBlank() && columnId.isBlank()) {
+            return;
+        }
+        if (!formLayoutContainsColumn(config, sectionId, rowId, columnId)) {
+            failures.add("validator layout-target-exists failed for " + operationId
+                    + ": target section/row/column not found");
+        }
+    }
+
+    private void validateFormRichContentDocument(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode document = planOperation.path("input").path("document");
+        if (document.isMissingNode()) {
+            return;
+        }
+        if (!document.isObject()
+                || !"praxis.rich-content".equals(text(document, "kind"))
+                || text(document, "version").isBlank()
+                || !document.path("nodes").isArray()) {
+            failures.add("validator rich-content-document-valid failed for " + operationId
+                    + ": document must be a praxis.rich-content object with version and nodes[]");
+        }
+    }
+
+    private boolean formLayoutContainsColumn(JsonNode config, String sectionId, String rowId, String columnId) {
+        if (sectionId.isBlank() || rowId.isBlank() || columnId.isBlank()) {
+            return false;
+        }
+        for (JsonNode section : config.path("sections")) {
+            if (!sectionId.equals(text(section, "id"))) {
+                continue;
+            }
+            for (JsonNode row : section.path("rows")) {
+                if (!rowId.equals(text(row, "id"))) {
+                    continue;
+                }
+                for (JsonNode column : row.path("columns")) {
+                    if (columnId.equals(text(column, "id"))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean formLayoutContainsField(JsonNode node, String fieldName) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isTextual()) {
+            return fieldName.equals(node.asText(""));
+        }
+        if (node.isObject()) {
+            if (fieldName.equals(firstNonBlank(text(node, "field"), text(node, "fieldName")))) {
+                return true;
+            }
+            Iterator<JsonNode> values = node.elements();
+            while (values.hasNext()) {
+                if (formLayoutContainsField(values.next(), fieldName)) {
+                    return true;
+                }
+            }
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (formLayoutContainsField(child, fieldName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean formLayoutContainsVisualBlock(JsonNode node, String id) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isObject()) {
+            if (id.equals(text(node, "id"))
+                    && ("richContent".equals(text(node, "type")) || "richContent".equals(text(node, "kind")))) {
+                return true;
+            }
+            Iterator<JsonNode> values = node.elements();
+            while (values.hasNext()) {
+                if (formLayoutContainsVisualBlock(values.next(), id)) {
+                    return true;
+                }
+            }
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (formLayoutContainsVisualBlock(child, id)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void validateRemoteResourceBindingSafe(

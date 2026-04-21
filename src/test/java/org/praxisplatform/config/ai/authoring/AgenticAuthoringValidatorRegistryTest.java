@@ -119,6 +119,71 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateDynamicFormLayoutAndVisualBlockSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "fieldMetadata": [
+                    { "name": "email", "source": "local" },
+                    { "name": "status", "source": "schema" }
+                  ],
+                  "sections": [
+                    {
+                      "id": "main",
+                      "rows": [
+                        {
+                          "id": "r1",
+                          "columns": [
+                            {
+                              "id": "c1",
+                              "fields": ["email"],
+                              "items": [
+                                { "id": "intro", "type": "richContent", "document": { "kind": "praxis.rich-content", "version": "1.0.0", "nodes": [] } }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-dynamic-form",
+                operation("layout.field.move", "field", "field-by-name-or-label", true,
+                        "field-exists-in-layout,layout-target-exists"),
+                plan("\"status\"", "{ \"targetSectionId\": \"missing\", \"targetRowId\": \"r2\", \"targetColumnId\": \"c2\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-dynamic-form",
+                operation("layout.visualBlock.add", "column", "column-by-id-in-row", true,
+                        "visual-block-id-unique,rich-content-document-valid"),
+                plan("\"c1\"", "{ \"id\": \"intro\", \"document\": { \"kind\": \"bad\", \"nodes\": {} } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-dynamic-form",
+                operation("layout.visualBlock.update", "visualBlock", "layout-item-by-id", true,
+                        "visual-block-exists"),
+                plan("\"missing-block\"", "{}"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator field-exists-in-layout failed for layout.field.move: field is not referenced in layout status",
+                        "validator layout-target-exists failed for layout.field.move: target section/row/column not found",
+                        "validator visual-block-id-unique failed for layout.visualBlock.add: duplicate visual block id intro",
+                        "validator rich-content-document-valid failed for layout.visualBlock.add: document must be a praxis.rich-content object with version and nodes[]",
+                        "validator visual-block-exists failed for layout.visualBlock.update: target not found: missing-block");
+    }
+
+    @Test
     void shouldWarnWhenValidatorHasNoBackendImplementation() throws Exception {
         List<String> failures = new ArrayList<>();
         List<String> warnings = new ArrayList<>();

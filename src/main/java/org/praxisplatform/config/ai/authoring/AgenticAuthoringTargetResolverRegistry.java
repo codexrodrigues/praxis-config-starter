@@ -199,6 +199,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "field-metadata-json-path" -> addRecursiveObjectMatches(candidates, config, List.of("path", "jsonPath", "name", "id"), targetValue);
             case "row-by-id-in-section" -> addRecursiveArrayMatches(candidates, config, "rows", List.of("id"), targetValue);
             case "column-by-id-in-row" -> addRecursiveArrayMatches(candidates, config, "columns", List.of("id"), targetValue);
+            case "layout-item-by-id" -> addRecursiveArrayMatches(candidates, config, "items", List.of("id", "key"), targetValue);
             default -> {
                 if (kind != null && !kind.isBlank()) {
                     addRecursiveObjectMatches(candidates, config, List.of("id", "field", "name", "key", "label", "title"), targetValue);
@@ -302,7 +303,8 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "component-metadata-editorial-descriptor",
                 "field-metadata-json-path",
                 "row-by-id-in-section",
-                "column-by-id-in-row").contains(resolver);
+                "column-by-id-in-row",
+                "layout-item-by-id").contains(resolver);
     }
 
     private void addArrayMatches(
