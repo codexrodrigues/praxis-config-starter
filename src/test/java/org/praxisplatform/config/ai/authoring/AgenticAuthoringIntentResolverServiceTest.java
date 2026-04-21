@@ -446,6 +446,73 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void treatsConfirmedPayrollCollectionSourceWithDashboardBreakdownAsCreateEvenWhenLlmKeepsExploring() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "dashboard",
+                        "recommend_dashboard_visualization",
+                        "/api/human-resources/folhas-pagamento",
+                        null,
+                        "clarification_answer",
+                        "Vou usar a fonte confirmada para montar o painel por setor.",
+                        List.of(),
+                        List.of("Posso aplicar a base ao painel?"),
+                        List.of("llm-kept-exploring"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/folhas-pagamento");
+        contextHints.put("submitUrl", "/api/human-resources/folhas-pagamento/all");
+        contextHints.put("operation", "get");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Use Grafico por setor + lista abaixo (/api/human-resources/folhas-pagamento) as the data source.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.pendingClarification()).isNull();
+        assertThat(result.quickReplies()).isEmpty();
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-used", "deterministic-payroll-dashboard-confirmation-applied");
+    }
+
+    @Test
     void fallsBackToKeywordResolverOnlyWhenLlmIntentIsUnresolved() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
