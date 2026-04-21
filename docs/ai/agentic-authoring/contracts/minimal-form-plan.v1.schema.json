@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxis.local/ai/agentic-authoring/minimal-form-plan.v1.schema.json",
+  "title": "MinimalFormPlan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "profileId",
+    "targetApp",
+    "targetComponentId",
+    "apiUseCaseResolutionRef",
+    "fieldSelectionPlanRef",
+    "submitActionRef",
+    "fields",
+    "sourceRefs"
+  ],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "profileId": { "const": "create-minimal-form" },
+    "targetApp": { "type": "string", "minLength": 1 },
+    "targetComponentId": { "type": "string", "minLength": 1 },
+    "apiUseCaseResolutionRef": { "type": "string", "minLength": 1 },
+    "fieldSelectionPlanRef": { "type": "string", "minLength": 1 },
+    "submitActionRef": { "type": "string", "minLength": 1 },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "label", "controlType", "required"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "controlType": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "defaultValue": {},
+          "optionSource": { "type": "string" },
+          "schemaPointer": { "type": "string" }
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "clarificationNeed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["needed", "code"],
+      "properties": {
+        "needed": { "type": "boolean" },
+        "code": {
+          "enum": ["none", "field-choice", "business-default", "option-ambiguity", "policy-unsatisfied"]
+        },
+        "question": { "type": "string" }
+      }
+    },
+    "validationExpectations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "sourceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}
