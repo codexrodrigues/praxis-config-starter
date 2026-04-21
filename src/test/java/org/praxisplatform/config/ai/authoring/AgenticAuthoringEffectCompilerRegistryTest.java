@@ -359,6 +359,50 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("group").path("selectedIndex").asInt()).isEqualTo(1);
     }
 
+    @Test
+    void shouldCompileTabsSetActiveItemDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "tabs": [
+                    { "id": "general", "textLabel": "Geral" },
+                    { "id": "security", "textLabel": "Seguranca" }
+                  ],
+                  "group": {
+                    "selectedIndex": 0
+                  },
+                  "nav": {
+                    "selectedIndex": 0
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                operationWithHandler("tab.active.set", "activeTab", "tab-index-or-id", true,
+                        "compile-domain-patch", "tabs.set-active-item", "group.selectedIndex"),
+                plan("\"security\"", "{ \"selectedIndex\": 1, \"tabId\": \"security\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-active-index");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("tabs.set-active-item");
+        assertThat(patchOperation.path("selectedIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("selectedTabId").asText()).isEqualTo("security");
+        assertThat(patchOperation.path("groupSelectedIndexBefore").asInt()).isZero();
+        assertThat(patchOperation.path("groupSelectedIndexAfter").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("navSelectedIndexBefore").asInt()).isZero();
+        assertThat(patchOperation.path("navSelectedIndexAfter").asInt()).isEqualTo(1);
+        assertThat(proposedConfig.path("group").path("selectedIndex").asInt()).isEqualTo(1);
+        assertThat(proposedConfig.path("nav").path("selectedIndex").asInt()).isEqualTo(1);
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

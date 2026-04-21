@@ -74,7 +74,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     boolean supportsDomainPatchHandler(String handler) {
         return "stepper-step-reorder".equals(handler)
                 || "tabs.reorder-tab-and-preserve-selection".equals(handler)
-                || "tabs.remove-tab-and-reselect".equals(handler);
+                || "tabs.remove-tab-and-reselect".equals(handler)
+                || "tabs.set-active-item".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -156,6 +157,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     resolved,
                     proposedConfig,
                     failures);
+            case "tabs.set-active-item" -> compileTabsSetActiveItem(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
             default -> {
                 failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
                 yield null;
@@ -230,6 +239,64 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("beforeStepId", beforeStepId);
         compiled.put("selectedIndexBefore", selectedIndexBefore);
         compiled.put("selectedIndexAfter", selectedIndexAfter);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileTabsSetActiveItem(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode tabs = arrayAt(proposedConfig, "tabs", false);
+        if (tabs == null) {
+            failures.add("tabs.set-active-item path is not an array: tabs[]");
+            return null;
+        }
+        int selectedIndex = indexOfResolvedArrayTarget(resolved);
+        if (selectedIndex < 0 || selectedIndex >= tabs.size()) {
+            String tabId = resolved != null ? text(resolved.value(), "id") : "";
+            selectedIndex = indexOfObjectByKey(tabs, "id", tabId);
+        }
+        if (selectedIndex < 0 || selectedIndex >= tabs.size()) {
+            failures.add("tabs.set-active-item target not found in tabs[]");
+            return null;
+        }
+        JsonNode selectedTab = tabs.get(selectedIndex);
+        String selectedTabId = text(selectedTab, "id");
+
+        int groupSelectedIndexBefore = proposedConfig.path("group").path("selectedIndex").asInt(-1);
+        int navSelectedIndexBefore = proposedConfig.path("nav").path("selectedIndex").asInt(-1);
+        objectAt(proposedConfig, "group", true).put("selectedIndex", selectedIndex);
+        if (proposedConfig.path("nav").isObject()) {
+            objectAt(proposedConfig, "nav", true).put("selectedIndex", selectedIndex);
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "set-active-index");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "group.selectedIndex");
+        compiled.put("resolvedPath", resolved != null ? resolved.path() : "");
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("selectedIndex", selectedIndex);
+        compiled.put("selectedTabId", selectedTabId);
+        compiled.put("groupSelectedIndexBefore", groupSelectedIndexBefore);
+        compiled.put("groupSelectedIndexAfter", selectedIndex);
+        compiled.put("navSelectedIndexBefore", navSelectedIndexBefore);
+        if (proposedConfig.path("nav").isObject()) {
+            compiled.put("navSelectedIndexAfter", selectedIndex);
+        }
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
         compiled.set("affectedPaths", operation.path("affectedPaths"));
@@ -626,6 +693,21 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
         }
         return -1;
+    }
+
+    private int indexOfResolvedArrayTarget(AgenticAuthoringResolvedTarget resolved) {
+        if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
+            return -1;
+        }
+        int slash = resolved.path().lastIndexOf('/');
+        if (slash < 0 || slash == resolved.path().length() - 1) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(resolved.path().substring(slash + 1));
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
     }
 
     private int resolveReorderIndex(

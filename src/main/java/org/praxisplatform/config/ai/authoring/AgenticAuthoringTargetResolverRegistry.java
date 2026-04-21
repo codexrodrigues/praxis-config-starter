@@ -117,6 +117,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "panel-by-id-or-title", "panel-content-by-id" -> addArrayMatches(candidates, config, "panels[]", List.of("id", "title", "label"), targetValue);
             case "step-by-id-or-label", "step-content-by-id" -> addArrayMatches(candidates, config, "steps[]", List.of("id", "label", "textLabel", "title"), targetValue);
             case "tab-by-id-or-label" -> addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
+            case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
             case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
             case "rule-by-id", "rule-by-id-or-name" -> addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
             case "action-by-id", "form-action-by-id", "actions-by-id" -> {
@@ -207,6 +208,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "step-by-id-or-label",
                 "step-content-by-id",
                 "tab-by-id-or-label",
+                "tab-index-or-id",
                 "rich-block-by-id-or-index",
                 "rich-text-node-by-id-or-path",
                 "rule-by-id",
@@ -239,6 +241,21 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 candidates.add(new ResolvedCandidate(arrayPath + "/" + i, item));
             }
         }
+    }
+
+    private void addTabIndexOrIdMatches(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
+        JsonNode tabs = resolvePath(config, "tabs");
+        if (!tabs.isArray()) {
+            return;
+        }
+        Integer index = parseNonNegativeInt(targetValue);
+        if (index != null) {
+            if (index < tabs.size()) {
+                candidates.add(new ResolvedCandidate("tabs[]/" + index, tabs.get(index)));
+            }
+            return;
+        }
+        addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
     }
 
     private void addRecursiveArrayMatches(
@@ -370,6 +387,18 @@ public final class AgenticAuthoringTargetResolverRegistry {
             }
         }
         return "";
+    }
+
+    private Integer parseNonNegativeInt(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            return parsed >= 0 ? parsed : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private String text(JsonNode node, String field) {

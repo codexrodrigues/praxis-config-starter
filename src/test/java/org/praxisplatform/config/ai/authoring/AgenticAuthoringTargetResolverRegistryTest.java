@@ -172,6 +172,36 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(result.path()).isEqualTo("steps[]/0");
     }
 
+    @Test
+    void shouldResolveTabByIndexOrId() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "tabs": [
+                    { "id": "general", "textLabel": "Geral" },
+                    { "id": "security", "textLabel": "Seguranca" }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget byIndex = registry.resolve(
+                "praxis-tabs",
+                operation("tab.active.set", "activeTab", "tab-index-or-id", "fail", true),
+                objectMapper.readTree("1"),
+                config);
+        AgenticAuthoringResolvedTarget byId = registry.resolve(
+                "praxis-tabs",
+                operation("tab.active.set", "activeTab", "tab-index-or-id", "fail", true),
+                objectMapper.readTree("\"security\""),
+                config);
+
+        assertThat(byIndex.status()).isEqualTo("resolved");
+        assertThat(byIndex.resolver()).isEqualTo("tab-index-or-id");
+        assertThat(byIndex.path()).isEqualTo("tabs[]/1");
+        assertThat(byIndex.value().path("id").asText()).isEqualTo("security");
+        assertThat(byId.status()).isEqualTo("resolved");
+        assertThat(byId.path()).isEqualTo("tabs[]/1");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,

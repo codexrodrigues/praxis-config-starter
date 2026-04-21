@@ -701,6 +701,67 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesTabsSetActiveDomainPatchWhenHandlerExists() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-tabs",
+                payloadFromClasspathSnapshot("praxis-tabs"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "tabs": [
+                      { "id": "general", "textLabel": "Geral" },
+                      { "id": "security", "textLabel": "Seguranca" }
+                    ],
+                    "group": {
+                      "selectedIndex": 0
+                    },
+                    "nav": {
+                      "selectedIndex": 0
+                    }
+                  },
+                  "plan": {
+                    "operationId": "tab.active.set",
+                    "target": "security",
+                    "input": {
+                      "selectedIndex": 1,
+                      "tabId": "security"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: active-tab-exists for tab.active.set")
+                .contains("validator declared without backend implementation: selected-index-in-range for tab.active.set");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-tabs",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("set-active-index");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("tabs.set-active-item");
+        assertThat(operation.path("selectedIndex").asInt()).isEqualTo(1);
+        assertThat(operation.path("selectedTabId").asText()).isEqualTo("security");
+        assertThat(operation.path("groupSelectedIndexBefore").asInt()).isZero();
+        assertThat(operation.path("groupSelectedIndexAfter").asInt()).isEqualTo(1);
+        assertThat(operation.path("navSelectedIndexBefore").asInt()).isZero();
+        assertThat(operation.path("navSelectedIndexAfter").asInt()).isEqualTo(1);
+        assertThat(result.patch().path("proposedConfig").path("group").path("selectedIndex").asInt())
+                .isEqualTo(1);
+        assertThat(result.patch().path("proposedConfig").path("nav").path("selectedIndex").asInt())
+                .isEqualTo(1);
+    }
+
+    @Test
     void compilesStepperLabelChangeFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-stepper",
