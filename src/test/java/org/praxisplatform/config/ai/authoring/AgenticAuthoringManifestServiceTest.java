@@ -584,7 +584,7 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
-    void warnsOnTabsDomainPatchAndRejectsCompilationWithoutHandler() throws Exception {
+    void compilesTabsDomainPatchWhenHandlerExists() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-tabs",
                 payloadFromClasspathSnapshot("praxis-tabs"));
@@ -596,14 +596,14 @@ class AgenticAuthoringManifestServiceTest {
                       { "id": "security", "textLabel": "Seguranca" }
                     ],
                     "group": {
-                      "selectedIndex": 0
+                      "selectedIndex": 1
                     }
                   },
                   "plan": {
                     "operationId": "tab.order.set",
-                    "target": "general",
+                    "target": "security",
                     "input": {
-                      "beforeTabId": "security"
+                      "beforeTabId": "general"
                     }
                   }
                 }
@@ -615,14 +615,30 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings()).contains("operation requires domain compiler: tab.order.set");
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: tab-exists for tab.order.set")
+                .contains("validator declared without backend implementation: tab-order-deterministic for tab.order.set");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-tabs",
                 objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
 
-        assertThat(result.compiled()).isFalse();
-        assertThat(result.failures()).contains("domain compiler is required for operation: tab.order.set");
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("reorder-by-key");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("tabs.reorder-tab-and-preserve-selection");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("security");
+        assertThat(operation.path("fromIndex").asInt()).isEqualTo(1);
+        assertThat(operation.path("toIndex").asInt()).isZero();
+        assertThat(operation.path("selectedIndexBefore").asInt()).isEqualTo(1);
+        assertThat(operation.path("selectedIndexAfter").asInt()).isZero();
+        assertThat(result.patch().path("proposedConfig").path("tabs").get(0).path("id").asText())
+                .isEqualTo("security");
+        assertThat(result.patch().path("proposedConfig").path("tabs").get(1).path("id").asText())
+                .isEqualTo("general");
+        assertThat(result.patch().path("proposedConfig").path("group").path("selectedIndex").asInt())
+                .isZero();
     }
 
     @Test

@@ -72,7 +72,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     boolean supportsDomainPatchHandler(String handler) {
-        return "stepper-step-reorder".equals(handler);
+        return "stepper-step-reorder".equals(handler)
+                || "tabs.reorder-tab-and-preserve-selection".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -131,6 +132,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         String handler = text(effect, "handler");
         return switch (handler) {
             case "stepper-step-reorder" -> compileStepperStepReorder(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "tabs.reorder-tab-and-preserve-selection" -> compileTabsReorderAndPreserveSelection(
                     componentId,
                     operation,
                     effect,
@@ -210,6 +219,81 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("fromIndex", fromIndex);
         compiled.put("toIndex", targetIndex);
         compiled.put("beforeStepId", beforeStepId);
+        compiled.put("selectedIndexBefore", selectedIndexBefore);
+        compiled.put("selectedIndexAfter", selectedIndexAfter);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileTabsReorderAndPreserveSelection(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode tabs = arrayAt(proposedConfig, "tabs", false);
+        if (tabs == null) {
+            failures.add("tabs.reorder-tab-and-preserve-selection path is not an array: tabs[]");
+            return null;
+        }
+        String tabId = resolved != null ? text(resolved.value(), "id") : "";
+        int fromIndex = indexOfObjectByKey(tabs, "id", tabId);
+        if (fromIndex < 0) {
+            failures.add("tabs.reorder-tab-and-preserve-selection target not found: tabs[] id=" + tabId);
+            return null;
+        }
+        String beforeTabId = text(planOperation.path("input"), "beforeTabId");
+        if (beforeTabId.isBlank()) {
+            failures.add("tabs.reorder-tab-and-preserve-selection requires beforeTabId");
+            return null;
+        }
+        int beforeIndex = indexOfObjectByKey(tabs, "id", beforeTabId);
+        if (beforeIndex < 0) {
+            failures.add("tabs.reorder-tab-and-preserve-selection before tab not found: tabs[] id=" + beforeTabId);
+            return null;
+        }
+
+        JsonNode group = proposedConfig.path("group");
+        int selectedIndexBefore = group.path("selectedIndex").asInt(-1);
+        String selectedTabId = selectedIndexBefore >= 0 && selectedIndexBefore < tabs.size()
+                ? text(tabs.get(selectedIndexBefore), "id")
+                : "";
+
+        JsonNode moved = tabs.remove(fromIndex);
+        int targetIndex = beforeIndex;
+        if (fromIndex < beforeIndex) {
+            targetIndex = beforeIndex - 1;
+        }
+        tabs.insert(targetIndex, moved);
+
+        int selectedIndexAfter = selectedIndexBefore;
+        if (!selectedTabId.isBlank()) {
+            selectedIndexAfter = indexOfObjectByKey(tabs, "id", selectedTabId);
+            if (selectedIndexAfter >= 0) {
+                objectAt(proposedConfig, "group", true).put("selectedIndex", selectedIndexAfter);
+            }
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "reorder-by-key");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "tabs[]");
+        compiled.put("resolvedPath", resolved != null ? resolved.path() : "");
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", tabId);
+        compiled.put("fromIndex", fromIndex);
+        compiled.put("toIndex", targetIndex);
+        compiled.put("beforeTabId", beforeTabId);
         compiled.put("selectedIndexBefore", selectedIndexBefore);
         compiled.put("selectedIndexAfter", selectedIndexAfter);
         compiled.set("target", planOperation.path("target"));
