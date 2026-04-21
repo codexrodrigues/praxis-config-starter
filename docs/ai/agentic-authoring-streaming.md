@@ -97,8 +97,11 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 O processamento assincrono do turno deve respeitar
 `praxis.ai.stream.processing-timeout-seconds` para evitar que o cliente fique
 preso em estados intermediarios quando retrieval, provider LLM ou compilacao de
-preview nao concluem. Ao estourar esse limite, o backend emite `error` terminal
-com `code=agentic-authoring-timeout` e expira a reserva do turno.
+preview nao concluem. O default da plataforma e `180s`, porque turnos reais de
+authoring podem envolver discovery, RAG, chamada LLM e compilacao de preview no
+mesmo ciclo. Smokes e hosts podem reduzir esse valor explicitamente quando
+usarem doubles deterministas. Ao estourar esse limite, o backend emite `error`
+terminal com `code=agentic-authoring-timeout` e expira a reserva do turno.
 
 Erros terminais devem separar texto de usuario e diagnostico tecnico. `code`
 deve ser estavel para i18n e tratamento no cliente; `assistantMessage` deve ser

@@ -69,7 +69,7 @@ public class AgenticAuthoringTurnStreamService {
     @Value("${praxis.ai.stream.processing-poll-seconds:1}")
     private long processingPollSeconds;
 
-    @Value("${praxis.ai.stream.processing-timeout-seconds:45}")
+    @Value("${praxis.ai.stream.processing-timeout-seconds:180}")
     private long processingTimeoutSeconds;
 
     public StartResult start(

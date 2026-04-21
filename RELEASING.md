@@ -44,11 +44,18 @@ O smoke manual:
 - empacota o `praxis-api-quickstart` contra essa versao local, sem depender do Maven Central;
 - sobe o quickstart empacotado;
 - valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
+- usa `praxis.ai.stream.processing-timeout-seconds=180` por padrao para acomodar turnos reais com discovery, RAG e LLM.
 
 Para reproduzir localmente, primeiro empacote o quickstart e depois rode:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart
+```
+
+Para alterar o timeout do stream no smoke local:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -StreamProcessingTimeoutSeconds 180
 ```
 
 Quando a versao ja estiver publicada no Maven Central, valide tambem o consumidor sem override local:

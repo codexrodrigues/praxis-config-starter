@@ -12,6 +12,7 @@ param(
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
     [int] $StartupTimeoutSec = 90,
+    [int] $StreamProcessingTimeoutSeconds = 180,
     [switch] $UseExistingQuickstart
 )
 
@@ -121,6 +122,7 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_AUTHORING_HTTP_ENABLED = 'true'
 `$env:PRAXIS_AI_AUTHORING_ARTIFACTS_DIR = '$authoringRoot\proofs'
 `$env:PRAXIS_AI_AUTHORING_CONTRACTS_DIR = '$authoringRoot\contracts'
+`$env:PRAXIS_AI_STREAM_PROCESSING_TIMEOUT_SECONDS = '$StreamProcessingTimeoutSeconds'
 `$env:PRAXIS_AI_SECURITY_CORPORATE_MODE = 'false'
 `$env:PRAXIS_AI_SECURITY_ALLOW_HEADER_IDENTITY_IN_LOCAL = 'true'
 `$env:EMBEDDING_PROVIDER = 'mock'
