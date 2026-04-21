@@ -65,6 +65,18 @@ public final class AgenticAuthoringTargetResolverRegistry {
         if (config == null || config.isMissingNode() || config.isNull()) {
             return unresolved(componentId, operationId, kind, resolver, "config is required for target resolution");
         }
+        if (GLOBAL_RESOLVERS.contains(resolver)) {
+            return new AgenticAuthoringResolvedTarget(
+                    STATUS_RESOLVED,
+                    componentId,
+                    operationId,
+                    kind,
+                    resolver,
+                    "$",
+                    config,
+                    List.of("$"),
+                    List.of());
+        }
         String targetValue = targetValue(target);
         if (targetValue.isBlank()) {
             return unresolved(componentId, operationId, kind, resolver, "target value is required");

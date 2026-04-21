@@ -486,6 +486,55 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesSettingsPanelShellConfigurationFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-settings-panel",
+                payloadFromClasspathSnapshot("praxis-settings-panel"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "config": {
+                      "id": "settings-panel",
+                      "title": "Preferencias",
+                      "titleIcon": "settings"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "panel.shell.configure",
+                    "input": {
+                      "title": "Preferencias avancadas",
+                      "titleIcon": "tune"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-settings-panel",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-settings-panel",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("panel.shell.configure");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-object");
+        assertThat(operation.path("path").asText()).isEqualTo("config");
+        assertThat(operation.path("resolvedPath").asText()).isEqualTo("$");
+        assertThat(result.patch().path("proposedConfig").path("config").path("title").asText())
+                .isEqualTo("Preferencias avancadas");
+        assertThat(result.patch().path("proposedConfig").path("config").path("titleIcon").asText())
+                .isEqualTo("tune");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""
