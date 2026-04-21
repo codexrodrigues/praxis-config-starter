@@ -724,6 +724,59 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(items.get(1).path("id").asText()).isEqualTo("archived");
     }
 
+    @Test
+    void shouldCompileRichContentSanitizationPolicyDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      { "id": "intro", "type": "text", "text": "Intro" }
+                    ],
+                    "sanitizationPolicy": {
+                      "allowedUrlProtocols": ["https"],
+                      "maxNodeDepth": 8
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("sanitizationPolicy.set", "sanitizationPolicy", "rich-content-validation-policy", false,
+                        "compile-domain-patch", "rich-content-sanitization-policy", "document"),
+                plan("null", """
+                        {
+                          "allowHtml": false,
+                          "allowedUrlProtocols": ["https", "mailto"],
+                          "allowImageDataUrls": false,
+                          "maxNodeDepth": 10,
+                          "maxNodeCount": 200
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("set-rich-content-sanitization-policy");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-sanitization-policy");
+        assertThat(patchOperation.path("path").asText()).isEqualTo("document.sanitizationPolicy");
+        assertThat(patchOperation.path("previousValue").path("maxNodeDepth").asInt()).isEqualTo(8);
+        assertThat(patchOperation.path("value").path("allowedUrlProtocols")).hasSize(2);
+        JsonNode policy = proposedConfig.path("document").path("sanitizationPolicy");
+        assertThat(policy.path("allowHtml").asBoolean()).isFalse();
+        assertThat(policy.path("allowedUrlProtocols")).hasSize(2);
+        assertThat(policy.path("maxNodeDepth").asInt()).isEqualTo(10);
+        assertThat(policy.path("maxNodeCount").asInt()).isEqualTo(200);
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

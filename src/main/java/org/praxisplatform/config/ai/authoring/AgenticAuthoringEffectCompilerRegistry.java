@@ -82,7 +82,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "rich-content-link-remove".equals(handler)
                 || "rich-content-timeline-item-add".equals(handler)
                 || "rich-content-timeline-item-update".equals(handler)
-                || "rich-content-timeline-item-remove".equals(handler);
+                || "rich-content-timeline-item-remove".equals(handler)
+                || "rich-content-sanitization-policy".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -217,6 +218,13 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     effect,
                     planOperation,
                     resolved,
+                    proposedConfig,
+                    failures);
+            case "rich-content-sanitization-policy" -> compileRichContentSanitizationPolicy(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
                     proposedConfig,
                     failures);
             default -> {
@@ -797,6 +805,91 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileRichContentSanitizationPolicy(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.isObject()) {
+            failures.add("rich-content-sanitization-policy requires object input");
+            return null;
+        }
+        ObjectNode policy = objectMapper.createObjectNode();
+        copySanitizationPolicyField(input, policy, "allowHtml");
+        copySanitizationPolicyField(input, policy, "allowedUrlProtocols");
+        copySanitizationPolicyField(input, policy, "allowImageDataUrls");
+        copySanitizationPolicyField(input, policy, "maxNodeDepth");
+        copySanitizationPolicyField(input, policy, "maxNodeCount");
+        if (policy.isEmpty()) {
+            failures.add("rich-content-sanitization-policy requires at least one policy field");
+            return null;
+        }
+        if (!validateSanitizationPolicy(policy, failures)) {
+            return null;
+        }
+        ObjectNode document = objectAt(proposedConfig, "document", true);
+        if (document == null) {
+            failures.add("rich-content-sanitization-policy document is not an object");
+            return null;
+        }
+        ObjectNode currentPolicy = document.path("sanitizationPolicy") instanceof ObjectNode existing
+                ? existing
+                : document.putObject("sanitizationPolicy");
+        JsonNode previousPolicy = currentPolicy.deepCopy();
+        currentPolicy.setAll(policy);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "set-rich-content-sanitization-policy");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "document.sanitizationPolicy");
+        compiled.set("previousValue", previousPolicy);
+        compiled.set("value", policy);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private void copySanitizationPolicyField(JsonNode input, ObjectNode policy, String field) {
+        if (input.has(field)) {
+            policy.set(field, input.path(field));
+        }
+    }
+
+    private boolean validateSanitizationPolicy(ObjectNode policy, List<String> failures) {
+        if (policy.has("allowHtml") && policy.path("allowHtml").asBoolean(true)) {
+            failures.add("rich-content-sanitization-policy does not allow arbitrary HTML");
+        }
+        if (policy.path("allowedUrlProtocols").isArray()) {
+            for (JsonNode protocol : policy.path("allowedUrlProtocols")) {
+                String normalized = protocol.asText("").replace(":", "").toLowerCase();
+                if (!safeRichContentUrlProtocols().contains(normalized)) {
+                    failures.add("rich-content-sanitization-policy unsafe URL protocol: " + protocol.asText(""));
+                }
+            }
+        }
+        if (policy.has("maxNodeDepth")) {
+            int maxNodeDepth = policy.path("maxNodeDepth").asInt(-1);
+            if (maxNodeDepth < 1 || maxNodeDepth > 20) {
+                failures.add("rich-content-sanitization-policy maxNodeDepth must be between 1 and 20");
+            }
+        }
+        if (policy.has("maxNodeCount")) {
+            int maxNodeCount = policy.path("maxNodeCount").asInt(-1);
+            if (maxNodeCount < 1 || maxNodeCount > 1000) {
+                failures.add("rich-content-sanitization-policy maxNodeCount must be between 1 and 1000");
+            }
+        }
+        return failures.stream().noneMatch(failure -> failure.startsWith("rich-content-sanitization-policy"));
+    }
+
     private ObjectNode compileTabsSetActiveItem(
             String componentId,
             JsonNode operation,
@@ -1285,6 +1378,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     private String timelineBlockPathFromItemPath(String itemPath) {
         int marker = itemPath == null ? -1 : itemPath.lastIndexOf(".items[]/");
         return marker < 0 ? "" : itemPath.substring(0, marker);
+    }
+
+    private Set<String> safeRichContentUrlProtocols() {
+        return Set.of("http", "https", "mailto", "tel");
     }
 
     private Set<String> timelineItemFields() {

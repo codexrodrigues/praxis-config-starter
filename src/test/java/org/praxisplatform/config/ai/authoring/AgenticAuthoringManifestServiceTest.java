@@ -973,7 +973,6 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.warnings())
                 .contains("validator declared without backend implementation: block-exists for mediaBlock.update")
                 .contains("validator declared without backend implementation: media-block-target-valid for mediaBlock.update")
-                .contains("validator declared without backend implementation: unsafe-url-rejected for mediaBlock.update")
                 .contains("validator declared without backend implementation: document-shape-canonical for mediaBlock.update");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
@@ -1261,6 +1260,103 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(items).hasSize(2);
         assertThat(items.get(0).path("id").asText()).isEqualTo("created");
         assertThat(items.get(1).path("id").asText()).isEqualTo("archived");
+    }
+
+    @Test
+    void compilesRichContentSanitizationPolicyFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "intro", "type": "text", "text": "Intro" }
+                      ],
+                      "sanitizationPolicy": {
+                        "allowedUrlProtocols": ["https"],
+                        "maxNodeDepth": 8
+                      }
+                    }
+                  },
+                  "plan": {
+                    "operationId": "sanitizationPolicy.set",
+                    "confirmed": true,
+                    "input": {
+                      "allowHtml": false,
+                      "allowedUrlProtocols": ["https", "mailto"],
+                      "allowImageDataUrls": false,
+                      "maxNodeDepth": 10,
+                      "maxNodeCount": 200
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: editor-runtime-round-trip for sanitizationPolicy.set");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("sanitizationPolicy.set");
+        assertThat(operation.path("op").asText()).isEqualTo("set-rich-content-sanitization-policy");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("rich-content-sanitization-policy");
+        assertThat(operation.path("previousValue").path("maxNodeDepth").asInt()).isEqualTo(8);
+        JsonNode policy = result.patch().path("proposedConfig").path("document").path("sanitizationPolicy");
+        assertThat(policy.path("allowHtml").asBoolean()).isFalse();
+        assertThat(policy.path("allowedUrlProtocols")).hasSize(2);
+        assertThat(policy.path("maxNodeDepth").asInt()).isEqualTo(10);
+        assertThat(policy.path("maxNodeCount").asInt()).isEqualTo(200);
+    }
+
+    @Test
+    void rejectsUnsafeRichContentSanitizationPolicyFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": []
+                    }
+                  },
+                  "plan": {
+                    "operationId": "sanitizationPolicy.set",
+                    "confirmed": true,
+                    "input": {
+                      "allowHtml": true,
+                      "allowedUrlProtocols": ["https", "javascript"]
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isFalse();
+        assertThat(validation.failures())
+                .anyMatch(failure -> failure.contains("sanitizationPolicy.set.allowHtml must equal const false"))
+                .anyMatch(failure -> failure.contains("validator unsafe-html-rejected failed for sanitizationPolicy.set"))
+                .anyMatch(failure -> failure.contains("validator unsafe-url-rejected failed for sanitizationPolicy.set"));
     }
 
     @Test

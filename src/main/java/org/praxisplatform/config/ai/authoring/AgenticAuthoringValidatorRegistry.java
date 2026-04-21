@@ -45,6 +45,10 @@ public final class AgenticAuthoringValidatorRegistry {
             "section-id-unique",
             "destructive-removal-confirmation",
             "remote-resource-binding-safe",
+            "sanitization-policy-explicit",
+            "unsafe-html-rejected",
+            "unsafe-url-rejected",
+            "security-change-confirmed",
             "json-logic-valid",
             "logic-valid",
             "renderer-supported",
@@ -103,12 +107,69 @@ public final class AgenticAuthoringValidatorRegistry {
                 }
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
+                case "sanitization-policy-explicit" -> validateSanitizationPolicyExplicit(operationId, planOperation, failures);
+                case "unsafe-html-rejected" -> validateUnsafeHtmlRejected(operationId, planOperation, failures);
+                case "unsafe-url-rejected" -> validateUnsafeUrlRejected(operationId, planOperation, failures);
+                case "security-change-confirmed" -> validateSecurityChangeConfirmed(operationId, planOperation, failures);
                 case "json-logic-valid", "logic-valid", "conditional-style-valid" ->
                         validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 case "grouping-fields-exist", "filter-fields-exist" ->
                         validateInputFieldsExist(operationId, planOperation.path("input"), config, failures);
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
+        }
+    }
+
+    private void validateSanitizationPolicyExplicit(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!(input.has("allowHtml")
+                || input.has("allowedUrlProtocols")
+                || input.has("allowImageDataUrls")
+                || input.has("maxNodeDepth")
+                || input.has("maxNodeCount"))) {
+            failures.add("validator sanitization-policy-explicit failed for " + operationId
+                    + ": at least one policy field is required");
+        }
+    }
+
+    private void validateUnsafeHtmlRejected(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("allowHtml") && input.path("allowHtml").asBoolean(true)) {
+            failures.add("validator unsafe-html-rejected failed for " + operationId
+                    + ": arbitrary HTML is not supported");
+        }
+    }
+
+    private void validateUnsafeUrlRejected(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode protocols = planOperation.path("input").path("allowedUrlProtocols");
+        if (!protocols.isArray()) {
+            return;
+        }
+        for (JsonNode protocol : protocols) {
+            String normalized = protocol.asText("").replace(":", "").toLowerCase();
+            if (!safeRichContentUrlProtocols().contains(normalized)) {
+                failures.add("validator unsafe-url-rejected failed for " + operationId
+                        + ": unsupported URL protocol " + protocol.asText(""));
+            }
+        }
+    }
+
+    private void validateSecurityChangeConfirmed(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        if (!planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator security-change-confirmed failed for " + operationId
+                    + ": explicit confirmation is required");
         }
     }
 
@@ -164,6 +225,10 @@ public final class AgenticAuthoringValidatorRegistry {
             }
         }
         return false;
+    }
+
+    private Set<String> safeRichContentUrlProtocols() {
+        return Set.of("http", "https", "mailto", "tel");
     }
 
     private void validateJsonLogicLikeInput(String operationId, JsonNode input, List<String> failures) {
