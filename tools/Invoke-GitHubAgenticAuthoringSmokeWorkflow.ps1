@@ -4,7 +4,10 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "main",
+    [string] $QuickstartRef = "3cd1344fdbd772f54b4261a0527d361e3ef1df33",
+    [string] $UiRef = "main",
+    [int] $StreamProcessingTimeoutSeconds = 180,
+    [switch] $RunPageBuilderFullE2E,
     [string] $Token = "",
     [int] $PollIntervalSec = 15,
     [int] $TimeoutSec = 1800,
@@ -42,6 +45,9 @@ $dispatchBody = @{
     inputs = @{
         provider = $Provider
         quickstart_ref = $QuickstartRef
+        ui_ref = $UiRef
+        run_page_builder_full_e2e = [bool] $RunPageBuilderFullE2E.IsPresent
+        stream_processing_timeout_seconds = [string] $StreamProcessingTimeoutSeconds
     }
 } | ConvertTo-Json -Depth 6 -Compress
 
@@ -59,6 +65,8 @@ if ($NoWait.IsPresent) {
         ref = $Ref
         provider = $Provider
         quickstartRef = $QuickstartRef
+        uiRef = $UiRef
+        runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
         dispatched = $true
         waiting = $false
     } | ConvertTo-Json -Depth 4
@@ -104,6 +112,8 @@ $result = [pscustomobject]@{
     ref = $Ref
     provider = $Provider
     quickstartRef = $QuickstartRef
+    uiRef = $UiRef
+    runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
     status = $run.status
     conclusion = $run.conclusion
     url = $run.html_url

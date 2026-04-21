@@ -416,9 +416,10 @@ isolated unit/integration tests.
 
 GitHub Actions gate:
 - Run `Agentic Authoring HTTP Smoke` manually before publishing a new Maven Central version.
-- Use `provider=openai` and `quickstart_ref=main` as the default release gate.
+- Use `provider=openai` with the workflow's default `quickstart_ref` as the release gate. The default is pinned to a known quickstart commit whose dependencies are already published, so the starter gate does not fail when quickstart `main` temporarily depends on unreleased Maven artifacts.
 - Required repository secret for the default gate: `PRAXIS_AI_OPENAI_API_KEY`.
 - The workflow installs the checked-out starter locally, packages `praxis-api-quickstart` against that local version and validates plan, compile, preview, apply, SSE, replay and cleanup.
+- For page-builder, browser SSE or full Angular authoring changes, run the same workflow with `run_page_builder_full_e2e=true` and `ui_ref=main`. This opt-in gate also checks out `praxis-ui-angular`, starts the quickstart on `8088`, starts Angular on `4003`, and runs `praxis-page-builder-agentic-validation.playwright.config.ts` against the real provider stream with a controlled retry for provider variability.
 
 ### Usage Example (Java)
 
