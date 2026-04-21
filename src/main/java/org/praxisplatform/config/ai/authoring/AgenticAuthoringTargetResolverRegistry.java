@@ -78,14 +78,14 @@ public final class AgenticAuthoringTargetResolverRegistry {
                     List.of());
         }
         String targetValue = targetValue(target);
-        if (targetValue.isBlank()) {
+        if (targetValue.isBlank() && !"rich-timeline-item-by-block-id-and-item-id".equals(resolver)) {
             return unresolved(componentId, operationId, kind, resolver, "target value is required");
         }
-        List<ResolvedCandidate> candidates = resolveCandidates(resolver, kind, config, targetValue);
+        List<ResolvedCandidate> candidates = resolveCandidates(resolver, kind, config, target, targetValue);
         if (candidates.isEmpty() && !isSupportedResolver(resolver)) {
             return unresolved(componentId, operationId, kind, resolver, "unsupported target resolver: " + resolver);
         }
-        return resolvedFromCandidates(componentId, operation, targetValue, candidates);
+        return resolvedFromCandidates(componentId, operation, targetValue.isBlank() ? target.toString() : targetValue, candidates);
     }
 
     AgenticAuthoringResolvedTarget unresolved(
@@ -106,7 +106,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 List.of(failure));
     }
 
-    private List<ResolvedCandidate> resolveCandidates(String resolver, String kind, JsonNode config, String targetValue) {
+    private List<ResolvedCandidate> resolveCandidates(String resolver, String kind, JsonNode config, JsonNode target, String targetValue) {
         List<ResolvedCandidate> candidates = new ArrayList<>();
         switch (resolver) {
             case "column-by-field" -> addArrayMatches(candidates, config, "columns[]", List.of("field"), targetValue);
@@ -119,6 +119,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "tab-by-id-or-label" -> addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
             case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
             case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
+            case "rich-timeline-item-by-block-id-and-item-id" -> addRichTimelineItemMatches(candidates, config, target, targetValue);
             case "rule-by-id", "rule-by-id-or-name" -> addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
             case "action-by-id", "form-action-by-id", "actions-by-id" -> {
                 addArrayMatches(candidates, config, "actions.custom[]", List.of("id", "name", "action"), targetValue);
@@ -214,6 +215,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "rich-media-node-by-id-or-path",
                 "rich-link-node-by-id-or-path",
                 "rich-timeline-node-by-id-or-path",
+                "rich-timeline-item-by-block-id-and-item-id",
                 "rule-by-id",
                 "rule-by-id-or-name",
                 "action-by-id",
@@ -259,6 +261,57 @@ public final class AgenticAuthoringTargetResolverRegistry {
             return;
         }
         addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
+    }
+
+    private void addRichTimelineItemMatches(
+            List<ResolvedCandidate> candidates,
+            JsonNode config,
+            JsonNode target,
+            String targetValue) {
+        JsonNode nodes = resolvePath(config, "document.nodes");
+        if (!nodes.isArray()) {
+            return;
+        }
+        String timelineBlockId = target.isObject()
+                ? firstText(target, "timelineBlockId", "blockId", "parentId")
+                : "";
+        String itemId = target.isObject()
+                ? firstText(target, "itemId", "id", "key", "value")
+                : targetValue;
+        Integer itemIndex = null;
+        if (target.isObject()) {
+            itemIndex = parseNonNegativeInt(firstText(target, "itemIndex", "index"));
+        }
+        if (timelineBlockId.isBlank() || (itemId.isBlank() && itemIndex == null)) {
+            return;
+        }
+        for (int blockIndex = 0; blockIndex < nodes.size(); blockIndex++) {
+            JsonNode block = nodes.get(blockIndex);
+            if (!matchesAnyKey(block, List.of("id", "path", "key"), timelineBlockId)) {
+                continue;
+            }
+            JsonNode items = block.path("items");
+            if (!items.isArray()) {
+                return;
+            }
+            if (itemIndex != null) {
+                if (itemIndex < items.size()) {
+                    candidates.add(new ResolvedCandidate(
+                            "document.nodes[]/" + blockIndex + ".items[]/" + itemIndex,
+                            items.get(itemIndex)));
+                }
+                return;
+            }
+            for (int itemPosition = 0; itemPosition < items.size(); itemPosition++) {
+                JsonNode item = items.get(itemPosition);
+                if (matchesAnyKey(item, List.of("id", "key"), itemId)) {
+                    candidates.add(new ResolvedCandidate(
+                            "document.nodes[]/" + blockIndex + ".items[]/" + itemPosition,
+                            item));
+                }
+            }
+            return;
+        }
     }
 
     private void addRecursiveArrayMatches(
@@ -402,6 +455,16 @@ public final class AgenticAuthoringTargetResolverRegistry {
         } catch (NumberFormatException ex) {
             return null;
         }
+    }
+
+    private String firstText(JsonNode node, String... fields) {
+        for (String field : fields) {
+            String value = text(node, field);
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String text(JsonNode node, String field) {

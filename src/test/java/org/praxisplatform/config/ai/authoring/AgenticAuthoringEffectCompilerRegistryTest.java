@@ -604,6 +604,67 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(items.get(2).path("id").asText()).isEqualTo("published");
     }
 
+    @Test
+    void shouldCompileRichContentTimelineItemUpdateDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "history",
+                        "type": "timeline",
+                        "items": [
+                          { "id": "created", "title": "Created" },
+                          { "id": "published", "title": "Published", "subtitle": "Draft" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("timeline.item.update", "timelineItem", "rich-timeline-item-by-block-id-and-item-id", true,
+                        "compile-domain-patch", "rich-content-timeline-item-update", "document.nodes[].items[].title"),
+                plan("""
+                        {
+                          "timelineBlockId": "history",
+                          "itemId": "published"
+                        }
+                        """, """
+                        {
+                          "timelineBlockId": "history",
+                          "patch": {
+                            "title": "Published live",
+                            "badge": "done"
+                          }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("merge-rich-timeline-item");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-timeline-item-update");
+        assertThat(patchOperation.path("timelineBlockId").asText()).isEqualTo("history");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("published");
+        assertThat(patchOperation.path("value").path("title").asText()).isEqualTo("Published live");
+        assertThat(patchOperation.path("value").path("badge").asText()).isEqualTo("done");
+        JsonNode item = proposedConfig.path("document").path("nodes").get(0).path("items").get(1);
+        assertThat(item.path("title").asText()).isEqualTo("Published live");
+        assertThat(item.path("subtitle").asText()).isEqualTo("Draft");
+        assertThat(item.path("badge").asText()).isEqualTo("done");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,
