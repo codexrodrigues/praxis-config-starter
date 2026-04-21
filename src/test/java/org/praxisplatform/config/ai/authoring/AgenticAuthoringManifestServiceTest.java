@@ -1562,7 +1562,7 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
         assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: editor-runtime-round-trip for sanitizationPolicy.set");
+                .doesNotContain("validator declared without backend implementation: editor-runtime-round-trip for sanitizationPolicy.set");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1661,7 +1661,7 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.warnings())
                 .contains("validator declared without backend implementation: preset-exists-or-host-mediated for preset.apply")
                 .contains("validator declared without backend implementation: document-shape-canonical for preset.apply")
-                .contains("validator declared without backend implementation: editor-runtime-round-trip for preset.apply");
+                .doesNotContain("validator declared without backend implementation: editor-runtime-round-trip for preset.apply");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",

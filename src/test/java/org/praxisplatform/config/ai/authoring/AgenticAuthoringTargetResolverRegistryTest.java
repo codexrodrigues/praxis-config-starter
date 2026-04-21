@@ -90,6 +90,19 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldTreatChartRootResolversAsGlobalWhenOptional() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", "fail", false),
+                objectMapper.createObjectNode(),
+                objectMapper.readTree("{ \"chartDocument\": { \"kind\": \"bar\" } }"));
+
+        assertThat(result.status()).isEqualTo("not-required");
+        assertThat(result.kind()).isEqualTo("dataBinding");
+        assertThat(result.resolver()).isEqualTo("x-ui-chart-source-and-field-catalog");
+    }
+
+    @Test
     void shouldResolveExpansionPanelByIdOrTitle() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-expansion",

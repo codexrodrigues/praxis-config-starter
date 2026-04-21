@@ -383,6 +383,66 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator child-inputs-serializable failed for childHost.configure: inputs must not contain absolute remote URLs");
     }
 
+    @Test
+    void shouldValidateChartFieldsResourceAxisAndEvents() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "availableFields": [
+                    { "name": "month" },
+                    { "name": "revenue" }
+                  ],
+                  "availableTargets": [
+                    { "id": "orders-table" }
+                  ],
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "bar",
+                    "source": { "kind": "praxis.stats", "resource": "/api/sales/stats" },
+                    "dimensions": [{ "field": "month" }],
+                    "metrics": [{ "field": "revenue", "aggregation": "sum", "axis": "primary" }]
+                  }
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "series-field-exists,series-id-unique,secondary-axis-combo-only,series-field-aggregable"),
+                plan("{}", "{ \"field\": \"missing\", \"aggregation\": \"median\", \"axis\": \"secondary\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "remote-resource-in-api-metadata,stats-operation-supported,bound-fields-exist"),
+                plan("{}", "{ \"sourceKind\": \"praxis.stats\", \"resource\": \"https://evil.example/stats\", \"operation\": \"raw\", \"dimensions\": [{ \"field\": \"unknown\" }] }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
+                        "event-target-governed,event-action-supported,event-mapping-fields-exist"),
+                plan("{}", "{ \"event\": \"pointClick\", \"action\": \"unsafe\", \"target\": \"unknown-widget\", \"mapping\": { \"date\": \"missing\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator chart-fields-exist failed for series.add: unknown field missing",
+                        "validator secondary-axis-combo-only failed for series.add: secondary axis is supported only for combo charts",
+                        "validator series-field-aggregable failed for series.add: unsupported aggregation median",
+                        "validator remote-resource-in-api-metadata failed for data.resource.bind: resource must be a relative governed Praxis path",
+                        "validator stats-operation-supported failed for data.resource.bind: unsupported stats operation raw",
+                        "validator chart-fields-exist failed for data.resource.bind: unknown field unknown",
+                        "validator event-target-governed failed for crossFilter.configure: unknown event target unknown-widget",
+                        "validator event-action-supported failed for crossFilter.configure: unsupported event action unsafe",
+                        "validator chart-fields-exist failed for crossFilter.configure: unknown field missing");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

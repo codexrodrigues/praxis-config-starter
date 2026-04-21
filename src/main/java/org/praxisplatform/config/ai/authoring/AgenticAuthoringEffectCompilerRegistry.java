@@ -124,6 +124,11 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "crud-dialog-host-set".equals(handler)
                 || "crud-permissions-set".equals(handler)
                 || "crud-child-operation-delegate".equals(handler)
+                || "chart-series-add".equals(handler)
+                || "chart-axis-configure".equals(handler)
+                || "chart-data-resource-bind".equals(handler)
+                || "chart-event-cross-filter-configure".equals(handler)
+                || "chart-event-drilldown-configure".equals(handler)
                 || "settings-panel-size-set".equals(handler)
                 || "settings-panel-apply-behavior-set".equals(handler)
                 || "settings-panel-save-behavior-set".equals(handler)
@@ -537,6 +542,45 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     effect,
                     planOperation,
                     proposedConfig,
+                    failures);
+            case "chart-series-add" -> compileChartSeriesAdd(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "chart-axis-configure" -> compileChartAxisConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "chart-data-resource-bind" -> compileChartDataResourceBind(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "chart-event-cross-filter-configure" -> compileChartEventConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "crossFilter",
+                    "configure-chart-cross-filter-event",
+                    failures);
+            case "chart-event-drilldown-configure" -> compileChartEventConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "drillDown",
+                    "configure-chart-drilldown-event",
                     failures);
             case "settings-panel-size-set" -> compileSettingsPanelSizeSet(
                     componentId,
@@ -2850,6 +2894,178 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileChartSeriesAdd(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String field = text(input, "field");
+        if (field.isBlank()) {
+            failures.add("chart-series-add requires input.field");
+            return null;
+        }
+        ArrayNode metrics = arrayAt(proposedConfig, "chartDocument.metrics", true);
+        if (metrics == null) {
+            failures.add("chart-series-add path is not an array: chartDocument.metrics[]");
+            return null;
+        }
+        if (indexOfObjectByKey(metrics, "field", field) >= 0) {
+            failures.add("chart-series-add duplicate metric field: " + field);
+            return null;
+        }
+
+        ObjectNode metric = objectMapper.createObjectNode();
+        metric.put("field", field);
+        copyIfPresent(input, metric, "label");
+        copyIfPresent(input, metric, "aggregation");
+        copyIfPresent(input, metric, "seriesKind");
+        copyIfPresent(input, metric, "axis");
+        copyIfPresent(input, metric, "color");
+        copyIfPresent(input, metric, "format");
+
+        int insertedIndex = metrics.size();
+        String afterField = text(input, "afterField");
+        if (!afterField.isBlank()) {
+            int afterIndex = indexOfObjectByKey(metrics, "field", afterField);
+            if (afterIndex < 0) {
+                failures.add("chart-series-add afterField target not found: " + afterField);
+                return null;
+            }
+            insertedIndex = afterIndex + 1;
+            metrics.insert(insertedIndex, metric);
+        } else {
+            metrics.add(metric);
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "add-chart-series");
+        compiled.put("path", "chartDocument.metrics[]");
+        compiled.put("key", "field");
+        compiled.put("keyValue", field);
+        compiled.put("insertedIndex", insertedIndex);
+        compiled.set("value", metric);
+        return compiled;
+    }
+
+    private ObjectNode compileChartAxisConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode chartDocument = objectAt(proposedConfig, "chartDocument", true);
+        if (chartDocument == null) {
+            failures.add("chart-axis-configure chartDocument is not an object");
+            return null;
+        }
+
+        if (input.has("orientation")) {
+            chartDocument.set("orientation", input.path("orientation"));
+        }
+        String dimensionField = text(input, "dimensionField");
+        if (!dimensionField.isBlank()) {
+            ArrayNode dimensions = arrayAt(proposedConfig, "chartDocument.dimensions", true);
+            ObjectNode dimension = findObjectByKey(dimensions, "field", dimensionField);
+            if (dimension == null) {
+                dimension = objectMapper.createObjectNode();
+                dimension.put("field", dimensionField);
+                dimensions.add(dimension);
+            }
+            copyIfPresent(input, dimension, "dimensionRole", "role");
+        }
+        String metricField = text(input, "metricField");
+        if (!metricField.isBlank()) {
+            ArrayNode metrics = arrayAt(proposedConfig, "chartDocument.metrics", true);
+            ObjectNode metric = findObjectByKey(metrics, "field", metricField);
+            if (metric == null) {
+                failures.add("chart-axis-configure metric target not found: " + metricField);
+                return null;
+            }
+            copyIfPresent(input, metric, "metricAxis", "axis");
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-chart-axis");
+        compiled.put("path", "chartDocument");
+        compiled.set("value", input);
+        return compiled;
+    }
+
+    private ObjectNode compileChartDataResourceBind(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String sourceKind = text(input, "sourceKind");
+        if (sourceKind.isBlank()) {
+            failures.add("chart-data-resource-bind requires input.sourceKind");
+            return null;
+        }
+        ObjectNode chartDocument = objectAt(proposedConfig, "chartDocument", true);
+        if (chartDocument == null) {
+            failures.add("chart-data-resource-bind chartDocument is not an object");
+            return null;
+        }
+        ObjectNode source = objectMapper.createObjectNode();
+        source.put("kind", sourceKind);
+        copyIfPresent(input, source, "resource");
+        copyIfPresent(input, source, "operation");
+        chartDocument.set("source", source);
+        if (input.path("dimensions").isArray()) {
+            chartDocument.set("dimensions", input.path("dimensions").deepCopy());
+        }
+        if (input.path("metrics").isArray()) {
+            chartDocument.set("metrics", input.path("metrics").deepCopy());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "bind-chart-data-resource");
+        compiled.put("path", "chartDocument.source");
+        compiled.set("value", chartDocument);
+        return compiled;
+    }
+
+    private ObjectNode compileChartEventConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            String eventKey,
+            String op,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (text(input, "action").isBlank()) {
+            failures.add(text(effect, "handler") + " requires input.action");
+            return null;
+        }
+        ObjectNode events = objectAt(proposedConfig, "chartDocument.events", true);
+        if (events == null) {
+            failures.add(text(effect, "handler") + " chartDocument.events is not an object");
+            return null;
+        }
+        ObjectNode event = objectMapper.createObjectNode();
+        event.put("event", textOrDefault(input, "event", eventKey));
+        copyIfPresent(input, event, "action");
+        copyIfPresent(input, event, "target");
+        copyIfPresent(input, event, "mapping");
+        events.set(eventKey, event);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", op);
+        compiled.put("path", "chartDocument.events." + eventKey);
+        compiled.set("value", event);
+        return compiled;
+    }
+
     private void collapseAllPanelsExcept(ArrayNode panels, String expandedPanelId) {
         for (JsonNode panel : panels) {
             if (panel instanceof ObjectNode object) {
@@ -3078,6 +3294,12 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         if (input.has("form")) {
             ObjectNode form = action.path("form") instanceof ObjectNode object ? object : action.putObject("form");
             mergeObject(form, input.path("form"));
+        }
+    }
+
+    private void copyIfPresent(JsonNode source, ObjectNode target, String sourceField, String targetField) {
+        if (source != null && source.has(sourceField)) {
+            target.set(targetField, source.path(sourceField).deepCopy());
         }
     }
 

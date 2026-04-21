@@ -1768,6 +1768,74 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("delegatedAuthoringOperations").get(0).path("childComponentId").asText()).isEqualTo("praxis-dynamic-form");
     }
 
+    @Test
+    void shouldCompileChartSeriesAxisDataAndEvents() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "combo",
+                    "source": { "kind": "derived" },
+                    "dimensions": [
+                      { "field": "month", "role": "category" }
+                    ],
+                    "metrics": [
+                      { "field": "revenue", "aggregation": "sum", "axis": "primary" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "compile-domain-patch", "chart-series-add", "chartDocument.metrics[]"),
+                plan("{}", "{ \"field\": \"margin\", \"aggregation\": \"avg\", \"seriesKind\": \"line\", \"axis\": \"secondary\", \"afterField\": \"revenue\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("axis.configure", "axis", "x-ui-chart-dimension-or-metric-axis", false,
+                        "compile-domain-patch", "chart-axis-configure", "chartDocument.metrics[].axis"),
+                plan("{}", "{ \"metricField\": \"margin\", \"metricAxis\": \"secondary\", \"dimensionField\": \"month\", \"dimensionRole\": \"time\", \"orientation\": \"vertical\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "compile-domain-patch", "chart-data-resource-bind", "chartDocument.source"),
+                plan("{}", "{ \"sourceKind\": \"praxis.stats\", \"resource\": \"/api/sales/stats\", \"operation\": \"timeseries\", \"dimensions\": [{ \"field\": \"month\" }], \"metrics\": [{ \"field\": \"revenue\", \"aggregation\": \"sum\" }] }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
+                        "compile-domain-patch", "chart-event-cross-filter-configure", "chartDocument.events.crossFilter"),
+                plan("{}", "{ \"event\": \"pointClick\", \"action\": \"update-context\", \"target\": \"orders-table\", \"mapping\": { \"date\": \"month\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(4);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("add-chart-series");
+        assertThat(patchOperations.get(1).path("op").asText()).isEqualTo("configure-chart-axis");
+        assertThat(patchOperations.get(2).path("op").asText()).isEqualTo("bind-chart-data-resource");
+        assertThat(patchOperations.get(3).path("op").asText()).isEqualTo("configure-chart-cross-filter-event");
+        assertThat(proposedConfig.path("chartDocument").path("source").path("resource").asText()).isEqualTo("/api/sales/stats");
+        assertThat(proposedConfig.path("chartDocument").path("metrics").get(0).path("field").asText()).isEqualTo("revenue");
+        assertThat(proposedConfig.path("chartDocument").path("events").path("crossFilter").path("mapping").path("date").asText()).isEqualTo("month");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

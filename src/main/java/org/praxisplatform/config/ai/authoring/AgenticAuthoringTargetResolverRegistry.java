@@ -70,6 +70,16 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "crud-dialog-host-defaults",
             "crud-resource-capabilities",
             "child-authoring-manifest-operation",
+            "x-ui-chart-document-root",
+            "x-ui-chart-kind",
+            "x-ui-chart-dimension-or-metric-axis",
+            "x-ui-chart-source-and-field-catalog",
+            "praxis-chart-query-context",
+            "x-ui-chart-events-cross-filter",
+            "x-ui-chart-events-drill-down",
+            "x-ui-chart-events-selection-change",
+            "x-ui-chart-legend-feature",
+            "x-ui-chart-tooltip-feature",
             "component-config");
 
     public AgenticAuthoringTargetResolverRegistry() {

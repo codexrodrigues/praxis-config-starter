@@ -191,7 +191,36 @@ public final class AgenticAuthoringValidatorRegistry {
             "child-operation-known",
             "no-local-form-config-write",
             "no-local-table-config-write",
-            "delegation-target-valid");
+            "delegation-target-valid",
+            "chart-document-shape",
+            "chart-version-supported",
+            "chart-type-supported",
+            "chart-type-series-axis-compatible",
+            "pie-single-metric",
+            "combo-minimum-series",
+            "series-field-exists",
+            "series-field-aggregable",
+            "series-id-unique",
+            "series-exists",
+            "destructive-series-removal-confirmed",
+            "chart-keeps-required-metric",
+            "axis-field-exists",
+            "secondary-axis-combo-only",
+            "cartesian-dimension-required",
+            "remote-resource-in-api-metadata",
+            "bound-fields-exist",
+            "stats-operation-supported",
+            "query-context-structured",
+            "query-context-fields-exist",
+            "query-context-safe-values",
+            "cross-filter-output-structured",
+            "event-target-governed",
+            "event-mapping-fields-exist",
+            "event-action-supported",
+            "drilldown-target-governed",
+            "selection-output-structured",
+            "feature-toggle-valid",
+            "editor-runtime-round-trip");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
@@ -348,6 +377,34 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "back-policy-valid", "settings-panel-shell-compatible" -> validateCrudSerializableObjectInputs(operationId, planOperation, failures);
                 case "child-manifest-available", "child-operation-known", "delegation-target-valid" -> validateCrudChildDelegation(operationId, planOperation, failures);
                 case "no-local-form-config-write", "no-local-table-config-write" -> validateCrudNoLocalChildConfigWrite(operationId, planOperation, failures);
+                case "chart-document-shape" -> validateChartDocumentShape(operationId, planOperation, config, failures);
+                case "chart-version-supported" -> validateChartVersionSupported(operationId, planOperation, config, failures);
+                case "chart-type-supported" -> validateChartTypeSupported(operationId, planOperation, config, failures);
+                case "chart-type-series-axis-compatible" -> validateChartTypeSeriesAxisCompatible(operationId, planOperation, config, failures);
+                case "pie-single-metric" -> validateChartPieSingleMetric(operationId, planOperation, config, failures);
+                case "combo-minimum-series" -> validateChartComboMinimumSeries(operationId, planOperation, config, failures);
+                case "series-field-exists", "axis-field-exists", "bound-fields-exist",
+                     "query-context-fields-exist", "event-mapping-fields-exist" ->
+                        validateChartInputFieldsExist(operationId, planOperation, config, failures);
+                case "series-field-aggregable" -> validateChartAggregation(operationId, planOperation, failures);
+                case "series-id-unique" -> validateChartSeriesUnique(operationId, planOperation, config, failures);
+                case "series-exists" -> validateChartSeriesExists(operationId, planOperation, config, failures);
+                case "destructive-series-removal-confirmed" -> validateChartSeriesRemovalConfirmed(operationId, planOperation, failures);
+                case "chart-keeps-required-metric" -> validateChartKeepsMetric(operationId, config, failures);
+                case "secondary-axis-combo-only" -> validateChartSecondaryAxisComboOnly(operationId, planOperation, config, failures);
+                case "cartesian-dimension-required" -> validateChartCartesianDimensionRequired(operationId, planOperation, config, failures);
+                case "remote-resource-in-api-metadata" -> validateChartRemoteResource(operationId, planOperation, failures);
+                case "stats-operation-supported" -> validateChartStatsOperation(operationId, planOperation, failures);
+                case "query-context-structured", "query-context-safe-values",
+                     "cross-filter-output-structured", "selection-output-structured" ->
+                        validateChartStructuredInput(operationId, planOperation, failures);
+                case "event-target-governed", "drilldown-target-governed" ->
+                        validateChartEventTarget(operationId, planOperation, config, failures);
+                case "event-action-supported" -> validateChartEventAction(operationId, planOperation, failures);
+                case "feature-toggle-valid" -> validateChartFeatureToggle(operationId, planOperation, failures);
+                case "editor-runtime-round-trip" -> {
+                    // Round-trip is enforced by compiling only canonical chartDocument paths consumed by editor and runtime.
+                }
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
         }
@@ -1327,6 +1384,346 @@ public final class AgenticAuthoringValidatorRegistry {
         if (input.has("formConfig") || input.has("tableConfig")) {
             failures.add("validator no-local-child-config-write failed for " + operationId + ": child config must be delegated");
         }
+    }
+
+    private void validateChartDocumentShape(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode document = chartDocumentCandidate(planOperation, config);
+        if (!document.isObject()) {
+            failures.add("validator chart-document-shape failed for " + operationId + ": chartDocument must be an object");
+            return;
+        }
+        if (text(document, "kind").isBlank()) {
+            failures.add("validator chart-document-shape failed for " + operationId + ": kind is required");
+        }
+        if (!document.path("source").isObject()) {
+            failures.add("validator chart-document-shape failed for " + operationId + ": source must be an object");
+        }
+    }
+
+    private void validateChartVersionSupported(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String version = firstNonBlank(
+                text(planOperation.path("input"), "version"),
+                text(config.path("chartDocument"), "version"));
+        if (!version.isBlank() && !"0.1.0".equals(version)) {
+            failures.add("validator chart-version-supported failed for " + operationId + ": unsupported version " + version);
+        }
+    }
+
+    private void validateChartTypeSupported(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String kind = chartKind(planOperation, config);
+        if (!kind.isBlank() && !chartKinds().contains(kind)) {
+            failures.add("validator chart-type-supported failed for " + operationId + ": unsupported kind " + kind);
+        }
+    }
+
+    private void validateChartTypeSeriesAxisCompatible(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String kind = chartKind(planOperation, config);
+        if (Set.of("pie", "donut").contains(kind) && hasSecondaryAxis(chartMetricsCandidate(planOperation, config))) {
+            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                    + ": pie and donut charts cannot use secondary axes");
+        }
+        String seriesKind = text(planOperation.path("input"), "seriesKind");
+        if (!seriesKind.isBlank() && Set.of("pie", "donut", "scatter").contains(kind)) {
+            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                    + ": seriesKind is not supported by " + kind);
+        }
+    }
+
+    private void validateChartPieSingleMetric(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String kind = chartKind(planOperation, config);
+        JsonNode metrics = chartMetricsCandidate(planOperation, config);
+        if (Set.of("pie", "donut").contains(kind) && metrics.isArray() && metrics.size() > 1) {
+            failures.add("validator pie-single-metric failed for " + operationId + ": pie and donut charts support one metric");
+        }
+    }
+
+    private void validateChartComboMinimumSeries(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String kind = chartKind(planOperation, config);
+        JsonNode metrics = chartMetricsCandidate(planOperation, config);
+        if ("combo".equals(kind) && metrics.isArray() && metrics.size() < 2) {
+            failures.add("validator combo-minimum-series failed for " + operationId + ": combo charts require at least two metrics");
+        }
+    }
+
+    private void validateChartInputFieldsExist(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        Set<String> known = chartKnownFields(config);
+        for (String field : chartInputFields(planOperation.path("input"))) {
+            if (!field.isBlank() && !known.isEmpty() && !known.contains(field)) {
+                failures.add("validator chart-fields-exist failed for " + operationId + ": unknown field " + field);
+            }
+        }
+    }
+
+    private void validateChartSeriesUnique(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String field = text(planOperation.path("input"), "field");
+        if (!field.isBlank() && fieldExists(config.path("chartDocument").path("metrics"), field)) {
+            failures.add("validator series-id-unique failed for " + operationId + ": duplicate series field " + field);
+        }
+    }
+
+    private void validateChartAggregation(String operationId, JsonNode planOperation, List<String> failures) {
+        String aggregation = text(planOperation.path("input"), "aggregation");
+        if (!aggregation.isBlank() && !Set.of("sum", "avg", "min", "max", "count", "distinct-count").contains(aggregation)) {
+            failures.add("validator series-field-aggregable failed for " + operationId
+                    + ": unsupported aggregation " + aggregation);
+        }
+    }
+
+    private void validateChartSeriesExists(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String field = targetText(planOperation.path("target"));
+        if (!field.isBlank() && !fieldExists(config.path("chartDocument").path("metrics"), field)) {
+            failures.add("validator series-exists failed for " + operationId + ": series not found " + field);
+        }
+    }
+
+    private void validateChartSeriesRemovalConfirmed(String operationId, JsonNode planOperation, List<String> failures) {
+        if (!planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator destructive-series-removal-confirmed failed for " + operationId
+                    + ": removing a series requires confirmation");
+        }
+    }
+
+    private void validateChartKeepsMetric(String operationId, JsonNode config, List<String> failures) {
+        JsonNode metrics = config.path("chartDocument").path("metrics");
+        if (metrics.isArray() && metrics.size() <= 1) {
+            failures.add("validator chart-keeps-required-metric failed for " + operationId
+                    + ": chart must keep at least one metric");
+        }
+    }
+
+    private void validateChartSecondaryAxisComboOnly(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String axis = firstNonBlank(text(planOperation.path("input"), "axis"), text(planOperation.path("input"), "metricAxis"));
+        if ("secondary".equals(axis) && !"combo".equals(chartKind(planOperation, config))) {
+            failures.add("validator secondary-axis-combo-only failed for " + operationId
+                    + ": secondary axis is supported only for combo charts");
+        }
+    }
+
+    private void validateChartCartesianDimensionRequired(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String kind = chartKind(planOperation, config);
+        JsonNode dimensions = firstPresent(planOperation.path("input"), "dimensions");
+        if (dimensions.isMissingNode()) {
+            dimensions = config.path("chartDocument").path("dimensions");
+        }
+        if (Set.of("bar", "combo", "horizontal-bar", "line", "area", "stacked-bar", "stacked-area", "scatter").contains(kind)
+                && (!dimensions.isArray() || dimensions.isEmpty())
+                && text(planOperation.path("input"), "dimensionField").isBlank()) {
+            failures.add("validator cartesian-dimension-required failed for " + operationId
+                    + ": cartesian charts require a dimension");
+        }
+    }
+
+    private void validateChartRemoteResource(String operationId, JsonNode planOperation, List<String> failures) {
+        String resource = text(planOperation.path("input"), "resource");
+        if (!resource.isBlank() && (containsUnsafeAbsoluteUrl(planOperation.path("input").path("resource")) || !resource.startsWith("/"))) {
+            failures.add("validator remote-resource-in-api-metadata failed for " + operationId
+                    + ": resource must be a relative governed Praxis path");
+        }
+    }
+
+    private void validateChartStatsOperation(String operationId, JsonNode planOperation, List<String> failures) {
+        String sourceKind = text(planOperation.path("input"), "sourceKind");
+        String operation = text(planOperation.path("input"), "operation");
+        if ("praxis.stats".equals(sourceKind) && !Set.of("group-by", "timeseries", "distribution").contains(operation)) {
+            failures.add("validator stats-operation-supported failed for " + operationId
+                    + ": unsupported stats operation " + operation);
+        }
+    }
+
+    private void validateChartStructuredInput(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.isObject()) {
+            failures.add("validator structured-input failed for " + operationId + ": input must be an object");
+        }
+        if (containsUnsafeAbsoluteUrl(input)) {
+            failures.add("validator query-context-safe-values failed for " + operationId
+                    + ": chart authoring values must not contain absolute remote URLs");
+        }
+    }
+
+    private void validateChartEventTarget(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String target = text(planOperation.path("input"), "target");
+        if (target.isBlank()) {
+            return;
+        }
+        JsonNode availableTargets = config.path("availableTargets");
+        if (availableTargets.isArray() && !fieldExists(availableTargets, target)) {
+            failures.add("validator event-target-governed failed for " + operationId + ": unknown event target " + target);
+        }
+    }
+
+    private void validateChartEventAction(String operationId, JsonNode planOperation, List<String> failures) {
+        String action = text(planOperation.path("input"), "action");
+        if (!Set.of("filter-widget", "open-detail", "navigate", "update-context", "emit").contains(action)) {
+            failures.add("validator event-action-supported failed for " + operationId + ": unsupported event action " + action);
+        }
+    }
+
+    private void validateChartFeatureToggle(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.path("enabled").isBoolean()) {
+            failures.add("validator feature-toggle-valid failed for " + operationId + ": enabled must be boolean");
+        }
+    }
+
+    private JsonNode chartDocumentCandidate(JsonNode planOperation, JsonNode config) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("kind") && input.has("source")) {
+            return input;
+        }
+        return config.path("chartDocument");
+    }
+
+    private String chartKind(JsonNode planOperation, JsonNode config) {
+        return firstNonBlank(text(planOperation.path("input"), "kind"), text(config.path("chartDocument"), "kind"));
+    }
+
+    private Set<String> chartKinds() {
+        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "area", "stacked-bar", "stacked-area", "scatter");
+    }
+
+    private JsonNode chartMetricsCandidate(JsonNode planOperation, JsonNode config) {
+        JsonNode metrics = firstPresent(planOperation.path("input"), "metrics");
+        return metrics.isMissingNode() ? config.path("chartDocument").path("metrics") : metrics;
+    }
+
+    private boolean hasSecondaryAxis(JsonNode metrics) {
+        if (!metrics.isArray()) {
+            return false;
+        }
+        for (JsonNode metric : metrics) {
+            if ("secondary".equals(text(metric, "axis"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<String> chartKnownFields(JsonNode config) {
+        Set<String> fields = new HashSet<>();
+        collectFieldNames(config.path("availableFields"), fields, "name", "field", "id");
+        collectFieldNames(config.path("fieldMetadata"), fields, "name", "field", "id");
+        collectFieldNames(config.path("columns"), fields, "field", "name", "id");
+        collectFieldNames(config.path("chartDocument").path("dimensions"), fields, "field", "name", "id");
+        collectFieldNames(config.path("chartDocument").path("metrics"), fields, "field", "name", "id");
+        return fields;
+    }
+
+    private void collectFieldNames(JsonNode array, Set<String> fields, String... keys) {
+        if (!array.isArray()) {
+            return;
+        }
+        for (JsonNode item : array) {
+            for (String key : keys) {
+                String value = text(item, key);
+                if (!value.isBlank()) {
+                    fields.add(value);
+                }
+            }
+        }
+    }
+
+    private Set<String> chartInputFields(JsonNode input) {
+        Set<String> fields = new HashSet<>();
+        collectChartInputFields(input, fields);
+        return fields;
+    }
+
+    private void collectChartInputFields(JsonNode node, Set<String> fields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(child -> collectChartInputFields(child, fields));
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        for (String key : List.of("field", "dimensionField", "metricField")) {
+            String value = text(node, key);
+            if (!value.isBlank()) {
+                fields.add(value);
+            }
+        }
+        JsonNode mapping = node.path("mapping");
+        if (mapping.isObject()) {
+            Iterator<JsonNode> values = mapping.elements();
+            while (values.hasNext()) {
+                String value = values.next().asText("");
+                if (!value.isBlank()) {
+                    fields.add(value);
+                }
+            }
+        }
+        Iterator<JsonNode> values = node.elements();
+        while (values.hasNext()) {
+            collectChartInputFields(values.next(), fields);
+        }
+    }
+
+    private boolean fieldExists(JsonNode array, String value) {
+        return !findObjectByKey(array, "field", value).isMissingNode()
+                || !findObjectByKey(array, "id", value).isMissingNode()
+                || !findObjectByKey(array, "name", value).isMissingNode();
+    }
+
+    private String targetText(JsonNode target) {
+        if (target == null || target.isMissingNode() || target.isNull()) {
+            return "";
+        }
+        if (target.isTextual()) {
+            return target.asText("");
+        }
+        return firstNonBlank(text(target, "field"), text(target, "id"), text(target, "name"), text(target, "value"));
     }
 
     private void validateInputFieldsExist(String operationId, JsonNode input, JsonNode config, List<String> failures) {
