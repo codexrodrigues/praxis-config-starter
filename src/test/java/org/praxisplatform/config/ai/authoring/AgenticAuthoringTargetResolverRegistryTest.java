@@ -130,6 +130,28 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldResolveRichMediaNodeById() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-rich-content",
+                operation("mediaBlock.update", "media", "rich-media-node-by-id-or-path", "fail", true),
+                objectMapper.readTree("\"profile\""),
+                objectMapper.readTree("""
+                        {
+                          "document": {
+                            "nodes": [
+                              { "id": "profile", "type": "mediaBlock", "title": "Profile" }
+                            ]
+                          }
+                        }
+                        """));
+
+        assertThat(result.status()).isEqualTo("resolved");
+        assertThat(result.resolver()).isEqualTo("rich-media-node-by-id-or-path");
+        assertThat(result.path()).isEqualTo("document.nodes[]/0");
+        assertThat(result.value().path("type").asText()).isEqualTo("mediaBlock");
+    }
+
+    @Test
     void shouldResolveTableConditionalRendererById() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-table",

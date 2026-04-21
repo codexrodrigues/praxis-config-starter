@@ -927,6 +927,76 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesRichContentMediaBlockUpdateFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        {
+                          "id": "profile",
+                          "type": "mediaBlock",
+                          "title": "Old",
+                          "subtitle": "Old subtitle",
+                          "avatar": {
+                            "name": "old",
+                            "imageSrc": "/old.png"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "plan": {
+                    "operationId": "mediaBlock.update",
+                    "target": "profile",
+                    "input": {
+                      "title": "New",
+                      "subtitle": "New subtitle",
+                      "avatarName": "person",
+                      "avatarImageSrc": "/assets/person.png"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: block-exists for mediaBlock.update")
+                .contains("validator declared without backend implementation: media-block-target-valid for mediaBlock.update")
+                .contains("validator declared without backend implementation: unsafe-url-rejected for mediaBlock.update")
+                .contains("validator declared without backend implementation: document-shape-canonical for mediaBlock.update");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.0.0");
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("mediaBlock.update");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-rich-media-block");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("rich-content-media-block-update");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("profile");
+        assertThat(operation.path("resolvedPath").asText()).isEqualTo("document.nodes[]/0");
+        JsonNode updatedBlock = result.patch().path("proposedConfig").path("document").path("nodes").get(0);
+        assertThat(updatedBlock.path("title").asText()).isEqualTo("New");
+        assertThat(updatedBlock.path("subtitle").asText()).isEqualTo("New subtitle");
+        assertThat(updatedBlock.path("avatar").path("name").asText()).isEqualTo("person");
+        assertThat(updatedBlock.path("avatar").path("imageSrc").asText()).isEqualTo("/assets/person.png");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""

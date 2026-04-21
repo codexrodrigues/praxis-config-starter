@@ -76,7 +76,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "tabs.reorder-tab-and-preserve-selection".equals(handler)
                 || "tabs.remove-tab-and-reselect".equals(handler)
                 || "tabs.set-active-item".equals(handler)
-                || "rich-content-block-add".equals(handler);
+                || "rich-content-block-add".equals(handler)
+                || "rich-content-media-block-update".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -173,6 +174,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     planOperation,
                     proposedConfig,
                     failures);
+            case "rich-content-media-block-update" -> compileRichContentMediaBlockUpdate(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
             default -> {
                 failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
                 yield null;
@@ -249,6 +258,82 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("selectedIndexAfter", selectedIndexAfter);
         compiled.set("target", planOperation.path("target"));
         compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileRichContentMediaBlockUpdate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null ? MissingNode.getInstance() : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode mediaBlock)) {
+            failures.add("rich-content-media-block-update target not found: " + (resolved == null ? "" : resolved.path()));
+            return null;
+        }
+        String nodeType = firstText(mediaBlock, "type", "kind");
+        if (!"mediaBlock".equals(nodeType)) {
+            failures.add("rich-content-media-block-update target is not mediaBlock: " + nodeType);
+            return null;
+        }
+
+        JsonNode input = planOperation.path("input");
+        ObjectNode value = objectMapper.createObjectNode();
+        if (input.has("title")) {
+            mediaBlock.set("title", input.path("title"));
+            value.set("title", input.path("title"));
+        }
+        if (input.has("titleExpr")) {
+            mediaBlock.set("titleExpr", input.path("titleExpr"));
+            value.set("titleExpr", input.path("titleExpr"));
+        }
+        if (input.has("subtitle")) {
+            mediaBlock.set("subtitle", input.path("subtitle"));
+            value.set("subtitle", input.path("subtitle"));
+        }
+        if (input.has("subtitleExpr")) {
+            mediaBlock.set("subtitleExpr", input.path("subtitleExpr"));
+            value.set("subtitleExpr", input.path("subtitleExpr"));
+        }
+        ObjectNode avatarPatch = objectMapper.createObjectNode();
+        if (input.has("avatarName")) {
+            avatarPatch.set("name", input.path("avatarName"));
+        }
+        if (input.has("avatarImageSrc")) {
+            avatarPatch.set("imageSrc", input.path("avatarImageSrc"));
+        }
+        if (!avatarPatch.isEmpty()) {
+            ObjectNode avatar = mediaBlock.path("avatar") instanceof ObjectNode existingAvatar
+                    ? existingAvatar
+                    : mediaBlock.putObject("avatar");
+            avatar.setAll(avatarPatch);
+            value.set("avatar", avatarPatch);
+        }
+        if (value.isEmpty()) {
+            failures.add("rich-content-media-block-update requires at least one supported field");
+            return null;
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "merge-rich-media-block");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", resolved == null ? "" : resolved.path());
+        compiled.put("resolvedPath", resolved == null ? "" : resolved.path());
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", text(mediaBlock, "id"));
+        compiled.set("value", value);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
         compiled.set("affectedPaths", operation.path("affectedPaths"));
         compiled.set("submissionImpact", operation.path("submissionImpact"));
         return compiled;

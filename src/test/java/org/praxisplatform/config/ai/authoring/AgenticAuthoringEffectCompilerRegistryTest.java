@@ -443,6 +443,66 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("document").path("nodes").get(1).path("id").asText()).isEqualTo("body");
     }
 
+    @Test
+    void shouldCompileRichContentMediaBlockUpdateDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "profile",
+                        "type": "mediaBlock",
+                        "title": "Old",
+                        "subtitle": "Old subtitle",
+                        "avatar": {
+                          "name": "old",
+                          "imageSrc": "/old.png"
+                        }
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("mediaBlock.update", "media", "rich-media-node-by-id-or-path", true,
+                        "compile-domain-patch", "rich-content-media-block-update", "document.nodes[].title"),
+                plan("\"profile\"", """
+                        {
+                          "title": "New",
+                          "subtitle": "New subtitle",
+                          "avatarName": "person",
+                          "avatarImageSrc": "/assets/person.png"
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("merge-rich-media-block");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-media-block-update");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("profile");
+        assertThat(patchOperation.path("resolvedPath").asText()).isEqualTo("document.nodes[]/0");
+        assertThat(patchOperation.path("value").path("title").asText()).isEqualTo("New");
+        assertThat(patchOperation.path("value").path("subtitle").asText()).isEqualTo("New subtitle");
+        assertThat(patchOperation.path("value").path("avatar").path("name").asText()).isEqualTo("person");
+        assertThat(patchOperation.path("value").path("avatar").path("imageSrc").asText()).isEqualTo("/assets/person.png");
+        JsonNode updatedBlock = proposedConfig.path("document").path("nodes").get(0);
+        assertThat(updatedBlock.path("title").asText()).isEqualTo("New");
+        assertThat(updatedBlock.path("subtitle").asText()).isEqualTo("New subtitle");
+        assertThat(updatedBlock.path("avatar").path("name").asText()).isEqualTo("person");
+        assertThat(updatedBlock.path("avatar").path("imageSrc").asText()).isEqualTo("/assets/person.png");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

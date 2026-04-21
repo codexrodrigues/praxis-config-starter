@@ -118,7 +118,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "step-by-id-or-label", "step-content-by-id" -> addArrayMatches(candidates, config, "steps[]", List.of("id", "label", "textLabel", "title"), targetValue);
             case "tab-by-id-or-label" -> addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
             case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
-            case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
+            case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
             case "rule-by-id", "rule-by-id-or-name" -> addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
             case "action-by-id", "form-action-by-id", "actions-by-id" -> {
                 addArrayMatches(candidates, config, "actions.custom[]", List.of("id", "name", "action"), targetValue);
@@ -211,6 +211,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "tab-index-or-id",
                 "rich-block-by-id-or-index",
                 "rich-text-node-by-id-or-path",
+                "rich-media-node-by-id-or-path",
                 "rule-by-id",
                 "rule-by-id-or-name",
                 "action-by-id",
