@@ -675,7 +675,7 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
-    void warnsOnStepperDomainPatchAndRejectsCompilationWithoutHandler() throws Exception {
+    void compilesStepperDomainPatchWhenHandlerExists() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-stepper",
                 payloadFromClasspathSnapshot("praxis-stepper"));
@@ -686,13 +686,13 @@ class AgenticAuthoringManifestServiceTest {
                       { "id": "account", "label": "Conta" },
                       { "id": "review", "label": "Revisao" }
                     ],
-                    "selectedIndex": 0
+                    "selectedIndex": 1
                   },
                   "plan": {
                     "operationId": "step.order.set",
-                    "target": "account",
+                    "target": "review",
                     "input": {
-                      "beforeStepId": "review"
+                      "beforeStepId": "account"
                     }
                   }
                 }
@@ -704,14 +704,30 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings()).contains("operation requires domain compiler: step.order.set");
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: step-exists for step.order.set")
+                .contains("validator declared without backend implementation: step-order-deterministic for step.order.set")
+                .contains("validator declared without backend implementation: selected-index-preserved for step.order.set");
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-stepper",
                 objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
 
-        assertThat(result.compiled()).isFalse();
-        assertThat(result.failures()).contains("domain compiler is required for operation: step.order.set");
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("op").asText()).isEqualTo("reorder-by-key");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("stepper-step-reorder");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("review");
+        assertThat(operation.path("fromIndex").asInt()).isEqualTo(1);
+        assertThat(operation.path("toIndex").asInt()).isZero();
+        assertThat(operation.path("selectedIndexBefore").asInt()).isEqualTo(1);
+        assertThat(operation.path("selectedIndexAfter").asInt()).isZero();
+        assertThat(result.patch().path("proposedConfig").path("steps").get(0).path("id").asText())
+                .isEqualTo("review");
+        assertThat(result.patch().path("proposedConfig").path("steps").get(1).path("id").asText())
+                .isEqualTo("account");
+        assertThat(result.patch().path("proposedConfig").path("selectedIndex").asInt()).isZero();
     }
 
     @Test

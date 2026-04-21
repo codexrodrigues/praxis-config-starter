@@ -199,7 +199,8 @@ public class AgenticAuthoringManifestService {
         validatorRegistry.validateInputSchema(operation, planOperation.path("input"), failures);
         validatorRegistry.executeOperationValidators(componentId, operation, planOperation, config, failures, warnings);
         for (JsonNode effect : operation.path("effects")) {
-            if ("compile-domain-patch".equals(text(effect, "kind"))) {
+            if ("compile-domain-patch".equals(text(effect, "kind"))
+                    && !effectCompilerRegistry.supportsDomainPatchHandler(text(effect, "handler"))) {
                 warnings.add("operation requires domain compiler: " + operationId);
             }
         }

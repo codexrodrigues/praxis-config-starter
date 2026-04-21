@@ -32,10 +32,6 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             List<String> warnings) {
         for (JsonNode effect : operation.path("effects")) {
             String effectKind = text(effect, "kind");
-            if ("compile-domain-patch".equals(effectKind)) {
-                failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
-                continue;
-            }
             AgenticAuthoringResolvedTarget resolved = null;
             if (operation.path("target").path("required").asBoolean(false)) {
                 resolved = targetResolverRegistry.resolve(componentId, operation, planOperation.path("target"), proposedConfig);
@@ -46,6 +42,20 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                             + String.join(", ", resolved.failures()));
                     continue;
                 }
+            }
+            if ("compile-domain-patch".equals(effectKind)) {
+                ObjectNode compiled = compileDomainPatch(
+                        componentId,
+                        operation,
+                        effect,
+                        planOperation,
+                        resolved,
+                        proposedConfig,
+                        failures);
+                if (compiled != null) {
+                    patchOperations.add(compiled);
+                }
+                continue;
             }
             ObjectNode compiled = compileAndApplyEffect(
                     componentId,
@@ -59,6 +69,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 patchOperations.add(compiled);
             }
         }
+    }
+
+    boolean supportsDomainPatchHandler(String handler) {
+        return "stepper-step-reorder".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -103,6 +117,105 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 return null;
             }
         }
+        return compiled;
+    }
+
+    private ObjectNode compileDomainPatch(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        String handler = text(effect, "handler");
+        return switch (handler) {
+            case "stepper-step-reorder" -> compileStepperStepReorder(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            default -> {
+                failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
+                yield null;
+            }
+        };
+    }
+
+    private ObjectNode compileStepperStepReorder(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ArrayNode steps = arrayAt(proposedConfig, "steps", false);
+        if (steps == null) {
+            failures.add("stepper-step-reorder path is not an array: steps[]");
+            return null;
+        }
+        String stepId = resolved != null ? text(resolved.value(), "id") : "";
+        int fromIndex = indexOfObjectByKey(steps, "id", stepId);
+        if (fromIndex < 0) {
+            failures.add("stepper-step-reorder target not found: steps[] id=" + stepId);
+            return null;
+        }
+        String beforeStepId = text(planOperation.path("input"), "beforeStepId");
+        if (beforeStepId.isBlank()) {
+            failures.add("stepper-step-reorder requires beforeStepId");
+            return null;
+        }
+        int beforeIndex = indexOfObjectByKey(steps, "id", beforeStepId);
+        if (beforeIndex < 0) {
+            failures.add("stepper-step-reorder before step not found: steps[] id=" + beforeStepId);
+            return null;
+        }
+
+        int selectedIndexBefore = proposedConfig.path("selectedIndex").asInt(-1);
+        String selectedStepId = selectedIndexBefore >= 0 && selectedIndexBefore < steps.size()
+                ? text(steps.get(selectedIndexBefore), "id")
+                : "";
+
+        JsonNode moved = steps.remove(fromIndex);
+        int targetIndex = beforeIndex;
+        if (fromIndex < beforeIndex) {
+            targetIndex = beforeIndex - 1;
+        }
+        steps.insert(targetIndex, moved);
+
+        int selectedIndexAfter = selectedIndexBefore;
+        if (!selectedStepId.isBlank()) {
+            selectedIndexAfter = indexOfObjectByKey(steps, "id", selectedStepId);
+            if (selectedIndexAfter >= 0) {
+                proposedConfig.put("selectedIndex", selectedIndexAfter);
+            }
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "reorder-by-key");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "steps[]");
+        compiled.put("resolvedPath", resolved != null ? resolved.path() : "");
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("keyValue", stepId);
+        compiled.put("fromIndex", fromIndex);
+        compiled.put("toIndex", targetIndex);
+        compiled.put("beforeStepId", beforeStepId);
+        compiled.put("selectedIndexBefore", selectedIndexBefore);
+        compiled.put("selectedIndexAfter", selectedIndexAfter);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", planOperation.path("input"));
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
         return compiled;
     }
 

@@ -225,7 +225,7 @@ class AgenticAuthoringEffectCompilerRegistryTest {
 
         registry.appendCompiledEffects(
                 "praxis-dynamic-form",
-                operation("layout.field.move", "field", "field-by-name-or-label", true,
+                operation("layout.field.move", "field", "field-by-name-or-label", false,
                         "compile-domain-patch", "layout", "", "layout"),
                 plan("\"email\"", "{ \"targetColumnId\": \"main\" }"),
                 proposedConfig,
@@ -235,6 +235,45 @@ class AgenticAuthoringEffectCompilerRegistryTest {
 
         assertThat(patchOperations).isEmpty();
         assertThat(failures).contains("domain compiler is required for operation: layout.field.move");
+    }
+
+    @Test
+    void shouldCompileStepperReorderDomainPatchAndPreserveSelectedIndexIdentity() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "steps": [
+                    { "id": "account", "label": "Conta" },
+                    { "id": "review", "label": "Revisao" }
+                  ],
+                  "selectedIndex": 1
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-stepper",
+                operationWithHandler("step.order.set", "step", "step-by-id-or-label", true,
+                        "compile-domain-patch", "stepper-step-reorder", "steps[]"),
+                plan("\"review\"", "{ \"beforeStepId\": \"account\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("reorder-by-key");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("stepper-step-reorder");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("review");
+        assertThat(patchOperation.path("fromIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("toIndex").asInt()).isZero();
+        assertThat(patchOperation.path("selectedIndexBefore").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("selectedIndexAfter").asInt()).isZero();
+        assertThat(proposedConfig.path("steps").get(0).path("id").asText()).isEqualTo("review");
+        assertThat(proposedConfig.path("steps").get(1).path("id").asText()).isEqualTo("account");
+        assertThat(proposedConfig.path("selectedIndex").asInt()).isZero();
     }
 
     private JsonNode operation(
@@ -263,6 +302,32 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                   "submissionImpact": "visual-only"
                 }
                 """.formatted(operationId, targetKind, resolver, required, effectKind, path, keyProperty, affectedPath));
+    }
+
+    private JsonNode operationWithHandler(
+            String operationId,
+            String targetKind,
+            String resolver,
+            boolean required,
+            String effectKind,
+            String handler,
+            String affectedPath) throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "operationId": "%s",
+                  "target": {
+                    "kind": "%s",
+                    "resolver": "%s",
+                    "ambiguityPolicy": "fail",
+                    "required": %s
+                  },
+                  "effects": [
+                    { "kind": "%s", "handler": "%s" }
+                  ],
+                  "affectedPaths": ["%s"],
+                  "submissionImpact": "config-only"
+                }
+                """.formatted(operationId, targetKind, resolver, required, effectKind, handler, affectedPath));
     }
 
     private JsonNode plan(String targetJson, String inputJson) throws Exception {
