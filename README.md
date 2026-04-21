@@ -419,6 +419,7 @@ GitHub Actions gate:
 - Use `provider=openai` and `quickstart_ref=main` as the default release gate.
 - Required repository secret for the default gate: `PRAXIS_AI_OPENAI_API_KEY`.
 - The workflow installs the checked-out starter locally, packages `praxis-api-quickstart` against that local version and validates plan, compile, preview, apply, SSE, replay and cleanup.
+- For page-builder, browser SSE or full Angular authoring changes, run the same workflow with `run_page_builder_full_e2e=true` and `ui_ref=main`. This opt-in gate also checks out `praxis-ui-angular`, starts the quickstart on `8088`, starts Angular on `4003`, and runs `praxis-page-builder-agentic-validation.playwright.config.ts` against the real provider stream.
 
 ### Usage Example (Java)
 
