@@ -1,0 +1,117 @@
+name: Agentic Authoring HTTP Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'AI provider used by the quickstart HTTP smoke.'
+        required: true
+        default: openai
+        type: choice
+        options:
+          - openai
+          - gemini
+      quickstart_ref:
+        description: 'praxis-api-quickstart ref to test against.'
+        required: false
+        default: main
+        type: string
+
+concurrency:
+  group: agentic-authoring-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quickstart-http-smoke:
+    name: Quickstart HTTP/SSE smoke
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      PRAXIS_AI_OPENAI_API_KEY: ${{ secrets.PRAXIS_AI_OPENAI_API_KEY }}
+      PRAXIS_AI_OPENAI_MODEL: ${{ vars.PRAXIS_AI_OPENAI_MODEL || 'gpt-4.1-mini' }}
+      PRAXIS_AI_GEMINI_API_KEY: ${{ secrets.PRAXIS_AI_GEMINI_API_KEY }}
+      PRAXIS_AI_GEMINI_MODEL: ${{ vars.PRAXIS_AI_GEMINI_MODEL || 'gemini-2.5-flash' }}
+    steps:
+      - name: Checkout praxis-config-starter
+        uses: actions/checkout@v4
+        with:
+          path: praxis-config-starter
+
+      - name: Checkout praxis-api-quickstart
+        uses: actions/checkout@v4
+        with:
+          repository: codexrodrigues/praxis-api-quickstart
+          ref: ${{ inputs.quickstart_ref }}
+          path: praxis-api-quickstart
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Prepare AI env file
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          function Escape-PsSingleQuoted([string] $Value) {
+            if ($null -eq $Value) {
+              return ''
+            }
+            return $Value.Replace("'", "''")
+          }
+          $provider = '${{ inputs.provider }}'
+          if ($provider -eq 'openai' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_OPENAI_API_KEY)) {
+            throw 'Missing required secret PRAXIS_AI_OPENAI_API_KEY for provider=openai.'
+          }
+          if ($provider -eq 'gemini' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_GEMINI_API_KEY)) {
+            throw 'Missing required secret PRAXIS_AI_GEMINI_API_KEY for provider=gemini.'
+          }
+          @"
+          `$env:PRAXIS_AI_OPENAI_API_KEY = '$(Escape-PsSingleQuoted $env:PRAXIS_AI_OPENAI_API_KEY)'
+          `$env:PRAXIS_AI_OPENAI_MODEL = '$(Escape-PsSingleQuoted $env:PRAXIS_AI_OPENAI_MODEL)'
+          `$env:PRAXIS_AI_GEMINI_API_KEY = '$(Escape-PsSingleQuoted $env:PRAXIS_AI_GEMINI_API_KEY)'
+          `$env:PRAXIS_AI_GEMINI_MODEL = '$(Escape-PsSingleQuoted $env:PRAXIS_AI_GEMINI_MODEL)'
+          "@ | Set-Content -LiteralPath .env.openai.local.ps1 -Encoding UTF8
+
+      - name: Resolve local starter version
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          $version = mvn -q -DforceStdout help:evaluate "-Dexpression=project.version"
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'Could not resolve praxis-config-starter project.version.'
+          }
+          "STARTER_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install praxis-config-starter locally
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: mvn -B -DskipTests install
+
+      - name: Package praxis-api-quickstart against local starter
+        shell: pwsh
+        working-directory: praxis-api-quickstart
+        run: mvn -B -DskipTests "-Dpraxis.config.version=$env:STARTER_VERSION" package
+
+      - name: Run quickstart authoring HTTP/SSE smoke suite
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 `
+            -Provider '${{ inputs.provider }}' `
+            -JavaHome "$env:JAVA_HOME" `
+            -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
+            -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1"
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentic-authoring-smoke-artifacts
+          path: |
+            artifacts/ai-sse-smoke/**
+            praxis-api-quickstart/logs/**
+          if-no-files-found: ignore
