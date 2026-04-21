@@ -308,5 +308,5 @@ jobs:
 
       - name: Publish to Central
         run: |
-          mvn -B -P release,ci-smoke-unit -DskipTests -Dgpg.skip=false -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -DautoPublish=true -DwaitUntil=PUBLISHED -T 1C \
+          mvn -B -P release,ci-smoke-unit -DskipTests -Dgpg.skip=false -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -DautoPublish=true -DwaitUntil=PUBLISHED -DwaitMaxTime=7200 -T 1C \
             clean verify org.sonatype.central:central-publishing-maven-plugin:publish
