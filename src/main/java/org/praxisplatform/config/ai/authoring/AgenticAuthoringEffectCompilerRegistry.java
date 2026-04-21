@@ -109,6 +109,12 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "dialog-preset-apply".equals(handler)
                 || "dialog-child-host-configure".equals(handler)
                 || "dialog-child-operation-delegate".equals(handler)
+                || "dynamic-fields-control-registration".equals(handler)
+                || "dynamic-fields-alias-registration".equals(handler)
+                || "dynamic-fields-alias-removal".equals(handler)
+                || "dynamic-fields-selector-mapping-set".equals(handler)
+                || "dynamic-fields-editor-coverage-validation".equals(handler)
+                || "dynamic-fields-runtime-coverage-validation".equals(handler)
                 || "settings-panel-size-set".equals(handler)
                 || "settings-panel-apply-behavior-set".equals(handler)
                 || "settings-panel-save-behavior-set".equals(handler)
@@ -416,6 +422,50 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     planOperation,
                     proposedConfig,
                     failures);
+            case "dynamic-fields-control-registration" -> compileDynamicFieldsControlRegistration(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "dynamic-fields-alias-registration" -> compileDynamicFieldsAliasRegistration(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "dynamic-fields-alias-removal" -> compileDynamicFieldsAliasRemoval(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "dynamic-fields-selector-mapping-set" -> compileDynamicFieldsSelectorMappingSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "dynamic-fields-editor-coverage-validation" -> compileDynamicFieldsCoverageValidation(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "editorCoverage",
+                    "validate-dynamic-fields-editor-coverage");
+            case "dynamic-fields-runtime-coverage-validation" -> compileDynamicFieldsCoverageValidation(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "runtimeCoverage",
+                    "validate-dynamic-fields-runtime-coverage");
             case "settings-panel-size-set" -> compileSettingsPanelSizeSet(
                     componentId,
                     operation,
@@ -2200,6 +2250,197 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileDynamicFieldsControlRegistration(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String controlType = text(input, "controlType");
+        String selector = text(input, "selector");
+        if (controlType.isBlank() || selector.isBlank() || text(input, "componentExport").isBlank()) {
+            failures.add("dynamic-fields-control-registration requires controlType, selector, and componentExport");
+            return null;
+        }
+        ArrayNode registry = arrayAt(proposedConfig, "componentRegistry", true);
+        ObjectNode entry = findObjectByKey(registry, "controlType", controlType);
+        JsonNode previousEntry = entry == null ? MissingNode.getInstance() : entry.deepCopy();
+        if (entry == null) {
+            entry = objectMapper.createObjectNode();
+            entry.put("controlType", controlType);
+            registry.add(entry);
+        }
+        entry.put("selector", selector);
+        entry.put("componentExport", text(input, "componentExport"));
+        if (input.has("lazyImportPath")) {
+            entry.set("lazyImportPath", input.path("lazyImportPath"));
+        }
+        entry.put("packageOwned", input.path("packageOwned").asBoolean(true));
+
+        ObjectNode metadata = objectAt(proposedConfig, "componentMetadata", true);
+        ArrayNode profiles = arrayAt(metadata, "controlProfiles", true);
+        ObjectNode profile = findObjectByKey(profiles, "controlType", controlType);
+        if (profile == null) {
+            profile = objectMapper.createObjectNode();
+            profile.put("controlType", controlType);
+            profiles.add(profile);
+        }
+        profile.put("selector", selector);
+        profile.put("componentExport", text(input, "componentExport"));
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "register-dynamic-field-control");
+        compiled.put("path", "componentRegistry[]");
+        compiled.set("previousEntry", previousEntry);
+        compiled.set("entry", entry.deepCopy());
+        compiled.set("metadataProfile", profile.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileDynamicFieldsAliasRegistration(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String alias = text(input, "alias");
+        String controlType = text(input, "controlType");
+        if (alias.isBlank() || controlType.isBlank()) {
+            failures.add("dynamic-fields-alias-registration requires alias and controlType");
+            return null;
+        }
+        ArrayNode aliases = arrayAt(proposedConfig, "controlTypeAliases", true);
+        String normalizedAlias = normalizeControlToken(alias);
+        ObjectNode entry = findObjectByKey(aliases, "normalizedAlias", normalizedAlias);
+        JsonNode previousEntry = entry == null ? MissingNode.getInstance() : entry.deepCopy();
+        if (entry == null) {
+            entry = objectMapper.createObjectNode();
+            aliases.add(entry);
+        }
+        entry.put("alias", alias);
+        entry.put("normalizedAlias", normalizedAlias);
+        entry.put("controlType", controlType);
+        if (input.has("reason")) {
+            entry.set("reason", input.path("reason"));
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "register-dynamic-field-alias");
+        compiled.put("path", "controlTypeAliases[]");
+        compiled.set("previousEntry", previousEntry);
+        compiled.set("entry", entry.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileDynamicFieldsAliasRemoval(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String alias = text(input, "alias");
+        if (alias.isBlank()) {
+            failures.add("dynamic-fields-alias-removal requires alias");
+            return null;
+        }
+        ArrayNode aliases = arrayAt(proposedConfig, "controlTypeAliases", false);
+        if (aliases == null) {
+            failures.add("dynamic-fields-alias-removal path is not an array: controlTypeAliases[]");
+            return null;
+        }
+        String normalizedAlias = normalizeControlToken(alias);
+        int removedIndex = indexOfObjectByKey(aliases, "normalizedAlias", normalizedAlias);
+        if (removedIndex < 0) {
+            removedIndex = indexOfObjectByKey(aliases, "alias", alias);
+        }
+        if (removedIndex < 0) {
+            failures.add("dynamic-fields-alias-removal alias not found: " + alias);
+            return null;
+        }
+        JsonNode removed = aliases.remove(removedIndex);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "remove-dynamic-field-alias");
+        compiled.put("path", "controlTypeAliases[]");
+        compiled.put("removedIndex", removedIndex);
+        compiled.set("removedEntry", removed);
+        if (input.has("replacementControlType")) {
+            compiled.set("replacementControlType", input.path("replacementControlType"));
+        }
+        return compiled;
+    }
+
+    private ObjectNode compileDynamicFieldsSelectorMappingSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String selector = text(input, "selector");
+        String controlType = text(input, "controlType");
+        if (selector.isBlank() || controlType.isBlank()) {
+            failures.add("dynamic-fields-selector-mapping-set requires selector and controlType");
+            return null;
+        }
+        ArrayNode mappings = arrayAt(proposedConfig, "selectorMappings", true);
+        ObjectNode entry = findObjectByKey(mappings, "selector", selector);
+        JsonNode previousEntry = entry == null ? MissingNode.getInstance() : entry.deepCopy();
+        if (entry == null) {
+            entry = objectMapper.createObjectNode();
+            mappings.add(entry);
+        }
+        entry.put("selector", selector);
+        entry.put("controlType", controlType);
+        entry.put("overwrite", input.path("overwrite").asBoolean(false));
+        if (input.has("source")) {
+            entry.set("source", input.path("source"));
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "set-dynamic-field-selector-mapping");
+        compiled.put("path", "selectorMappings[]");
+        compiled.set("previousEntry", previousEntry);
+        compiled.set("entry", entry.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileDynamicFieldsCoverageValidation(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            String coveragePath,
+            String opName) {
+        JsonNode input = planOperation.path("input");
+        String controlType = text(input, "controlType");
+        ArrayNode coverage = arrayAt(proposedConfig, coveragePath, true);
+        ObjectNode entry = findObjectByKey(coverage, "controlType", controlType);
+        JsonNode previousEntry = entry == null ? MissingNode.getInstance() : entry.deepCopy();
+        if (entry == null) {
+            entry = objectMapper.createObjectNode();
+            entry.put("controlType", controlType);
+            coverage.add(entry);
+        }
+        mergeObject(entry, input);
+        entry.put("validated", true);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", opName);
+        compiled.put("path", coveragePath + "[]");
+        compiled.set("previousEntry", previousEntry);
+        compiled.set("entry", entry.deepCopy());
+        return compiled;
+    }
+
     private ObjectNode compileExpansionMultiExpandSet(
             String componentId,
             JsonNode operation,
@@ -2496,6 +2737,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     private String textOrDefault(JsonNode node, String field, String defaultValue) {
         String value = text(node, field);
         return value.isBlank() ? defaultValue : value;
+    }
+
+    private String normalizeControlToken(String value) {
+        return value == null ? "" : value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
     }
 
     private boolean isUnsafeFilesBaseUrl(String baseUrl) {

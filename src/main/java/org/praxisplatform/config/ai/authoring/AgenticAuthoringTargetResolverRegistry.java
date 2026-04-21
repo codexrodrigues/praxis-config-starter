@@ -169,6 +169,13 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 addArrayMatches(candidates, config, "rowConditionalStyles[]", List.of("id", "key"), targetValue);
                 addRecursiveArrayMatches(candidates, config, "conditionalStyles", List.of("id", "key"), targetValue);
             }
+            case "field-control-type-token", "component-registry-coverage" -> {
+                addArrayMatches(candidates, config, "componentRegistry[]", List.of("controlType", "type", "id", "name"), targetValue);
+                addRecursiveArrayMatches(candidates, config, "controlProfiles", List.of("controlType", "type", "id", "name"), targetValue);
+            }
+            case "normalized-control-type-alias" -> addArrayMatches(candidates, config, "controlTypeAliases[]", List.of("alias", "normalizedAlias", "id"), normalizeToken(targetValue));
+            case "field-selector-registry-entry" -> addArrayMatches(candidates, config, "selectorMappings[]", List.of("selector", "id"), targetValue);
+            case "metadata-editor-tooling-coverage" -> addArrayMatches(candidates, config, "editorCoverage[]", List.of("controlType", "type", "id", "name"), targetValue);
             case "component-metadata-editorial-descriptor" -> addRecursiveArrayMatches(candidates, config, "controlProfiles", List.of("controlType", "type", "id", "name"), targetValue);
             case "field-metadata-json-path" -> addRecursiveObjectMatches(candidates, config, List.of("path", "jsonPath", "name", "id"), targetValue);
             case "row-by-id-in-section" -> addRecursiveArrayMatches(candidates, config, "rows", List.of("id"), targetValue);
@@ -264,6 +271,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "renderer-in-column",
                 "conditional-renderer-in-column",
                 "style-rule-in-column-or-row",
+                "field-control-type-token",
+                "component-registry-coverage",
+                "normalized-control-type-alias",
+                "field-selector-registry-entry",
+                "metadata-editor-tooling-coverage",
                 "component-metadata-editorial-descriptor",
                 "field-metadata-json-path",
                 "row-by-id-in-section",
@@ -473,11 +485,16 @@ public final class AgenticAuthoringTargetResolverRegistry {
 
     private boolean matchesAnyKey(JsonNode item, List<String> keys, String targetValue) {
         for (String key : keys) {
-            if (targetValue.equals(text(item, key))) {
+            String value = text(item, key);
+            if (targetValue.equals(value) || targetValue.equals(normalizeToken(value))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private String normalizeToken(String value) {
+        return value == null ? "" : value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
     }
 
     private JsonNode resolvePath(JsonNode root, String dottedPath) {

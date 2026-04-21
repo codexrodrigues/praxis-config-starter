@@ -147,7 +147,18 @@ public final class AgenticAuthoringValidatorRegistry {
             "editor-round-trip-preserve",
             "no-index-as-identity",
             "format-preset-supported",
-            "conditional-style-valid");
+            "conditional-style-valid",
+            "control-type-unique",
+            "runtime-component-resolves",
+            "field-metadata-compatible",
+            "alias-resolves-deterministically",
+            "editor-tooling-discovers-control",
+            "alias-exists",
+            "alias-removal-safe",
+            "selector-mapping-deterministic",
+            "metadata-capability-aligned",
+            "runtime-editor-coverage-not-divergent",
+            "coverage-evidence-present");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
@@ -278,6 +289,17 @@ public final class AgenticAuthoringValidatorRegistry {
                         validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 case "grouping-fields-exist", "filter-fields-exist" ->
                         validateInputFieldsExist(operationId, planOperation.path("input"), config, failures);
+                case "control-type-unique" -> validateDynamicControlTypeUnique(operationId, planOperation, config, failures);
+                case "runtime-component-resolves" -> validateDynamicRuntimeComponentResolves(operationId, planOperation, config, failures);
+                case "field-metadata-compatible", "metadata-capability-aligned" -> validateDynamicFieldMetadataCompatible(operationId, planOperation, failures);
+                case "alias-resolves-deterministically" -> validateDynamicAliasDeterministic(operationId, planOperation, config, failures);
+                case "alias-exists" -> validateDynamicAliasExists(operationId, planOperation, config, failures);
+                case "alias-removal-safe" -> validateDynamicAliasRemovalSafe(operationId, planOperation, config, failures);
+                case "destructive-removal-confirmation" -> validateDestructiveRemovalConfirmation(operationId, planOperation, failures);
+                case "selector-mapping-deterministic" -> validateDynamicSelectorMappingDeterministic(operationId, planOperation, config, failures);
+                case "editor-tooling-discovers-control" -> validateDynamicEditorToolingDiscoversControl(operationId, planOperation, config, failures);
+                case "runtime-editor-coverage-not-divergent" -> validateDynamicRuntimeEditorCoverageNotDivergent(operationId, planOperation, config, failures);
+                case "coverage-evidence-present" -> validateDynamicCoverageEvidencePresent(operationId, planOperation, failures);
                 default -> warnings.add("validator executed as structural pass-through: " + validatorId);
             }
         }
@@ -922,6 +944,183 @@ public final class AgenticAuthoringValidatorRegistry {
             failures.add("validator json-logic-valid failed for " + operationId + ": expression must not be blank");
         } else if (!(condition.isObject() || condition.isArray() || condition.isTextual())) {
             failures.add("validator json-logic-valid failed for " + operationId + ": expression has unsupported type");
+        }
+    }
+
+    private void validateDynamicControlTypeUnique(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String controlType = text(planOperation.path("input"), "controlType");
+        if (controlType.isBlank()) {
+            failures.add("validator control-type-unique failed for " + operationId + ": controlType is required");
+            return;
+        }
+        if (hasControlType(config, controlType)) {
+            failures.add("validator control-type-unique failed for " + operationId + ": controlType already exists " + controlType);
+        }
+    }
+
+    private void validateDynamicRuntimeComponentResolves(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String controlType = text(input, "controlType");
+        if ("controlType.register".equals(operationId)) {
+            if (text(input, "componentExport").isBlank()) {
+                failures.add("validator runtime-component-resolves failed for " + operationId + ": componentExport is required");
+            }
+            if (text(input, "selector").isBlank()) {
+                failures.add("validator runtime-component-resolves failed for " + operationId + ": selector is required");
+            }
+            return;
+        }
+        if (controlType.isBlank()) {
+            failures.add("validator runtime-component-resolves failed for " + operationId + ": controlType is required");
+            return;
+        }
+        if (!hasControlType(config, controlType) && !input.path("componentRegistered").asBoolean(false)) {
+            failures.add("validator runtime-component-resolves failed for " + operationId + ": controlType is not registered " + controlType);
+        }
+    }
+
+    private void validateDynamicFieldMetadataCompatible(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("path")) {
+            String path = text(input, "path");
+            if (path.isBlank() || path.startsWith("$") || path.contains("..")) {
+                failures.add("validator field-metadata-compatible failed for " + operationId + ": metadata path is invalid");
+            }
+        }
+        if (input.has("controlType") && text(input, "controlType").isBlank()) {
+            failures.add("validator field-metadata-compatible failed for " + operationId + ": controlType is required");
+        }
+    }
+
+    private void validateDynamicAliasDeterministic(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String alias = text(input, "alias");
+        String controlType = text(input, "controlType");
+        if (alias.isBlank() || controlType.isBlank()) {
+            failures.add("validator alias-resolves-deterministically failed for " + operationId + ": alias and controlType are required");
+            return;
+        }
+        if (normalizeControlToken(alias).equals(normalizeControlToken(controlType))) {
+            failures.add("validator alias-resolves-deterministically failed for " + operationId + ": alias must differ from controlType");
+        }
+        JsonNode existing = findAlias(config, alias);
+        if (!existing.isMissingNode() && !controlType.equals(text(existing, "controlType"))) {
+            failures.add("validator alias-resolves-deterministically failed for " + operationId
+                    + ": alias already maps to " + text(existing, "controlType"));
+        }
+    }
+
+    private void validateDynamicAliasExists(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        String alias = text(planOperation.path("input"), "alias");
+        if (findAlias(config, alias).isMissingNode()) {
+            failures.add("validator alias-exists failed for " + operationId + ": alias not found " + alias);
+        }
+    }
+
+    private void validateDynamicAliasRemovalSafe(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String replacement = text(planOperation.path("input"), "replacementControlType");
+        if (!replacement.isBlank() && !hasControlType(config, replacement)) {
+            failures.add("validator alias-removal-safe failed for " + operationId
+                    + ": replacement controlType is not registered " + replacement);
+        }
+    }
+
+    private void validateDestructiveRemovalConfirmation(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        if (!planOperation.path("confirmed").asBoolean(false)) {
+            failures.add("validator destructive-removal-confirmation failed for " + operationId
+                    + ": explicit confirmation is required");
+        }
+    }
+
+    private void validateDynamicSelectorMappingDeterministic(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String selector = text(input, "selector");
+        String controlType = text(input, "controlType");
+        if (selector.isBlank() || controlType.isBlank()) {
+            failures.add("validator selector-mapping-deterministic failed for " + operationId + ": selector and controlType are required");
+            return;
+        }
+        JsonNode existing = findObjectByKey(config.path("selectorMappings"), "selector", selector);
+        if (!existing.isMissingNode()
+                && !input.path("overwrite").asBoolean(false)
+                && !controlType.equals(text(existing, "controlType"))) {
+            failures.add("validator selector-mapping-deterministic failed for " + operationId
+                    + ": selector already maps to " + text(existing, "controlType"));
+        }
+    }
+
+    private void validateDynamicEditorToolingDiscoversControl(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String controlType = text(input, "controlType");
+        if (controlType.isBlank()) {
+            return;
+        }
+        if (input.has("metadataEditor") && !input.path("metadataEditor").asBoolean(false)) {
+            failures.add("validator editor-tooling-discovers-control failed for " + operationId + ": metadataEditor coverage is false");
+        }
+        if (input.has("dynamicFormDiscovery") && !input.path("dynamicFormDiscovery").asBoolean(false)) {
+            failures.add("validator editor-tooling-discovers-control failed for " + operationId + ": dynamicFormDiscovery coverage is false");
+        }
+        if (!input.has("metadataEditor")
+                && !hasControlType(config, controlType)
+                && findObjectByKey(config.path("editorCoverage"), "controlType", controlType).isMissingNode()) {
+            failures.add("validator editor-tooling-discovers-control failed for " + operationId
+                    + ": no editor coverage evidence for " + controlType);
+        }
+    }
+
+    private void validateDynamicRuntimeEditorCoverageNotDivergent(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String controlType = text(planOperation.path("input"), "controlType");
+        if (controlType.isBlank()) {
+            return;
+        }
+        JsonNode runtime = findObjectByKey(config.path("runtimeCoverage"), "controlType", controlType);
+        JsonNode editor = findObjectByKey(config.path("editorCoverage"), "controlType", controlType);
+        if (!runtime.isMissingNode()
+                && runtime.path("componentRegistered").asBoolean(false)
+                && !editor.isMissingNode()
+                && editor.has("metadataEditor")
+                && !editor.path("metadataEditor").asBoolean(false)) {
+            failures.add("validator runtime-editor-coverage-not-divergent failed for " + operationId
+                    + ": runtime coverage exists but metadata editor coverage is false");
+        }
+    }
+
+    private void validateDynamicCoverageEvidencePresent(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode evidence = planOperation.path("input").path("evidence");
+        if (!evidence.isArray() || evidence.isEmpty()) {
+            failures.add("validator coverage-evidence-present failed for " + operationId + ": evidence array is required");
         }
     }
 
@@ -1577,6 +1776,32 @@ public final class AgenticAuthoringValidatorRegistry {
             }
         }
         return current;
+    }
+
+    private boolean hasControlType(JsonNode config, String controlType) {
+        if (controlType == null || controlType.isBlank()) {
+            return false;
+        }
+        return !findObjectByKey(config.path("componentRegistry"), "controlType", controlType).isMissingNode()
+                || !findObjectByKey(config.path("componentMetadata").path("controlProfiles"), "controlType", controlType).isMissingNode()
+                || !findObjectByKey(config.path("controlProfiles"), "controlType", controlType).isMissingNode()
+                || !findObjectByKey(config.path("runtimeCoverage"), "controlType", controlType).isMissingNode();
+    }
+
+    private JsonNode findAlias(JsonNode config, String alias) {
+        if (alias == null || alias.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        String normalized = normalizeControlToken(alias);
+        JsonNode byNormalized = findObjectByKey(config.path("controlTypeAliases"), "normalizedAlias", normalized);
+        if (!byNormalized.isMissingNode()) {
+            return byNormalized;
+        }
+        return findObjectByKey(config.path("controlTypeAliases"), "alias", alias);
+    }
+
+    private String normalizeControlToken(String value) {
+        return value == null ? "" : value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
     }
 
     private String text(JsonNode node, String field) {

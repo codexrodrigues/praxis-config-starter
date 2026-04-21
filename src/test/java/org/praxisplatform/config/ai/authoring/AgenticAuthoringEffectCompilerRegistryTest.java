@@ -1575,6 +1575,98 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("data").path("__praxisAuthoringDelegatedPatch").path("componentId").asText()).isEqualTo("praxis-table");
     }
 
+    @Test
+    void shouldCompileDynamicFieldsControlRegistrationAndMetadataProfile() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "componentRegistry": [],
+                  "componentMetadata": { "controlProfiles": [] }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-dynamic-fields",
+                operationWithHandler("controlType.register", "controlType", "field-control-type-token", false,
+                        "compile-domain-patch", "dynamic-fields-control-registration", "componentRegistry"),
+                plan("null", "{ \"controlType\": \"pdx-money\", \"selector\": \"pdx-money-input\", \"componentExport\": \"PdxMoneyInputComponent\", \"packageOwned\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("register-dynamic-field-control");
+        assertThat(proposedConfig.path("componentRegistry").get(0).path("controlType").asText()).isEqualTo("pdx-money");
+        assertThat(proposedConfig.path("componentMetadata").path("controlProfiles").get(0).path("selector").asText()).isEqualTo("pdx-money-input");
+    }
+
+    @Test
+    void shouldCompileDynamicFieldsAliasAddRemoveSelectorAndCoverage() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "componentRegistry": [
+                    { "controlType": "pdx-money", "selector": "pdx-money-input" }
+                  ],
+                  "controlTypeAliases": [
+                    { "alias": "money", "normalizedAlias": "money", "controlType": "pdx-money" }
+                  ],
+                  "selectorMappings": []
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-dynamic-fields",
+                operationWithHandler("controlType.alias.add", "controlAlias", "normalized-control-type-alias", false,
+                        "compile-domain-patch", "dynamic-fields-alias-registration", "controlTypeAliases"),
+                plan("null", "{ \"alias\": \"currency money\", \"controlType\": \"pdx-money\", \"reason\": \"legacy schema\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-fields",
+                operationWithHandler("selector.mapping.set", "selector", "field-selector-registry-entry", false,
+                        "compile-domain-patch", "dynamic-fields-selector-mapping-set", "selectorMappings[]"),
+                plan("null", "{ \"selector\": \"[data-money]\", \"controlType\": \"pdx-money\", \"source\": \"package-default\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-fields",
+                operationWithHandler("runtimeCoverage.validate", "runtimeCoverage", "component-registry-coverage", true,
+                        "compile-domain-patch", "dynamic-fields-runtime-coverage-validation", "runtimeCoverage"),
+                plan("\"pdx-money\"", "{ \"controlType\": \"pdx-money\", \"componentRegistered\": true, \"valueAccessor\": true, \"evidence\": [\"registry spec\"] }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-dynamic-fields",
+                operationWithHandler("controlType.alias.remove", "controlAlias", "normalized-control-type-alias", true,
+                        "compile-domain-patch", "dynamic-fields-alias-removal", "controlTypeAliases"),
+                plan("\"money\"", "{ \"alias\": \"money\", \"replacementControlType\": \"pdx-money\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(4);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("register-dynamic-field-alias");
+        assertThat(patchOperations.get(1).path("op").asText()).isEqualTo("set-dynamic-field-selector-mapping");
+        assertThat(patchOperations.get(2).path("op").asText()).isEqualTo("validate-dynamic-fields-runtime-coverage");
+        assertThat(patchOperations.get(3).path("op").asText()).isEqualTo("remove-dynamic-field-alias");
+        assertThat(proposedConfig.path("controlTypeAliases")).hasSize(1);
+        assertThat(proposedConfig.path("controlTypeAliases").get(0).path("normalizedAlias").asText()).isEqualTo("currency-money");
+        assertThat(proposedConfig.path("selectorMappings").get(0).path("selector").asText()).isEqualTo("[data-money]");
+        assertThat(proposedConfig.path("runtimeCoverage").get(0).path("validated").asBoolean()).isTrue();
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

@@ -210,6 +210,56 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateDynamicFieldsAliasAndCoverageSemantics() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-dynamic-fields",
+                operation("controlType.alias.add", "controlAlias", "normalized-control-type-alias", false,
+                        "alias-resolves-deterministically,runtime-component-resolves,editor-tooling-discovers-control"),
+                plan("null", "{ \"alias\": \"money\", \"controlType\": \"pdx-money\" }"),
+                objectMapper.readTree("""
+                        {
+                          "componentRegistry": [
+                            { "controlType": "pdx-money" }
+                          ],
+                          "controlTypeAliases": [
+                            { "alias": "money", "normalizedAlias": "money", "controlType": "pdx-currency" }
+                          ]
+                        }
+                        """),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains("validator alias-resolves-deterministically failed for controlType.alias.add: alias already maps to pdx-currency");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-dynamic-fields",
+                operation("runtimeCoverage.validate", "runtimeCoverage", "component-registry-coverage", true,
+                        "runtime-component-resolves,runtime-editor-coverage-not-divergent,coverage-evidence-present"),
+                plan("\"pdx-money\"", "{ \"controlType\": \"pdx-money\", \"componentRegistered\": true }"),
+                objectMapper.readTree("""
+                        {
+                          "runtimeCoverage": [
+                            { "controlType": "pdx-money", "componentRegistered": true }
+                          ],
+                          "editorCoverage": [
+                            { "controlType": "pdx-money", "metadataEditor": false }
+                          ]
+                        }
+                        """),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator runtime-editor-coverage-not-divergent failed for runtimeCoverage.validate: runtime coverage exists but metadata editor coverage is false",
+                        "validator coverage-evidence-present failed for runtimeCoverage.validate: evidence array is required");
+    }
+
+    @Test
     void shouldValidateDialogPresetAndAccessibilitySemantics() throws Exception {
         List<String> failures = new ArrayList<>();
 

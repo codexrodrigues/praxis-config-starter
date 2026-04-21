@@ -302,6 +302,49 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(byId.path()).isEqualTo("tabs[]/1");
     }
 
+    @Test
+    void shouldResolveDynamicFieldsAliasesSelectorsAndCoverageTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "componentRegistry": [
+                    { "controlType": "pdx-money", "selector": "pdx-money-input" }
+                  ],
+                  "controlTypeAliases": [
+                    { "alias": "Currency Money", "normalizedAlias": "currency-money", "controlType": "pdx-money" }
+                  ],
+                  "selectorMappings": [
+                    { "selector": "[data-money]", "controlType": "pdx-money" }
+                  ],
+                  "editorCoverage": [
+                    { "controlType": "pdx-money", "metadataEditor": true }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget alias = registry.resolve(
+                "praxis-dynamic-fields",
+                operation("controlType.alias.remove", "controlAlias", "normalized-control-type-alias", "fail", true),
+                objectMapper.readTree("\"currency money\""),
+                config);
+        AgenticAuthoringResolvedTarget selector = registry.resolve(
+                "praxis-dynamic-fields",
+                operation("selector.mapping.set", "selector", "field-selector-registry-entry", "fail", true),
+                objectMapper.readTree("\"[data-money]\""),
+                config);
+        AgenticAuthoringResolvedTarget coverage = registry.resolve(
+                "praxis-dynamic-fields",
+                operation("editorCoverage.validate", "editorCoverage", "metadata-editor-tooling-coverage", "fail", true),
+                objectMapper.readTree("\"pdx-money\""),
+                config);
+
+        assertThat(alias.status()).isEqualTo("resolved");
+        assertThat(alias.path()).isEqualTo("controlTypeAliases[]/0");
+        assertThat(selector.status()).isEqualTo("resolved");
+        assertThat(selector.path()).isEqualTo("selectorMappings[]/0");
+        assertThat(coverage.status()).isEqualTo("resolved");
+        assertThat(coverage.path()).isEqualTo("editorCoverage[]/0");
+    }
+
     private JsonNode operation(
             String operationId,
             String kind,
