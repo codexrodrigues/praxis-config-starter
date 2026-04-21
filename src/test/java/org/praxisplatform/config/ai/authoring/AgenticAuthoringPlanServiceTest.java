@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,19 +88,10 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
-    void generateMinimalFormPlanUsesIntentResolutionAsPromptAndValidationContext() throws Exception {
+    void generateMinimalFormPlanUsesReferencePlanForResolvedQuickstartFuncionariosCreate() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
         properties.setContractsDir(tempDir);
-        ObjectNode plan = funcionariosPlan();
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        when(providerManagementService.generateJson(
-                promptCaptor.capture(),
-                any(AiJsonSchema.class),
-                any(),
-                eq("tenant"),
-                eq("user"),
-                eq("local"))).thenReturn(plan);
 
         AgenticAuthoringPlanResult result = service(properties)
                 .generateMinimalFormPlan(
@@ -116,11 +108,13 @@ class AgenticAuthoringPlanServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.warnings()).contains("intent-resolution-applied");
-        assertThat(promptCaptor.getValue()).contains("/api/human-resources/funcionarios");
-        assertThat(promptCaptor.getValue()).contains("submitActionRef: POST /api/human-resources/funcionarios");
-        assertThat(promptCaptor.getValue()).contains("Current page summary:");
-        assertThat(promptCaptor.getValue()).contains("\"fieldNames\":[\"observacaoInterna\"]");
-        assertThat(promptCaptor.getValue()).contains("\"localFieldNames\":[\"observacaoInterna\"]");
+        assertThat(result.minimalFormPlan().path("targetApp").asText()).isEqualTo("praxis-ui-angular");
+        assertThat(result.minimalFormPlan().path("submitActionRef").asText())
+                .isEqualTo("POST /api/human-resources/funcionarios");
+        assertThat(result.minimalFormPlan().path("fields"))
+                .extracting(field -> field.path("name").asText())
+                .contains("nomeCompleto", "cpf", "email", "telefone", "salario", "cargoId", "departamentoId");
+        verifyNoInteractions(providerManagementService);
     }
 
     @Test

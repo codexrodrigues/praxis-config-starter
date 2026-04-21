@@ -220,10 +220,27 @@ public class AgenticAuthoringIntentResolverService {
                 }
             }
         }
+        candidates = withEmployeeFormPriorityCandidate(prompt, candidates);
+        boolean deterministicEmployeeFormCreate = target == null && isEmployeeFormCreatePrompt(prompt);
+        if (deterministicEmployeeFormCreate) {
+            operationKind = "create";
+            artifactKind = "form";
+            changeKind = "create_minimal_form";
+        }
         AgenticAuthoringCandidate selectedCandidate = selectCandidate(candidates, target, artifactKind);
         selectedCandidate = selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
         selectedCandidate = selectLlmCandidate(llmIntent, candidates, selectedCandidate);
         selectedCandidate = selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
+        selectedCandidate = selectDeterministicFormCandidate(prompt, candidates, selectedCandidate);
+        boolean deterministicPayrollDashboardConfirmation = isConfirmedPayrollDashboardCreate(
+                prompt,
+                effectivePrompt,
+                selectedCandidate);
+        if (deterministicPayrollDashboardConfirmation) {
+            operationKind = "create";
+            artifactKind = "dashboard";
+            changeKind = "create_chart_drilldown";
+        }
         AgenticAuthoringGateResult gate = eligibilityGate.evaluate(
                 operationKind,
                 artifactKind,
@@ -285,6 +302,12 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (deterministicFallbackApplied) {
             warnings = withWarning(warnings, "keyword-fallback-applied");
+        }
+        if (deterministicEmployeeFormCreate) {
+            warnings = withWarning(warnings, "deterministic-employee-form-create-applied");
+        }
+        if (deterministicPayrollDashboardConfirmation) {
+            warnings = withWarning(warnings, "deterministic-payroll-dashboard-confirmation-applied");
         }
         return new AgenticAuthoringIntentResolutionResult(
                 "eligible".equals(gate.status()),
@@ -547,6 +570,22 @@ public class AgenticAuthoringIntentResolverService {
                 .orElse(fallback);
     }
 
+    private AgenticAuthoringCandidate selectDeterministicFormCandidate(
+            String prompt,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringCandidate fallback) {
+        if (!isEmployeeFormCreatePrompt(prompt) || candidates == null || candidates.isEmpty()) {
+            return fallback;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> "/api/human-resources/funcionarios".equals(candidate.resourcePath()))
+                .filter(candidate -> "post".equalsIgnoreCase(candidate.operation())
+                        || candidate.schemaUrl().contains("operation=post"))
+                .findFirst()
+                .orElse(fallback);
+    }
+
     private List<String> warnings(AgenticAuthoringLlmIntentResolution llmIntent) {
         List<String> warnings = new ArrayList<>();
         warnings.add("metadata-probe-not-run");
@@ -762,7 +801,9 @@ public class AgenticAuthoringIntentResolverService {
 
     private List<AgenticAuthoringCandidate> discoverKnownCandidates(String prompt) {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
-        if (containsAny(prompt, "funcionario", "funcionarios", "colaborador", "colaboradores")
+        if (isEmployeeFormCreatePrompt(prompt)) {
+            candidates.add(employeeFormCandidate());
+        } else if (containsAny(prompt, "funcionario", "funcionarios", "funsionario", "funsionarios", "colaborador", "colaboradores")
                 || (containsAny(prompt, "rh", "human resources") && !isPayrollAnalyticsPrompt(prompt))) {
             candidates.add(candidate("/api/human-resources/funcionarios", 0.90d, "prompt mentions funcionarios/colaboradores", "known-quickstart-resource"));
         }
@@ -826,6 +867,35 @@ public class AgenticAuthoringIntentResolverService {
                     "known-quickstart-resource"));
         }
         return candidates;
+    }
+
+    private AgenticAuthoringCandidate employeeFormCandidate() {
+        return candidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                0.99d,
+                "prompt asks for an employee registration form",
+                "known-quickstart-employee-form");
+    }
+
+    private List<AgenticAuthoringCandidate> withEmployeeFormPriorityCandidate(
+            String prompt,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (!isEmployeeFormCreatePrompt(prompt)) {
+            return candidates == null ? List.of() : candidates;
+        }
+        java.util.LinkedHashMap<String, AgenticAuthoringCandidate> prioritized = new java.util.LinkedHashMap<>();
+        AgenticAuthoringCandidate priorityCandidate = employeeFormCandidate();
+        prioritized.put(priorityCandidate.resourcePath(), priorityCandidate);
+        if (candidates != null) {
+            for (AgenticAuthoringCandidate candidate : candidates) {
+                if (candidate == null || candidate.resourcePath() == null || candidate.resourcePath().isBlank()) {
+                    continue;
+                }
+                prioritized.putIfAbsent(candidate.resourcePath(), candidate);
+            }
+        }
+        return List.copyOf(prioritized.values());
     }
 
     private List<AgenticAuthoringCandidate> deduplicateCandidates(List<AgenticAuthoringCandidate> candidates) {
@@ -965,10 +1035,32 @@ public class AgenticAuthoringIntentResolverService {
                 && !hasPayrollDashboardBreakdown(prompt);
     }
 
+    private boolean isConfirmedPayrollDashboardCreate(
+            String prompt,
+            String effectivePrompt,
+            AgenticAuthoringCandidate selectedCandidate) {
+        if (selectedCandidate == null || !PAYROLL_ANALYTICS.equals(selectedCandidate.resourcePath())) {
+            return false;
+        }
+        String combinedPrompt = normalize(valueOrDefault(effectivePrompt, "") + "\n" + valueOrDefault(prompt, ""));
+        if (!isExplicitDashboardPrompt(combinedPrompt) || !hasPayrollDashboardBreakdown(combinedPrompt)) {
+            return false;
+        }
+        return isExplicitCreateConfirmation(combinedPrompt)
+                || isConfirmedDataSourceSelection(combinedPrompt);
+    }
+
+    private boolean isConfirmedDataSourceSelection(String prompt) {
+        return containsAny(prompt, "fonte confirmada", "source confirmed", "data source", "usar vw-", "use vw-",
+                "usar /api/", "use /api/", "recurso confirmado", "api confirmada")
+                || (prompt.contains(PAYROLL_ANALYTICS)
+                && containsAny(prompt, "usar", "use", "confirmada", "confirmado", "selecionada", "selecionado"));
+    }
+
     private boolean hasPayrollDashboardBreakdown(String prompt) {
         return containsAny(prompt,
                 "departamento", "departamentos", "competencia", "competencias", "mes", "mensal",
-                "status", "perfil", "perfis", "cargo", "cargos", "equipe", "equipes", "base", "bases",
+                "status", "setor", "setores", "perfil", "perfis", "cargo", "cargos", "equipe", "equipes", "base", "bases",
                 "funcionario", "funcionarios",
                 "drill down", "drill-down", "drilldown");
     }
@@ -979,6 +1071,27 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean isTablePrompt(String prompt) {
         return containsAny(prompt, "tabela", "grid", "lista", "listagem", "listar", "liste", "relacao");
+    }
+
+    private boolean isEmployeeFormCreatePrompt(String prompt) {
+        if (containsAny(prompt, "beneficio", "beneficios", "dependente", "dependentes", "habilidade", "habilidades")) {
+            return false;
+        }
+        if (!containsAny(prompt,
+                "funcionario", "funcionarios", "funsionario", "funsionarios",
+                "colaborador", "colaboradores", "rh", "human resources")) {
+            return false;
+        }
+        boolean asksForForm = containsAny(prompt,
+                "formulario", "form", "ficha", "cadastro", "cadastrar", "cadastra",
+                "preencher", "prencher", "preenche", "pagina de preencher", "pagina de prencher",
+                "salvar", "salva", "gravar", "criar registro");
+        boolean mentionsEmployeeFields = containsAny(prompt,
+                "nome", "cargo", "salario", "salarios", "departamento", "departameto", "setor");
+        if (isTablePrompt(prompt) && !asksForForm) {
+            return false;
+        }
+        return asksForForm || mentionsEmployeeFields;
     }
 
     private boolean isExplicitDashboardPrompt(String prompt) {
