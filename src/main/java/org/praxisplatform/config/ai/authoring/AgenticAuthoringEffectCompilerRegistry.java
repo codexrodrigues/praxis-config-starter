@@ -81,7 +81,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "rich-content-media-block-update".equals(handler)
                 || "rich-content-link-remove".equals(handler)
                 || "rich-content-timeline-item-add".equals(handler)
-                || "rich-content-timeline-item-update".equals(handler);
+                || "rich-content-timeline-item-update".equals(handler)
+                || "rich-content-timeline-item-remove".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -203,6 +204,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "rich-content-timeline-item-update" -> compileRichContentTimelineItemUpdate(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "rich-content-timeline-item-remove" -> compileRichContentTimelineItemRemove(
                     componentId,
                     operation,
                     effect,
@@ -726,6 +735,68 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return true;
     }
 
+    private ObjectNode compileRichContentTimelineItemRemove(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String timelineBlockId = text(input, "timelineBlockId");
+        if (timelineBlockId.isBlank()) {
+            failures.add("rich-content-timeline-item-remove requires timelineBlockId");
+            return null;
+        }
+        if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
+            failures.add("rich-content-timeline-item-remove target not found");
+            return null;
+        }
+        int itemIndex = indexOfResolvedArrayTarget(resolved);
+        if (itemIndex < 0) {
+            failures.add("rich-content-timeline-item-remove target path is not an indexed timeline item: " + resolved.path());
+            return null;
+        }
+        String blockPath = timelineBlockPathFromItemPath(resolved.path());
+        JsonNode blockNode = nodeAtResolvedPath(proposedConfig, blockPath);
+        if (!(blockNode instanceof ObjectNode timelineBlock)) {
+            failures.add("rich-content-timeline-item-remove timeline block not found: " + blockPath);
+            return null;
+        }
+        ArrayNode items = timelineBlock.path("items") instanceof ArrayNode array ? array : null;
+        if (items == null) {
+            failures.add("rich-content-timeline-item-remove path is not an array: " + blockPath + ".items[]");
+            return null;
+        }
+        if (itemIndex >= items.size()) {
+            failures.add("rich-content-timeline-item-remove item index out of bounds: " + itemIndex);
+            return null;
+        }
+        JsonNode removedValue = items.get(itemIndex).deepCopy();
+        String itemId = text(removedValue, "id");
+        items.remove(itemIndex);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "remove-rich-timeline-item");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "document.nodes[].items[]");
+        compiled.put("resolvedPath", resolved.path());
+        compiled.set("resolvedValue", resolved.value());
+        compiled.put("timelineBlockId", timelineBlockId);
+        compiled.put("keyValue", itemId);
+        compiled.put("removedIndex", itemIndex);
+        compiled.set("removedValue", removedValue);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
     private ObjectNode compileTabsSetActiveItem(
             String componentId,
             JsonNode operation,
@@ -1209,6 +1280,11 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 return candidate;
             }
         }
+    }
+
+    private String timelineBlockPathFromItemPath(String itemPath) {
+        int marker = itemPath == null ? -1 : itemPath.lastIndexOf(".items[]/");
+        return marker < 0 ? "" : itemPath.substring(0, marker);
     }
 
     private Set<String> timelineItemFields() {

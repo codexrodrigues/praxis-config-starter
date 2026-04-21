@@ -1194,6 +1194,76 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesRichContentTimelineItemRemoveFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        {
+                          "id": "history",
+                          "type": "timeline",
+                          "items": [
+                            { "id": "created", "title": "Created" },
+                            { "id": "published", "title": "Published", "subtitle": "Draft" },
+                            { "id": "archived", "title": "Archived" }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "plan": {
+                    "operationId": "timeline.item.remove",
+                    "confirmed": true,
+                    "target": {
+                      "timelineBlockId": "history",
+                      "itemId": "published"
+                    },
+                    "input": {
+                      "timelineBlockId": "history",
+                      "itemId": "published"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(validation.warnings())
+                .contains("validator declared without backend implementation: timeline-target-valid for timeline.item.remove")
+                .contains("validator declared without backend implementation: timeline-item-exists for timeline.item.remove")
+                .contains("validator declared without backend implementation: destructive-removal-confirmed for timeline.item.remove");
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode operation = result.patch().path("operations").get(0);
+        assertThat(operation.path("operationId").asText()).isEqualTo("timeline.item.remove");
+        assertThat(operation.path("op").asText()).isEqualTo("remove-rich-timeline-item");
+        assertThat(operation.path("domainHandler").asText()).isEqualTo("rich-content-timeline-item-remove");
+        assertThat(operation.path("timelineBlockId").asText()).isEqualTo("history");
+        assertThat(operation.path("keyValue").asText()).isEqualTo("published");
+        assertThat(operation.path("removedIndex").asInt()).isEqualTo(1);
+        assertThat(operation.path("removedValue").path("subtitle").asText()).isEqualTo("Draft");
+        JsonNode items = result.patch().path("proposedConfig").path("document").path("nodes").get(0).path("items");
+        assertThat(items).hasSize(2);
+        assertThat(items.get(0).path("id").asText()).isEqualTo("created");
+        assertThat(items.get(1).path("id").asText()).isEqualTo("archived");
+    }
+
+    @Test
     void failsWhenOperationTargetKindIsNotDeclared() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(invalidTargetPayload());
         JsonNode request = objectMapper.readTree("""

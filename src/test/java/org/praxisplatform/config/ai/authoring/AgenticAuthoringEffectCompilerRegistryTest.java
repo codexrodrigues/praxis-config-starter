@@ -665,6 +665,65 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(item.path("badge").asText()).isEqualTo("done");
     }
 
+    @Test
+    void shouldCompileRichContentTimelineItemRemoveDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "history",
+                        "type": "timeline",
+                        "items": [
+                          { "id": "created", "title": "Created" },
+                          { "id": "published", "title": "Published", "subtitle": "Draft" },
+                          { "id": "archived", "title": "Archived" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("timeline.item.remove", "timelineItem", "rich-timeline-item-by-block-id-and-item-id", true,
+                        "compile-domain-patch", "rich-content-timeline-item-remove", "document.nodes[].items[]"),
+                plan("""
+                        {
+                          "timelineBlockId": "history",
+                          "itemId": "published"
+                        }
+                        """, """
+                        {
+                          "timelineBlockId": "history",
+                          "itemId": "published"
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("remove-rich-timeline-item");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-timeline-item-remove");
+        assertThat(patchOperation.path("timelineBlockId").asText()).isEqualTo("history");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("published");
+        assertThat(patchOperation.path("removedIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperation.path("removedValue").path("title").asText()).isEqualTo("Published");
+        JsonNode items = proposedConfig.path("document").path("nodes").get(0).path("items");
+        assertThat(items).hasSize(2);
+        assertThat(items.get(0).path("id").asText()).isEqualTo("created");
+        assertThat(items.get(1).path("id").asText()).isEqualTo("archived");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,
