@@ -115,6 +115,7 @@ Set-Location '$QuickstartRoot'
 `$env:Path = '$JavaHome\bin;' + `$env:Path
 `$env:PORT = '$Port'
 `$env:SPRING_PROFILES_ACTIVE = ''
+`$env:PRAXIS_AI_PROVIDER = '$Provider'
 `$env:APP_SECURITY_READ_OPEN = 'true'
 `$env:APP_SECURITY_CSRF_DISABLE = 'true'
 `$env:APP_SECURITY_CONFIG_ORIGIN_RESTRICTION_ALLOWED_ORIGINS = 'http://localhost:4003,http://127.0.0.1:4003,http://localhost:4200,http://127.0.0.1:4200'
@@ -163,7 +164,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         -Origin $Origin `
         -TenantId $TenantId `
         -UserId $UserId `
-        -Environment $Environment | ConvertFrom-Json
+        -Environment $Environment `
+        -Provider $Provider | ConvertFrom-Json
 
     [pscustomobject]@{
         health = $health.status

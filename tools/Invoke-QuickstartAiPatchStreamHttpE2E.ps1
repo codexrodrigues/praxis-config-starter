@@ -1,4 +1,6 @@
 param(
+    [ValidateSet("openai", "gemini")]
+    [string] $Provider = "openai",
     [string] $BaseUrl = "http://localhost:8088",
     [string] $Origin = "http://localhost:4200",
     [string] $TenantId = "agentic-authoring-e2e",
@@ -7,6 +9,7 @@ param(
     [string] $ComponentId = "praxis-table",
     [string] $ComponentType = "praxis-table",
     [string] $UserPrompt = "Aplique um ajuste visual seguro na tabela atual.",
+    [string] $Model = "",
     [int] $StreamTimeoutSec = 45,
     [string] $ArtifactsDir = ""
 )
@@ -85,8 +88,16 @@ $startBody = @{
         columns = @()
         capabilities = @()
         runtimeState = @{}
+        ai = @{
+            provider = $Provider
+        }
     }
 } | ConvertTo-Json -Depth 10 -Compress
+if (-not [string]::IsNullOrWhiteSpace($Model)) {
+    $startBodyObject = $startBody | ConvertFrom-Json
+    $startBodyObject.currentState.ai | Add-Member -NotePropertyName model -NotePropertyValue $Model -Force
+    $startBody = $startBodyObject | ConvertTo-Json -Depth 10 -Compress
+}
 
 $startRequestPath = Join-Path $ArtifactsDir "start.request.json"
 $startResponsePath = Join-Path $ArtifactsDir "start.response.json"
@@ -148,11 +159,19 @@ $events = @(ConvertFrom-SseContent $streamContent)
 ($events | ConvertTo-Json -Depth 20) | Set-Content -LiteralPath $streamEventsPath -Encoding UTF8
 
 $terminalEvents = @($events | Where-Object { "$($_.type)".ToLowerInvariant() -in @("result", "error", "cancelled") })
+$errorEvents = @($events | Where-Object { "$($_.type)".ToLowerInvariant() -eq "error" })
 if ($events.Count -lt 1) {
     throw "SSE stream returned no parsable JSON events."
 }
 if ($terminalEvents.Count -lt 1) {
     throw "SSE stream returned no terminal event."
+}
+if ($errorEvents.Count -gt 0) {
+    $message = $errorEvents[0].payload.message
+    if ([string]::IsNullOrWhiteSpace($message)) {
+        $message = ($errorEvents[0] | ConvertTo-Json -Depth 8 -Compress)
+    }
+    throw "SSE stream ended with error event: $message"
 }
 
 $replayChecked = $false
@@ -196,6 +215,7 @@ $result = [pscustomobject]@{
     tenantId = $TenantId
     userId = $UserId
     environment = $Environment
+    provider = $Provider
     componentId = $ComponentId
     componentType = $ComponentType
     artifactsDir = $ArtifactsDir
