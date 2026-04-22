@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.ApplicationContext;
@@ -18,7 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Configuration
 @ConditionalOnClass(PgVectorStore.class)
 @ConditionalOnProperty(name = "spring.ai.enabled", havingValue = "true", matchIfMissing = true)
-@ConditionalOnProperty(prefix = "praxis.ai.rag.vector-store", name = "enabled", havingValue = "true", matchIfMissing = true)
+@Conditional(RagVectorStoreEnabledCondition.class)
 @EnableConfigurationProperties(RagChatAdvisorProperties.class)
 public class RagVectorStoreConfiguration {
 
@@ -30,6 +31,12 @@ public class RagVectorStoreConfiguration {
 
     @Value("${praxis.ai.rag.vector-store.dimensions:0}")
     private int ragDimensions;
+
+    @Value("${praxis.ai.rag.vector-store.initialize-schema:${spring.ai.vectorstore.pgvector.initialize-schema:false}}")
+    private boolean initializeSchema;
+
+    @Value("${praxis.ai.rag.vector-store.validate-schema:${spring.ai.vectorstore.pgvector.vector-table-validations-enabled:false}}")
+    private boolean validateSchema;
 
     @Value("${spring.ai.embedding.provider:gemini}")
     private String embeddingProvider;
@@ -57,8 +64,8 @@ public class RagVectorStoreConfiguration {
                 .distanceType(PgDistanceType.COSINE_DISTANCE)
                 .indexType(PgIndexType.IVFFLAT)
                 .dimensions(dimensions)
-                .initializeSchema(false)
-                .vectorTableValidationsEnabled(true)
+                .initializeSchema(initializeSchema)
+                .vectorTableValidationsEnabled(validateSchema)
                 .build();
     }
 
