@@ -52,12 +52,14 @@ public class DomainCatalogIngestionService {
     private final DomainCatalogItemRepository itemRepository;
     private final ObjectMapper objectMapper;
     private final RagVectorStoreService ragVectorStoreService;
+    private final DomainCatalogSchemaValidationService schemaValidationService;
 
     @Transactional
     public DomainCatalogIngestionResponse ingest(JsonNode payload, String tenantId, String environment) {
         if (payload == null || !payload.isObject()) {
             throw new ConfigurationIngestionException("Domain catalog payload must be a JSON object");
         }
+        schemaValidationService.validate(payload);
         String schemaVersion = requiredText(payload, "schemaVersion");
         String releaseKey = releaseKey(payload);
 

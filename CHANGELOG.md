@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+- Domain catalog contract `praxis.domain-catalog/v0.2` with packaged runtime
+  JSON Schema and matching documentation schema.
+- Runtime JSON Schema validation before domain catalog persistence, covering
+  published v0.1 payloads and governed v0.2 payloads.
+
+### Changed
+- Domain catalog ingestion now rejects unsupported schema versions and invalid
+  payloads before writing `domain_catalog_release` or `domain_catalog_item`.
+
 ## [0.1.0-rc.5] - 2026-04-22
 
 ### Fixed
