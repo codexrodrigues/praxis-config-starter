@@ -268,6 +268,40 @@ mvn -B verify
 This verifies the published starter coordinates, not only the local override
 path used by the cross-repository authoring smoke workflow.
 
+## Post-Publication Integrated Authoring Gate
+
+After the first post-publication full smoke exposed two gate weaknesses, the
+authoring smoke line was hardened without waiting for another Maven Central
+publication:
+
+- quickstart startup timeout was raised to `180` seconds for CI stability;
+- checked-out starter versions are aligned to the quickstart Maven properties
+  before local install;
+- the SSE smoke now fails on terminal `error` events instead of treating any
+  terminal event as success;
+- the SSE request explicitly carries the selected AI provider;
+- the SSE smoke prompt uses a deterministic, enum-valid table density request;
+- `praxis-ui-angular/main` clears stale agentic quick replies when a backend
+  semantic quick reply starts a new turn.
+
+The complete cross-repository gate then passed against checked-out `main`
+sources:
+
+| Workflow | Run | Ref | Result |
+| --- | --- | --- | --- |
+| `Agentic Authoring HTTP Smoke` | [`24764478409`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24764478409) | `main` | success |
+
+Confirmed steps:
+
+- local install of `praxis-metadata-starter/main` at the quickstart metadata
+  version;
+- local install of `praxis-config-starter/main` at `0.1.0-rc.6`;
+- packaging of `praxis-api-quickstart/main` against those local starter builds;
+- quickstart authoring HTTP/SSE smoke suite with real OpenAI provider;
+- quickstart Domain Catalog v0.2 HTTP smoke;
+- page-builder agentic full Playwright E2E gate against
+  `praxis-ui-angular/main`.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
