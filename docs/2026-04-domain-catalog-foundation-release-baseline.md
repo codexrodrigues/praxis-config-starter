@@ -367,6 +367,34 @@ This line confirms that:
   `human-resources.funcionarios`, `human-resources.folhas-pagamento` and
   `operations.missoes`.
 
+## Published Resource-Scoped Context Line
+
+After validating the Render-hosted quickstart with multiple resource catalogs
+under the same `serviceKey`, a runtime defect was found in the LLM context
+lookup: `/api/praxis/config/domain-catalog/context` selected the latest release
+for the service, which could return `operations.missoes` context for a query
+that belonged to `human-resources.funcionarios`.
+
+The config starter now supports `resourceKey` scoping for latest-release
+retrieval APIs while preserving the previous service-wide behavior when
+`resourceKey` is omitted.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-config-starter` | `0.1.0-rc.10` / `4e5aec4` | published to Maven Central by [`24781078326`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24781078326) |
+| `praxis-api-quickstart` | `7e42d37` | consumes `praxis-config-starter:0.1.0-rc.10`; CI passed in [`24781951059`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24781951059) |
+
+This line confirms that:
+
+- `/context`, `/items/latest` and `/relationships/latest` can be scoped by
+  `resourceKey`;
+- prompt context retrieval can read `contextHints.domainCatalog.resourceKey` or
+  a top-level `domainResourceKey`;
+- service-wide latest-release lookup remains available for broad discovery;
+- no database migration was required for this release;
+- local quickstart validation passed against the remote database with Flyway at
+  version `17` and the schema already up to date.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
