@@ -132,6 +132,32 @@ Follow-up workflow maintenance also moved official GitHub Actions in
 major versions (`actions/checkout@v5`, `actions/setup-java@v5`, and
 `actions/setup-node@v5` where applicable).
 
+## Current Remote End-to-End Gate
+
+After publishing `praxis-config-starter:0.1.0-rc.5`, updating
+`praxis-api-quickstart` to consume it by default, and switching the authoring
+smoke workflow defaults to current `main` refs, the remote cross-repository gate
+was executed again with the full page-builder E2E enabled.
+
+| Workflow | Run | Ref | Result |
+| --- | --- | --- | --- |
+| `Agentic Authoring HTTP Smoke` | [`24758264901`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24758264901) | `main` | success |
+
+Confirmed steps:
+
+- checkout of `praxis-config-starter/main`, `praxis-api-quickstart/main` and
+  `praxis-ui-angular/main`;
+- setup of Java 21 and Node.js 20 runtime dependencies;
+- local install of the checked-out `praxis-config-starter`;
+- packaging of `praxis-api-quickstart` against the local starter;
+- installation of `praxis-ui-angular` dependencies and Playwright Chromium;
+- quickstart authoring HTTP/SSE smoke suite;
+- full page-builder agentic Playwright E2E gate;
+- smoke artifact upload.
+
+This is the accepted remote end-to-end evidence for the current authoring stack
+after the `0.1.0-rc.5` release line.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
