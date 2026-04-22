@@ -38,6 +38,29 @@ The Maven Central artifacts were verified through direct repository checks:
 - The quickstart CI now waits for newly published Praxis starter artifacts to
   become visible on Maven Central before running `mvn verify`.
 
+## Post-Release Authoring Gate
+
+After publishing `praxis-config-starter:0.1.0-rc.2`, the full agentic
+authoring gate was executed on `praxis-config-starter/main`.
+
+| Workflow | Run | Ref | Commit | Result |
+| --- | --- | --- | --- | --- |
+| `Agentic Authoring HTTP Smoke` | [`24754530578`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24754530578) | `main` | `389a0be93f567ee77e2ac2b66b820355f3108c5b` | success |
+
+Confirmed steps:
+
+- checkout of `praxis-config-starter`, `praxis-api-quickstart` and
+  `praxis-ui-angular`;
+- local install of the checked-out `praxis-config-starter`;
+- packaging of `praxis-api-quickstart` against the local starter;
+- quickstart authoring HTTP/SSE smoke suite;
+- full page-builder agentic Playwright E2E gate;
+- smoke artifact upload.
+
+This run verifies the authoring/SSE/page-builder integration path after the
+`0.1.0-rc.2` release line and records the operational baseline for subsequent
+manifest/backend authoring work.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
