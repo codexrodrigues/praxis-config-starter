@@ -265,6 +265,108 @@ class DomainCatalogPromptContextServiceTest {
     }
 
     @Test
+    void includesExplicitRelationshipsWhenRelationshipHintIsPresent() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+
+        when(ingestionService.contextLatest(
+                eq("praxis-service"),
+                eq("tenant-a"),
+                eq("dev"),
+                eq("node"),
+                eq("human-resources"),
+                eq("field"),
+                eq("centro custo"),
+                eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "centro custo",
+                        "node",
+                        "human-resources",
+                        "field",
+                        List.of(),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "hr:latest",
+                                "node",
+                                "human-resources.employee.field.costCenterId",
+                                "human-resources",
+                                "field",
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "nodeKey": "human-resources.employee.field.costCenterId",
+                                      "nodeType": "field",
+                                      "label": "Centro de custo"
+                                    }
+                                    """)))));
+        when(ingestionService.relationshipsLatest(
+                eq(null),
+                eq("tenant-a"),
+                eq("dev"),
+                eq("human-resources.employee.field.costCenterId"),
+                eq(null),
+                eq("references"),
+                eq("centro custo"),
+                eq(4)))
+                .thenReturn(List.of(new DomainCatalogItemResponse(
+                        UUID.randomUUID(),
+                        "hr:latest",
+                        "edge",
+                        "edge:hr.employee.references.finance.cost-center",
+                        null,
+                        null,
+                        null,
+                        "references",
+                        objectMapper.readTree("""
+                            {
+                              "edgeKey": "edge:hr.employee.references.finance.cost-center",
+                              "sourceNodeKey": "human-resources.employee.field.costCenterId",
+                              "targetNodeKey": "finance.cost-center",
+                              "edgeType": "references",
+                              "sourceEvidenceKeys": ["evidence:domain-catalog:hr"]
+                            }
+                            """))));
+
+        String promptContext = service.buildPromptContext(
+                "qual centro de custo?",
+                objectMapper.readTree("""
+                    {
+                      "domainCatalog": {
+                        "serviceKey": "praxis-service",
+                        "contextKey": "human-resources",
+                        "nodeType": "field",
+                        "query": "centro custo",
+                        "limit": 8,
+                        "relationships": {
+                          "enabled": true,
+                          "federated": true,
+                          "sourceNodeKey": "human-resources.employee.field.costCenterId",
+                          "edgeType": "references",
+                          "query": "centro custo",
+                          "limit": 4
+                        }
+                      }
+                    }
+                    """),
+                "tenant-a",
+                "dev");
+
+        assertThat(promptContext)
+                .contains("DOMAIN_CATALOG_CONTEXT")
+                .contains("[node/field] Centro de custo")
+                .contains("DOMAIN_CATALOG_RELATIONSHIPS")
+                .contains("federated: true")
+                .contains("sourceNodeKey: human-resources.employee.field.costCenterId")
+                .contains("[edge/references] edge:hr.employee.references.finance.cost-center")
+                .contains("sourceNodeKey=human-resources.employee.field.costCenterId")
+                .contains("targetNodeKey=finance.cost-center")
+                .contains("sourceEvidenceKeys=evidence:domain-catalog:hr");
+    }
+
+    @Test
     void ignoresRequestsWithoutDomainCatalogHints() {
         DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
         DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);

@@ -30,24 +30,9 @@ public class DomainCatalogPromptContextService {
         if (request == null) {
             return "";
         }
-        try {
-            DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
-                    request.serviceKey(),
-                    tenantId,
-                    environment,
-                    request.itemType(),
-                    request.contextKey(),
-                    request.nodeType(),
-                    request.query(),
-                    request.limit());
-            return formatContext(context);
-        } catch (RuntimeException ex) {
-            log.warn(
-                    "Could not build domain catalog prompt context for serviceKey={}: {}",
-                    request.serviceKey(),
-                    ex.getMessage());
-            return "";
-        }
+        String contextBlock = formatContext(request, tenantId, environment);
+        String relationshipBlock = formatRelationships(request.relationships(), tenantId, environment);
+        return appendOptionalPromptBlock(contextBlock, relationshipBlock);
     }
 
     private DomainCatalogRequest resolveRequest(String userPrompt, JsonNode contextHints) {
@@ -80,6 +65,7 @@ public class DomainCatalogPromptContextService {
         int limit = clampLimit(domainCatalog != null && domainCatalog.has("limit")
                 ? domainCatalog.path("limit").asInt(DEFAULT_LIMIT)
                 : DEFAULT_LIMIT);
+        RelationshipRequest relationships = resolveRelationshipRequest(domainCatalog, serviceKey, query);
 
         return new DomainCatalogRequest(
                 serviceKey,
@@ -87,7 +73,29 @@ public class DomainCatalogPromptContextService {
                 contextKey,
                 nodeType,
                 query,
-                limit);
+                limit,
+                relationships);
+    }
+
+    private RelationshipRequest resolveRelationshipRequest(JsonNode domainCatalog, String serviceKey, String query) {
+        JsonNode relationships = objectNode(domainCatalog != null ? domainCatalog.get("relationships") : null);
+        if (relationships == null || (relationships.has("enabled") && !relationships.path("enabled").asBoolean(true))) {
+            return null;
+        }
+        boolean federated = relationships.path("federated").asBoolean(false);
+        String relationshipServiceKey = federated ? null : firstText(text(relationships, "serviceKey"), serviceKey);
+        String relationshipQuery = firstText(text(relationships, "query"), text(relationships, "q"), query);
+        int relationshipLimit = clampLimit(relationships.has("limit")
+                ? relationships.path("limit").asInt(DEFAULT_LIMIT)
+                : DEFAULT_LIMIT);
+        return new RelationshipRequest(
+                relationshipServiceKey,
+                text(relationships, "sourceNodeKey"),
+                text(relationships, "targetNodeKey"),
+                text(relationships, "edgeType"),
+                relationshipQuery,
+                relationshipLimit,
+                federated);
     }
 
     private String formatContext(DomainCatalogContextResponse context) {
@@ -124,6 +132,74 @@ public class DomainCatalogPromptContextService {
         return builder.toString().trim();
     }
 
+    private String formatContext(DomainCatalogRequest request, String tenantId, String environment) {
+        try {
+            DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
+                    request.serviceKey(),
+                    tenantId,
+                    environment,
+                    request.itemType(),
+                    request.contextKey(),
+                    request.nodeType(),
+                    request.query(),
+                    request.limit());
+            return formatContext(context);
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Could not build domain catalog prompt context for serviceKey={}: {}",
+                    request.serviceKey(),
+                    ex.getMessage());
+            return "";
+        }
+    }
+
+    private String formatRelationships(RelationshipRequest request, String tenantId, String environment) {
+        if (request == null) {
+            return "";
+        }
+        try {
+            List<DomainCatalogItemResponse> relationships = domainCatalogIngestionService.relationshipsLatest(
+                    request.serviceKey(),
+                    tenantId,
+                    environment,
+                    request.sourceNodeKey(),
+                    request.targetNodeKey(),
+                    request.edgeType(),
+                    request.query(),
+                    request.limit());
+            if (relationships == null || relationships.isEmpty()) {
+                return "";
+            }
+            StringBuilder builder = new StringBuilder();
+            builder.append("DOMAIN_CATALOG_RELATIONSHIPS\n");
+            if (request.federated()) {
+                builder.append("federated: true\n");
+            } else {
+                appendLine(builder, "serviceKey", request.serviceKey());
+            }
+            appendLine(builder, "query", request.query());
+            appendLine(builder, "sourceNodeKey", request.sourceNodeKey());
+            appendLine(builder, "targetNodeKey", request.targetNodeKey());
+            appendLine(builder, "edgeType", request.edgeType());
+            builder.append("items:\n");
+            for (DomainCatalogItemResponse item : relationships) {
+                builder.append("- [edge/")
+                        .append(nullToDash(item.edgeType()))
+                        .append("] ")
+                        .append(label(item))
+                        .append(" (")
+                        .append(item.itemKey())
+                        .append(")");
+                appendPayloadSummary(builder, item.payload());
+                builder.append('\n');
+            }
+            return builder.toString().trim();
+        } catch (RuntimeException ex) {
+            log.warn("Could not build domain catalog relationship prompt context: {}", ex.getMessage());
+            return "";
+        }
+    }
+
     private void appendGuidance(StringBuilder builder, List<String> guidance) {
         if (guidance == null || guidance.isEmpty()) {
             return;
@@ -140,6 +216,8 @@ public class DomainCatalogPromptContextService {
         appendInline(builder, "type", text(payload.path("metadata"), "type"));
         appendInline(builder, "binding", text(payload, "bindingType"));
         appendInline(builder, "edge", text(payload, "edgeType"));
+        appendInline(builder, "sourceNodeKey", text(payload, "sourceNodeKey"));
+        appendInline(builder, "targetNodeKey", text(payload, "targetNodeKey"));
         appendInline(builder, "source", text(payload, "source"));
         appendInline(builder, "semanticOwner", text(payload, "semanticOwner"));
         appendInline(builder, "lifecycle", text(payload, "lifecycle"));
@@ -271,6 +349,16 @@ public class DomainCatalogPromptContextService {
         return Math.min(Math.max(limit, 1), MAX_LIMIT);
     }
 
+    private String appendOptionalPromptBlock(String base, String extra) {
+        if (!StringUtils.hasText(base)) {
+            return StringUtils.hasText(extra) ? extra : "";
+        }
+        if (!StringUtils.hasText(extra)) {
+            return base;
+        }
+        return base + "\n\n" + extra;
+    }
+
     private String nullToDash(String value) {
         return StringUtils.hasText(value) ? value : "-";
     }
@@ -281,6 +369,17 @@ public class DomainCatalogPromptContextService {
             String contextKey,
             String nodeType,
             String query,
-            int limit) {
+            int limit,
+            RelationshipRequest relationships) {
+    }
+
+    private record RelationshipRequest(
+            String serviceKey,
+            String sourceNodeKey,
+            String targetNodeKey,
+            String edgeType,
+            String query,
+            int limit,
+            boolean federated) {
     }
 }

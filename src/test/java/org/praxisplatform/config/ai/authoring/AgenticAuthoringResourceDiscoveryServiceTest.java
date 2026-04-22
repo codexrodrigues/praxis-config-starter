@@ -86,6 +86,13 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .contains("analytics folha pagamento");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("type").asText())
                 .isEqualTo("node");
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("enabled").asBoolean())
+                .isTrue();
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("federated").asBoolean())
+                .isTrue();
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("query").asText())
+                .contains("folha de pagamento")
+                .contains("analytics folha pagamento");
         assertThat(result.warnings()).isEmpty();
     }
 

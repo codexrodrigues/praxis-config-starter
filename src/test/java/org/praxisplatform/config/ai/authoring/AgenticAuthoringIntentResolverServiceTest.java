@@ -2547,6 +2547,13 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("query").asText())
                 .contains("manutencoes preventivas")
                 .contains("beneficios");
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("enabled").asBoolean())
+                .isTrue();
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("federated").asBoolean())
+                .isTrue();
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("query").asText())
+                .contains("manutencoes preventivas")
+                .contains("beneficios");
     }
 
     @Test

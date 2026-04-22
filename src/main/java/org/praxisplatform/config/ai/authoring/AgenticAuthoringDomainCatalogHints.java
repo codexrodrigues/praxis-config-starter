@@ -38,6 +38,13 @@ final class AgenticAuthoringDomainCatalogHints {
         if (!query.isBlank()) {
             domainCatalog.put("query", query);
         }
+        ObjectNode relationships = domainCatalog.putObject("relationships");
+        relationships.put("enabled", true);
+        relationships.put("federated", true);
+        relationships.put("limit", 8);
+        if (!query.isBlank()) {
+            relationships.put("query", query);
+        }
         String nodeType = nodeType(artifactKind);
         if (!nodeType.isBlank()) {
             domainCatalog.put("nodeType", nodeType);
