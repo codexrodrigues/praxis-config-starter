@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.0-rc.7] - 2026-04-22
+
+### Added
+- Latest domain catalog lookups can now federate across the latest release of
+  each service when `serviceKey` is omitted.
+- New `GET /api/praxis/config/domain-catalog/relationships/latest` endpoint for
+  deterministic lookup of explicit domain catalog `edge` relationships.
+- Authoring prompt context can now include a dedicated
+  `DOMAIN_CATALOG_RELATIONSHIPS` block from `contextHints.domainCatalog.relationships`.
+
+### Changed
+- Domain catalog relationship retrieval remains explicit: it does not synthesize
+  relationships from labels, aliases or similarly named fields.
+- Quickstart Domain Catalog v2 HTTP smoke now verifies projected explicit
+  relationships through the config starter runtime endpoint.
+
+### Validated
+- Local quickstart Domain Catalog v2 HTTP smoke passed against the locally
+  installed starter with `explicitRelationshipSeen=true`.
+- Local quickstart Agentic Authoring HTTP/SSE smoke passed with OpenAI.
+- Remote `Agentic Authoring HTTP Smoke` passed with `run_page_builder_full_e2e=true`
+  across config starter, metadata starter, quickstart and praxis-ui-angular
+  `main`.
+
 ## [0.1.0-rc.6] - 2026-04-22
 
 ### Added
