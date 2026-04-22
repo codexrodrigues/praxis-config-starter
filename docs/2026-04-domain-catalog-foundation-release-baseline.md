@@ -464,6 +464,26 @@ The first database foundation for that design is staged as
 manually to the shared remote config database without validating the remote
 Flyway history first.
 
+The first Java runtime model for the same foundation was added in
+`praxis-config-starter` commit `3c28422`. It introduces JPA entities and Spring
+Data repositories for:
+
+- `domain_knowledge_concept`
+- `domain_knowledge_alias`
+- `domain_knowledge_binding`
+- `domain_knowledge_relationship`
+- `domain_knowledge_evidence`
+- `domain_knowledge_change_set`
+
+Local focused validation passed with:
+
+```bash
+mvn -Dtest=DomainKnowledgeEntityLifecycleTest test
+```
+
+The corresponding main-branch CI passed in
+[`24786618645`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24786618645).
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
