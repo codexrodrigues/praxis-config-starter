@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -732,6 +733,33 @@ class DomainCatalogIngestionServiceTest {
                             .containsEntry("resourceId", "governance:human-resources.folhas-pagamento.field.valor-liquido:privacy");
                     assertThat(document.getText()).contains("confidential", "financial", "LGPD");
                 });
+    }
+
+    @Test
+    void canDisableDomainCatalogRagPublicationWithoutBlockingCatalogPersistence() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                false
+        );
+        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
+        assertThat(response.itemCount()).isEqualTo(9);
+        verify(releaseRepository).save(any(DomainCatalogRelease.class));
+        verify(itemRepository).saveAll(any());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
     }
 
     @Test

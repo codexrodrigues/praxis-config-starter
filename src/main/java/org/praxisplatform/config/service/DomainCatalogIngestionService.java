@@ -28,6 +28,7 @@ import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,7 @@ public class DomainCatalogIngestionService {
     private final RagVectorStoreService ragVectorStoreService;
     private final DomainCatalogSchemaValidationService schemaValidationService;
     private final DomainKnowledgeProjectionService domainKnowledgeProjectionService;
+    private final boolean domainCatalogRagPublicationEnabled;
 
     public DomainCatalogIngestionService(
             DomainCatalogReleaseRepository releaseRepository,
@@ -68,7 +70,25 @@ public class DomainCatalogIngestionService {
                 objectMapper,
                 ragVectorStoreService,
                 schemaValidationService,
-                (DomainKnowledgeProjectionService) null);
+                (DomainKnowledgeProjectionService) null,
+                true);
+    }
+
+    DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            boolean domainCatalogRagPublicationEnabled) {
+        this(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                schemaValidationService,
+                (DomainKnowledgeProjectionService) null,
+                domainCatalogRagPublicationEnabled);
     }
 
     @Autowired
@@ -78,14 +98,17 @@ public class DomainCatalogIngestionService {
             ObjectMapper objectMapper,
             RagVectorStoreService ragVectorStoreService,
             DomainCatalogSchemaValidationService schemaValidationService,
-            ObjectProvider<DomainKnowledgeProjectionService> domainKnowledgeProjectionService) {
+            ObjectProvider<DomainKnowledgeProjectionService> domainKnowledgeProjectionService,
+            @Value("${praxis.domain-catalog.rag-publication.enabled:true}")
+            boolean domainCatalogRagPublicationEnabled) {
         this(
                 releaseRepository,
                 itemRepository,
                 objectMapper,
                 ragVectorStoreService,
                 schemaValidationService,
-                domainKnowledgeProjectionService.getIfAvailable());
+                domainKnowledgeProjectionService.getIfAvailable(),
+                domainCatalogRagPublicationEnabled);
     }
 
     private DomainCatalogIngestionService(
@@ -94,13 +117,15 @@ public class DomainCatalogIngestionService {
             ObjectMapper objectMapper,
             RagVectorStoreService ragVectorStoreService,
             DomainCatalogSchemaValidationService schemaValidationService,
-            DomainKnowledgeProjectionService domainKnowledgeProjectionService) {
+            DomainKnowledgeProjectionService domainKnowledgeProjectionService,
+            boolean domainCatalogRagPublicationEnabled) {
         this.releaseRepository = releaseRepository;
         this.itemRepository = itemRepository;
         this.objectMapper = objectMapper;
         this.ragVectorStoreService = ragVectorStoreService;
         this.schemaValidationService = schemaValidationService;
         this.domainKnowledgeProjectionService = domainKnowledgeProjectionService;
+        this.domainCatalogRagPublicationEnabled = domainCatalogRagPublicationEnabled;
     }
 
     @Transactional
@@ -132,14 +157,18 @@ public class DomainCatalogIngestionService {
         if (domainKnowledgeProjectionService != null) {
             domainKnowledgeProjectionService.project(release, items);
         }
-        try {
-            publishRagDocuments(release, items);
-        } catch (RuntimeException ex) {
-            log.warn(
-                    "Domain catalog release {} was persisted, but RAG publication failed: {}",
-                    release.getReleaseKey(),
-                    ex.getMessage()
-            );
+        if (domainCatalogRagPublicationEnabled) {
+            try {
+                publishRagDocuments(release, items);
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "Domain catalog release {} was persisted, but RAG publication failed: {}",
+                        release.getReleaseKey(),
+                        ex.getMessage()
+                );
+            }
+        } else {
+            log.debug("Domain catalog RAG publication disabled for release {}", release.getReleaseKey());
         }
 
         log.info("Ingested domain catalog release {} with {} item(s)", release.getReleaseKey(), items.size());
