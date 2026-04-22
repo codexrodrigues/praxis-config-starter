@@ -395,6 +395,29 @@ This line confirms that:
 - local quickstart validation passed against the remote database with Flyway at
   version `17` and the schema already up to date.
 
+## Published Resource-Aware Authoring Envelope Line
+
+After resource-scoped runtime context was published, the authoring hint contract
+was advanced so LLM task envelopes can carry the canonical domain resource key
+derived from the selected REST resource.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-config-starter` | `0.1.0-rc.11` / `3f39725` | published to Maven Central by [`24782442986`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24782442986) |
+| `praxis-api-quickstart` | `d3932a0` | consumes `praxis-config-starter:0.1.0-rc.11`; CI passed in [`24784518411`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24784518411) |
+
+This line confirms that:
+
+- authoring discovery now carries `contextHints.domainCatalog.resourceKey`;
+- `/api/{context}/{resource}` paths resolve to canonical keys such as
+  `human-resources.funcionarios`;
+- the agentic domain task envelope is documented in
+  `docs/ai/agentic-domain-task-envelope.md`;
+- local quickstart validation passed against the remote database with Flyway at
+  version `17`; the schema was already up to date and no migration was applied;
+- the quickstart consumed the published `0.1.0-rc.11` artifact from Maven
+  Central without local overrides.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
