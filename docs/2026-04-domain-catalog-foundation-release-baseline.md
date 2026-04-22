@@ -103,6 +103,23 @@ The remote workflow was not dispatched from the local workstation because no
 `GH_TOKEN`, `GITHUB_TOKEN` or `GITHUB_PAT` was available to
 `Invoke-GitHubAgenticAuthoringSmokeWorkflow.ps1`.
 
+## Version Alignment After Post-Merge Gate
+
+Because `v0.1.0-rc.2` already points to commit `70c19c1`, the post-merge
+`main` line was advanced to `0.1.0-rc.3` instead of reusing the published
+`0.1.0-rc.2` coordinate for different code.
+
+For subsequent local downstream validation, install the checked-out starter and
+package `praxis-api-quickstart` with:
+
+```powershell
+mvn -B -DskipTests install
+mvn -B -DskipTests "-Dpraxis.config.version=0.1.0-rc.3" package
+```
+
+Keep `praxis-api-quickstart` on `0.1.0-rc.2` until `0.1.0-rc.3` is published
+and verified through Maven Central or through the local starter override above.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
