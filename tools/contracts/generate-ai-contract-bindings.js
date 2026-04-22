@@ -165,7 +165,7 @@ export const AI_STREAM_EVENT_TYPES = [${eventList}] as const;
 export type AiJsonPrimitive = string | number | boolean | null;
 export type AiJsonArray = AiJsonValue[];
 export interface AiJsonObject {
-  [key: string]: AiJsonValue | undefined;
+  [key: string]: AiJsonValue;
 }
 export type AiJsonValue = AiJsonPrimitive | AiJsonObject | AiJsonArray;
 
@@ -177,7 +177,7 @@ export type AiDomainCatalogContextHintItemType =
   | 'evidence'
   | 'governance';
 
-export interface AiDomainCatalogContextHintContract extends AiJsonObject {
+export interface AiDomainCatalogContextHintContract {
   schemaVersion?: typeof AI_DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION;
   serviceKey?: string;
   type?: AiDomainCatalogContextHintItemType;
@@ -187,8 +187,9 @@ export interface AiDomainCatalogContextHintContract extends AiJsonObject {
   limit?: number;
 }
 
-export interface AiContextHintsContract extends AiJsonObject {
+export interface AiContextHintsContract {
   domainCatalog?: AiDomainCatalogContextHintContract;
+  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | undefined;
 }
 
 export interface AiSchemaContextContract {
@@ -365,7 +366,7 @@ export interface AgenticAuthoringQuickReplyContract {
   icon?: string | null;
   tone?: string | null;
   contextHints?: AiContextHintsContract | null;
-  [key: string]: AiJsonValue | undefined;
+  [key: string]: AiJsonValue | AiContextHintsContract | undefined;
 }
 
 export interface AgenticAuthoringIntentResolutionResultContract {
@@ -431,7 +432,7 @@ export interface AgenticAuthoringTurnStreamRequestContract
   apiKey?: string | null;
   contextHints?: AiContextHintsContract | null;
   componentCapabilities?: AgenticAuthoringComponentCapabilitiesResultContract | null;
-  [key: string]: AiJsonValue | AgenticAuthoringComponentCapabilitiesResultContract | AgenticAuthoringConversationMessageContract[] | AgenticAuthoringPendingClarificationContract | AgenticAuthoringAttachmentSummaryContract[] | undefined;
+  [key: string]: AiJsonValue | AiContextHintsContract | AgenticAuthoringComponentCapabilitiesResultContract | AgenticAuthoringConversationMessageContract[] | AgenticAuthoringPendingClarificationContract | AgenticAuthoringAttachmentSummaryContract[] | undefined;
 }
 
 export interface AgenticAuthoringPreviewResultContract {
