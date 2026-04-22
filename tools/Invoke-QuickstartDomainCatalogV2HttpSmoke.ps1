@@ -177,13 +177,20 @@ try {
         -Uri "$base/api/praxis/config/domain-catalog/context?serviceKey=$([uri]::EscapeDataString($serviceKey))&type=governance&limit=5" `
         -Headers $headers `
         -TimeoutSec 60
+    $relationships = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$base/api/praxis/config/domain-catalog/relationships/latest?serviceKey=$([uri]::EscapeDataString($serviceKey))&limit=10" `
+        -Headers $headers `
+        -TimeoutSec 60
 
     $nodeItems = @($nodeContext.items)
     $aliasItems = @($aliasContext.items)
     $governanceItems = @($governanceContext.items)
+    $relationshipItems = @($relationships)
     Require-AnyItem $nodeItems "node fields"
     Require-AnyItem $aliasItems "aliases"
     Require-AnyItem $governanceItems "governance"
+    Require-AnyItem $relationshipItems "explicit relationships"
 
     $semanticItems = @($nodeItems | Where-Object {
         $_.payload.semanticOwner -or $_.payload.lifecycle -or $_.payload.businessGlossary -or
@@ -195,6 +202,12 @@ try {
     $namedAliases = @($aliasItems | Where-Object { $_.payload.alias })
     if ($namedAliases.Count -lt 1) {
         throw "Expected at least one alias item with alias."
+    }
+    $explicitRelationships = @($relationshipItems | Where-Object {
+        $_.itemType -eq "edge" -and $_.payload.sourceNodeKey -and $_.payload.targetNodeKey
+    })
+    if ($explicitRelationships.Count -lt 1) {
+        throw "Expected at least one explicit relationship with sourceNodeKey and targetNodeKey."
     }
 
     [pscustomobject]@{
@@ -213,9 +226,11 @@ try {
         projectedNodeCount = $nodeItems.Count
         projectedAliasCount = $aliasItems.Count
         projectedGovernanceCount = $governanceItems.Count
+        projectedRelationshipCount = $relationshipItems.Count
         semanticPayloadSeen = $semanticItems.Count -gt 0
         aliasPayloadSeen = $namedAliases.Count -gt 0
         typedAliasSeen = @($namedAliases | Where-Object { $_.payload.aliasType }).Count -gt 0
+        explicitRelationshipSeen = $explicitRelationships.Count -gt 0
     } | ConvertTo-Json -Depth 8
 } finally {
     if ($startedQuickstart -and $null -ne $quickstartProcess) {
