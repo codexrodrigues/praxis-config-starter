@@ -344,6 +344,29 @@ Confirmed steps:
 - quickstart Domain Catalog v2 HTTP smoke;
 - page-builder agentic full Playwright E2E gate.
 
+## Published AI Visibility Governance Line
+
+After hardening Domain Catalog LLM context visibility, the config starter was
+published again and the operational quickstart was advanced to consume the new
+coordinate directly from Maven Central.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-config-starter` | `0.1.0-rc.9` / `412a24b` | published to Maven Central by [`24779789126`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24779789126) |
+| `praxis-api-quickstart` | `3abb9c9` | consumes `praxis-config-starter:0.1.0-rc.9`; CI passed in [`24780498818`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24780498818) |
+
+This line confirms that:
+
+- `aiUsage.visibility=deny` items are excluded from LLM prompt context and RAG
+  publication;
+- `aiUsage.visibility=mask` and `summarize_only` items are exposed to LLMs only
+  as governed summaries;
+- raw deterministic catalog reads remain available through `/items`;
+- the quickstart consumed the published artifact without local overrides;
+- the Render-hosted catalog context remained ready for
+  `human-resources.funcionarios`, `human-resources.folhas-pagamento` and
+  `operations.missoes`.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
