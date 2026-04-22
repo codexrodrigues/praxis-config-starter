@@ -459,6 +459,11 @@ The next implementation design is captured in
 catalog releases from curated domain knowledge and future executable
 rule/policy artifacts.
 
+The first database foundation for that design is staged as
+`V18__create_domain_knowledge_layer.sql`. This migration must not be applied
+manually to the shared remote config database without validating the remote
+Flyway history first.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to

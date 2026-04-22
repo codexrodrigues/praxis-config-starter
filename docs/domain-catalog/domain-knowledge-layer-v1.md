@@ -59,6 +59,16 @@ become executable rules.
 Do not replace `domain_catalog_release` and `domain_catalog_item`. Add curated
 tables next to them.
 
+The initial table foundation is represented by Flyway migration:
+
+```text
+src/main/resources/db/migration/V18__create_domain_knowledge_layer.sql
+```
+
+Do not apply this manually to the shared remote config database until the remote
+Flyway history has been validated. The remote database may be ahead of local
+migrations.
+
 ### `domain_knowledge_concept`
 
 Canonical semantic node known by the platform.
