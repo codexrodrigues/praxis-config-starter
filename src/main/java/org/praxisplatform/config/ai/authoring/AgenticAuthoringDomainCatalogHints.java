@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.text.Normalizer;
 import java.util.Locale;
+import org.praxisplatform.config.contract.AiContractSpec;
 
 final class AgenticAuthoringDomainCatalogHints {
 
@@ -25,6 +26,7 @@ final class AgenticAuthoringDomainCatalogHints {
             return;
         }
         ObjectNode domainCatalog = contextHints.putObject("domainCatalog");
+        domainCatalog.put("schemaVersion", AiContractSpec.DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION);
         domainCatalog.put("serviceKey", resolvedServiceKey);
         domainCatalog.put("type", "node");
         domainCatalog.put("limit", 12);

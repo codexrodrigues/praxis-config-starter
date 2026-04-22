@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: f7bbb88ab1137f2cf18911841e73f102d97e50ba33e9be65f0aaf87368911563
+        default: de47da5e091f33ba0e885ab6d679fd498b0bcee30479aaa98eb35b2166736311
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: f7bbb88ab1137f2cf18911841e73f102d97e50ba33e9be65f0aaf87368911563
+        example: de47da5e091f33ba0e885ab6d679fd498b0bcee30479aaa98eb35b2166736311
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1018,6 +1018,9 @@ components:
             contextHints:
               type: object
               nullable: true
+              properties:
+                domainCatalog:
+                  $ref: '#/components/schemas/AiDomainCatalogContextHint'
               additionalProperties: true
               description: Dados estruturados preservados de acoes do assistente, como chips de recurso.
 
@@ -1049,6 +1052,9 @@ components:
               type: object
               nullable: true
               additionalProperties: true
+              properties:
+                domainCatalog:
+                  $ref: '#/components/schemas/AiDomainCatalogContextHint'
               description: Dados estruturados preservados de acoes do assistente, como chips de recurso.
 
     AgenticAuthoringTurnStreamRequest:
@@ -1411,8 +1417,53 @@ components:
           type: object
           nullable: true
           description: Payload opaco e seguro para preservar contexto estruturado da opcao selecionavel.
+          properties:
+            domainCatalog:
+              $ref: '#/components/schemas/AiDomainCatalogContextHint'
           additionalProperties: true
       additionalProperties: true
+
+    AiDomainCatalogContextHint:
+      type: object
+      description: Hint versionado para recuperar contexto semantico/governanca do catalogo de dominio durante authoring AI.
+      properties:
+        schemaVersion:
+          type: string
+          description: Versao canonica do contrato do hint de catalogo de dominio.
+          default: praxis.ai.context-hints.domain-catalog/v0.1
+          example: praxis.ai.context-hints.domain-catalog/v0.1
+        serviceKey:
+          type: string
+          description: Chave do servico produtor do catalogo no config store.
+          example: praxis-service
+        type:
+          type: string
+          description: Tipo de item a recuperar no catalogo.
+          enum: [context, node, edge, binding, evidence, governance]
+          example: governance
+        query:
+          type: string
+          nullable: true
+          description: Consulta textual para reduzir o contexto ao vocabulario relevante.
+          example: cpf lgpd funcionarios
+        contextKey:
+          type: string
+          nullable: true
+          description: Bounded context ou grupo funcional do catalogo.
+          example: human-resources
+        nodeType:
+          type: string
+          nullable: true
+          description: Tipo de no semantico quando type=node.
+          example: field
+        limit:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 50
+          default: 12
+          description: Limite maximo de itens de catalogo retornados ao prompt.
+      additionalProperties: false
 
     AgenticAuthoringPreviewResult:
       type: object
@@ -1507,6 +1558,9 @@ components:
         contextHints:
           type: object
           nullable: true
+          properties:
+            domainCatalog:
+              $ref: '#/components/schemas/AiDomainCatalogContextHint'
           additionalProperties: true
         aiMode:
           type: string

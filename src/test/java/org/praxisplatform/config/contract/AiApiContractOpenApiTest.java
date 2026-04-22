@@ -91,7 +91,25 @@ class AiApiContractOpenApiTest {
                 "AgenticAuthoringResourceCandidatesResult",
                 "AgenticAuthoringCandidate",
                 "AgenticAuthoringPreviewResult",
-                "AgenticAuthoringApplyRequest");
+                "AgenticAuthoringApplyRequest",
+                "AiDomainCatalogContextHint");
+
+        Map<String, Object> domainCatalogHint =
+                (Map<String, Object>) schemas.get("AiDomainCatalogContextHint");
+        Map<String, Object> domainCatalogHintProperties =
+                (Map<String, Object>) domainCatalogHint.get("properties");
+        assertThat(domainCatalogHintProperties).containsKeys(
+                "schemaVersion",
+                "serviceKey",
+                "type",
+                "query",
+                "contextKey",
+                "nodeType",
+                "limit");
+        assertThat((Map<String, Object>) domainCatalogHintProperties.get("schemaVersion"))
+                .containsEntry("default", "praxis.ai.context-hints.domain-catalog/v0.1");
+        assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("type")).get("enum"))
+                .containsExactly("context", "node", "edge", "binding", "evidence", "governance");
 
         Map<String, Object> conversationContext = (Map<String, Object>) schemas.get("AgenticAuthoringConversationContext");
         assertThat(conversationContext).isNotNull();

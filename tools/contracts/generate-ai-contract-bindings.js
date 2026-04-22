@@ -77,6 +77,11 @@ function parseContract(openApiText) {
     /AiPatchStreamStartResponse:[\s\S]*?eventSchemaVersion:[\s\S]*?example:\s*([^\n#]+)/m,
     'AiPatchStreamStartResponse.eventSchemaVersion.example',
   );
+  const domainCatalogContextHintSchemaVersion = extractRequired(
+    openApiText,
+    /AiDomainCatalogContextHint:[\s\S]*?schemaVersion:[\s\S]*?default:\s*([^\n#]+)/m,
+    'AiDomainCatalogContextHint.schemaVersion.default',
+  );
   const eventTypesRaw = extractRequired(
     openApiText,
     /AiTurnEventEnvelope:[\s\S]*?type:[\s\S]*?enum:\s*\[([^\]]+)\]/m,
@@ -91,6 +96,7 @@ function parseContract(openApiText) {
     schemaHash,
     streamEventSchemaVersion,
     streamEventTypes,
+    domainCatalogContextHintSchemaVersion,
   };
 }
 
@@ -133,6 +139,7 @@ public final class AiContractSpec {
     public static final String CONTRACT_VERSION = "${escapeJava(contract.contractVersion)}";
     public static final String CONTRACT_SCHEMA_HASH = "${escapeJava(contract.schemaHash)}";
     public static final String STREAM_EVENT_SCHEMA_VERSION = "${escapeJava(contract.streamEventSchemaVersion)}";
+    public static final String DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION = "${escapeJava(contract.domainCatalogContextHintSchemaVersion)}";
     public static final List<String> STREAM_EVENT_TYPES = List.of(${eventList});
 
     private AiContractSpec() {
@@ -152,14 +159,37 @@ function renderTs(contract) {
 export const AI_CONTRACT_VERSION = '${escapeTs(contract.contractVersion)}' as const;
 export const AI_CONTRACT_SCHEMA_HASH = '${escapeTs(contract.schemaHash)}' as const;
 export const AI_STREAM_EVENT_SCHEMA_VERSION = '${escapeTs(contract.streamEventSchemaVersion)}' as const;
+export const AI_DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION = '${escapeTs(contract.domainCatalogContextHintSchemaVersion)}' as const;
 export const AI_STREAM_EVENT_TYPES = [${eventList}] as const;
 
 export type AiJsonPrimitive = string | number | boolean | null;
 export type AiJsonArray = AiJsonValue[];
 export interface AiJsonObject {
-  [key: string]: AiJsonValue;
+  [key: string]: AiJsonValue | undefined;
 }
 export type AiJsonValue = AiJsonPrimitive | AiJsonObject | AiJsonArray;
+
+export type AiDomainCatalogContextHintItemType =
+  | 'context'
+  | 'node'
+  | 'edge'
+  | 'binding'
+  | 'evidence'
+  | 'governance';
+
+export interface AiDomainCatalogContextHintContract extends AiJsonObject {
+  schemaVersion?: typeof AI_DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION;
+  serviceKey?: string;
+  type?: AiDomainCatalogContextHintItemType;
+  query?: string | null;
+  contextKey?: string | null;
+  nodeType?: string | null;
+  limit?: number;
+}
+
+export interface AiContextHintsContract extends AiJsonObject {
+  domainCatalog?: AiDomainCatalogContextHintContract;
+}
 
 export interface AiSchemaContextContract {
   path?: string | null;
@@ -202,7 +232,7 @@ export interface AiOrchestratorRequestContract {
   schemaFields?: AiJsonObject[] | null;
   runtimeState?: AiJsonObject | null;
   suggestedPatch?: AiJsonObject | null;
-  contextHints?: AiJsonObject | null;
+  contextHints?: AiContextHintsContract | null;
   aiMode?: string;
   requireSchema?: boolean;
   resourcePath?: string;
@@ -227,7 +257,7 @@ export interface AiOptionContract {
   value?: string | null;
   label?: string | null;
   example?: string | null;
-  contextHints?: AiJsonObject | null;
+  contextHints?: AiContextHintsContract | null;
 }
 
 export interface AiClarificationUiContract {
@@ -311,7 +341,7 @@ export interface AgenticAuthoringIntentResolutionRequestContract
   provider?: string | null;
   model?: string | null;
   apiKey?: string | null;
-  contextHints?: AiJsonObject | null;
+  contextHints?: AiContextHintsContract | null;
 }
 
 export interface AgenticAuthoringCandidateContract {
@@ -334,7 +364,7 @@ export interface AgenticAuthoringQuickReplyContract {
   description?: string | null;
   icon?: string | null;
   tone?: string | null;
-  contextHints?: AiJsonObject | null;
+  contextHints?: AiContextHintsContract | null;
   [key: string]: AiJsonValue | undefined;
 }
 
@@ -385,7 +415,7 @@ export interface AgenticAuthoringPlanRequestContract
   apiKey?: string | null;
   currentPage?: AiJsonObject | null;
   intentResolution?: AgenticAuthoringIntentResolutionResultContract | null;
-  contextHints?: AiJsonObject | null;
+  contextHints?: AiContextHintsContract | null;
 }
 
 export interface AgenticAuthoringTurnStreamRequestContract
@@ -399,7 +429,7 @@ export interface AgenticAuthoringTurnStreamRequestContract
   provider?: string | null;
   model?: string | null;
   apiKey?: string | null;
-  contextHints?: AiJsonObject | null;
+  contextHints?: AiContextHintsContract | null;
   componentCapabilities?: AgenticAuthoringComponentCapabilitiesResultContract | null;
   [key: string]: AiJsonValue | AgenticAuthoringComponentCapabilitiesResultContract | AgenticAuthoringConversationMessageContract[] | AgenticAuthoringPendingClarificationContract | AgenticAuthoringAttachmentSummaryContract[] | undefined;
 }

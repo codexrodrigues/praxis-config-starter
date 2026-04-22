@@ -55,6 +55,16 @@ class AiContractSpecConsistencyTest {
         assertThat(eventSchemaVersion).isNotNull();
         assertThat(AiContractSpec.STREAM_EVENT_SCHEMA_VERSION).isEqualTo(eventSchemaVersion.get("example"));
 
+        Map<String, Object> domainCatalogHint = (Map<String, Object>) schemas.get("AiDomainCatalogContextHint");
+        assertThat(domainCatalogHint).isNotNull();
+        Map<String, Object> domainCatalogHintProperties = (Map<String, Object>) domainCatalogHint.get("properties");
+        assertThat(domainCatalogHintProperties).isNotNull();
+        Map<String, Object> domainCatalogSchemaVersion =
+                (Map<String, Object>) domainCatalogHintProperties.get("schemaVersion");
+        assertThat(domainCatalogSchemaVersion).isNotNull();
+        assertThat(AiContractSpec.DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION)
+                .isEqualTo(domainCatalogSchemaVersion.get("default"));
+
         Map<String, Object> envelopeSchema = (Map<String, Object>) schemas.get("AiTurnEventEnvelope");
         assertThat(envelopeSchema).isNotNull();
         Map<String, Object> envelopeProperties = (Map<String, Object>) envelopeSchema.get("properties");

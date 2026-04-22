@@ -2538,6 +2538,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isTrue();
         assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/beneficios");
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("schemaVersion").asText())
+                .isEqualTo("praxis.ai.context-hints.domain-catalog/v0.1");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("serviceKey").asText())
                 .isEqualTo("praxis-service");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("contextKey").asText())

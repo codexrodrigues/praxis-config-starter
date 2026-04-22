@@ -75,6 +75,8 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.quickReplies().get(0).contextHints().path("artifactKind").asText())
                 .isEqualTo("dashboard");
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("schemaVersion").asText())
+                .isEqualTo("praxis.ai.context-hints.domain-catalog/v0.1");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("serviceKey").asText())
                 .isEqualTo("praxis-service");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("contextKey").asText())
