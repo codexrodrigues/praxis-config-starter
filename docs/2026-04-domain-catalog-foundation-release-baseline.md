@@ -418,6 +418,19 @@ This line confirms that:
 - the quickstart consumed the published `0.1.0-rc.11` artifact from Maven
   Central without local overrides.
 
+The Render-hosted quickstart was also validated after publication:
+
+- `/api/praxis/config/domain-catalog/context` returned resource-scoped releases
+  for `human-resources.funcionarios`, `human-resources.folhas-pagamento` and
+  `operations.missoes`;
+- CPF and salary governance context remained exposed only as
+  `payloadMode=governed-summary`;
+- `/api/praxis/config/ai/authoring/resource-candidates` returned resource
+  quick replies whose `contextHints.domainCatalog.resourceKey` values included
+  `human-resources.folhas-pagamento` and `human-resources.eventos-folha`;
+- returned authoring hints included relationship retrieval with
+  `relationships.enabled=true` and `relationships.federated=true`.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
