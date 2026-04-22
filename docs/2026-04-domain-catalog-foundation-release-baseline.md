@@ -247,6 +247,27 @@ Confirmed additional steps:
 - installation of Playwright Chromium;
 - page-builder agentic full E2E gate.
 
+## Published Domain Catalog v0.2 Starter Line
+
+After the local and remote gates passed against checked-out `main` sources, the
+governed Domain Catalog v0.2 line was published and consumed without local
+overrides.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-metadata-starter` | `8.0.0-rc.9` | published to Maven Central by [`24761151253`](https://github.com/codexrodrigues/praxis-metadata-starter/actions/runs/24761151253) |
+| `praxis-config-starter` | `0.1.0-rc.6` | published to Maven Central by [`24761285613`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24761285613) |
+| `praxis-api-quickstart` | `16f1807` | consumes `praxis-metadata-starter:8.0.0-rc.9` and `praxis-config-starter:0.1.0-rc.6`; CI passed in [`24761864949`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24761864949) |
+
+Local validation before the quickstart push also passed with:
+
+```powershell
+mvn -B verify
+```
+
+This verifies the published starter coordinates, not only the local override
+path used by the cross-repository authoring smoke workflow.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
