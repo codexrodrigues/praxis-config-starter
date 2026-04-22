@@ -431,6 +431,16 @@ The Render-hosted quickstart was also validated after publication:
 - returned authoring hints included relationship retrieval with
   `relationships.enabled=true` and `relationships.federated=true`.
 
+The same read-only runtime check is now repeatable from
+`praxis-api-quickstart` commit `ef54722` through:
+
+```bash
+BACKEND_URL=https://praxis-api-quickstart.onrender.com scripts/verify-domain-catalog-authoring-runtime.sh
+```
+
+The quickstart CI for this script passed in
+[`24785032531`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24785032531).
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
