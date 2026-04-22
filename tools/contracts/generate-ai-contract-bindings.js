@@ -185,6 +185,17 @@ export type AiDomainCatalogContextHintIntent =
   | 'validate'
   | 'ai-access-control';
 
+export interface AiDomainCatalogRelationshipHintContract {
+  enabled?: boolean;
+  federated?: boolean;
+  serviceKey?: string | null;
+  sourceNodeKey?: string | null;
+  targetNodeKey?: string | null;
+  edgeType?: string | null;
+  query?: string | null;
+  limit?: number;
+}
+
 export interface AiDomainCatalogContextHintContract {
   schemaVersion?: typeof AI_DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION;
   serviceKey?: string;
@@ -198,6 +209,7 @@ export interface AiDomainCatalogContextHintContract {
   contextKey?: string | null;
   nodeType?: string | null;
   limit?: number;
+  relationships?: AiDomainCatalogRelationshipHintContract | null;
 }
 
 export interface AiContextHintsContract {

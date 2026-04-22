@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: 9dd2844b3c6d1d645695665ef79f40343ca27c2350032a4c71ed0175ac5e01c1
+        default: 8ee46bce6fd8445afc9244c0e84ef152141f643ad0b55fc145f0373fa396b654
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 9dd2844b3c6d1d645695665ef79f40343ca27c2350032a4c71ed0175ac5e01c1
+        example: 8ee46bce6fd8445afc9244c0e84ef152141f643ad0b55fc145f0373fa396b654
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1491,6 +1491,54 @@ components:
           maximum: 50
           default: 12
           description: Limite maximo de itens de catalogo retornados ao prompt.
+        relationships:
+          $ref: '#/components/schemas/AiDomainCatalogRelationshipHint'
+      additionalProperties: false
+
+    AiDomainCatalogRelationshipHint:
+      type: object
+      description: Hint para recuperar relacionamentos semanticos explicitos do Domain Catalog.
+      properties:
+        enabled:
+          type: boolean
+          default: true
+          description: Habilita a expansao de relacionamentos no contexto semantico.
+        federated:
+          type: boolean
+          default: false
+          description: Quando true, consulta releases latest de todos os servicos do tenant/environment.
+        serviceKey:
+          type: string
+          nullable: true
+          description: Servico produtor do catalogo quando a consulta nao for federada.
+          example: praxis-service
+        sourceNodeKey:
+          type: string
+          nullable: true
+          description: Chave do no de origem para filtrar relacionamentos.
+          example: funcionario.cpf
+        targetNodeKey:
+          type: string
+          nullable: true
+          description: Chave do no de destino para filtrar relacionamentos.
+          example: pessoa.documento
+        edgeType:
+          type: string
+          nullable: true
+          description: Tipo semantico da aresta desejada.
+          example: governs
+        query:
+          type: string
+          nullable: true
+          description: Consulta textual para reduzir os relacionamentos relevantes.
+          example: cpf lgpd funcionarios
+        limit:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 50
+          default: 8
+          description: Limite maximo de relacionamentos retornados ao prompt.
       additionalProperties: false
 
     AgenticAuthoringPreviewResult:

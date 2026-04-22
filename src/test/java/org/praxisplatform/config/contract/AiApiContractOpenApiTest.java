@@ -92,7 +92,8 @@ class AiApiContractOpenApiTest {
                 "AgenticAuthoringCandidate",
                 "AgenticAuthoringPreviewResult",
                 "AgenticAuthoringApplyRequest",
-                "AiDomainCatalogContextHint");
+                "AiDomainCatalogContextHint",
+                "AiDomainCatalogRelationshipHint");
 
         Map<String, Object> domainCatalogHint =
                 (Map<String, Object>) schemas.get("AiDomainCatalogContextHint");
@@ -110,13 +111,32 @@ class AiApiContractOpenApiTest {
                 "query",
                 "contextKey",
                 "nodeType",
-                "limit");
+                "limit",
+                "relationships");
         assertThat((Map<String, Object>) domainCatalogHintProperties.get("schemaVersion"))
                 .containsEntry("default", "praxis.ai.context-hints.domain-catalog/v0.1");
         assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("type")).get("enum"))
                 .containsExactly("context", "node", "edge", "binding", "evidence", "governance", "vocabulary", "relationship");
         assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("intent")).get("enum"))
                 .containsExactly("authoring", "explain", "validate", "ai-access-control");
+        assertThat((Map<String, Object>) domainCatalogHintProperties.get("relationships"))
+                .containsEntry("$ref", "#/components/schemas/AiDomainCatalogRelationshipHint");
+
+        Map<String, Object> relationshipHint =
+                (Map<String, Object>) schemas.get("AiDomainCatalogRelationshipHint");
+        Map<String, Object> relationshipHintProperties =
+                (Map<String, Object>) relationshipHint.get("properties");
+        assertThat(relationshipHintProperties).containsKeys(
+                "enabled",
+                "federated",
+                "serviceKey",
+                "sourceNodeKey",
+                "targetNodeKey",
+                "edgeType",
+                "query",
+                "limit");
+        assertThat((Map<String, Object>) relationshipHintProperties.get("limit"))
+                .containsEntry("default", 8);
 
         Map<String, Object> conversationContext = (Map<String, Object>) schemas.get("AgenticAuthoringConversationContext");
         assertThat(conversationContext).isNotNull();
