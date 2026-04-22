@@ -446,6 +446,19 @@ workflow in commit `aa8ce93`. The first manual dispatch against the Render
 host passed in
 [`24785680070`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24785680070).
 
+The authoring envelope derivation is also locked by
+`AgenticAuthoringDomainCatalogHintsTest` in commit `a855838`. It covers
+collection paths such as `/api/human-resources/funcionarios`, action paths such
+as `/api/operations/missoes/{id}/actions/start`, canonical `resourceKey`,
+`contextKey`, service override and federated relationship hints. The CI for
+that guard passed in
+[`24785870646`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24785870646).
+
+The next implementation design is captured in
+`docs/domain-catalog/domain-knowledge-layer-v1.md`, which separates immutable
+catalog releases from curated domain knowledge and future executable
+rule/policy artifacts.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
