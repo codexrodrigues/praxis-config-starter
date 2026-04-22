@@ -68,6 +68,12 @@ O endpoint `start` recebe um request de turno agentic que contenha, no minimo:
 - `contextHints`
 - `provider`, `model` e `apiKey` quando aplicavel
 
+Quando o turno for sensivel a dominio, privacidade, compliance, validacao ou
+terminologia de negocio, `contextHints.domainCatalog` deve seguir o envelope em
+[`agentic-domain-task-envelope.md`](agentic-domain-task-envelope.md). Em especial,
+turnos criados a partir de discovery de recurso devem preservar `resourceKey`
+para que o contexto LLM seja recuperado da release correta do Domain Catalog.
+
 O resultado terminal entrega o mesmo contrato funcional que o frontend hoje obtem
 pela combinacao de `intent-resolution` e `page-preview`, preservando fallback
 sincrono para clientes que ainda nao consomem SSE via `fallbackAuthoringUrl`.

@@ -34,6 +34,10 @@ final class AgenticAuthoringDomainCatalogHints {
         if (!contextKey.isBlank()) {
             domainCatalog.put("contextKey", contextKey);
         }
+        String resourceKey = resourceKey(candidate.resourcePath());
+        if (!resourceKey.isBlank()) {
+            domainCatalog.put("resourceKey", resourceKey);
+        }
         String query = query(userPrompt, candidate.resourcePath());
         if (!query.isBlank()) {
             domainCatalog.put("query", query);
@@ -56,6 +60,16 @@ final class AgenticAuthoringDomainCatalogHints {
         for (int i = 0; i < parts.length - 1; i++) {
             if ("api".equals(parts[i]) && !parts[i + 1].isBlank()) {
                 return parts[i + 1];
+            }
+        }
+        return "";
+    }
+
+    private static String resourceKey(String resourcePath) {
+        String[] parts = resourcePath.split("/");
+        for (int i = 0; i < parts.length - 2; i++) {
+            if ("api".equals(parts[i]) && !parts[i + 1].isBlank() && !parts[i + 2].isBlank()) {
+                return parts[i + 1] + "." + parts[i + 2];
             }
         }
         return "";
