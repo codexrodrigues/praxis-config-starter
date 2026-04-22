@@ -54,6 +54,7 @@ public class DomainCatalogController {
     @GetMapping("/items/latest")
     public ResponseEntity<List<DomainCatalogItemResponse>> latestItems(
             @RequestParam(required = false) String serviceKey,
+            @RequestParam(required = false) String resourceKey,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment,
             @RequestParam(required = false) String type,
@@ -63,6 +64,7 @@ public class DomainCatalogController {
             @RequestParam(defaultValue = "50") int limit) {
         return ResponseEntity.ok(domainCatalogIngestionService.searchLatest(
                 serviceKey,
+                resourceKey,
                 tenantId,
                 environment,
                 type,
@@ -75,6 +77,7 @@ public class DomainCatalogController {
     @GetMapping("/context")
     public ResponseEntity<DomainCatalogContextResponse> context(
             @RequestParam(required = false) String serviceKey,
+            @RequestParam(required = false) String resourceKey,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment,
             @RequestParam(required = false) String type,
@@ -84,6 +87,7 @@ public class DomainCatalogController {
             @RequestParam(defaultValue = "50") int limit) {
         return ResponseEntity.ok(domainCatalogIngestionService.contextLatest(
                 serviceKey,
+                resourceKey,
                 tenantId,
                 environment,
                 type,
@@ -96,6 +100,7 @@ public class DomainCatalogController {
     @GetMapping("/relationships/latest")
     public ResponseEntity<List<DomainCatalogItemResponse>> latestRelationships(
             @RequestParam(required = false) String serviceKey,
+            @RequestParam(required = false) String resourceKey,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment,
             @RequestParam(required = false) String sourceNodeKey,
@@ -105,6 +110,7 @@ public class DomainCatalogController {
             @RequestParam(defaultValue = "50") int limit) {
         return ResponseEntity.ok(domainCatalogIngestionService.relationshipsLatest(
                 serviceKey,
+                resourceKey,
                 tenantId,
                 environment,
                 sourceNodeKey,

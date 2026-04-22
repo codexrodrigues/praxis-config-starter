@@ -519,6 +519,89 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void contextLatestSelectsLatestReleaseForRequestedResourceKey() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease operationsRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:operations.missoes:2026-04-22T11:02:22Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-22T11:02:22Z"))
+                .createdAt(Instant.parse("2026-04-22T11:02:23Z"))
+                .build();
+        DomainCatalogRelease funcionariosRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-22T11:01:23Z"))
+                .createdAt(Instant.parse("2026-04-22T11:01:24Z"))
+                .build();
+        DomainCatalogItem cpfGovernance = DomainCatalogItem.builder()
+                .release(funcionariosRelease)
+                .itemType("governance")
+                .itemKey("governance:human-resources.funcionarios.field.cpf:privacy")
+                .payload("""
+                    {
+                      "governanceKey": "governance:human-resources.funcionarios.field.cpf:privacy",
+                      "nodeKey": "human-resources.funcionarios.field.cpf",
+                      "annotationType": "privacy",
+                      "classification": "confidential",
+                      "dataCategory": "personal",
+                      "complianceTags": ["LGPD"],
+                      "aiUsage": {
+                        "visibility": "mask",
+                        "trainingUse": "deny",
+                        "reasoningUse": "review_required"
+                      }
+                    }
+                    """)
+                .build();
+
+        when(releaseRepository.findLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(operationsRelease, funcionariosRelease));
+        when(itemRepository.search(
+                eq("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z"),
+                eq("governance"),
+                eq(null),
+                eq(null),
+                eq("cpf"),
+                any(Pageable.class)))
+                .thenReturn(List.of(cpfGovernance));
+
+        var context = service.contextLatest(
+                "praxis-service",
+                "human-resources.funcionarios",
+                "tenant-a",
+                "dev",
+                "governance",
+                null,
+                null,
+                "cpf",
+                5);
+
+        assertThat(context.release().releaseKey())
+                .isEqualTo("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z");
+        assertThat(context.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.itemKey()).isEqualTo("governance:human-resources.funcionarios.field.cpf:privacy");
+                    assertThat(item.payload().path("payloadMode").asText()).isEqualTo("governed-summary");
+                });
+    }
+
+    @Test
     void contextLatestAppliesAiVisibilityBeforeReturningLlmContext() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);

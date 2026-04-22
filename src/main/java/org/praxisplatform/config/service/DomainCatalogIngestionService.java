@@ -142,10 +142,24 @@ public class DomainCatalogIngestionService {
             String nodeType,
             String query,
             int limit) {
+        return searchLatest(serviceKey, null, tenantId, environment, itemType, contextKey, nodeType, query, limit);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DomainCatalogItemResponse> searchLatest(
+            String serviceKey,
+            String resourceKey,
+            String tenantId,
+            String environment,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
         if (!StringUtils.hasText(normalize(serviceKey))) {
             List<DomainCatalogItemResponse> responses = new ArrayList<>();
-            for (DomainCatalogRelease release : latestReleasesByService(tenantId, environment)) {
+            for (DomainCatalogRelease release : latestReleasesByService(tenantId, environment, resourceKey)) {
                 int remaining = resolvedLimit - responses.size();
                 if (remaining <= 0) {
                     break;
@@ -154,7 +168,7 @@ public class DomainCatalogIngestionService {
             }
             return responses.stream().limit(resolvedLimit).toList();
         }
-        DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment);
+        DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment, resourceKey);
         return search(release.getReleaseKey(), itemType, contextKey, nodeType, query, resolvedLimit);
     }
 
@@ -168,9 +182,24 @@ public class DomainCatalogIngestionService {
             String nodeType,
             String query,
             int limit) {
+        return contextLatest(serviceKey, null, tenantId, environment, itemType, contextKey, nodeType, query, limit);
+    }
+
+    @Transactional(readOnly = true)
+    public DomainCatalogContextResponse contextLatest(
+            String serviceKey,
+            String resourceKey,
+            String tenantId,
+            String environment,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
         if (!StringUtils.hasText(normalize(serviceKey))) {
             List<DomainCatalogItemResponse> items = searchLatest(
                     serviceKey,
+                    resourceKey,
                     tenantId,
                     environment,
                     itemType,
@@ -188,7 +217,7 @@ public class DomainCatalogIngestionService {
                     retrievalGuidance(true),
                     governedContextItems(items));
         }
-        DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment);
+        DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment, resourceKey);
         List<DomainCatalogItemResponse> items = search(
                 release.getReleaseKey(),
                 itemType,
@@ -217,9 +246,23 @@ public class DomainCatalogIngestionService {
             String edgeType,
             String query,
             int limit) {
+        return relationshipsLatest(serviceKey, null, tenantId, environment, sourceNodeKey, targetNodeKey, edgeType, query, limit);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DomainCatalogItemResponse> relationshipsLatest(
+            String serviceKey,
+            String resourceKey,
+            String tenantId,
+            String environment,
+            String sourceNodeKey,
+            String targetNodeKey,
+            String edgeType,
+            String query,
+            int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
         List<DomainCatalogItemResponse> responses = new ArrayList<>();
-        for (DomainCatalogRelease release : latestReleasesForScope(serviceKey, tenantId, environment)) {
+        for (DomainCatalogRelease release : latestReleasesForScope(serviceKey, tenantId, environment, resourceKey)) {
             int remaining = resolvedLimit - responses.size();
             if (remaining <= 0) {
                 break;
@@ -451,24 +494,43 @@ public class DomainCatalogIngestionService {
     }
 
     private DomainCatalogRelease latestRelease(String serviceKey, String tenantId, String environment) {
+        return latestRelease(serviceKey, tenantId, environment, null);
+    }
+
+    private DomainCatalogRelease latestRelease(String serviceKey, String tenantId, String environment, String resourceKey) {
+        String normalizedResourceKey = normalize(resourceKey);
         return releaseRepository.findLatest(
                         normalize(serviceKey),
                         normalize(tenantId),
                         normalize(environment),
-                        PageRequest.of(0, 1))
+                        PageRequest.of(0, StringUtils.hasText(normalizedResourceKey) ? 100 : 1))
                 .stream()
+                .filter(release -> matchesResourceKey(release, normalizedResourceKey))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("No domain catalog release found for the requested scope"));
     }
 
     private List<DomainCatalogRelease> latestReleasesForScope(String serviceKey, String tenantId, String environment) {
+        return latestReleasesForScope(serviceKey, tenantId, environment, null);
+    }
+
+    private List<DomainCatalogRelease> latestReleasesForScope(
+            String serviceKey,
+            String tenantId,
+            String environment,
+            String resourceKey) {
         if (StringUtils.hasText(normalize(serviceKey))) {
-            return List.of(latestRelease(serviceKey, tenantId, environment));
+            return List.of(latestRelease(serviceKey, tenantId, environment, resourceKey));
         }
-        return latestReleasesByService(tenantId, environment);
+        return latestReleasesByService(tenantId, environment, resourceKey);
     }
 
     private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment) {
+        return latestReleasesByService(tenantId, environment, null);
+    }
+
+    private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment, String resourceKey) {
+        String normalizedResourceKey = normalize(resourceKey);
         List<DomainCatalogRelease> releases = releaseRepository.findLatest(
                 null,
                 normalize(tenantId),
@@ -476,14 +538,41 @@ public class DomainCatalogIngestionService {
                 PageRequest.of(0, 100));
         Map<String, DomainCatalogRelease> latestByService = new LinkedHashMap<>();
         for (DomainCatalogRelease release : releases) {
+            if (!matchesResourceKey(release, normalizedResourceKey)) {
+                continue;
+            }
             String serviceKey = normalize(release.getServiceKey());
-            String key = StringUtils.hasText(serviceKey) ? serviceKey : release.getReleaseKey();
+            String key = StringUtils.hasText(serviceKey)
+                    ? latestByServiceKey(serviceKey, release, normalizedResourceKey)
+                    : release.getReleaseKey();
             latestByService.putIfAbsent(key, release);
         }
         if (latestByService.isEmpty()) {
             throw new IllegalArgumentException("No domain catalog release found for the requested scope");
         }
         return List.copyOf(latestByService.values());
+    }
+
+    private String latestByServiceKey(String serviceKey, DomainCatalogRelease release, String resourceKey) {
+        if (StringUtils.hasText(resourceKey)) {
+            return serviceKey + ":" + resourceKeyFromReleaseKey(release.getReleaseKey());
+        }
+        return serviceKey;
+    }
+
+    private boolean matchesResourceKey(DomainCatalogRelease release, String resourceKey) {
+        if (!StringUtils.hasText(resourceKey)) {
+            return true;
+        }
+        return resourceKey.equals(resourceKeyFromReleaseKey(release.getReleaseKey()));
+    }
+
+    private String resourceKeyFromReleaseKey(String releaseKey) {
+        if (!StringUtils.hasText(releaseKey)) {
+            return "";
+        }
+        String[] parts = releaseKey.split(":", 3);
+        return parts.length >= 2 ? parts[1] : "";
     }
 
     private boolean matchesEdge(

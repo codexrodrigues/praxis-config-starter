@@ -141,7 +141,7 @@ LLM/runtime clients should prefer `context` when they do not already know the ac
 
 ```bash
 curl -sS \
-  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/context?serviceKey=praxis-service&type=node&nodeType=field&q=salario&limit=10" \
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/context?serviceKey=praxis-service&resourceKey=human-resources.folhas-pagamento&type=node&nodeType=field&q=salario&limit=10" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "X-Env: $ENVIRONMENT"
 ```
@@ -149,7 +149,7 @@ curl -sS \
 The response includes:
 
 - `schemaVersion`: context contract version;
-- `release`: the latest release selected for `serviceKey`, tenant and environment;
+- `release`: the latest release selected for `serviceKey`, optional `resourceKey`, tenant and environment;
 - `retrievalGuidance`: instructions for LLM/runtime interpretation;
 - `items`: semantic catalog items relevant to the query.
 
@@ -182,6 +182,7 @@ Supported filters:
 
 - `serviceKey`: optional. When omitted, the query federates across the latest release of each
   service in the requested tenant and environment.
+- `resourceKey`: optional. Use it when one service publishes multiple resource catalogs.
 - `sourceNodeKey`: optional exact canonical source node key.
 - `targetNodeKey`: optional exact canonical target node key.
 - `edgeType`: optional exact edge type such as `references`, `same_as`, `governed_by` or
@@ -253,7 +254,7 @@ For a field classification request:
 Runtime retrieval should call:
 
 ```text
-GET /api/praxis/config/domain-catalog/context?serviceKey=<service>&type=node&nodeType=field&q=salario
+GET /api/praxis/config/domain-catalog/context?serviceKey=<service>&resourceKey=<resource>&type=node&nodeType=field&q=salario
 ```
 
 The LLM should use returned field nodes, inspect `payload.metadata.fieldName`, and then propose a
@@ -266,7 +267,7 @@ For a cross-service relationship request:
 Runtime retrieval should call:
 
 ```text
-GET /api/praxis/config/domain-catalog/relationships/latest?sourceNodeKey=<field-node-key>&edgeType=references
+GET /api/praxis/config/domain-catalog/relationships/latest?serviceKey=<service>&resourceKey=<resource>&sourceNodeKey=<field-node-key>&edgeType=references
 ```
 
 The LLM should only cite returned relationship edges and their evidence. It should not invent
