@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Domain catalog ingestion now rejects unsupported schema versions and invalid
   payloads before writing `domain_catalog_release` or `domain_catalog_item`.
+- Domain catalog prompt context now carries governed v0.2 semantics such as
+  semantic owner, lifecycle, business glossary, resolution, source evidence and
+  aliases into authoring/LLM prompt hints.
 
 ## [0.1.0-rc.5] - 2026-04-22
 

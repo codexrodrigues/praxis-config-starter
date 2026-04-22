@@ -141,6 +141,13 @@ public class DomainCatalogPromptContextService {
         appendInline(builder, "binding", text(payload, "bindingType"));
         appendInline(builder, "edge", text(payload, "edgeType"));
         appendInline(builder, "source", text(payload, "source"));
+        appendInline(builder, "semanticOwner", text(payload, "semanticOwner"));
+        appendInline(builder, "lifecycle", text(payload, "lifecycle"));
+        appendInline(builder, "businessGlossary", objectSummary(payload.path("businessGlossary")));
+        appendInline(builder, "resolution", objectSummary(payload.path("resolution")));
+        appendInline(builder, "sourceEvidenceKeys", textArray(payload.path("sourceEvidenceKeys")));
+        appendInline(builder, "alias", text(payload, "alias"));
+        appendInline(builder, "aliasType", text(payload, "aliasType"));
         appendInline(builder, "classification", text(payload, "classification"));
         appendInline(builder, "dataCategory", text(payload, "dataCategory"));
         appendInline(builder, "visibility", text(payload.path("aiUsage"), "visibility"));
@@ -155,7 +162,18 @@ public class DomainCatalogPromptContextService {
 
     private String label(DomainCatalogItemResponse item) {
         String payloadLabel = text(item.payload(), "label");
-        return StringUtils.hasText(payloadLabel) ? payloadLabel : item.itemKey();
+        if (StringUtils.hasText(payloadLabel)) {
+            return payloadLabel;
+        }
+        String alias = text(item.payload(), "alias");
+        if (StringUtils.hasText(alias)) {
+            return alias;
+        }
+        String summary = text(item.payload(), "summary");
+        if (StringUtils.hasText(summary)) {
+            return summary;
+        }
+        return item.itemKey();
     }
 
     private void appendLine(StringBuilder builder, String name, String value) {
@@ -214,6 +232,39 @@ public class DomainCatalogPromptContextService {
             }
         });
         return builder.length() == 0 ? null : builder.toString();
+    }
+
+    private String objectSummary(JsonNode node) {
+        if (node == null || !node.isObject() || node.isEmpty()) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        node.fields().forEachRemaining(field -> {
+            String value = scalarSummary(field.getValue());
+            if (StringUtils.hasText(value)) {
+                if (builder.length() > 0) {
+                    builder.append(',');
+                }
+                builder.append(field.getKey()).append('=').append(value);
+            }
+        });
+        return builder.length() == 0 ? null : builder.toString();
+    }
+
+    private String scalarSummary(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            return StringUtils.hasText(node.asText()) ? node.asText() : null;
+        }
+        if (node.isNumber() || node.isBoolean()) {
+            return node.asText();
+        }
+        if (node.isArray()) {
+            return textArray(node);
+        }
+        return null;
     }
 
     private int clampLimit(int limit) {

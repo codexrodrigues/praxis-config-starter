@@ -69,6 +69,18 @@ class DomainCatalogPromptContextServiceTest {
                                       "nodeKey": "human-resources.folhas-pagamento.field.salario-liquido",
                                       "nodeType": "field",
                                       "label": "Salario liquido",
+                                      "semanticOwner": "people-ops",
+                                      "lifecycle": "active",
+                                      "businessGlossary": {
+                                        "pt-BR": "Valor recebido pelo colaborador apos descontos"
+                                      },
+                                      "resolution": {
+                                        "strategy": "exact-field-name",
+                                        "confidence": "high"
+                                      },
+                                      "sourceEvidenceKeys": [
+                                        "evidence:openapi:folhas-pagamento"
+                                      ],
                                       "metadata": {
                                         "fieldName": "salarioLiquido",
                                         "type": "number",
@@ -98,7 +110,74 @@ class DomainCatalogPromptContextServiceTest {
                 .contains("releaseKey: praxis-service:human-resources:latest")
                 .contains("[node/field] Salario liquido")
                 .contains("field=salarioLiquido")
+                .contains("semanticOwner=people-ops")
+                .contains("lifecycle=active")
+                .contains("businessGlossary=pt-BR=Valor recebido pelo colaborador apos descontos")
+                .contains("resolution=strategy=exact-field-name,confidence=high")
+                .contains("sourceEvidenceKeys=evidence:openapi:folhas-pagamento")
                 .contains("required=true");
+    }
+
+    @Test
+    void includesAliasItemsInPromptContext() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+
+        when(ingestionService.contextLatest(
+                eq("praxis-service"),
+                eq("tenant-a"),
+                eq("dev"),
+                eq("alias"),
+                eq("human-resources"),
+                eq(null),
+                eq("liquido"),
+                eq(3)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "liquido",
+                        "alias",
+                        "human-resources",
+                        null,
+                        List.of(),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:human-resources:latest",
+                                "alias",
+                                "alias:human-resources.folhas-pagamento.field.salario-liquido:liquido",
+                                "human-resources",
+                                null,
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "aliasKey": "alias:human-resources.folhas-pagamento.field.salario-liquido:liquido",
+                                      "targetKey": "human-resources.folhas-pagamento.field.salario-liquido",
+                                      "alias": "liquido",
+                                      "aliasType": "business-term"
+                                    }
+                                    """)))));
+
+        String promptContext = service.buildPromptContext(
+                "liquido",
+                objectMapper.readTree("""
+                    {
+                      "domainCatalog": {
+                        "serviceKey": "praxis-service",
+                        "type": "alias",
+                        "contextKey": "human-resources",
+                        "query": "liquido",
+                        "limit": 3
+                      }
+                    }
+                    """),
+                "tenant-a",
+                "dev");
+
+        assertThat(promptContext)
+                .contains("[alias/-] liquido")
+                .contains("alias=liquido")
+                .contains("aliasType=business-term");
     }
 
     @Test
