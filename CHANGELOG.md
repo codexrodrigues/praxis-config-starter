@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.0-rc.6] - 2026-04-22
+
 ### Added
 - Domain catalog contract `praxis.domain-catalog/v0.2` with packaged runtime
   JSON Schema and matching documentation schema.
@@ -25,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Domain catalog prompt context now carries governed v0.2 semantics such as
   semantic owner, lifecycle, business glossary, resolution, source evidence and
   aliases into authoring/LLM prompt hints.
+
+### Validated
+- `praxis-api-quickstart` consumes `praxis-metadata-starter` `8.0.0-rc.13`
+  and validates generated domain catalogs against this starter's schema
+  contract.
+- Runtime ingestion and read-only governance context verification passed for
+  human resources, operations and procurement domain resources.
 
 ## [0.1.0-rc.5] - 2026-04-22
 
