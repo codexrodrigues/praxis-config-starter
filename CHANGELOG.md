@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JSON Schema and matching documentation schema.
 - Runtime JSON Schema validation before domain catalog persistence, covering
   published v0.1 payloads and governed v0.2 payloads.
+- Quickstart Domain Catalog v0.2 HTTP smoke script covering runtime emission,
+  ingestion and projected node/alias/governance retrieval.
 
 ### Changed
 - Domain catalog ingestion now rejects unsupported schema versions and invalid

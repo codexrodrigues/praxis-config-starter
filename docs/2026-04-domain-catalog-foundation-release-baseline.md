@@ -193,6 +193,22 @@ This confirms the end-to-end local path for the governed domain catalog:
 metadata runtime emission, config runtime schema validation, persistence, and
 queryable projection.
 
+The same path is now covered by the repeatable smoke script:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartDomainCatalogV2HttpSmoke.ps1 -JavaHome "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21" -QuickstartRoot "D:\Developer\praxis-plataform\praxis-api-quickstart"
+```
+
+The first script run against the locally packaged quickstart confirmed:
+
+- catalog schema version `praxis.domain-catalog/v0.2`;
+- `45` aliases, `1` context and `24` nodes from metadata runtime emission;
+- `175` persisted projection items;
+- projected node, alias and governance retrieval from
+  `/api/praxis/config/domain-catalog/context`;
+- governed semantic payload present in node projection;
+- alias payload present in alias projection.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
