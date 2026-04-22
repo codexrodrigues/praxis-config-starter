@@ -441,6 +441,11 @@ BACKEND_URL=https://praxis-api-quickstart.onrender.com scripts/verify-domain-cat
 The quickstart CI for this script passed in
 [`24785032531`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24785032531).
 
+The quickstart then added the manual/scheduled `Domain Catalog Runtime Smoke`
+workflow in commit `aa8ce93`. The first manual dispatch against the Render
+host passed in
+[`24785680070`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24785680070).
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
