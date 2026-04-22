@@ -16,6 +16,11 @@ on:
         required: false
         default: main
         type: string
+      metadata_ref:
+        description: 'praxis-metadata-starter ref to install locally for metadata/domain catalog contracts.'
+        required: false
+        default: main
+        type: string
       ui_ref:
         description: 'praxis-ui-angular ref to test against when the page-builder full E2E gate is enabled.'
         required: false
@@ -60,6 +65,14 @@ jobs:
           repository: codexrodrigues/praxis-api-quickstart
           ref: ${{ inputs.quickstart_ref }}
           path: praxis-api-quickstart
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      - name: Checkout praxis-metadata-starter
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-metadata-starter
+          ref: ${{ inputs.metadata_ref }}
+          path: praxis-metadata-starter
           token: ${{ secrets.RELEASE_PAT || github.token }}
 
       - name: Checkout praxis-ui-angular
@@ -120,6 +133,21 @@ jobs:
           }
           "STARTER_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Resolve local metadata starter version
+        shell: pwsh
+        working-directory: praxis-metadata-starter
+        run: |
+          $version = mvn -q -DforceStdout help:evaluate "-Dexpression=project.version"
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'Could not resolve praxis-metadata-starter project.version.'
+          }
+          "METADATA_STARTER_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install praxis-metadata-starter locally
+        shell: pwsh
+        working-directory: praxis-metadata-starter
+        run: mvn -B -DskipTests install
+
       - name: Install praxis-config-starter locally
         shell: pwsh
         working-directory: praxis-config-starter
@@ -128,7 +156,7 @@ jobs:
       - name: Package praxis-api-quickstart against local starter
         shell: pwsh
         working-directory: praxis-api-quickstart
-        run: mvn -B -DskipTests "-Dpraxis.config.version=$env:STARTER_VERSION" package
+        run: mvn -B -DskipTests "-Dpraxis.core.version=$env:METADATA_STARTER_VERSION" "-Dpraxis.config.version=$env:STARTER_VERSION" package
 
       - name: Install praxis-ui-angular dependencies
         if: inputs.run_page_builder_full_e2e == true
@@ -152,6 +180,14 @@ jobs:
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
+
+      - name: Run quickstart Domain Catalog v2 HTTP smoke
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          .\tools\Invoke-QuickstartDomainCatalogV2HttpSmoke.ps1 `
+            -JavaHome "$env:JAVA_HOME" `
+            -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart"
 
       - name: Run page-builder agentic full E2E gate
         if: inputs.run_page_builder_full_e2e == true

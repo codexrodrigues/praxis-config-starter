@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ingestion and projected node/alias/governance retrieval.
 
 ### Changed
+- The `Agentic Authoring HTTP Smoke` workflow now checks out and installs
+  `praxis-metadata-starter` locally, packages the quickstart against both local
+  starters and runs the Domain Catalog v0.2 HTTP smoke as part of the remote
+  gate.
 - Domain catalog ingestion now rejects unsupported schema versions and invalid
   payloads before writing `domain_catalog_release` or `domain_catalog_item`.
 - Domain catalog prompt context now carries governed v0.2 semantics such as

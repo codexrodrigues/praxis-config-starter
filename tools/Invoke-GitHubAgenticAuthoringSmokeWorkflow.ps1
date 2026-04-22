@@ -5,6 +5,7 @@ param(
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
     [string] $QuickstartRef = "3cd1344fdbd772f54b4261a0527d361e3ef1df33",
+    [string] $MetadataRef = "main",
     [string] $UiRef = "main",
     [int] $StreamProcessingTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
@@ -45,6 +46,7 @@ $dispatchBody = @{
     inputs = @{
         provider = $Provider
         quickstart_ref = $QuickstartRef
+        metadata_ref = $MetadataRef
         ui_ref = $UiRef
         run_page_builder_full_e2e = [bool] $RunPageBuilderFullE2E.IsPresent
         stream_processing_timeout_seconds = [string] $StreamProcessingTimeoutSeconds
@@ -65,6 +67,7 @@ if ($NoWait.IsPresent) {
         ref = $Ref
         provider = $Provider
         quickstartRef = $QuickstartRef
+        metadataRef = $MetadataRef
         uiRef = $UiRef
         runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
         dispatched = $true
@@ -112,6 +115,7 @@ $result = [pscustomobject]@{
     ref = $Ref
     provider = $Provider
     quickstartRef = $QuickstartRef
+    metadataRef = $MetadataRef
     uiRef = $UiRef
     runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
     status = $run.status

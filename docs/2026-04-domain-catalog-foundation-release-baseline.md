@@ -209,6 +209,13 @@ The first script run against the locally packaged quickstart confirmed:
 - governed semantic payload present in node projection;
 - alias payload present in alias projection.
 
+The remote `Agentic Authoring HTTP Smoke` workflow now installs
+`praxis-metadata-starter` locally, packages `praxis-api-quickstart` against both
+local starters and runs this Domain Catalog v0.2 smoke in the same remote gate as
+the authoring HTTP/SSE validation. This keeps the platform gate from silently
+falling back to an older published metadata starter that still emits
+`praxis.domain-catalog/v0.1`.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
