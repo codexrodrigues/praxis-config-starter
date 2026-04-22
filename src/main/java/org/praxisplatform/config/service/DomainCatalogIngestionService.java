@@ -141,8 +141,20 @@ public class DomainCatalogIngestionService {
             String nodeType,
             String query,
             int limit) {
+        int resolvedLimit = Math.min(Math.max(limit, 1), 200);
+        if (!StringUtils.hasText(normalize(serviceKey))) {
+            List<DomainCatalogItemResponse> responses = new ArrayList<>();
+            for (DomainCatalogRelease release : latestReleasesByService(tenantId, environment)) {
+                int remaining = resolvedLimit - responses.size();
+                if (remaining <= 0) {
+                    break;
+                }
+                responses.addAll(search(release.getReleaseKey(), itemType, contextKey, nodeType, query, remaining));
+            }
+            return responses.stream().limit(resolvedLimit).toList();
+        }
         DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment);
-        return search(release.getReleaseKey(), itemType, contextKey, nodeType, query, limit);
+        return search(release.getReleaseKey(), itemType, contextKey, nodeType, query, resolvedLimit);
     }
 
     @Transactional(readOnly = true)
@@ -155,6 +167,26 @@ public class DomainCatalogIngestionService {
             String nodeType,
             String query,
             int limit) {
+        if (!StringUtils.hasText(normalize(serviceKey))) {
+            List<DomainCatalogItemResponse> items = searchLatest(
+                    serviceKey,
+                    tenantId,
+                    environment,
+                    itemType,
+                    contextKey,
+                    nodeType,
+                    query,
+                    limit);
+            return new DomainCatalogContextResponse(
+                    "praxis.domain-catalog-context/v0.1",
+                    null,
+                    normalize(query),
+                    normalize(itemType),
+                    normalize(contextKey),
+                    normalize(nodeType),
+                    retrievalGuidance(true),
+                    items);
+        }
         DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment);
         List<DomainCatalogItemResponse> items = search(
                 release.getReleaseKey(),
@@ -170,14 +202,21 @@ public class DomainCatalogIngestionService {
                 normalize(itemType),
                 normalize(contextKey),
                 normalize(nodeType),
-                List.of(
-                        "Use this context as the semantic vocabulary for the requested business scope.",
-                        "Prefer node items for business concepts, fields, actions, states and policy hints.",
-                        "Use governance items to respect privacy, compliance and AI visibility constraints.",
-                        "Use binding and evidence items to cite runtime/API/schema sources.",
-                        "Do not infer executable rules from policy_hint nodes unless an executable rule binding is present."
-                ),
+                retrievalGuidance(false),
                 items);
+    }
+
+    private List<String> retrievalGuidance(boolean federated) {
+        List<String> guidance = new ArrayList<>();
+        guidance.add("Use this context as the semantic vocabulary for the requested business scope.");
+        guidance.add("Prefer node items for business concepts, fields, actions, states and policy hints.");
+        guidance.add("Use governance items to respect privacy, compliance and AI visibility constraints.");
+        guidance.add("Use binding and evidence items to cite runtime/API/schema sources.");
+        guidance.add("Do not infer executable rules from policy_hint nodes unless an executable rule binding is present.");
+        if (federated) {
+            guidance.add("This context may include items from the latest releases of multiple services; keep service boundaries explicit when citing or applying it.");
+        }
+        return List.copyOf(guidance);
     }
 
     private List<DomainCatalogItem> extractItems(JsonNode payload, DomainCatalogRelease release) {
@@ -294,6 +333,24 @@ public class DomainCatalogIngestionService {
                 .stream()
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("No domain catalog release found for the requested scope"));
+    }
+
+    private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment) {
+        List<DomainCatalogRelease> releases = releaseRepository.findLatest(
+                null,
+                normalize(tenantId),
+                normalize(environment),
+                PageRequest.of(0, 100));
+        Map<String, DomainCatalogRelease> latestByService = new LinkedHashMap<>();
+        for (DomainCatalogRelease release : releases) {
+            String serviceKey = normalize(release.getServiceKey());
+            String key = StringUtils.hasText(serviceKey) ? serviceKey : release.getReleaseKey();
+            latestByService.putIfAbsent(key, release);
+        }
+        if (latestByService.isEmpty()) {
+            throw new IllegalArgumentException("No domain catalog release found for the requested scope");
+        }
+        return List.copyOf(latestByService.values());
     }
 
     private String searchableText(String itemType, JsonNode node) {

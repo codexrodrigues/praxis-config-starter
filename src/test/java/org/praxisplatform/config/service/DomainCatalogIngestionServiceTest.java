@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
+import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
@@ -157,6 +158,148 @@ class DomainCatalogIngestionServiceTest {
                     assertThat(response.itemType()).isEqualTo("node");
                     assertThat(response.nodeType()).isEqualTo("field");
                     assertThat(response.payload().path("label").asText()).isEqualTo("Salario Liquido");
+                });
+    }
+
+    @Test
+    void federatesSearchAcrossLatestReleaseOfEachServiceWhenServiceKeyIsOmitted() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease hrLatest = DomainCatalogRelease.builder()
+                .releaseKey("hr:latest")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("hr-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+        DomainCatalogRelease financeLatest = DomainCatalogRelease.builder()
+                .releaseKey("finance:latest")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("finance-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T11:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T11:00:01Z"))
+                .build();
+        DomainCatalogRelease hrOlder = DomainCatalogRelease.builder()
+                .releaseKey("hr:older")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("hr-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-20T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-20T12:00:01Z"))
+                .build();
+        DomainCatalogItem hrField = DomainCatalogItem.builder()
+                .release(hrLatest)
+                .itemType("node")
+                .itemKey("human-resources.employee.field.name")
+                .contextKey("human-resources")
+                .nodeType("field")
+                .payload("{\"label\":\"Employee name\"}")
+                .build();
+        DomainCatalogItem financeField = DomainCatalogItem.builder()
+                .release(financeLatest)
+                .itemType("node")
+                .itemKey("finance.invoice.field.total")
+                .contextKey("finance")
+                .nodeType("field")
+                .payload("{\"label\":\"Invoice total\"}")
+                .build();
+
+        when(releaseRepository.findLatest(eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(hrLatest, financeLatest, hrOlder));
+        when(itemRepository.search(eq("hr:latest"), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
+                .thenReturn(List.of(hrField));
+        when(itemRepository.search(eq("finance:latest"), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
+                .thenReturn(List.of(financeField));
+
+        var responses = service.searchLatest(
+                null,
+                "tenant-a",
+                "dev",
+                "node",
+                null,
+                "field",
+                "field",
+                10);
+
+        assertThat(responses).extracting(DomainCatalogItemResponse::releaseKey)
+                .containsExactly("hr:latest", "finance:latest");
+        assertThat(responses).extracting(DomainCatalogItemResponse::itemKey)
+                .containsExactly("human-resources.employee.field.name", "finance.invoice.field.total");
+    }
+
+    @Test
+    void buildsFederatedContextWhenServiceKeyIsOmitted() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease hrLatest = DomainCatalogRelease.builder()
+                .releaseKey("hr:latest")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("hr-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+        DomainCatalogItem hrPolicy = DomainCatalogItem.builder()
+                .release(hrLatest)
+                .itemType("node")
+                .itemKey("human-resources.policy.salary-visibility")
+                .contextKey("human-resources")
+                .nodeType("policy_hint")
+                .payload("{\"label\":\"Salary visibility\"}")
+                .build();
+
+        when(releaseRepository.findLatest(eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(hrLatest));
+        when(itemRepository.search(
+                eq("hr:latest"),
+                eq("node"),
+                eq("human-resources"),
+                eq("policy_hint"),
+                eq("salary"),
+                any(Pageable.class)))
+                .thenReturn(List.of(hrPolicy));
+
+        var context = service.contextLatest(
+                null,
+                "tenant-a",
+                "dev",
+                "node",
+                "human-resources",
+                "policy_hint",
+                "salary",
+                5);
+
+        assertThat(context.release()).isNull();
+        assertThat(context.retrievalGuidance())
+                .contains("This context may include items from the latest releases of multiple services; keep service boundaries explicit when citing or applying it.");
+        assertThat(context.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.releaseKey()).isEqualTo("hr:latest");
+                    assertThat(item.itemKey()).isEqualTo("human-resources.policy.salary-visibility");
                 });
     }
 

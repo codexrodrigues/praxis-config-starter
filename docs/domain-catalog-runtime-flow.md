@@ -229,11 +229,14 @@ The MVP currently supports:
 - release persistence;
 - materialized items;
 - basic item search;
+- latest-release search for a specific service or, when `serviceKey` is
+  omitted, federated search across the latest release of each service in the
+  requested tenant/environment;
 - optional RAG publication when `VectorStore` is available.
 
 The MVP does not yet support:
 
-- cross-service federation;
+- cross-service relationship inference beyond latest-release federation;
 - LLM patch proposals;
 - rule execution;
 - OPA/DMN integration;
