@@ -15,4 +15,6 @@ public interface DomainKnowledgeAliasRepository extends JpaRepository<DomainKnow
             Pageable pageable);
 
     List<DomainKnowledgeAlias> findByConcept_Id(UUID conceptId);
+
+    List<DomainKnowledgeAlias> findByConcept_IdIn(List<UUID> conceptIds);
 }

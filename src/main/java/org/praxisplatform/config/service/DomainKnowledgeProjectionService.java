@@ -3,12 +3,14 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.text.Normalizer;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
@@ -103,6 +105,7 @@ public class DomainKnowledgeProjectionService {
             DomainCatalogRelease release,
             List<DomainCatalogItem> items,
             Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        Map<String, DomainKnowledgeAlias> aliasesByConceptAndValue = existingAliasesByConceptAndValue(conceptsByKey);
         for (DomainCatalogItem item : items) {
             if (!"alias".equals(item.getItemType())) {
                 continue;
@@ -113,20 +116,20 @@ public class DomainKnowledgeProjectionService {
             if (concept == null || !StringUtils.hasText(alias)) {
                 continue;
             }
-            Optional<DomainKnowledgeAlias> existing = aliasRepository.findByConcept_Id(concept.getId()).stream()
-                    .filter(candidate -> Objects.equals(normalizedAlias(alias), candidate.getNormalizedAlias()))
-                    .findFirst();
-            DomainKnowledgeAlias projected = existing.orElseGet(DomainKnowledgeAlias::new);
+            String normalizedAlias = normalizedAlias(alias);
+            DomainKnowledgeAlias projected = aliasesByConceptAndValue
+                    .getOrDefault(aliasLookupKey(concept.getId(), normalizedAlias), new DomainKnowledgeAlias());
             projected.setTenantId(release.getTenantId());
             projected.setEnvironment(release.getEnvironment());
             projected.setConcept(concept);
             projected.setAlias(alias);
-            projected.setNormalizedAlias(normalizedAlias(alias));
+            projected.setNormalizedAlias(normalizedAlias);
             projected.setLocale(text(payload, "locale"));
             projected.setAliasType(aliasType(payload));
             projected.setSource("generated");
             projected.setWeight(confidence(payload, 1.0));
-            aliasRepository.save(projected);
+            DomainKnowledgeAlias saved = aliasRepository.save(projected);
+            aliasesByConceptAndValue.put(aliasLookupKey(concept.getId(), normalizedAlias), saved);
         }
     }
 
@@ -174,6 +177,8 @@ public class DomainKnowledgeProjectionService {
             DomainCatalogRelease release,
             List<DomainCatalogItem> items,
             Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        Map<String, DomainKnowledgeRelationship> relationshipsBySourceTargetAndType =
+                existingRelationshipsBySourceTargetAndType(release, conceptsByKey);
         for (DomainCatalogItem item : items) {
             if (!"edge".equals(item.getItemType())) {
                 continue;
@@ -185,16 +190,9 @@ public class DomainKnowledgeProjectionService {
             if (source == null || target == null || !StringUtils.hasText(relationshipType)) {
                 continue;
             }
-            DomainKnowledgeRelationship relationship = relationshipRepository
-                    .findByTenantIdAndEnvironmentAndSourceConcept_Id(
-                            release.getTenantId(),
-                            release.getEnvironment(),
-                            source.getId())
-                    .stream()
-                    .filter(candidate -> target.getId().equals(candidate.getTargetConcept().getId()))
-                    .filter(candidate -> relationshipType.equals(candidate.getRelationshipType()))
-                    .findFirst()
-                    .orElseGet(DomainKnowledgeRelationship::new);
+            String lookupKey = relationshipLookupKey(source.getId(), target.getId(), relationshipType);
+            DomainKnowledgeRelationship relationship = relationshipsBySourceTargetAndType
+                    .getOrDefault(lookupKey, new DomainKnowledgeRelationship());
             relationship.setTenantId(release.getTenantId());
             relationship.setEnvironment(release.getEnvironment());
             relationship.setSourceConcept(source);
@@ -206,8 +204,74 @@ public class DomainKnowledgeProjectionService {
             relationship.setContractKey(firstText(text(payload, "contractKey"), item.getItemKey()));
             relationship.setConfidence(confidence(payload, null));
             relationship.setPayload(item.getPayload());
-            relationshipRepository.save(relationship);
+            DomainKnowledgeRelationship saved = relationshipRepository.save(relationship);
+            relationshipsBySourceTargetAndType.put(lookupKey, saved);
         }
+    }
+
+    private Map<String, DomainKnowledgeAlias> existingAliasesByConceptAndValue(
+            Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        List<UUID> conceptIds = conceptIds(conceptsByKey);
+        Map<String, DomainKnowledgeAlias> aliasesByConceptAndValue = new LinkedHashMap<>();
+        if (conceptIds.isEmpty()) {
+            return aliasesByConceptAndValue;
+        }
+        for (DomainKnowledgeAlias alias : aliasRepository.findByConcept_IdIn(conceptIds)) {
+            if (alias.getConcept() == null || alias.getConcept().getId() == null
+                    || !StringUtils.hasText(alias.getNormalizedAlias())) {
+                continue;
+            }
+            aliasesByConceptAndValue.putIfAbsent(
+                    aliasLookupKey(alias.getConcept().getId(), alias.getNormalizedAlias()),
+                    alias);
+        }
+        return aliasesByConceptAndValue;
+    }
+
+    private Map<String, DomainKnowledgeRelationship> existingRelationshipsBySourceTargetAndType(
+            DomainCatalogRelease release,
+            Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        List<UUID> conceptIds = conceptIds(conceptsByKey);
+        Map<String, DomainKnowledgeRelationship> relationshipsBySourceTargetAndType = new LinkedHashMap<>();
+        if (conceptIds.isEmpty()) {
+            return relationshipsBySourceTargetAndType;
+        }
+        for (DomainKnowledgeRelationship relationship : relationshipRepository
+                .findByTenantIdAndEnvironmentAndSourceConcept_IdIn(
+                        release.getTenantId(),
+                        release.getEnvironment(),
+                        conceptIds)) {
+            if (relationship.getSourceConcept() == null || relationship.getSourceConcept().getId() == null
+                    || relationship.getTargetConcept() == null || relationship.getTargetConcept().getId() == null
+                    || !StringUtils.hasText(relationship.getRelationshipType())) {
+                continue;
+            }
+            relationshipsBySourceTargetAndType.putIfAbsent(
+                    relationshipLookupKey(
+                            relationship.getSourceConcept().getId(),
+                            relationship.getTargetConcept().getId(),
+                            relationship.getRelationshipType()),
+                    relationship);
+        }
+        return relationshipsBySourceTargetAndType;
+    }
+
+    private List<UUID> conceptIds(Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        List<UUID> conceptIds = new ArrayList<>();
+        for (DomainKnowledgeConcept concept : conceptsByKey.values()) {
+            if (concept != null && concept.getId() != null) {
+                conceptIds.add(concept.getId());
+            }
+        }
+        return conceptIds;
+    }
+
+    private String aliasLookupKey(UUID conceptId, String normalizedAlias) {
+        return conceptId + "::" + normalizedAlias;
+    }
+
+    private String relationshipLookupKey(UUID sourceConceptId, UUID targetConceptId, String relationshipType) {
+        return sourceConceptId + "::" + targetConceptId + "::" + relationshipType;
     }
 
     private void projectEvidence(

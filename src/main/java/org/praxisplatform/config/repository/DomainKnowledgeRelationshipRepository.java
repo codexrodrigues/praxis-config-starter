@@ -12,6 +12,11 @@ public interface DomainKnowledgeRelationshipRepository extends JpaRepository<Dom
             String environment,
             UUID sourceConceptId);
 
+    List<DomainKnowledgeRelationship> findByTenantIdAndEnvironmentAndSourceConcept_IdIn(
+            String tenantId,
+            String environment,
+            List<UUID> sourceConceptIds);
+
     List<DomainKnowledgeRelationship> findByTenantIdAndEnvironmentAndTargetConcept_Id(
             String tenantId,
             String environment,

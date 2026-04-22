@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -159,10 +160,10 @@ class DomainKnowledgeProjectionServiceTest {
             concept.onInsert();
             return concept;
         });
-        when(aliasRepository.findByConcept_Id(any())).thenReturn(List.of());
+        when(aliasRepository.findByConcept_IdIn(any())).thenReturn(List.of());
         when(bindingRepository.findByTenantIdAndEnvironmentAndBindingTypeAndBindingKey(any(), any(), any(), any()))
                 .thenReturn(List.of());
-        when(relationshipRepository.findByTenantIdAndEnvironmentAndSourceConcept_Id(any(), any(), any()))
+        when(relationshipRepository.findByTenantIdAndEnvironmentAndSourceConcept_IdIn(any(), any(), any()))
                 .thenReturn(List.of());
         when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(any(), any(), any()))
                 .thenReturn(List.of());
@@ -201,6 +202,8 @@ class DomainKnowledgeProjectionServiceTest {
                 });
 
         ArgumentCaptor<DomainKnowledgeAlias> aliasCaptor = ArgumentCaptor.forClass(DomainKnowledgeAlias.class);
+        verify(aliasRepository).findByConcept_IdIn(any());
+        verify(aliasRepository, never()).findByConcept_Id(any());
         verify(aliasRepository).save(aliasCaptor.capture());
         assertThat(aliasCaptor.getValue())
                 .satisfies(alias -> {
@@ -211,6 +214,8 @@ class DomainKnowledgeProjectionServiceTest {
 
         ArgumentCaptor<DomainKnowledgeRelationship> relationshipCaptor =
                 ArgumentCaptor.forClass(DomainKnowledgeRelationship.class);
+        verify(relationshipRepository).findByTenantIdAndEnvironmentAndSourceConcept_IdIn(any(), any(), any());
+        verify(relationshipRepository, never()).findByTenantIdAndEnvironmentAndSourceConcept_Id(any(), any(), any());
         verify(relationshipRepository, org.mockito.Mockito.times(2)).save(relationshipCaptor.capture());
         assertThat(relationshipCaptor.getAllValues())
                 .extracting(DomainKnowledgeRelationship::getRelationshipType)
