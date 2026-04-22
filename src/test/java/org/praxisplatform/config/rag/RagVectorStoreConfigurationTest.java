@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.service.EmbeddingService;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -16,7 +17,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class RagVectorStoreConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(RagVectorStoreConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(
+                    PropertyPlaceholderAutoConfiguration.class,
+                    RagChatAdvisorPropertiesConfiguration.class,
+                    RagVectorStoreConfiguration.class))
             .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
             .withBean(ObjectMapper.class, ObjectMapper::new)
             .withBean(EmbeddingService.class, () -> mock(EmbeddingService.class))
@@ -44,5 +48,17 @@ class RagVectorStoreConfigurationTest {
         contextRunner
                 .withPropertyValues("praxis.ai.rag.vector-store.enabled=true")
                 .run(context -> assertThat(context).hasSingleBean(VectorStore.class));
+    }
+
+    @Test
+    void shouldRegisterChatAdvisorPropertiesWhenVectorStoreIsDisabled() {
+        contextRunner
+                .withUserConfiguration(RagChatAdvisorService.class)
+                .withPropertyValues("praxis.ai.rag.vector-store.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(VectorStore.class);
+                    assertThat(context).hasSingleBean(RagChatAdvisorProperties.class);
+                    assertThat(context).hasSingleBean(RagChatAdvisorService.class);
+                });
     }
 }
