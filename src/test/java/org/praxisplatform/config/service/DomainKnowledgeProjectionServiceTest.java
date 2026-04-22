@@ -70,7 +70,17 @@ class DomainKnowledgeProjectionServiceTest {
                           "classification": "confidential",
                           "dataCategory": "financial",
                           "complianceTags": ["LGPD"],
-                          "aiUsage": {"visibility": "mask"}
+                          "aiUsage": {"visibility": "mask"},
+                          "sourceEvidenceKeys": ["evidence:valor-liquido:workflow-response"]
+                        }
+                        """),
+                item(release, "node", "human-resources.folhas-pagamento.surface.create", "human-resources",
+                        "surface", null, null, """
+                        {
+                          "nodeKey": "human-resources.folhas-pagamento.surface.create",
+                          "nodeType": "surface",
+                          "contextKey": "human-resources",
+                          "label": "Criar folha"
                         }
                         """),
                 item(release, "edge", "human-resources.folhas-pagamento.has-field.valor-liquido", "human-resources", null, null, "has_field", """
@@ -79,6 +89,16 @@ class DomainKnowledgeProjectionServiceTest {
                           "sourceNodeKey": "human-resources.folhas-pagamento",
                           "targetNodeKey": "human-resources.folhas-pagamento.field.valor-liquido",
                           "edgeType": "has_field"
+                        }
+                        """),
+                item(release, "edge", "human-resources.folhas-pagamento.has-surface.create", "human-resources",
+                        null, null, "has_surface", """
+                        {
+                          "edgeKey": "human-resources.folhas-pagamento.has-surface.create",
+                          "sourceNodeKey": "human-resources.folhas-pagamento",
+                          "targetNodeKey": "human-resources.folhas-pagamento.surface.create",
+                          "edgeType": "has_surface",
+                          "sourceEvidenceKeys": ["evidence:surface:create"]
                         }
                         """),
                 item(release, "binding", "binding:human-resources.folhas-pagamento.field.valor-liquido:dto-field",
@@ -94,6 +114,19 @@ class DomainKnowledgeProjectionServiceTest {
                           }
                         }
                         """),
+                item(release, "binding", "binding:human-resources.folhas-pagamento.surface.create:ui-surface",
+                        "human-resources", null, "ui_surface", null, """
+                        {
+                          "bindingKey": "binding:human-resources.folhas-pagamento.surface.create:ui-surface",
+                          "nodeKey": "human-resources.folhas-pagamento.surface.create",
+                          "bindingType": "ui_surface",
+                          "confidence": 0.93,
+                          "target": {
+                            "apiPath": "/api/folhas-pagamento",
+                            "apiMethod": "POST"
+                          }
+                        }
+                        """),
                 item(release, "alias", "alias:valor-liquido", "human-resources", null, null, null, """
                         {
                           "aliasKey": "alias:valor-liquido",
@@ -106,9 +139,15 @@ class DomainKnowledgeProjectionServiceTest {
                 item(release, "evidence", "evidence:valor-liquido:workflow-response", "human-resources", null, null, null, """
                         {
                           "evidenceKey": "evidence:valor-liquido:workflow-response",
-                          "nodeKey": "human-resources.folhas-pagamento.field.valor-liquido",
                           "evidenceType": "dto_schema",
                           "confidence": 0.88
+                        }
+                        """),
+                item(release, "evidence", "evidence:surface:create", "human-resources", null, null, null, """
+                        {
+                          "evidenceKey": "evidence:surface:create",
+                          "evidenceType": "api_spec",
+                          "confidence": 0.82
                         }
                         """)
         );
@@ -131,7 +170,7 @@ class DomainKnowledgeProjectionServiceTest {
         service.project(release, items);
 
         ArgumentCaptor<DomainKnowledgeConcept> conceptCaptor = ArgumentCaptor.forClass(DomainKnowledgeConcept.class);
-        verify(conceptRepository, org.mockito.Mockito.times(2)).save(conceptCaptor.capture());
+        verify(conceptRepository, org.mockito.Mockito.times(3)).save(conceptCaptor.capture());
         assertThat(conceptCaptor.getAllValues())
                 .filteredOn(concept -> "human-resources.folhas-pagamento.field.valor-liquido"
                         .equals(concept.getConceptKey()))
@@ -145,12 +184,20 @@ class DomainKnowledgeProjectionServiceTest {
                 });
 
         ArgumentCaptor<DomainKnowledgeBinding> bindingCaptor = ArgumentCaptor.forClass(DomainKnowledgeBinding.class);
-        verify(bindingRepository).save(bindingCaptor.capture());
-        assertThat(bindingCaptor.getValue())
+        verify(bindingRepository, org.mockito.Mockito.times(2)).save(bindingCaptor.capture());
+        assertThat(bindingCaptor.getAllValues())
+                .filteredOn(binding -> "dto_field".equals(binding.getBindingType()))
+                .singleElement()
                 .satisfies(binding -> {
-                    assertThat(binding.getBindingType()).isEqualTo("dto_field");
                     assertThat(binding.getSchemaPointer()).isEqualTo("WorkflowResponse#/valorLiquido");
                     assertThat(binding.getConfidence()).isEqualTo(0.91);
+                });
+        assertThat(bindingCaptor.getAllValues())
+                .filteredOn(binding -> "ui_surface".equals(binding.getBindingType()))
+                .singleElement()
+                .satisfies(binding -> {
+                    assertThat(binding.getApiPath()).isEqualTo("/api/folhas-pagamento");
+                    assertThat(binding.getApiMethod()).isEqualTo("POST");
                 });
 
         ArgumentCaptor<DomainKnowledgeAlias> aliasCaptor = ArgumentCaptor.forClass(DomainKnowledgeAlias.class);
@@ -164,18 +211,26 @@ class DomainKnowledgeProjectionServiceTest {
 
         ArgumentCaptor<DomainKnowledgeRelationship> relationshipCaptor =
                 ArgumentCaptor.forClass(DomainKnowledgeRelationship.class);
-        verify(relationshipRepository).save(relationshipCaptor.capture());
-        assertThat(relationshipCaptor.getValue())
-                .satisfies(relationship -> {
-                    assertThat(relationship.getRelationshipType()).isEqualTo("has_field");
-                    assertThat(relationship.getCrossContext()).isFalse();
-                });
+        verify(relationshipRepository, org.mockito.Mockito.times(2)).save(relationshipCaptor.capture());
+        assertThat(relationshipCaptor.getAllValues())
+                .extracting(DomainKnowledgeRelationship::getRelationshipType)
+                .containsExactly("has_field", "has_surface");
+        assertThat(relationshipCaptor.getAllValues())
+                .allSatisfy(relationship -> assertThat(relationship.getCrossContext()).isFalse());
 
         ArgumentCaptor<DomainKnowledgeEvidence> evidenceCaptor = ArgumentCaptor.forClass(DomainKnowledgeEvidence.class);
-        verify(evidenceRepository, org.mockito.Mockito.times(3)).save(evidenceCaptor.capture());
+        verify(evidenceRepository, org.mockito.Mockito.times(5)).save(evidenceCaptor.capture());
         assertThat(evidenceCaptor.getAllValues())
                 .extracting(DomainKnowledgeEvidence::getEvidenceType)
                 .contains("catalog_release", "json_schema");
+        assertThat(evidenceCaptor.getAllValues())
+                .filteredOn(evidence -> "evidence:valor-liquido:workflow-response".equals(evidence.getEvidenceKey()))
+                .singleElement()
+                .satisfies(evidence -> assertThat(evidence.getSubjectId()).isNotNull());
+        assertThat(evidenceCaptor.getAllValues())
+                .filteredOn(evidence -> "evidence:surface:create".equals(evidence.getEvidenceKey()))
+                .singleElement()
+                .satisfies(evidence -> assertThat(evidence.getSubjectId()).isNotNull());
     }
 
     private DomainCatalogItem item(

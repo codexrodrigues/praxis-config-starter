@@ -214,6 +214,7 @@ public class DomainKnowledgeProjectionService {
             DomainCatalogRelease release,
             List<DomainCatalogItem> items,
             Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        Map<String, DomainKnowledgeConcept> conceptsByEvidenceKey = conceptsByEvidenceKey(items, conceptsByKey);
         for (DomainCatalogItem item : items) {
             if (!"node".equals(item.getItemType()) && !"evidence".equals(item.getItemType())) {
                 continue;
@@ -221,7 +222,7 @@ public class DomainKnowledgeProjectionService {
             JsonNode payload = read(item.getPayload());
             DomainKnowledgeConcept concept = "node".equals(item.getItemType())
                     ? conceptsByKey.get(item.getItemKey())
-                    : conceptFor(payload, conceptsByKey);
+                    : firstConcept(conceptFor(payload, conceptsByKey), conceptsByEvidenceKey.get(firstText(item.getItemKey(), text(payload, "evidenceKey"))));
             if (concept == null) {
                 continue;
             }
@@ -250,8 +251,46 @@ public class DomainKnowledgeProjectionService {
         }
     }
 
+    private Map<String, DomainKnowledgeConcept> conceptsByEvidenceKey(
+            List<DomainCatalogItem> items,
+            Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        Map<String, DomainKnowledgeConcept> conceptsByEvidenceKey = new LinkedHashMap<>();
+        for (DomainCatalogItem item : items) {
+            JsonNode payload = read(item.getPayload());
+            DomainKnowledgeConcept concept = conceptFor(payload, conceptsByKey);
+            if ("node".equals(item.getItemType())) {
+                concept = conceptsByKey.get(item.getItemKey());
+            } else if ("edge".equals(item.getItemType())) {
+                concept = conceptsByKey.get(text(payload, "sourceNodeKey"));
+            }
+            if (concept == null) {
+                continue;
+            }
+            for (JsonNode evidenceKey : payload.path("evidenceKeys")) {
+                if (evidenceKey != null && evidenceKey.isTextual() && StringUtils.hasText(evidenceKey.asText())) {
+                    conceptsByEvidenceKey.putIfAbsent(evidenceKey.asText().trim(), concept);
+                }
+            }
+            for (JsonNode evidenceKey : payload.path("sourceEvidenceKeys")) {
+                if (evidenceKey != null && evidenceKey.isTextual() && StringUtils.hasText(evidenceKey.asText())) {
+                    conceptsByEvidenceKey.putIfAbsent(evidenceKey.asText().trim(), concept);
+                }
+            }
+        }
+        return conceptsByEvidenceKey;
+    }
+
     private DomainKnowledgeConcept conceptFor(JsonNode payload, Map<String, DomainKnowledgeConcept> conceptsByKey) {
         return conceptsByKey.get(firstText(text(payload, "nodeKey"), text(payload, "subjectNodeKey")));
+    }
+
+    private DomainKnowledgeConcept firstConcept(DomainKnowledgeConcept... concepts) {
+        for (DomainKnowledgeConcept concept : concepts) {
+            if (concept != null) {
+                return concept;
+            }
+        }
+        return null;
     }
 
     private String sourcePointer(DomainCatalogItem item) {
