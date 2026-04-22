@@ -302,6 +302,48 @@ Confirmed steps:
 - page-builder agentic full Playwright E2E gate against
   `praxis-ui-angular/main`.
 
+## Published Relationship Hint Contract Line
+
+After the relationship-aware authoring prompt context was validated, the AI API
+contract was advanced so consumers can send typed domain catalog hint payloads
+instead of relying on loose JSON shapes.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-config-starter` | `0.1.0-rc.8` / `b7870ba` | published to Maven Central and tagged `v0.1.0-rc.8` |
+| `praxis-api-quickstart` | `fffc11e` | consumes `praxis-config-starter:0.1.0-rc.8`; CI passed in [`24770883403`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24770883403) |
+| `praxis-ui-angular` | `b4b42963` | includes generated AI contract/domain catalog consumer updates; CI passed in [`24770877526`](https://github.com/codexrodrigues/praxis-ui-angular/actions/runs/24770877526) |
+
+The Maven Central coordinate was verified from a temporary empty Maven
+repository:
+
+```powershell
+mvn -B -U "-Dmaven.repo.local=$tempRepo" dependency:get "-Dartifact=io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.8"
+```
+
+The quickstart host then passed:
+
+```powershell
+mvn -B verify
+```
+
+Finally, the full cross-repository authoring gate passed against current
+`main` refs:
+
+| Workflow | Run | Ref | Result |
+| --- | --- | --- | --- |
+| `Agentic Authoring HTTP Smoke` | [`24771109354`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24771109354) | `main` | success |
+
+Confirmed steps:
+
+- checkout of `praxis-config-starter/main`, `praxis-api-quickstart/main`,
+  `praxis-metadata-starter/main` and `praxis-ui-angular/main`;
+- local install of `praxis-metadata-starter` and `praxis-config-starter`;
+- packaging of `praxis-api-quickstart` against the checked-out starters;
+- quickstart authoring HTTP/SSE smoke suite with OpenAI;
+- quickstart Domain Catalog v2 HTTP smoke;
+- page-builder agentic full Playwright E2E gate.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to

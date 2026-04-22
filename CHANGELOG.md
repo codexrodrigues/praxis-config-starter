@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.0-rc.8] - 2026-04-22
+
+### Added
+- AI API contract schema now types `contextHints.domainCatalog` in more detail,
+  including relationship query hints used by authoring prompt construction.
+
+### Changed
+- Generated AI contract bindings now preserve the richer domain catalog hint
+  shape so Angular consumers can send typed relationship context requests
+  instead of unstructured JSON blobs.
+
+### Validated
+- `praxis-api-quickstart` consumes `praxis-config-starter` `0.1.0-rc.8`
+  from Maven Central and passed `mvn -B verify`.
+- Remote `Agentic Authoring HTTP Smoke` passed with `run_page_builder_full_e2e=true`
+  across config starter, metadata starter, quickstart and praxis-ui-angular
+  `main` in run `24771109354`.
+
 ## [0.1.0-rc.7] - 2026-04-22
 
 ### Added
