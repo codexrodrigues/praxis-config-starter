@@ -36,6 +36,11 @@ on:
         required: false
         default: '180'
         type: string
+      quickstart_startup_timeout_seconds:
+        description: 'Quickstart startup timeout used by HTTP smoke, domain catalog smoke and page-builder E2E.'
+        required: false
+        default: '180'
+        type: string
 
 concurrency:
   group: agentic-authoring-smoke-${{ github.ref }}
@@ -123,35 +128,34 @@ jobs:
           `$env:PRAXIS_AI_GEMINI_MODEL = '$(Escape-PsSingleQuoted $env:PRAXIS_AI_GEMINI_MODEL)'
           "@ | Set-Content -LiteralPath .env.openai.local.ps1 -Encoding UTF8
 
-      - name: Resolve local starter version
+      - name: Resolve quickstart starter versions
         shell: pwsh
-        working-directory: praxis-config-starter
+        working-directory: praxis-api-quickstart
         run: |
-          $version = mvn -q -DforceStdout help:evaluate "-Dexpression=project.version"
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw 'Could not resolve praxis-config-starter project.version.'
+          $configVersion = mvn -q -DforceStdout help:evaluate "-Dexpression=praxis.config.version"
+          if ([string]::IsNullOrWhiteSpace($configVersion)) {
+            throw 'Could not resolve praxis-api-quickstart praxis.config.version.'
           }
-          "STARTER_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Resolve local metadata starter version
-        shell: pwsh
-        working-directory: praxis-metadata-starter
-        run: |
-          $version = mvn -q -DforceStdout help:evaluate "-Dexpression=project.version"
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw 'Could not resolve praxis-metadata-starter project.version.'
+          $metadataVersion = mvn -q -DforceStdout help:evaluate "-Dexpression=praxis.core.version"
+          if ([string]::IsNullOrWhiteSpace($metadataVersion)) {
+            throw 'Could not resolve praxis-api-quickstart praxis.core.version.'
           }
-          "METADATA_STARTER_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "STARTER_VERSION=$configVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "METADATA_STARTER_VERSION=$metadataVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install praxis-metadata-starter locally
         shell: pwsh
         working-directory: praxis-metadata-starter
-        run: mvn -B -DskipTests install
+        run: |
+          mvn -q versions:set "-DnewVersion=$env:METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
+          mvn -B -DskipTests install
 
       - name: Install praxis-config-starter locally
         shell: pwsh
         working-directory: praxis-config-starter
-        run: mvn -B -DskipTests install
+        run: |
+          mvn -q versions:set "-DnewVersion=$env:STARTER_VERSION" -DgenerateBackupPoms=false
+          mvn -B -DskipTests install
 
       - name: Package praxis-api-quickstart against local starter
         shell: pwsh
@@ -179,6 +183,7 @@ jobs:
             -JavaHome "$env:JAVA_HOME" `
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
+            -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
             -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
 
       - name: Run quickstart Domain Catalog v2 HTTP smoke
@@ -187,7 +192,8 @@ jobs:
         run: |
           .\tools\Invoke-QuickstartDomainCatalogV2HttpSmoke.ps1 `
             -JavaHome "$env:JAVA_HOME" `
-            -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart"
+            -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
+            -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}')
 
       - name: Run page-builder agentic full E2E gate
         if: inputs.run_page_builder_full_e2e == true
@@ -200,6 +206,7 @@ jobs:
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
+            -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
             -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
 
       - name: Upload smoke artifacts

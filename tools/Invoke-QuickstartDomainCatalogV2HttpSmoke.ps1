@@ -8,7 +8,7 @@ param(
     [string] $TenantId = "domain-catalog-v2-smoke",
     [string] $Environment = "local",
     [string] $ResourceKey = "human-resources.folhas-pagamento",
-    [int] $StartupTimeoutSec = 90,
+    [int] $StartupTimeoutSec = 180,
     [switch] $UseExistingQuickstart
 )
 

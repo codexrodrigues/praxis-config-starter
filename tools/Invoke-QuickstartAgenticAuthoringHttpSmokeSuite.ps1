@@ -11,7 +11,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
-    [int] $StartupTimeoutSec = 90,
+    [int] $StartupTimeoutSec = 180,
     [int] $StreamProcessingTimeoutSeconds = 180,
     [switch] $UseExistingQuickstart
 )

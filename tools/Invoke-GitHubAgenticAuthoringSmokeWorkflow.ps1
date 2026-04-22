@@ -4,10 +4,11 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "3cd1344fdbd772f54b4261a0527d361e3ef1df33",
+    [string] $QuickstartRef = "main",
     [string] $MetadataRef = "main",
     [string] $UiRef = "main",
     [int] $StreamProcessingTimeoutSeconds = 180,
+    [int] $QuickstartStartupTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
     [string] $Token = "",
     [int] $PollIntervalSec = 15,
@@ -50,6 +51,7 @@ $dispatchBody = @{
         ui_ref = $UiRef
         run_page_builder_full_e2e = [bool] $RunPageBuilderFullE2E.IsPresent
         stream_processing_timeout_seconds = [string] $StreamProcessingTimeoutSeconds
+        quickstart_startup_timeout_seconds = [string] $QuickstartStartupTimeoutSeconds
     }
 } | ConvertTo-Json -Depth 6 -Compress
 
@@ -70,6 +72,7 @@ if ($NoWait.IsPresent) {
         metadataRef = $MetadataRef
         uiRef = $UiRef
         runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
+        quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds
         dispatched = $true
         waiting = $false
     } | ConvertTo-Json -Depth 4
@@ -118,6 +121,7 @@ $result = [pscustomobject]@{
     metadataRef = $MetadataRef
     uiRef = $UiRef
     runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
+    quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds
     status = $run.status
     conclusion = $run.conclusion
     url = $run.html_url
