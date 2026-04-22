@@ -105,19 +105,20 @@ The remote workflow was not dispatched from the local workstation because no
 
 ## Version Alignment After Post-Merge Gate
 
-Because `v0.1.0-rc.2` already points to commit `70c19c1`, the post-merge
-`main` line was advanced to `0.1.0-rc.3` instead of reusing the published
-`0.1.0-rc.2` coordinate for different code.
+Because `v0.1.0-rc.2` already points to commit `70c19c1`, `v0.1.0-rc.3`
+already points to commit `740ea1b`, and `v0.1.0-rc.4` already points to commit
+`1d64099`, the post-merge `main` line was advanced to `0.1.0-rc.5` instead of
+reusing an existing release coordinate for different code.
 
 For subsequent local downstream validation, install the checked-out starter and
 package `praxis-api-quickstart` with:
 
 ```powershell
 mvn -B -DskipTests install
-mvn -B -DskipTests "-Dpraxis.config.version=0.1.0-rc.3" package
+mvn -B -DskipTests "-Dpraxis.config.version=0.1.0-rc.5" package
 ```
 
-Keep `praxis-api-quickstart` on `0.1.0-rc.2` until `0.1.0-rc.3` is published
+Keep `praxis-api-quickstart` on `0.1.0-rc.2` until `0.1.0-rc.5` is published
 and verified through Maven Central or through the local starter override above.
 
 ## Release Pipeline Adjustment

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0-rc.3] - 2026-04-22
+## [0.1.0-rc.5] - 2026-04-22
 
 ### Fixed
 - Generated TypeScript AI contracts now keep `AiJsonObject` as strict JSON while modeling `AiContextHintsContract` as the extensible envelope for domain catalog hints.
@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Validated
 - Post-merge local authoring gate passed with quickstart HTTP/SSE smoke and page-builder full E2E against the locally installed starter.
+
+### Release Coordination
+- Advanced directly to `0.1.0-rc.5` because remote release tags `v0.1.0-rc.3` and `v0.1.0-rc.4` already exist.
 
 ## [0.1.0-rc.2] - 2026-04-21
 
