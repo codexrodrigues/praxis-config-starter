@@ -216,6 +216,23 @@ the authoring HTTP/SSE validation. This keeps the platform gate from silently
 falling back to an older published metadata starter that still emits
 `praxis.domain-catalog/v0.1`.
 
+The updated remote gate was dispatched and completed successfully:
+
+| Workflow | Run | Ref | Result |
+| --- | --- | --- | --- |
+| `Agentic Authoring HTTP Smoke` | [`24760282410`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24760282410) | `main` | success |
+
+Confirmed steps:
+
+- checkout of `praxis-config-starter/main`, `praxis-api-quickstart/main` and
+  `praxis-metadata-starter/main`;
+- local install of `praxis-metadata-starter`;
+- local install of the checked-out `praxis-config-starter`;
+- packaging of `praxis-api-quickstart` against both local starters;
+- quickstart authoring HTTP/SSE smoke suite;
+- quickstart Domain Catalog v0.2 HTTP smoke;
+- smoke artifact upload.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
