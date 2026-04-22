@@ -253,6 +253,13 @@ LLMs propose change sets; deterministic services validate and apply them.
 7. Runtime context reads the curated knowledge layer first, then falls back to
    release items when curated rows are missing.
 
+The Java projection service is intentionally disabled by default until the
+target config database has Flyway V18 applied and verified. Enable it with:
+
+```properties
+praxis.domain-knowledge.projection.enabled=true
+```
+
 ## Runtime APIs
 
 Recommended first endpoints:

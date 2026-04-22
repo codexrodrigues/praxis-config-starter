@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.StringJoiner;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
@@ -27,6 +26,8 @@ import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -34,7 +35,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 @ConditionalOnBean({DomainCatalogReleaseRepository.class, DomainCatalogItemRepository.class})
 public class DomainCatalogIngestionService {
@@ -54,6 +54,54 @@ public class DomainCatalogIngestionService {
     private final ObjectMapper objectMapper;
     private final RagVectorStoreService ragVectorStoreService;
     private final DomainCatalogSchemaValidationService schemaValidationService;
+    private final DomainKnowledgeProjectionService domainKnowledgeProjectionService;
+
+    public DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService) {
+        this(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                schemaValidationService,
+                (DomainKnowledgeProjectionService) null);
+    }
+
+    @Autowired
+    public DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            ObjectProvider<DomainKnowledgeProjectionService> domainKnowledgeProjectionService) {
+        this(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                schemaValidationService,
+                domainKnowledgeProjectionService.getIfAvailable());
+    }
+
+    private DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            DomainKnowledgeProjectionService domainKnowledgeProjectionService) {
+        this.releaseRepository = releaseRepository;
+        this.itemRepository = itemRepository;
+        this.objectMapper = objectMapper;
+        this.ragVectorStoreService = ragVectorStoreService;
+        this.schemaValidationService = schemaValidationService;
+        this.domainKnowledgeProjectionService = domainKnowledgeProjectionService;
+    }
 
     @Transactional
     public DomainCatalogIngestionResponse ingest(JsonNode payload, String tenantId, String environment) {
@@ -81,6 +129,9 @@ public class DomainCatalogIngestionService {
         itemRepository.deleteByRelease(release);
         List<DomainCatalogItem> items = extractItems(payload, release);
         itemRepository.saveAll(items);
+        if (domainKnowledgeProjectionService != null) {
+            domainKnowledgeProjectionService.project(release, items);
+        }
         try {
             publishRagDocuments(release, items);
         } catch (RuntimeException ex) {
