@@ -153,6 +153,18 @@ The response should give the LLM:
 - retrieval guidance;
 - source release metadata.
 
+Recommended explicit relationship query:
+
+```text
+GET /api/praxis/config/domain-catalog/relationships/latest
+```
+
+Supported relationship filters are `serviceKey`, `sourceNodeKey`, `targetNodeKey`,
+`edgeType`, `q` and `limit`. When `serviceKey` is omitted, `praxis-config-starter`
+searches the latest release of each service in the requested tenant/environment.
+This endpoint returns explicit `edge` items only; it must not synthesize
+relationships from names, labels or aliases.
+
 LLMs should not infer executable behavior unless a rule/binding explicitly says
 it is executable.
 

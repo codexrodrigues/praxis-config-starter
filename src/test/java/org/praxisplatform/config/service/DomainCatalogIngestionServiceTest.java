@@ -304,6 +304,154 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void resolvesExplicitRelationshipsAcrossLatestReleases() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease hrLatest = DomainCatalogRelease.builder()
+                .releaseKey("hr:latest")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("hr-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+        DomainCatalogRelease financeLatest = DomainCatalogRelease.builder()
+                .releaseKey("finance:latest")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("finance-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T11:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T11:00:01Z"))
+                .build();
+        DomainCatalogItem crossServiceReference = DomainCatalogItem.builder()
+                .release(hrLatest)
+                .itemType("edge")
+                .itemKey("edge:hr.employee.references.finance.cost-center")
+                .edgeType("references")
+                .payload("""
+                    {
+                      "edgeKey": "edge:hr.employee.references.finance.cost-center",
+                      "sourceNodeKey": "human-resources.employee.field.costCenterId",
+                      "targetNodeKey": "finance.cost-center",
+                      "edgeType": "references"
+                    }
+                    """)
+                .build();
+        DomainCatalogItem sameAsEdge = DomainCatalogItem.builder()
+                .release(financeLatest)
+                .itemType("edge")
+                .itemKey("edge:finance.cost-center.same-as.accounting.center")
+                .edgeType("same_as")
+                .payload("""
+                    {
+                      "edgeKey": "edge:finance.cost-center.same-as.accounting.center",
+                      "sourceNodeKey": "finance.cost-center",
+                      "targetNodeKey": "accounting.cost-center",
+                      "edgeType": "same_as"
+                    }
+                    """)
+                .build();
+
+        when(releaseRepository.findLatest(eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(hrLatest, financeLatest));
+        when(itemRepository.search(eq("hr:latest"), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
+                .thenReturn(List.of(crossServiceReference));
+        when(itemRepository.search(eq("finance:latest"), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
+                .thenReturn(List.of(sameAsEdge));
+
+        var responses = service.relationshipsLatest(
+                null,
+                "tenant-a",
+                "dev",
+                "human-resources.employee.field.costCenterId",
+                "finance.cost-center",
+                "references",
+                null,
+                10);
+
+        assertThat(responses).singleElement()
+                .satisfies(edge -> {
+                    assertThat(edge.releaseKey()).isEqualTo("hr:latest");
+                    assertThat(edge.edgeType()).isEqualTo("references");
+                    assertThat(edge.payload().path("sourceNodeKey").asText())
+                            .isEqualTo("human-resources.employee.field.costCenterId");
+                    assertThat(edge.payload().path("targetNodeKey").asText()).isEqualTo("finance.cost-center");
+                });
+    }
+
+    @Test
+    void resolvesRelationshipsForSingleServiceWhenServiceKeyIsProvided() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease hrLatest = DomainCatalogRelease.builder()
+                .releaseKey("hr:latest")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("hr-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+        DomainCatalogItem governedByEdge = DomainCatalogItem.builder()
+                .release(hrLatest)
+                .itemType("edge")
+                .itemKey("edge:hr.salary.governed-by.policy")
+                .edgeType("governed_by")
+                .payload("""
+                    {
+                      "edgeKey": "edge:hr.salary.governed-by.policy",
+                      "sourceNodeKey": "human-resources.salary",
+                      "targetNodeKey": "human-resources.policy.salary-visibility",
+                      "edgeType": "governed_by"
+                    }
+                    """)
+                .build();
+
+        when(releaseRepository.findLatest(eq("hr-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(hrLatest));
+        when(itemRepository.search(eq("hr:latest"), eq("edge"), eq(null), eq(null), eq("salary"), any(Pageable.class)))
+                .thenReturn(List.of(governedByEdge));
+
+        var responses = service.relationshipsLatest(
+                "hr-service",
+                "tenant-a",
+                "dev",
+                "human-resources.salary",
+                null,
+                "governed_by",
+                "salary",
+                10);
+
+        assertThat(responses).singleElement()
+                .satisfies(edge -> {
+                    assertThat(edge.releaseKey()).isEqualTo("hr:latest");
+                    assertThat(edge.edgeType()).isEqualTo("governed_by");
+                    assertThat(edge.payload().path("targetNodeKey").asText())
+                            .isEqualTo("human-resources.policy.salary-visibility");
+                });
+    }
+
+    @Test
     void buildsLlmReadyContextFromLatestRelease() {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);

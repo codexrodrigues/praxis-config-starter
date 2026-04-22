@@ -10,6 +10,8 @@ This document describes the first runtime flow between:
 - LLM/runtime consumers, reading `/api/praxis/config/domain-catalog/items`.
 - LLM/runtime consumers, reading `/api/praxis/config/domain-catalog/context` when they need
   a compact semantic context pack.
+- LLM/runtime consumers, reading `/api/praxis/config/domain-catalog/relationships/latest`
+  when they need explicit cross-service relationships.
 
 The goal is to validate the semantic domain catalog without requiring an LLM to inspect source code.
 
@@ -154,7 +156,33 @@ The response includes:
 Use `items/latest` when the client only needs raw items. Use `context` when the client is an LLM
 or an orchestration service that needs an explicit semantic contract.
 
-## 6. Expected Payroll Semantics
+## 6. Query Latest Explicit Relationships
+
+Use `relationships/latest` when the client needs deterministic relationship lookup instead of
+free-text inference.
+
+```bash
+curl -sS \
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/relationships/latest?sourceNodeKey=human-resources.employee.field.costCenterId&targetNodeKey=finance.cost-center&edgeType=references&limit=10" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "X-Env: $ENVIRONMENT"
+```
+
+Supported filters:
+
+- `serviceKey`: optional. When omitted, the query federates across the latest release of each
+  service in the requested tenant and environment.
+- `sourceNodeKey`: optional exact canonical source node key.
+- `targetNodeKey`: optional exact canonical target node key.
+- `edgeType`: optional exact edge type such as `references`, `same_as`, `governed_by` or
+  `materializes`.
+- `q`: optional full-text search over edge materialization.
+- `limit`: optional result limit, clamped by the service.
+
+This endpoint only returns explicit `edge` items. It does not infer relationships from similar
+names, labels or aliases.
+
+## 7. Expected Payroll Semantics
 
 For `human-resources.folhas-pagamento`, the catalog should include:
 
@@ -167,7 +195,7 @@ For `human-resources.folhas-pagamento`, the catalog should include:
 - `workflow_action`, `ui_surface` and `dto_field` bindings;
 - `annotation` and `dto_schema` evidence.
 
-## 7. Expected Procurement Semantics
+## 8. Expected Procurement Semantics
 
 For procurement option sources, the catalog should include `policy_hint` nodes.
 
@@ -182,7 +210,7 @@ Supplier example:
 These are not executable rules yet. They are semantic policy hints that make the business meaning
 queryable and explainable.
 
-## 8. How An LLM Should Use This
+## 9. How An LLM Should Use This
 
 The LLM should first query the catalog instead of reading source code.
 
@@ -221,7 +249,20 @@ GET /api/praxis/config/domain-catalog/context?serviceKey=<service>&type=node&nod
 The LLM should use returned field nodes, inspect `payload.metadata.fieldName`, and then propose a
 governed patch or annotation in a future authoring flow.
 
-## 9. Current MVP Limits
+For a cross-service relationship request:
+
+> Este campo de centro de custo referencia qual conceito financeiro?
+
+Runtime retrieval should call:
+
+```text
+GET /api/praxis/config/domain-catalog/relationships/latest?sourceNodeKey=<field-node-key>&edgeType=references
+```
+
+The LLM should only cite returned relationship edges and their evidence. It should not invent
+cross-service links from naming similarity.
+
+## 10. Current MVP Limits
 
 The MVP currently supports:
 
@@ -232,23 +273,25 @@ The MVP currently supports:
 - latest-release search for a specific service or, when `serviceKey` is
   omitted, federated search across the latest release of each service in the
   requested tenant/environment;
+- explicit latest relationship lookup across one service or across the latest
+  release of each service in the requested tenant/environment;
 - optional RAG publication when `VectorStore` is available.
 
 The MVP does not yet support:
 
-- cross-service relationship inference beyond latest-release federation;
+- cross-service relationship inference beyond explicit edges and latest-release federation;
 - LLM patch proposals;
 - rule execution;
 - OPA/DMN integration;
 - governance authoring UI;
 - automatic LGPD/GDPR classification.
 
-## 10. Next Evolution
+## 11. Next Evolution
 
 Recommended next steps:
 
 1. Add governance annotations for privacy and AI usage.
-2. Add cross-service domain resolution.
+2. Add indexed cross-service domain resolution for high-volume relationship queries.
 3. Add governed authoring operations for aliases and descriptions.
 4. Add domain context injection into the AI orchestrator prompt.
 5. Add field-level LGPD/GDPR classification proposals.

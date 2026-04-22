@@ -206,6 +206,38 @@ public class DomainCatalogIngestionService {
                 items);
     }
 
+    @Transactional(readOnly = true)
+    public List<DomainCatalogItemResponse> relationshipsLatest(
+            String serviceKey,
+            String tenantId,
+            String environment,
+            String sourceNodeKey,
+            String targetNodeKey,
+            String edgeType,
+            String query,
+            int limit) {
+        int resolvedLimit = Math.min(Math.max(limit, 1), 200);
+        List<DomainCatalogItemResponse> responses = new ArrayList<>();
+        for (DomainCatalogRelease release : latestReleasesForScope(serviceKey, tenantId, environment)) {
+            int remaining = resolvedLimit - responses.size();
+            if (remaining <= 0) {
+                break;
+            }
+            List<DomainCatalogItemResponse> releaseEdges = search(
+                    release.getReleaseKey(),
+                    "edge",
+                    null,
+                    null,
+                    query,
+                    200);
+            releaseEdges.stream()
+                    .filter(edge -> matchesEdge(edge, sourceNodeKey, targetNodeKey, edgeType))
+                    .limit(remaining)
+                    .forEach(responses::add);
+        }
+        return responses;
+    }
+
     private List<String> retrievalGuidance(boolean federated) {
         List<String> guidance = new ArrayList<>();
         guidance.add("Use this context as the semantic vocabulary for the requested business scope.");
@@ -335,6 +367,13 @@ public class DomainCatalogIngestionService {
                 .orElseThrow(() -> new IllegalArgumentException("No domain catalog release found for the requested scope"));
     }
 
+    private List<DomainCatalogRelease> latestReleasesForScope(String serviceKey, String tenantId, String environment) {
+        if (StringUtils.hasText(normalize(serviceKey))) {
+            return List.of(latestRelease(serviceKey, tenantId, environment));
+        }
+        return latestReleasesByService(tenantId, environment);
+    }
+
     private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment) {
         List<DomainCatalogRelease> releases = releaseRepository.findLatest(
                 null,
@@ -351,6 +390,21 @@ public class DomainCatalogIngestionService {
             throw new IllegalArgumentException("No domain catalog release found for the requested scope");
         }
         return List.copyOf(latestByService.values());
+    }
+
+    private boolean matchesEdge(
+            DomainCatalogItemResponse edge,
+            String sourceNodeKey,
+            String targetNodeKey,
+            String edgeType) {
+        return matchesText(text(edge.payload(), "sourceNodeKey"), sourceNodeKey)
+                && matchesText(text(edge.payload(), "targetNodeKey"), targetNodeKey)
+                && matchesText(edge.edgeType(), edgeType);
+    }
+
+    private boolean matchesText(String actual, String expected) {
+        String normalizedExpected = normalize(expected);
+        return !StringUtils.hasText(normalizedExpected) || normalizedExpected.equals(normalize(actual));
     }
 
     private String searchableText(String itemType, JsonNode node) {

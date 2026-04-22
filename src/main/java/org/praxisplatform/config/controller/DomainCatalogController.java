@@ -93,6 +93,27 @@ public class DomainCatalogController {
                 limit));
     }
 
+    @GetMapping("/relationships/latest")
+    public ResponseEntity<List<DomainCatalogItemResponse>> latestRelationships(
+            @RequestParam(required = false) String serviceKey,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            @RequestParam(required = false) String sourceNodeKey,
+            @RequestParam(required = false) String targetNodeKey,
+            @RequestParam(required = false) String edgeType,
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "50") int limit) {
+        return ResponseEntity.ok(domainCatalogIngestionService.relationshipsLatest(
+                serviceKey,
+                tenantId,
+                environment,
+                sourceNodeKey,
+                targetNodeKey,
+                edgeType,
+                q,
+                limit));
+    }
+
     @GetMapping("/releases")
     public ResponseEntity<List<DomainCatalogReleaseResponse>> releases(
             @RequestParam(required = false) String serviceKey,
