@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -185,7 +186,7 @@ public class DomainCatalogIngestionService {
                     normalize(contextKey),
                     normalize(nodeType),
                     retrievalGuidance(true),
-                    items);
+                    governedContextItems(items));
         }
         DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment);
         List<DomainCatalogItemResponse> items = search(
@@ -203,7 +204,7 @@ public class DomainCatalogIngestionService {
                 normalize(contextKey),
                 normalize(nodeType),
                 retrievalGuidance(false),
-                items);
+                governedContextItems(items));
     }
 
     @Transactional(readOnly = true)
@@ -290,10 +291,14 @@ public class DomainCatalogIngestionService {
         List<Document> documents = new ArrayList<>();
         int index = 0;
         for (DomainCatalogItem item : items) {
+            if (deniesAiVisibility(read(item.getPayload()))) {
+                continue;
+            }
             String content = item.getSearchableText();
             if (!StringUtils.hasText(content)) {
                 continue;
             }
+            content = ragContent(item, content);
             String contentHash = RagDocumentIdentity.sha256(item.getItemType() + "|" + item.getItemKey() + "|" + item.getPayload());
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.DOMAIN_CATALOG);
@@ -324,6 +329,95 @@ public class DomainCatalogIngestionService {
             return;
         }
         ragVectorStoreService.upsertDocuments(documents);
+    }
+
+    private List<DomainCatalogItemResponse> governedContextItems(List<DomainCatalogItemResponse> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        return items.stream()
+                .filter(item -> !deniesAiVisibility(item.payload()))
+                .map(this::governedContextItem)
+                .toList();
+    }
+
+    private DomainCatalogItemResponse governedContextItem(DomainCatalogItemResponse item) {
+        String visibility = aiVisibility(item.payload());
+        if (!"mask".equals(visibility) && !"summarize_only".equals(visibility)) {
+            return item;
+        }
+        return new DomainCatalogItemResponse(
+                item.id(),
+                item.releaseKey(),
+                item.itemType(),
+                item.itemKey(),
+                item.contextKey(),
+                item.nodeType(),
+                item.bindingType(),
+                item.edgeType(),
+                sanitizedAiPayload(item.payload(), visibility)
+        );
+    }
+
+    private JsonNode sanitizedAiPayload(JsonNode payload, String visibility) {
+        ObjectNode sanitized = objectMapper.createObjectNode();
+        copyText(payload, sanitized, "governanceKey");
+        copyText(payload, sanitized, "nodeKey");
+        copyText(payload, sanitized, "annotationType");
+        copyText(payload, sanitized, "classification");
+        copyText(payload, sanitized, "dataCategory");
+        if (payload != null && payload.path("complianceTags").isArray()) {
+            sanitized.set("complianceTags", payload.path("complianceTags"));
+        }
+        if (payload != null && payload.path("aiUsage").isObject()) {
+            sanitized.set("aiUsage", payload.path("aiUsage"));
+        }
+        sanitized.put("contextVisibility", visibility);
+        sanitized.put("payloadMode", "governed-summary");
+        return sanitized;
+    }
+
+    private String ragContent(DomainCatalogItem item, String fallbackContent) {
+        JsonNode payload = read(item.getPayload());
+        String visibility = aiVisibility(payload);
+        if (!"mask".equals(visibility) && !"summarize_only".equals(visibility)) {
+            return fallbackContent;
+        }
+        StringJoiner joiner = new StringJoiner(" | ");
+        add(joiner, item.getItemType());
+        add(joiner, item.getItemKey());
+        add(joiner, text(payload, "nodeKey"));
+        add(joiner, text(payload, "annotationType"));
+        add(joiner, text(payload, "classification"));
+        add(joiner, text(payload, "dataCategory"));
+        JsonNode complianceTags = payload.path("complianceTags");
+        if (complianceTags.isArray()) {
+            add(joiner, complianceTags.toString());
+        }
+        JsonNode aiUsage = payload.path("aiUsage");
+        if (aiUsage.isObject()) {
+            add(joiner, aiUsage.toString());
+        }
+        return joiner.toString();
+    }
+
+    private boolean deniesAiVisibility(JsonNode payload) {
+        return "deny".equals(aiVisibility(payload));
+    }
+
+    private String aiVisibility(JsonNode payload) {
+        if (payload == null) {
+            return null;
+        }
+        String visibility = text(payload.path("aiUsage"), "visibility");
+        return visibility == null ? null : visibility.toLowerCase();
+    }
+
+    private void copyText(JsonNode source, ObjectNode target, String field) {
+        String value = text(source, field);
+        if (StringUtils.hasText(value)) {
+            target.put(field, value);
+        }
     }
 
     private DomainCatalogItemResponse toResponse(DomainCatalogItem item) {

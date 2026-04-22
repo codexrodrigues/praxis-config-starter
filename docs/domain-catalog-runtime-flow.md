@@ -156,6 +156,16 @@ The response includes:
 Use `items/latest` when the client only needs raw items. Use `context` when the client is an LLM
 or an orchestration service that needs an explicit semantic contract.
 
+`context` applies direct `aiUsage.visibility` constraints before returning items to LLM/runtime
+consumers:
+
+- `deny`: the item is excluded from the context pack;
+- `mask` and `summarize_only`: the item payload is reduced to governed summary fields such as
+  `nodeKey`, `annotationType`, `classification`, `dataCategory`, `complianceTags` and `aiUsage`.
+
+The raw `/items` endpoints remain deterministic persistence reads and may return the original
+payload for authorized system clients.
+
 ## 6. Query Latest Explicit Relationships
 
 Use `relationships/latest` when the client needs deterministic relationship lookup instead of
@@ -275,6 +285,10 @@ The MVP currently supports:
   requested tenant/environment;
 - explicit latest relationship lookup across one service or across the latest
   release of each service in the requested tenant/environment;
+- direct AI visibility enforcement in LLM context packs for `deny`, `mask` and
+  `summarize_only`;
+- RAG publication skips `deny` items and indexes `mask`/`summarize_only` items
+  only as governed summaries;
 - optional RAG publication when `VectorStore` is available.
 
 The MVP does not yet support:
