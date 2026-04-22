@@ -61,6 +61,48 @@ This run verifies the authoring/SSE/page-builder integration path after the
 `0.1.0-rc.2` release line and records the operational baseline for subsequent
 manifest/backend authoring work.
 
+## Post-Merge Local Authoring Gate
+
+After merging the generated AI contract synchronization into
+`praxis-ui-angular/main` and the matching generator fix into
+`praxis-config-starter/main`, the same integration path was validated locally
+without waiting for a new Maven Central publication.
+
+| Project | Branch | Commit |
+| --- | --- | --- |
+| `praxis-config-starter` | `main` | `1d64099b45bf13a38449676f1b1aa7408ea2ae24` |
+| `praxis-ui-angular` | `main` | `4cc6c4b379e408ea30c03eda71deaa6d5fe34943` |
+| `praxis-api-quickstart` | `main` | `8be53c04e2b6bf407c1de66f4349d4c874291c4a` |
+
+Validation commands:
+
+```powershell
+mvn -B -DskipTests install
+mvn -B -DskipTests "-Dpraxis.config.version=0.1.0-rc.1" package
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -JavaHome "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21" -QuickstartRoot "D:\Developer\praxis-plataform\praxis-api-quickstart" -EnvFile "D:\Developer\praxis-plataform\praxis-config-starter\.env.openai.local.ps1" -StreamProcessingTimeoutSeconds 180
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -JavaHome "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21" -QuickstartRoot "D:\Developer\praxis-plataform\praxis-api-quickstart" -UiRoot "D:\Developer\praxis-plataform\praxis-ui-angular" -EnvFile "D:\Developer\praxis-plataform\praxis-config-starter\.env.openai.local.ps1" -StreamProcessingTimeoutSeconds 180 -Retries 0
+```
+
+Confirmed results:
+
+- local install of `praxis-config-starter:0.1.0-rc.1` passed;
+- `praxis-api-quickstart` packaged against the local starter override passed;
+- quickstart authoring HTTP/SSE smoke returned `planValid`,
+  `compileValid`, `previewValid`, `applyPersisted`, `applyCleanupDeleted`,
+  `streamTerminalSeen` and `streamReplayChecked` as `true`;
+- page-builder agentic full E2E passed cleanly with `-Retries 0`
+  (`3 passed`);
+- backend and Angular dev server ports were released after the scripts
+  completed.
+
+One earlier full E2E run passed on retry after a provider-dependent
+clarification turn. The clean `-Retries 0` rerun is the accepted local gate
+evidence for this baseline.
+
+The remote workflow was not dispatched from the local workstation because no
+`GH_TOKEN`, `GITHUB_TOKEN` or `GITHUB_PAT` was available to
+`Invoke-GitHubAgenticAuthoringSmokeWorkflow.ps1`.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
