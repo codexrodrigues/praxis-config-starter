@@ -19,4 +19,9 @@ public interface DomainKnowledgeBindingRepository extends JpaRepository<DomainKn
             String environment,
             String bindingType,
             String bindingKey);
+
+    List<DomainKnowledgeBinding> findByTenantIdAndEnvironmentAndBindingKeyIn(
+            String tenantId,
+            String environment,
+            List<String> bindingKeys);
 }

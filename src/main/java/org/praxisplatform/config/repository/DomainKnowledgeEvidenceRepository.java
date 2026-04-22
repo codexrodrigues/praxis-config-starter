@@ -17,4 +17,9 @@ public interface DomainKnowledgeEvidenceRepository extends JpaRepository<DomainK
             String tenantId,
             String environment,
             String evidenceKey);
+
+    List<DomainKnowledgeEvidence> findByTenantIdAndEnvironmentAndEvidenceKeyIn(
+            String tenantId,
+            String environment,
+            List<String> evidenceKeys);
 }

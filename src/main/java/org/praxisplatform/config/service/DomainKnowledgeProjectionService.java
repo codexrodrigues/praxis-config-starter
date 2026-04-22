@@ -96,7 +96,12 @@ public class DomainKnowledgeProjectionService {
             concept.setComplianceTags(arrayJson(payload.path("complianceTags")));
             concept.setSourceRelease(release);
             concept.setPayload(item.getPayload());
-            conceptsByKey.put(conceptKey, conceptRepository.save(concept));
+            conceptsByKey.put(conceptKey, concept);
+        }
+        if (!conceptsByKey.isEmpty()) {
+            for (DomainKnowledgeConcept concept : conceptRepository.saveAll(new ArrayList<>(conceptsByKey.values()))) {
+                conceptsByKey.put(concept.getConceptKey(), concept);
+            }
         }
         return conceptsByKey;
     }
@@ -106,6 +111,7 @@ public class DomainKnowledgeProjectionService {
             List<DomainCatalogItem> items,
             Map<String, DomainKnowledgeConcept> conceptsByKey) {
         Map<String, DomainKnowledgeAlias> aliasesByConceptAndValue = existingAliasesByConceptAndValue(conceptsByKey);
+        Map<String, DomainKnowledgeAlias> projectedAliasesByKey = new LinkedHashMap<>();
         for (DomainCatalogItem item : items) {
             if (!"alias".equals(item.getItemType())) {
                 continue;
@@ -117,8 +123,9 @@ public class DomainKnowledgeProjectionService {
                 continue;
             }
             String normalizedAlias = normalizedAlias(alias);
+            String lookupKey = aliasLookupKey(concept.getId(), normalizedAlias);
             DomainKnowledgeAlias projected = aliasesByConceptAndValue
-                    .getOrDefault(aliasLookupKey(concept.getId(), normalizedAlias), new DomainKnowledgeAlias());
+                    .getOrDefault(lookupKey, new DomainKnowledgeAlias());
             projected.setTenantId(release.getTenantId());
             projected.setEnvironment(release.getEnvironment());
             projected.setConcept(concept);
@@ -128,8 +135,11 @@ public class DomainKnowledgeProjectionService {
             projected.setAliasType(aliasType(payload));
             projected.setSource("generated");
             projected.setWeight(confidence(payload, 1.0));
-            DomainKnowledgeAlias saved = aliasRepository.save(projected);
-            aliasesByConceptAndValue.put(aliasLookupKey(concept.getId(), normalizedAlias), saved);
+            aliasesByConceptAndValue.put(lookupKey, projected);
+            projectedAliasesByKey.put(lookupKey, projected);
+        }
+        if (!projectedAliasesByKey.isEmpty()) {
+            aliasRepository.saveAll(new ArrayList<>(projectedAliasesByKey.values()));
         }
     }
 
@@ -137,6 +147,8 @@ public class DomainKnowledgeProjectionService {
             DomainCatalogRelease release,
             List<DomainCatalogItem> items,
             Map<String, DomainKnowledgeConcept> conceptsByKey) {
+        Map<String, DomainKnowledgeBinding> bindingsByTypeAndKey = existingBindingsByTypeAndKey(release, items);
+        Map<String, DomainKnowledgeBinding> projectedBindingsByKey = new LinkedHashMap<>();
         for (DomainCatalogItem item : items) {
             if (!"binding".equals(item.getItemType())) {
                 continue;
@@ -148,15 +160,9 @@ public class DomainKnowledgeProjectionService {
             if (concept == null || !StringUtils.hasText(bindingType) || !StringUtils.hasText(bindingKey)) {
                 continue;
             }
-            DomainKnowledgeBinding binding = bindingRepository
-                    .findByTenantIdAndEnvironmentAndBindingTypeAndBindingKey(
-                            release.getTenantId(),
-                            release.getEnvironment(),
-                            bindingType,
-                            bindingKey)
-                    .stream()
-                    .findFirst()
-                    .orElseGet(DomainKnowledgeBinding::new);
+            String lookupKey = bindingLookupKey(bindingType, bindingKey);
+            DomainKnowledgeBinding binding = bindingsByTypeAndKey
+                    .getOrDefault(lookupKey, new DomainKnowledgeBinding());
             binding.setTenantId(release.getTenantId());
             binding.setEnvironment(release.getEnvironment());
             binding.setConcept(concept);
@@ -169,7 +175,11 @@ public class DomainKnowledgeProjectionService {
             binding.setSourceRelease(release);
             binding.setConfidence(confidence(payload, null));
             binding.setPayload(item.getPayload());
-            bindingRepository.save(binding);
+            bindingsByTypeAndKey.put(lookupKey, binding);
+            projectedBindingsByKey.put(lookupKey, binding);
+        }
+        if (!projectedBindingsByKey.isEmpty()) {
+            bindingRepository.saveAll(new ArrayList<>(projectedBindingsByKey.values()));
         }
     }
 
@@ -179,6 +189,7 @@ public class DomainKnowledgeProjectionService {
             Map<String, DomainKnowledgeConcept> conceptsByKey) {
         Map<String, DomainKnowledgeRelationship> relationshipsBySourceTargetAndType =
                 existingRelationshipsBySourceTargetAndType(release, conceptsByKey);
+        Map<String, DomainKnowledgeRelationship> projectedRelationshipsByKey = new LinkedHashMap<>();
         for (DomainCatalogItem item : items) {
             if (!"edge".equals(item.getItemType())) {
                 continue;
@@ -204,8 +215,11 @@ public class DomainKnowledgeProjectionService {
             relationship.setContractKey(firstText(text(payload, "contractKey"), item.getItemKey()));
             relationship.setConfidence(confidence(payload, null));
             relationship.setPayload(item.getPayload());
-            DomainKnowledgeRelationship saved = relationshipRepository.save(relationship);
-            relationshipsBySourceTargetAndType.put(lookupKey, saved);
+            relationshipsBySourceTargetAndType.put(lookupKey, relationship);
+            projectedRelationshipsByKey.put(lookupKey, relationship);
+        }
+        if (!projectedRelationshipsByKey.isEmpty()) {
+            relationshipRepository.saveAll(new ArrayList<>(projectedRelationshipsByKey.values()));
         }
     }
 
@@ -256,6 +270,38 @@ public class DomainKnowledgeProjectionService {
         return relationshipsBySourceTargetAndType;
     }
 
+    private Map<String, DomainKnowledgeBinding> existingBindingsByTypeAndKey(
+            DomainCatalogRelease release,
+            List<DomainCatalogItem> items) {
+        List<String> bindingKeys = new ArrayList<>();
+        for (DomainCatalogItem item : items) {
+            if (!"binding".equals(item.getItemType())) {
+                continue;
+            }
+            JsonNode payload = read(item.getPayload());
+            String bindingKey = firstText(item.getItemKey(), text(payload, "bindingKey"));
+            if (StringUtils.hasText(bindingKey)) {
+                bindingKeys.add(bindingKey);
+            }
+        }
+        Map<String, DomainKnowledgeBinding> bindingsByTypeAndKey = new LinkedHashMap<>();
+        if (bindingKeys.isEmpty()) {
+            return bindingsByTypeAndKey;
+        }
+        for (DomainKnowledgeBinding binding : bindingRepository.findByTenantIdAndEnvironmentAndBindingKeyIn(
+                release.getTenantId(),
+                release.getEnvironment(),
+                bindingKeys)) {
+            if (!StringUtils.hasText(binding.getBindingType()) || !StringUtils.hasText(binding.getBindingKey())) {
+                continue;
+            }
+            bindingsByTypeAndKey.putIfAbsent(
+                    bindingLookupKey(binding.getBindingType(), binding.getBindingKey()),
+                    binding);
+        }
+        return bindingsByTypeAndKey;
+    }
+
     private List<UUID> conceptIds(Map<String, DomainKnowledgeConcept> conceptsByKey) {
         List<UUID> conceptIds = new ArrayList<>();
         for (DomainKnowledgeConcept concept : conceptsByKey.values()) {
@@ -274,11 +320,17 @@ public class DomainKnowledgeProjectionService {
         return sourceConceptId + "::" + targetConceptId + "::" + relationshipType;
     }
 
+    private String bindingLookupKey(String bindingType, String bindingKey) {
+        return bindingType + "::" + bindingKey;
+    }
+
     private void projectEvidence(
             DomainCatalogRelease release,
             List<DomainCatalogItem> items,
             Map<String, DomainKnowledgeConcept> conceptsByKey) {
         Map<String, DomainKnowledgeConcept> conceptsByEvidenceKey = conceptsByEvidenceKey(items, conceptsByKey);
+        Map<String, DomainKnowledgeEvidence> evidenceByKey = existingEvidenceByKey(release, items);
+        Map<String, DomainKnowledgeEvidence> projectedEvidenceByKey = new LinkedHashMap<>();
         for (DomainCatalogItem item : items) {
             if (!"node".equals(item.getItemType()) && !"evidence".equals(item.getItemType())) {
                 continue;
@@ -293,14 +345,8 @@ public class DomainKnowledgeProjectionService {
             String evidenceKey = "node".equals(item.getItemType())
                     ? "catalog-release:" + release.getReleaseKey() + ":" + item.getItemKey()
                     : firstText(item.getItemKey(), text(payload, "evidenceKey"));
-            DomainKnowledgeEvidence evidence = evidenceRepository
-                    .findByTenantIdAndEnvironmentAndEvidenceKey(
-                            release.getTenantId(),
-                            release.getEnvironment(),
-                            evidenceKey)
-                    .stream()
-                    .findFirst()
-                    .orElseGet(DomainKnowledgeEvidence::new);
+            DomainKnowledgeEvidence evidence = evidenceByKey
+                    .getOrDefault(evidenceKey, new DomainKnowledgeEvidence());
             evidence.setTenantId(release.getTenantId());
             evidence.setEnvironment(release.getEnvironment());
             evidence.setEvidenceKey(evidenceKey);
@@ -311,8 +357,43 @@ public class DomainKnowledgeProjectionService {
             evidence.setSourcePointer(sourcePointer(item));
             evidence.setConfidence(confidence(payload, 1.0));
             evidence.setPayload(item.getPayload());
-            evidenceRepository.save(evidence);
+            evidenceByKey.put(evidenceKey, evidence);
+            projectedEvidenceByKey.put(evidenceKey, evidence);
         }
+        if (!projectedEvidenceByKey.isEmpty()) {
+            evidenceRepository.saveAll(new ArrayList<>(projectedEvidenceByKey.values()));
+        }
+    }
+
+    private Map<String, DomainKnowledgeEvidence> existingEvidenceByKey(
+            DomainCatalogRelease release,
+            List<DomainCatalogItem> items) {
+        List<String> evidenceKeys = new ArrayList<>();
+        for (DomainCatalogItem item : items) {
+            if (!"node".equals(item.getItemType()) && !"evidence".equals(item.getItemType())) {
+                continue;
+            }
+            JsonNode payload = read(item.getPayload());
+            String evidenceKey = "node".equals(item.getItemType())
+                    ? "catalog-release:" + release.getReleaseKey() + ":" + item.getItemKey()
+                    : firstText(item.getItemKey(), text(payload, "evidenceKey"));
+            if (StringUtils.hasText(evidenceKey)) {
+                evidenceKeys.add(evidenceKey);
+            }
+        }
+        Map<String, DomainKnowledgeEvidence> evidenceByKey = new LinkedHashMap<>();
+        if (evidenceKeys.isEmpty()) {
+            return evidenceByKey;
+        }
+        for (DomainKnowledgeEvidence evidence : evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyIn(
+                release.getTenantId(),
+                release.getEnvironment(),
+                evidenceKeys)) {
+            if (StringUtils.hasText(evidence.getEvidenceKey())) {
+                evidenceByKey.putIfAbsent(evidence.getEvidenceKey(), evidence);
+            }
+        }
+        return evidenceByKey;
     }
 
     private Map<String, DomainKnowledgeConcept> conceptsByEvidenceKey(

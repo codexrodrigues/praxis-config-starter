@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Tag;
@@ -155,24 +156,29 @@ class DomainKnowledgeProjectionServiceTest {
 
         when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(any(), any(), any()))
                 .thenReturn(Optional.empty());
-        when(conceptRepository.save(any(DomainKnowledgeConcept.class))).thenAnswer(invocation -> {
-            DomainKnowledgeConcept concept = invocation.getArgument(0);
-            concept.onInsert();
-            return concept;
+        when(conceptRepository.saveAll(any())).thenAnswer(invocation -> {
+            List<DomainKnowledgeConcept> concepts = toList(invocation.getArgument(0));
+            concepts.forEach(DomainKnowledgeConcept::onInsert);
+            return concepts;
         });
+        when(aliasRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(aliasRepository.findByConcept_IdIn(any())).thenReturn(List.of());
-        when(bindingRepository.findByTenantIdAndEnvironmentAndBindingTypeAndBindingKey(any(), any(), any(), any()))
+        when(bindingRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(bindingRepository.findByTenantIdAndEnvironmentAndBindingKeyIn(any(), any(), any()))
                 .thenReturn(List.of());
+        when(relationshipRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(relationshipRepository.findByTenantIdAndEnvironmentAndSourceConcept_IdIn(any(), any(), any()))
                 .thenReturn(List.of());
-        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(any(), any(), any()))
+        when(evidenceRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyIn(any(), any(), any()))
                 .thenReturn(List.of());
 
         service.project(release, items);
 
-        ArgumentCaptor<DomainKnowledgeConcept> conceptCaptor = ArgumentCaptor.forClass(DomainKnowledgeConcept.class);
-        verify(conceptRepository, org.mockito.Mockito.times(3)).save(conceptCaptor.capture());
-        assertThat(conceptCaptor.getAllValues())
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeConcept>> conceptCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(conceptRepository).saveAll(conceptCaptor.capture());
+        assertThat(toList(conceptCaptor.getValue()))
                 .filteredOn(concept -> "human-resources.folhas-pagamento.field.valor-liquido"
                         .equals(concept.getConceptKey()))
                 .singleElement()
@@ -184,16 +190,21 @@ class DomainKnowledgeProjectionServiceTest {
                     assertThat(concept.getComplianceTags()).isEqualTo("[\"LGPD\"]");
                 });
 
-        ArgumentCaptor<DomainKnowledgeBinding> bindingCaptor = ArgumentCaptor.forClass(DomainKnowledgeBinding.class);
-        verify(bindingRepository, org.mockito.Mockito.times(2)).save(bindingCaptor.capture());
-        assertThat(bindingCaptor.getAllValues())
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeBinding>> bindingCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(bindingRepository).findByTenantIdAndEnvironmentAndBindingKeyIn(any(), any(), any());
+        verify(bindingRepository, never())
+                .findByTenantIdAndEnvironmentAndBindingTypeAndBindingKey(any(), any(), any(), any());
+        verify(bindingRepository).saveAll(bindingCaptor.capture());
+        List<DomainKnowledgeBinding> savedBindings = toList(bindingCaptor.getValue());
+        assertThat(savedBindings)
                 .filteredOn(binding -> "dto_field".equals(binding.getBindingType()))
                 .singleElement()
                 .satisfies(binding -> {
                     assertThat(binding.getSchemaPointer()).isEqualTo("WorkflowResponse#/valorLiquido");
                     assertThat(binding.getConfidence()).isEqualTo(0.91);
                 });
-        assertThat(bindingCaptor.getAllValues())
+        assertThat(savedBindings)
                 .filteredOn(binding -> "ui_surface".equals(binding.getBindingType()))
                 .singleElement()
                 .satisfies(binding -> {
@@ -201,38 +212,46 @@ class DomainKnowledgeProjectionServiceTest {
                     assertThat(binding.getApiMethod()).isEqualTo("POST");
                 });
 
-        ArgumentCaptor<DomainKnowledgeAlias> aliasCaptor = ArgumentCaptor.forClass(DomainKnowledgeAlias.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeAlias>> aliasCaptor = ArgumentCaptor.forClass(Iterable.class);
         verify(aliasRepository).findByConcept_IdIn(any());
         verify(aliasRepository, never()).findByConcept_Id(any());
-        verify(aliasRepository).save(aliasCaptor.capture());
-        assertThat(aliasCaptor.getValue())
+        verify(aliasRepository).saveAll(aliasCaptor.capture());
+        assertThat(toList(aliasCaptor.getValue()))
+                .singleElement()
                 .satisfies(alias -> {
                     assertThat(alias.getAliasType()).isEqualTo("technical_name");
                     assertThat(alias.getNormalizedAlias()).isEqualTo("valor liquido");
                     assertThat(alias.getWeight()).isEqualTo(0.85);
                 });
 
-        ArgumentCaptor<DomainKnowledgeRelationship> relationshipCaptor =
-                ArgumentCaptor.forClass(DomainKnowledgeRelationship.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeRelationship>> relationshipCaptor =
+                ArgumentCaptor.forClass(Iterable.class);
         verify(relationshipRepository).findByTenantIdAndEnvironmentAndSourceConcept_IdIn(any(), any(), any());
         verify(relationshipRepository, never()).findByTenantIdAndEnvironmentAndSourceConcept_Id(any(), any(), any());
-        verify(relationshipRepository, org.mockito.Mockito.times(2)).save(relationshipCaptor.capture());
-        assertThat(relationshipCaptor.getAllValues())
+        verify(relationshipRepository).saveAll(relationshipCaptor.capture());
+        List<DomainKnowledgeRelationship> savedRelationships = toList(relationshipCaptor.getValue());
+        assertThat(savedRelationships)
                 .extracting(DomainKnowledgeRelationship::getRelationshipType)
                 .containsExactly("has_field", "has_surface");
-        assertThat(relationshipCaptor.getAllValues())
+        assertThat(savedRelationships)
                 .allSatisfy(relationship -> assertThat(relationship.getCrossContext()).isFalse());
 
-        ArgumentCaptor<DomainKnowledgeEvidence> evidenceCaptor = ArgumentCaptor.forClass(DomainKnowledgeEvidence.class);
-        verify(evidenceRepository, org.mockito.Mockito.times(5)).save(evidenceCaptor.capture());
-        assertThat(evidenceCaptor.getAllValues())
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeEvidence>> evidenceCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(evidenceRepository).findByTenantIdAndEnvironmentAndEvidenceKeyIn(any(), any(), any());
+        verify(evidenceRepository, never()).findByTenantIdAndEnvironmentAndEvidenceKey(any(), any(), any());
+        verify(evidenceRepository).saveAll(evidenceCaptor.capture());
+        List<DomainKnowledgeEvidence> savedEvidence = toList(evidenceCaptor.getValue());
+        assertThat(savedEvidence)
                 .extracting(DomainKnowledgeEvidence::getEvidenceType)
                 .contains("catalog_release", "json_schema");
-        assertThat(evidenceCaptor.getAllValues())
+        assertThat(savedEvidence)
                 .filteredOn(evidence -> "evidence:valor-liquido:workflow-response".equals(evidence.getEvidenceKey()))
                 .singleElement()
                 .satisfies(evidence -> assertThat(evidence.getSubjectId()).isNotNull());
-        assertThat(evidenceCaptor.getAllValues())
+        assertThat(savedEvidence)
                 .filteredOn(evidence -> "evidence:surface:create".equals(evidence.getEvidenceKey()))
                 .singleElement()
                 .satisfies(evidence -> assertThat(evidence.getSubjectId()).isNotNull());
@@ -257,5 +276,11 @@ class DomainKnowledgeProjectionServiceTest {
                 .edgeType(edgeType)
                 .payload(payload)
                 .build();
+    }
+
+    private static <T> List<T> toList(Iterable<T> values) {
+        List<T> result = new ArrayList<>();
+        values.forEach(result::add);
+        return result;
     }
 }
