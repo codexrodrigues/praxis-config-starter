@@ -158,6 +158,41 @@ Confirmed steps:
 This is the accepted remote end-to-end evidence for the current authoring stack
 after the `0.1.0-rc.5` release line.
 
+## Governed Domain Catalog v0.2 Local Integration Gate
+
+After the governed semantic layer follow-up, the metadata and config starters
+were installed locally and the operational quickstart was packaged against those
+local artifacts without waiting for a Maven Central publication.
+
+| Project | Branch | Commit |
+| --- | --- | --- |
+| `praxis-metadata-starter` | `main` | `91822ac5` |
+| `praxis-config-starter` | `main` | `424855b` |
+| `praxis-api-quickstart` | `main` | local package with starter overrides |
+
+Validation commands:
+
+```powershell
+mvn -B -DskipTests install
+mvn -B -DskipTests "-Dpraxis.core.version=8.0.0-rc.7" "-Dpraxis.config.version=0.1.0-rc.5" package
+java -jar target\praxis-api-quickstart-2.0.0-rc.9.jar
+```
+
+Confirmed HTTP smoke results on `http://localhost:8088`:
+
+- `/actuator/health` returned `UP`;
+- `/schemas/domain?resourceKey=human-resources.folhas-pagamento` returned
+  `praxis.domain-catalog/v0.2`;
+- the returned catalog included `45` aliases, `1` context and `24` nodes;
+- `POST /api/praxis/config/domain-catalog/ingest` accepted the v0.2 catalog
+  and persisted `175` projected items;
+- `GET /api/praxis/config/domain-catalog/context` returned projected context
+  items for governance queries such as `folha`, `pagamento` and `salario`.
+
+This confirms the end-to-end local path for the governed domain catalog:
+metadata runtime emission, config runtime schema validation, persistence, and
+queryable projection.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
