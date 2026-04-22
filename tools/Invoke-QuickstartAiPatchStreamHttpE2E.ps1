@@ -8,7 +8,7 @@ param(
     [string] $Environment = "local",
     [string] $ComponentId = "praxis-table",
     [string] $ComponentType = "praxis-table",
-    [string] $UserPrompt = "Aplique um ajuste visual seguro na tabela atual.",
+    [string] $UserPrompt = "Defina appearance.density como compact. Use exatamente um destes valores permitidos: compact, comfortable ou spacious.",
     [string] $Model = "",
     [int] $StreamTimeoutSec = 45,
     [string] $ArtifactsDir = ""
