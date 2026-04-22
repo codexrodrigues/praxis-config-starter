@@ -1,0 +1,87 @@
+package org.praxisplatform.config.ai.authoring;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+@Tag("unit")
+class AgenticAuthoringDomainCatalogHintsTest {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void enrichDerivesCanonicalResourceKeyFromCollectionPath() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "POST",
+                "/schemas/human-resources/funcionarios",
+                "/api/human-resources/funcionarios",
+                "POST",
+                0.97,
+                "Employee form candidate",
+                java.util.List.of("metadata"));
+
+        AgenticAuthoringDomainCatalogHints.enrich(
+                contextHints,
+                candidate,
+                "form",
+                "Crie um formulario LGPD para funcionarios",
+                null);
+
+        assertThat(contextHints.path("domainCatalog").path("schemaVersion").asText())
+                .isEqualTo("praxis.ai.context-hints.domain-catalog/v0.1");
+        assertThat(contextHints.path("domainCatalog").path("serviceKey").asText())
+                .isEqualTo("praxis-service");
+        assertThat(contextHints.path("domainCatalog").path("contextKey").asText())
+                .isEqualTo("human-resources");
+        assertThat(contextHints.path("domainCatalog").path("resourceKey").asText())
+                .isEqualTo("human-resources.funcionarios");
+        assertThat(contextHints.path("domainCatalog").path("nodeType").asText())
+                .isEqualTo("field");
+        assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
+                .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("relationships").path("federated").asBoolean())
+                .isTrue();
+    }
+
+    @Test
+    void enrichDerivesCanonicalResourceKeyFromActionPath() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/operations/missoes/{id}/actions/start",
+                "POST",
+                "/schemas/operations/missoes/start",
+                "/api/operations/missoes/{id}/actions/start",
+                "POST",
+                0.91,
+                "Mission action candidate",
+                java.util.List.of("metadata"));
+
+        AgenticAuthoringDomainCatalogHints.enrich(
+                contextHints,
+                candidate,
+                "dashboard",
+                "Dashboard de status de missoes",
+                "mission-service");
+
+        assertThat(contextHints.path("domainCatalog").path("serviceKey").asText())
+                .isEqualTo("mission-service");
+        assertThat(contextHints.path("domainCatalog").path("contextKey").asText())
+                .isEqualTo("operations");
+        assertThat(contextHints.path("domainCatalog").path("resourceKey").asText())
+                .isEqualTo("operations.missoes");
+        assertThat(contextHints.path("domainCatalog").path("nodeType").isMissingNode())
+                .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("query").asText())
+                .contains("dashboard de status de missoes")
+                .contains("start");
+        assertThat(contextHints.path("domainCatalog").path("relationships").path("query").asText())
+                .isEqualTo(contextHints.path("domainCatalog").path("query").asText());
+        assertThat(contextHints.path("domainCatalog").path("relationships").path("limit").asInt())
+                .isEqualTo(8);
+    }
+}
