@@ -14,7 +14,7 @@ on:
       quickstart_ref:
         description: 'praxis-api-quickstart ref to test against.'
         required: false
-        default: 3cd1344fdbd772f54b4261a0527d361e3ef1df33
+        default: main
         type: string
       ui_ref:
         description: 'praxis-ui-angular ref to test against when the page-builder full E2E gate is enabled.'

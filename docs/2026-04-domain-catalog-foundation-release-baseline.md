@@ -118,8 +118,19 @@ mvn -B -DskipTests install
 mvn -B -DskipTests "-Dpraxis.config.version=0.1.0-rc.5" package
 ```
 
-Keep `praxis-api-quickstart` on `0.1.0-rc.2` until `0.1.0-rc.5` is published
-and verified through Maven Central or through the local starter override above.
+After `0.1.0-rc.5` was published and verified through Maven Central, the
+`praxis-api-quickstart` default dependency was advanced to
+`praxis-config-starter:0.1.0-rc.5` and validated without a local override.
+
+| Project | Branch | Commit | Evidence |
+| --- | --- | --- | --- |
+| `praxis-config-starter` | `v0.1.0-rc.5` | `6e0d932` | published to Maven Central |
+| `praxis-api-quickstart` | `main` | `619625e` | consumed `0.1.0-rc.5` without override and passed CI |
+
+Follow-up workflow maintenance also moved official GitHub Actions in
+`praxis-config-starter` and `praxis-api-quickstart` to their Node 24 runtime
+major versions (`actions/checkout@v5`, `actions/setup-java@v5`, and
+`actions/setup-node@v5` where applicable).
 
 ## Release Pipeline Adjustment
 
