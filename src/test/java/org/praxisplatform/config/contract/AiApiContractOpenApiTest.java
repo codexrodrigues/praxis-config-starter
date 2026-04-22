@@ -101,7 +101,12 @@ class AiApiContractOpenApiTest {
         assertThat(domainCatalogHintProperties).containsKeys(
                 "schemaVersion",
                 "serviceKey",
+                "resourceKey",
+                "releaseId",
+                "releaseKey",
                 "type",
+                "itemTypes",
+                "intent",
                 "query",
                 "contextKey",
                 "nodeType",
@@ -109,7 +114,9 @@ class AiApiContractOpenApiTest {
         assertThat((Map<String, Object>) domainCatalogHintProperties.get("schemaVersion"))
                 .containsEntry("default", "praxis.ai.context-hints.domain-catalog/v0.1");
         assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("type")).get("enum"))
-                .containsExactly("context", "node", "edge", "binding", "evidence", "governance");
+                .containsExactly("context", "node", "edge", "binding", "evidence", "governance", "vocabulary", "relationship");
+        assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("intent")).get("enum"))
+                .containsExactly("authoring", "explain", "validate", "ai-access-control");
 
         Map<String, Object> conversationContext = (Map<String, Object>) schemas.get("AgenticAuthoringConversationContext");
         assertThat(conversationContext).isNotNull();

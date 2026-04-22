@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: de47da5e091f33ba0e885ab6d679fd498b0bcee30479aaa98eb35b2166736311
+        default: 9dd2844b3c6d1d645695665ef79f40343ca27c2350032a4c71ed0175ac5e01c1
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: de47da5e091f33ba0e885ab6d679fd498b0bcee30479aaa98eb35b2166736311
+        example: 9dd2844b3c6d1d645695665ef79f40343ca27c2350032a4c71ed0175ac5e01c1
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1436,11 +1436,39 @@ components:
           type: string
           description: Chave do servico produtor do catalogo no config store.
           example: praxis-service
+        resourceKey:
+          type: string
+          nullable: true
+          description: Identidade semantica estavel do recurso quando ja resolvida por discovery/capabilities.
+          example: human-resources.funcionarios
+        releaseId:
+          type: string
+          nullable: true
+          description: Identificador opcional de release do Domain Catalog usado pelo cliente/servidor.
+          example: domain-catalog:human-resources.funcionarios:v1
+        releaseKey:
+          type: string
+          nullable: true
+          description: Chave opcional de release do Domain Catalog quando distinta de releaseId.
+          example: domain-catalog:human-resources.funcionarios:v1
         type:
           type: string
           description: Tipo de item a recuperar no catalogo.
-          enum: [context, node, edge, binding, evidence, governance]
+          enum: [context, node, edge, binding, evidence, governance, vocabulary, relationship]
           example: governance
+        itemTypes:
+          type: array
+          description: Tipos de itens aceitos para reduzir o contexto semantico retornado ao prompt.
+          items:
+            type: string
+            enum: [context, node, edge, binding, evidence, governance, vocabulary, relationship]
+          example: [governance]
+        intent:
+          type: string
+          nullable: true
+          description: Intencao de uso do hint para orientar recuperacao, explicacao, validacao ou controle de acesso AI.
+          enum: [authoring, explain, validate, ai-access-control]
+          example: authoring
         query:
           type: string
           nullable: true

@@ -175,12 +175,25 @@ export type AiDomainCatalogContextHintItemType =
   | 'edge'
   | 'binding'
   | 'evidence'
-  | 'governance';
+  | 'governance'
+  | 'vocabulary'
+  | 'relationship';
+
+export type AiDomainCatalogContextHintIntent =
+  | 'authoring'
+  | 'explain'
+  | 'validate'
+  | 'ai-access-control';
 
 export interface AiDomainCatalogContextHintContract {
   schemaVersion?: typeof AI_DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION;
   serviceKey?: string;
+  resourceKey?: string | null;
+  releaseId?: string | null;
+  releaseKey?: string | null;
   type?: AiDomainCatalogContextHintItemType;
+  itemTypes?: AiDomainCatalogContextHintItemType[];
+  intent?: AiDomainCatalogContextHintIntent | null;
   query?: string | null;
   contextKey?: string | null;
   nodeType?: string | null;
