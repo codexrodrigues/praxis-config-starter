@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -154,8 +153,8 @@ class DomainKnowledgeProjectionServiceTest {
                         """)
         );
 
-        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(any(), any(), any()))
-                .thenReturn(Optional.empty());
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKeyIn(any(), any(), any()))
+                .thenReturn(List.of());
         when(conceptRepository.saveAll(any())).thenAnswer(invocation -> {
             List<DomainKnowledgeConcept> concepts = toList(invocation.getArgument(0));
             concepts.forEach(DomainKnowledgeConcept::onInsert);
@@ -177,6 +176,8 @@ class DomainKnowledgeProjectionServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Iterable<DomainKnowledgeConcept>> conceptCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(conceptRepository).findByTenantIdAndEnvironmentAndConceptKeyIn(any(), any(), any());
+        verify(conceptRepository, never()).findByTenantIdAndEnvironmentAndConceptKey(any(), any(), any());
         verify(conceptRepository).saveAll(conceptCaptor.capture());
         assertThat(toList(conceptCaptor.getValue()))
                 .filteredOn(concept -> "human-resources.folhas-pagamento.field.valor-liquido"

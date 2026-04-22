@@ -16,6 +16,11 @@ public interface DomainKnowledgeConceptRepository extends JpaRepository<DomainKn
             String environment,
             String conceptKey);
 
+    List<DomainKnowledgeConcept> findByTenantIdAndEnvironmentAndConceptKeyIn(
+            String tenantId,
+            String environment,
+            List<String> conceptKeys);
+
     @Query("""
         select c from DomainKnowledgeConcept c
         where (:tenantId is null or :tenantId = '' or c.tenantId = :tenantId)

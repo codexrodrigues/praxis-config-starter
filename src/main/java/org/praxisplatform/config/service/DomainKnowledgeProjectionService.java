@@ -66,6 +66,7 @@ public class DomainKnowledgeProjectionService {
     }
 
     private Map<String, DomainKnowledgeConcept> projectConcepts(DomainCatalogRelease release, List<DomainCatalogItem> items) {
+        Map<String, DomainKnowledgeConcept> existingConceptsByKey = existingConceptsByKey(release, items);
         Map<String, DomainKnowledgeConcept> conceptsByKey = new LinkedHashMap<>();
         for (DomainCatalogItem item : items) {
             if (!"node".equals(item.getItemType())) {
@@ -76,9 +77,8 @@ public class DomainKnowledgeProjectionService {
             if (!StringUtils.hasText(conceptKey)) {
                 continue;
             }
-            DomainKnowledgeConcept concept = conceptRepository
-                    .findByTenantIdAndEnvironmentAndConceptKey(release.getTenantId(), release.getEnvironment(), conceptKey)
-                    .orElseGet(DomainKnowledgeConcept::new);
+            DomainKnowledgeConcept concept = existingConceptsByKey
+                    .getOrDefault(conceptKey, new DomainKnowledgeConcept());
             concept.setTenantId(release.getTenantId());
             concept.setEnvironment(release.getEnvironment());
             concept.setConceptKey(conceptKey);
@@ -101,6 +101,35 @@ public class DomainKnowledgeProjectionService {
         if (!conceptsByKey.isEmpty()) {
             for (DomainKnowledgeConcept concept : conceptRepository.saveAll(new ArrayList<>(conceptsByKey.values()))) {
                 conceptsByKey.put(concept.getConceptKey(), concept);
+            }
+        }
+        return conceptsByKey;
+    }
+
+    private Map<String, DomainKnowledgeConcept> existingConceptsByKey(
+            DomainCatalogRelease release,
+            List<DomainCatalogItem> items) {
+        List<String> conceptKeys = new ArrayList<>();
+        for (DomainCatalogItem item : items) {
+            if (!"node".equals(item.getItemType())) {
+                continue;
+            }
+            JsonNode payload = read(item.getPayload());
+            String conceptKey = firstText(item.getItemKey(), text(payload, "nodeKey"));
+            if (StringUtils.hasText(conceptKey)) {
+                conceptKeys.add(conceptKey);
+            }
+        }
+        Map<String, DomainKnowledgeConcept> conceptsByKey = new LinkedHashMap<>();
+        if (conceptKeys.isEmpty()) {
+            return conceptsByKey;
+        }
+        for (DomainKnowledgeConcept concept : conceptRepository.findByTenantIdAndEnvironmentAndConceptKeyIn(
+                release.getTenantId(),
+                release.getEnvironment(),
+                conceptKeys)) {
+            if (StringUtils.hasText(concept.getConceptKey())) {
+                conceptsByKey.putIfAbsent(concept.getConceptKey(), concept);
             }
         }
         return conceptsByKey;
