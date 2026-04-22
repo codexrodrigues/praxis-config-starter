@@ -233,6 +233,20 @@ Confirmed steps:
 - quickstart Domain Catalog v0.2 HTTP smoke;
 - smoke artifact upload.
 
+The same updated gate was then executed with the full page-builder E2E enabled:
+
+| Workflow | Run | Ref | Result |
+| --- | --- | --- | --- |
+| `Agentic Authoring HTTP Smoke` | [`24760628862`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24760628862) | `main` | success |
+
+Confirmed additional steps:
+
+- checkout of `praxis-ui-angular/main`;
+- setup of Node.js 20;
+- installation of `praxis-ui-angular` dependencies;
+- installation of Playwright Chromium;
+- page-builder agentic full E2E gate.
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to
