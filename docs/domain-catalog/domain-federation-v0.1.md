@@ -628,6 +628,9 @@ Current implementation status:
   `domain_resolution`.
 - JPA entities and repositories have been added for the same six persistence
   surfaces.
+- `POST /api/praxis/config/domain-federation/ingest?dryRun=false` can now
+  persist a validated candidate release when
+  `praxis.domain-federation.persistence.enabled=true`.
 - Database foreign keys are intentionally minimal in this first slice:
   release ownership is enforced by the database, while release-local semantic
   references remain validator-enforced.
