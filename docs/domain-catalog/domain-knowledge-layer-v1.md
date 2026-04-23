@@ -353,9 +353,19 @@ Recommended first endpoints:
 - `POST /api/praxis/config/domain-knowledge/change-sets`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`
+- `POST /api/praxis/config/domain-rules/definitions`
+- `GET /api/praxis/config/domain-rules/definitions`
+- `POST /api/praxis/config/domain-rules/materializations`
+- `GET /api/praxis/config/domain-rules/materializations`
 
 `/domain-catalog/context` may continue to exist as the stable public retrieval
 API. Internally it can delegate to the knowledge layer once v1 is ready.
+
+The `/domain-rules` endpoints are intentionally not rule executors. They are
+the persistence contract for shared rule definitions and target-specific
+materialization records. A materialization row may point to
+`target_layer=form_config`, but applying that payload to `FormConfig` remains a
+separate reviewed authoring operation.
 
 ## LLM Runtime Contract
 
