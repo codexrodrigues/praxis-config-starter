@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: 1925fafd1aedac3dd59df646a35fba0379f35f0b8ea887aa53fb1a0185252876
+        default: d8bff560e890c2692a55f17d0694702c167076c6e34417d621d6d76bb8680bd5
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 1925fafd1aedac3dd59df646a35fba0379f35f0b8ea887aa53fb1a0185252876
+        example: d8bff560e890c2692a55f17d0694702c167076c6e34417d621d6d76bb8680bd5
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
