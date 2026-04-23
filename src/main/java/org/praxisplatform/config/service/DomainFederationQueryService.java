@@ -141,6 +141,7 @@ public class DomainFederationQueryService {
         decisions.addAll(contextPolicy.decisions());
         decisions.addAll(relationshipPolicy.decisions());
         return new DomainFederationRetrievalPolicyReport(
+                contextPolicy.policyProfile(),
                 contextPolicy.minConfidence(),
                 contextPolicy.includeDenied(),
                 contextPolicy.includeLowConfidence(),

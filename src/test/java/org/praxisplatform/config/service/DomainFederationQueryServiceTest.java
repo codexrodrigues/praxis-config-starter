@@ -103,6 +103,7 @@ class DomainFederationQueryServiceTest {
                 .containsExactly("operations.mission.depends_on.assets.vehicle");
         assertThat(response.policyReport().inputItemCount()).isEqualTo(3);
         assertThat(response.policyReport().returnedItemCount()).isEqualTo(2);
+        assertThat(response.policyReport().policyProfile()).isEqualTo("explanation");
         assertThat(response.policyReport().minConfidence()).isEqualTo(0.7d);
         assertThat(response.policyReport().deniedItemCount()).isEqualTo(1);
         assertThat(response.policyReport().lowConfidenceItemCount()).isEqualTo(1);
@@ -198,11 +199,12 @@ class DomainFederationQueryServiceTest {
                 null,
                 "veiculo",
                 20,
-                new DomainFederationRetrievalPolicyOptions(0.8d, true, false));
+                new DomainFederationRetrievalPolicyOptions("diagnostics", 0.8d, true, false));
 
         assertThat(response.context().items()).isEmpty();
         assertThat(response.relationships()).extracting(DomainCatalogItemResponse::itemKey)
                 .containsExactly("operations.denied");
+        assertThat(response.policyReport().policyProfile()).isEqualTo("diagnostics");
         assertThat(response.policyReport().minConfidence()).isEqualTo(0.8d);
         assertThat(response.policyReport().includeDenied()).isTrue();
         assertThat(response.policyReport().includeLowConfidence()).isFalse();

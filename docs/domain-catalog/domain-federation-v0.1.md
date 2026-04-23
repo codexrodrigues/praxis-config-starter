@@ -360,9 +360,10 @@ Current filters:
 | `relationshipType` | Restrict relationship rows by edge type. |
 | `q` | Semantic or lexical query. |
 | `limit` | Maximum context and relationship items returned. |
-| `minConfidence` | Runtime retrieval threshold. Defaults to `0.7`. |
-| `includeDenied` | Include `aiUsage.visibility=deny` items for privileged diagnostics. Defaults to `false`. |
-| `includeLowConfidence` | Include items below `minConfidence`. Defaults to `true`. |
+| `policyProfile` | Named runtime policy profile: `explanation`, `authoring`, `compliance_review` or `diagnostics`. Defaults to `explanation`. |
+| `minConfidence` | Optional runtime retrieval threshold override. |
+| `includeDenied` | Optional override to include `aiUsage.visibility=deny` items for privileged diagnostics. |
+| `includeLowConfidence` | Optional override to include items below `minConfidence`. |
 
 Current behavior:
 
@@ -385,9 +386,13 @@ Current policy behavior:
 
 Runtime options:
 
-- `minConfidence`: clamps to `0.0..1.0`;
-- `includeDenied`: defaults to `false`;
-- `includeLowConfidence`: defaults to `true`.
+- `policyProfile=explanation`: `minConfidence=0.7`, `includeDenied=false`, `includeLowConfidence=true`;
+- `policyProfile=authoring`: `minConfidence=0.8`, `includeDenied=false`, `includeLowConfidence=false`;
+- `policyProfile=compliance_review`: `minConfidence=0.9`, `includeDenied=false`, `includeLowConfidence=false`;
+- `policyProfile=diagnostics`: `minConfidence=0.0`, `includeDenied=true`, `includeLowConfidence=true`;
+- `minConfidence`: optional override, clamped to `0.0..1.0`;
+- `includeDenied`: optional override;
+- `includeLowConfidence`: optional override.
 
 This is intentionally conservative. It is not yet a full authorization engine.
 It is the first LLM-facing retrieval guard that prevents obviously denied

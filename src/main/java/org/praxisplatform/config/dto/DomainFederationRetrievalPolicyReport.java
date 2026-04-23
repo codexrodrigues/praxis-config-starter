@@ -3,6 +3,7 @@ package org.praxisplatform.config.dto;
 import java.util.List;
 
 public record DomainFederationRetrievalPolicyReport(
+        String policyProfile,
         double minConfidence,
         boolean includeDenied,
         boolean includeLowConfidence,

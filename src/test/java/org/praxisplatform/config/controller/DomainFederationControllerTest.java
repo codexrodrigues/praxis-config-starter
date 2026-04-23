@@ -95,7 +95,7 @@ class DomainFederationControllerTest {
                 "depends_on",
                 "veiculo",
                 20,
-                new DomainFederationRetrievalPolicyOptions(0.8d, false, false))).thenReturn(response);
+                new DomainFederationRetrievalPolicyOptions("authoring", 0.85d, null, null))).thenReturn(response);
 
         var entity = controller.context(
                 null,
@@ -106,9 +106,10 @@ class DomainFederationControllerTest {
                 "depends_on",
                 "veiculo",
                 20,
-                0.8d,
-                false,
-                false,
+                "authoring",
+                0.85d,
+                null,
+                null,
                 "tenant-a",
                 "dev");
 
@@ -124,7 +125,7 @@ class DomainFederationControllerTest {
                 "depends_on",
                 "veiculo",
                 20,
-                new DomainFederationRetrievalPolicyOptions(0.8d, false, false));
+                new DomainFederationRetrievalPolicyOptions("authoring", 0.85d, null, null));
     }
 
     @Test

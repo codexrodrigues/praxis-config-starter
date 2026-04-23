@@ -30,6 +30,7 @@ class DomainFederationRetrievalPolicyServiceTest {
                 .containsExactly("allowed", "masked", "low-confidence");
         assertThat(result.report().inputItemCount()).isEqualTo(4);
         assertThat(result.report().returnedItemCount()).isEqualTo(3);
+        assertThat(result.report().policyProfile()).isEqualTo("explanation");
         assertThat(result.report().minConfidence()).isEqualTo(0.7d);
         assertThat(result.report().includeDenied()).isFalse();
         assertThat(result.report().includeLowConfidence()).isTrue();
@@ -48,10 +49,11 @@ class DomainFederationRetrievalPolicyServiceTest {
                 item("borderline", "{\"confidence\":0.72}"),
                 item("denied", "{\"aiUsage\":{\"visibility\":\"deny\"},\"confidence\":0.99}"));
 
-        var result = service.apply(items, new DomainFederationRetrievalPolicyOptions(0.8d, true, false));
+        var result = service.apply(items, new DomainFederationRetrievalPolicyOptions("diagnostics", 0.8d, true, false));
 
         assertThat(result.items()).extracting(DomainCatalogItemResponse::itemKey)
                 .containsExactly("visible", "denied");
+        assertThat(result.report().policyProfile()).isEqualTo("diagnostics");
         assertThat(result.report().minConfidence()).isEqualTo(0.8d);
         assertThat(result.report().includeDenied()).isTrue();
         assertThat(result.report().includeLowConfidence()).isFalse();
@@ -60,6 +62,23 @@ class DomainFederationRetrievalPolicyServiceTest {
         assertThat(result.report().decisions())
                 .anySatisfy(decision -> assertThat(decision).contains("Included denied despite aiUsage.visibility=deny"))
                 .anySatisfy(decision -> assertThat(decision).contains("Excluded borderline because confidence is below minConfidence"));
+    }
+
+    @Test
+    void appliesNamedPolicyProfileDefaults() throws Exception {
+        List<DomainCatalogItemResponse> items = List.of(
+                item("strong", "{\"confidence\":0.91}"),
+                item("borderline", "{\"confidence\":0.72}"),
+                item("denied", "{\"aiUsage\":{\"visibility\":\"deny\"},\"confidence\":0.99}"));
+
+        var result = service.apply(items, new DomainFederationRetrievalPolicyOptions("authoring", null, null, null));
+
+        assertThat(result.items()).extracting(DomainCatalogItemResponse::itemKey)
+                .containsExactly("strong");
+        assertThat(result.report().policyProfile()).isEqualTo("authoring");
+        assertThat(result.report().minConfidence()).isEqualTo(0.8d);
+        assertThat(result.report().includeDenied()).isFalse();
+        assertThat(result.report().includeLowConfidence()).isFalse();
     }
 
     private DomainCatalogItemResponse item(String key, String payload) throws Exception {

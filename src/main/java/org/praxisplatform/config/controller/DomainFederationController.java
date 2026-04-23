@@ -38,9 +38,10 @@ public class DomainFederationController {
             @RequestParam(required = false) String relationshipType,
             @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) String policyProfile,
             @RequestParam(required = false) Double minConfidence,
-            @RequestParam(defaultValue = "false") boolean includeDenied,
-            @RequestParam(defaultValue = "true") boolean includeLowConfidence,
+            @RequestParam(required = false) Boolean includeDenied,
+            @RequestParam(required = false) Boolean includeLowConfidence,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         return ResponseEntity.ok(domainFederationQueryService.context(
@@ -54,7 +55,7 @@ public class DomainFederationController {
                 relationshipType,
                 q,
                 limit,
-                new DomainFederationRetrievalPolicyOptions(minConfidence, includeDenied, includeLowConfidence)));
+                new DomainFederationRetrievalPolicyOptions(policyProfile, minConfidence, includeDenied, includeLowConfidence)));
     }
 
     @PostMapping("/dry-run")
