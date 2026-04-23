@@ -1582,6 +1582,14 @@ components:
             - component_authoring
             - ui_composition_authoring
           example: shared_rule_authoring
+        recommendedRuleType:
+          type: string
+          nullable: true
+          description: Tipo de regra compartilhada recomendado quando o fluxo canônico for shared_rule_authoring.
+          enum:
+            - governance
+            - selection_eligibility
+          example: governance
         limit:
           type: integer
           format: int32
