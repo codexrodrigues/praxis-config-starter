@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: c9c4e0975bea7043b09e9456aab8dada655fc1a6f7c81d04c3dc7b70d0151211
+        default: d8bff560e890c2692a55f17d0694702c167076c6e34417d621d6d76bb8680bd5
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: c9c4e0975bea7043b09e9456aab8dada655fc1a6f7c81d04c3dc7b70d0151211
+        example: d8bff560e890c2692a55f17d0694702c167076c6e34417d621d6d76bb8680bd5
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1519,8 +1519,8 @@ components:
         schemaVersion:
           type: string
           description: Versao canonica do contrato do hint de catalogo de dominio.
-          default: praxis.ai.context-hints.domain-catalog/v0.1
-          example: praxis.ai.context-hints.domain-catalog/v0.1
+          default: praxis.ai.context-hints.domain-catalog/v0.2
+          example: praxis.ai.context-hints.domain-catalog/v0.2
         serviceKey:
           type: string
           description: Chave do servico produtor do catalogo no config store.
@@ -1573,16 +1573,15 @@ components:
           nullable: true
           description: Tipo de no semantico quando type=node.
           example: field
-        recommendedOperation:
+        recommendedAuthoringFlow:
           type: string
           nullable: true
-          description: Operacao autoral recomendada para materializar um rascunho aprovado pelo agente/frontend.
+          description: Fluxo de autoria canônico recomendado para continuar a tarefa sem acoplar o retrieval semântico a uma operação específica de UI.
           enum:
-            - rule.visibility.add
-            - rule.validation.add
-            - rule.visualBlockGuidance.add
-            - rule.remove
-          example: rule.visualBlockGuidance.add
+            - shared_rule_authoring
+            - component_authoring
+            - ui_composition_authoring
+          example: shared_rule_authoring
         limit:
           type: integer
           format: int32

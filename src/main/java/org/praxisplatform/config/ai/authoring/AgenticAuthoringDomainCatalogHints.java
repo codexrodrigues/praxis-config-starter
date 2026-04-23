@@ -61,9 +61,9 @@ final class AgenticAuthoringDomainCatalogHints {
         if (!nodeType.isBlank()) {
             domainCatalog.put("nodeType", nodeType);
         }
-        String recommendedOperation = recommendedOperation(artifactKind, userPrompt);
-        if (!recommendedOperation.isBlank()) {
-            domainCatalog.put("recommendedOperation", recommendedOperation);
+        String recommendedAuthoringFlow = recommendedAuthoringFlow(artifactKind, userPrompt);
+        if (!recommendedAuthoringFlow.isBlank()) {
+            domainCatalog.put("recommendedAuthoringFlow", recommendedAuthoringFlow);
         }
     }
 
@@ -106,7 +106,7 @@ final class AgenticAuthoringDomainCatalogHints {
         };
     }
 
-    private static String recommendedOperation(String artifactKind, String userPrompt) {
+    private static String recommendedAuthoringFlow(String artifactKind, String userPrompt) {
         if (!"form".equals(valueOrDefault(artifactKind, "unknown"))) {
             return "";
         }
@@ -117,7 +117,7 @@ final class AgenticAuthoringDomainCatalogHints {
                 || prompt.contains("governanca")
                 || prompt.contains("privacidade")
                 || prompt.contains("orientacao visual")) {
-            return "rule.visualBlockGuidance.add";
+            return "shared_rule_authoring";
         }
         return "";
     }

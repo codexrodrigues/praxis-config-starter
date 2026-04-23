@@ -21,7 +21,7 @@ manifest flow.
   "currentRoute": "/page-builder-ia",
   "contextHints": {
     "domainCatalog": {
-      "schemaVersion": "praxis.ai.context-hints.domain-catalog/v0.1",
+      "schemaVersion": "praxis.ai.context-hints.domain-catalog/v0.2",
       "serviceKey": "praxis-service",
       "resourceKey": "human-resources.funcionarios",
       "contextKey": "human-resources",

@@ -33,7 +33,7 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 null);
 
         assertThat(contextHints.path("domainCatalog").path("schemaVersion").asText())
-                .isEqualTo("praxis.ai.context-hints.domain-catalog/v0.1");
+                .isEqualTo("praxis.ai.context-hints.domain-catalog/v0.2");
         assertThat(contextHints.path("domainCatalog").path("serviceKey").asText())
                 .isEqualTo("praxis-service");
         assertThat(contextHints.path("domainCatalog").path("contextKey").asText())
@@ -50,8 +50,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("node");
         assertThat(contextHints.path("domainCatalog").path("itemTypes").path(1).asText())
                 .isEqualTo("governance");
-        assertThat(contextHints.path("domainCatalog").path("recommendedOperation").asText())
-                .isEqualTo("rule.visualBlockGuidance.add");
+        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").asText())
+                .isEqualTo("shared_rule_authoring");
         assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("federated").asBoolean())
@@ -96,7 +96,7 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("node");
         assertThat(contextHints.path("domainCatalog").path("itemTypes").size())
                 .isEqualTo(1);
-        assertThat(contextHints.path("domainCatalog").path("recommendedOperation").isMissingNode())
+        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").isMissingNode())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("query").asText())
                 .contains("dashboard de status de missoes")
