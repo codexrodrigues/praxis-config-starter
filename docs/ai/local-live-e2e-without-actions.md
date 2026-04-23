@@ -33,6 +33,7 @@ Validated results:
 - Domain Federation v0.1 starter tests passed locally: `18` tests, `0` failures across controller, validator, dry-run ingest, query and retrieval policy.
 - Domain Federation v0.1 live smoke passed against the locally rebuilt quickstart jar with `schemaVersion=praxis.domain-federation/v0.1`, `dryRunValid=true`, candidate persistence, release audit, persisted validation and activation.
 - Domain Federation v0.1 live smoke passed again against the quickstart jar built with the published `praxis-config-starter:0.1.0-rc.24` dependency. The nested starter jar contains `DomainFederationController`, `DomainFederationContractValidator`, `DomainFederationQueryService` and `DomainFederationIngestDryRunService`.
+- Domain Federation v0.1 persistent live smoke passed against a quickstart jar packaged with the local starter `0.1.0-rc.5` override and `PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED=true`. The persistent ingest returned `dryRun=false`, `releaseStatus=candidate`, `releaseListed=true`, `validationReportValid=true`, `persistedSources=1`, `persistedContexts=2`, `persistedContextRelationships=1`, `persistedContracts=1` and `persistedResolutions=1`.
 - The original quickstart jar built before the starter federation controller returned `404`.
 
 ## Prerequisites
@@ -125,6 +126,41 @@ The local backend starter script enables this flag by default.
 If the runtime returns `404`, confirm the quickstart jar was packaged against
 a starter revision that contains the federation HTTP surface before rerunning
 this smoke.
+
+## Domain Federation v0.1 Persistent Smoke
+
+Use this runner when the change must prove the durable read model, release list
+and persisted validation report through the quickstart host:
+
+```powershell
+cd praxis-config-starter
+
+$env:JAVA_HOME='D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21'
+$env:Path="$env:JAVA_HOME\bin;D:\Developer\maven\apache-maven-3.9.6\bin;$env:Path"
+mvn.cmd clean install -DskipTests
+
+cd ..\praxis-api-quickstart
+mvn.cmd clean package -DskipTests '-Dpraxis.config.version=0.1.0-rc.5'
+
+cd ..\praxis-config-starter
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartDomainFederationPersistentHttpSmoke.ps1 -QuickstartRoot ..\praxis-api-quickstart
+```
+
+This validates:
+
+- quickstart startup on `http://localhost:8088`;
+- remote database configuration from quickstart;
+- Domain Catalog v2 bootstrap for `human-resources.folhas-pagamento`;
+- `POST /api/praxis/config/domain-federation/dry-run`;
+- `POST /api/praxis/config/domain-federation/ingest?dryRun=false`;
+- persisted release lookup through `GET /api/praxis/config/domain-federation/releases?status=candidate`;
+- persisted validation report lookup through `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation`;
+- persisted counts for `domain_source`, `domain_context`, `domain_context_relationship`, `domain_contract` and `domain_resolution`.
+
+The starter version override must match the local starter version being tested.
+Do not edit the quickstart `pom.xml` just to validate an unpublished starter;
+use the Maven property override and keep the Maven Central publication step
+decoupled from local platform validation.
 
 ## Compliance Shadow
 
