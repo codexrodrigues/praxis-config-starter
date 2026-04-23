@@ -640,7 +640,10 @@ Current implementation status:
 - Database foreign keys are intentionally minimal in this first slice:
   release ownership is enforced by the database, while release-local semantic
   references remain validator-enforced.
-- No remote database execution has been performed by this change.
+- Remote database execution has been validated through the quickstart host with
+  `PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED=true`: a persistent smoke
+  created a candidate release, listed it through the release endpoint and read
+  its persisted validation report.
 
 ## Example Scenario
 
