@@ -49,6 +49,13 @@ function ConvertTo-DeepJson([object] $Value) {
     return $Value | ConvertTo-Json -Depth 100
 }
 
+function Copy-DeepObject([object] $Value) {
+    if ($null -eq $Value) {
+        return $null
+    }
+    return (ConvertTo-DeepJson $Value) | ConvertFrom-Json
+}
+
 $starterRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $starterRoot
 if ([string]::IsNullOrWhiteSpace($QuickstartRoot)) {
@@ -326,6 +333,66 @@ try {
         throw "Expected persisted federation context to return context items and relationships."
     }
 
+    $unsafeRequest = Copy-DeepObject $request
+    $unsafeRequest.contracts[0].contractKey = "assets.vehicle-allocation.lookup.denied.v1"
+    $unsafeRequest.contracts[0].visibility = "deny_for_llm"
+    $unsafeRequest.contextRelationships[0].relationshipKey = "human-resources.funcionarios.references.assets.veiculos.denied"
+    $unsafeRequest.contextRelationships[0].contractKey = "assets.vehicle-allocation.lookup.denied.v1"
+    $unsafeRequest.resolutions[0].resolutionKey = "hr.allocated_vehicle.maps_to.assets.vehicle.denied"
+    $unsafeBody = ConvertTo-DeepJson $unsafeRequest
+
+    $unsafeDryRun = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/domain-federation/dry-run" `
+        -Headers $jsonHeaders `
+        -Body $unsafeBody `
+        -TimeoutSec 90
+    if ($unsafeDryRun.valid -ne $true -or $unsafeDryRun.errorCount -ne 0) {
+        throw "Expected deny_for_llm dry-run to remain valid for persisted redaction verification."
+    }
+
+    $unsafeIngest = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/domain-federation/ingest?dryRun=false" `
+        -Headers $jsonHeaders `
+        -Body $unsafeBody `
+        -TimeoutSec 90
+    if ($unsafeIngest.valid -ne $true -or [string]::IsNullOrWhiteSpace($unsafeIngest.releaseKey)) {
+        throw "Expected deny_for_llm ingest to persist a candidate release."
+    }
+
+    $unsafeReleaseKey = [uri]::EscapeDataString($unsafeIngest.releaseKey)
+    $unsafeActivated = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/domain-federation/releases/$unsafeReleaseKey/activate" `
+        -Headers $headers `
+        -TimeoutSec 60
+    if ($unsafeActivated.releaseKey -ne $unsafeIngest.releaseKey -or $unsafeActivated.status -ne "active") {
+        throw "Expected deny_for_llm release activation to succeed."
+    }
+
+    $unsafeContext = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$base/api/praxis/config/domain-federation/context?$contextQuery" `
+        -Headers $headers `
+        -TimeoutSec 60
+    if ($unsafeContext.sourceMode -ne "persisted_federation") {
+        throw "Expected deny_for_llm context query to stay on persisted_federation mode, got $($unsafeContext.sourceMode)."
+    }
+    if (@($unsafeContext.context.items).Count -lt 1) {
+        throw "Expected deny_for_llm context query to keep persisted context items."
+    }
+    if (@($unsafeContext.relationships).Count -ne 0) {
+        throw "Expected deny_for_llm persisted relationship to be redacted from context retrieval."
+    }
+    if ($unsafeContext.policyReport.deniedItemCount -lt 1) {
+        throw "Expected deny_for_llm persisted relationship redaction to increment deniedItemCount."
+    }
+    $unsafeGuidance = @($unsafeContext.retrievalGuidance)
+    if (-not ($unsafeGuidance | Where-Object { $_ -like "*contract.visibility=deny_for_llm*" })) {
+        throw "Expected deny_for_llm context guidance to mention contract.visibility=deny_for_llm."
+    }
+
     [pscustomobject]@{
         health = $health.status
         baseUrl = $base
@@ -349,6 +416,13 @@ try {
         contextSourceMode = $context.sourceMode
         contextItemCount = $contextItemCount
         contextRelationshipCount = $contextRelationshipCount
+        deniedReleaseKey = $unsafeIngest.releaseKey
+        deniedActivatedStatus = $unsafeActivated.status
+        deniedContextSourceMode = $unsafeContext.sourceMode
+        deniedContextItemCount = @($unsafeContext.context.items).Count
+        deniedContextRelationshipCount = @($unsafeContext.relationships).Count
+        deniedItemCount = $unsafeContext.policyReport.deniedItemCount
+        deniedGuidanceConfirmed = $true
     } | ConvertTo-Json -Depth 8
 } finally {
     if ($startedQuickstart -and $null -ne $quickstartProcess) {

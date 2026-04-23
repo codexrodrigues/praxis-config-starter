@@ -659,6 +659,9 @@ Current implementation status:
   `PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED=true`: a persistent smoke
   created a candidate release, listed it through the release endpoint and read
   its persisted validation report.
+- The same persistent smoke now also activates a `deny_for_llm` candidate
+  release and proves over real HTTP that persisted relationships linked to that
+  contract are redacted from `/domain-federation/context`.
 
 ## Example Scenario
 
