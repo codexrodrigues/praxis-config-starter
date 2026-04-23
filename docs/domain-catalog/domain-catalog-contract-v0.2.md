@@ -7,6 +7,17 @@ Date: 2026-04-22
 This contract extends `praxis.domain-catalog/v0.1` with first-class governed
 semantic metadata for authoring, RAG and LLM context retrieval.
 
+Federated multi-service semantics are intentionally defined in a separate
+planning contract:
+
+```text
+docs/domain-catalog/domain-federation-v0.1.md
+```
+
+That federation contract introduces `domain_source`,
+`domain_context_relationship`, `domain_contract` and `domain_resolution` as the
+next read-only, validation-first layer above source catalog releases.
+
 The top-level shape remains unchanged:
 
 ```json
