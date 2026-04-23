@@ -626,6 +626,8 @@ Current implementation status:
 - The migration creates `domain_federation_release`, `domain_source`,
   `domain_context`, `domain_context_relationship`, `domain_contract` and
   `domain_resolution`.
+- JPA entities and repositories have been added for the same six persistence
+  surfaces.
 - Database foreign keys are intentionally minimal in this first slice:
   release ownership is enforced by the database, while release-local semantic
   references remain validator-enforced.
