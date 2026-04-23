@@ -391,7 +391,11 @@ public class AgenticAuthoringPreviewService {
         if (!intentResolution.valid()) {
             failures.add("intent-resolution-invalid");
         }
-        if (intentResolution.gate() == null || !"eligible".equals(intentResolution.gate().status())) {
+        if (intentResolution.gate() != null
+                && "route_required".equals(intentResolution.gate().status())
+                && intentResolution.gate().messages().contains("shared-rule-authoring-required")) {
+            failures.add("intent-resolution-shared-rule-route-required");
+        } else if (intentResolution.gate() == null || !"eligible".equals(intentResolution.gate().status())) {
             failures.add("intent-resolution-not-eligible");
         }
         if (intentResolution.selectedCandidate() == null) {

@@ -281,6 +281,7 @@ public class AgenticAuthoringIntentResolverService {
                 selectedCandidate,
                 candidates);
         gate = withPromptSpecificGateMessages(gate, prompt, operationKind, artifactKind, selectedCandidate);
+        gate = withRequestedAuthoringFlowGate(gate, request, selectedCandidate);
         List<String> questions = clarificationQuestions(gate, operationKind, artifactKind, selectedCandidate, candidates);
         questions = llmClarificationQuestions(llmIntent, gate, questions);
         boolean answeredBareDomainClarification = turn.answeredPendingClarification()
@@ -1108,6 +1109,28 @@ public class AgenticAuthoringIntentResolverService {
         return new AgenticAuthoringGateResult(gate.gateId(), status, List.copyOf(messages));
     }
 
+    private AgenticAuthoringGateResult withRequestedAuthoringFlowGate(
+            AgenticAuthoringGateResult gate,
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringCandidate selectedCandidate) {
+        if (gate == null) {
+            return null;
+        }
+        String requestedFlow = requestedAuthoringFlow(request);
+        if (!"shared_rule_authoring".equals(requestedFlow)
+                || selectedCandidate == null) {
+            return gate;
+        }
+        List<String> messages = new ArrayList<>(gate.messages());
+        if (!messages.contains("shared-rule-authoring-required")) {
+            messages.add("shared-rule-authoring-required");
+        }
+        return new AgenticAuthoringGateResult(
+                gate.gateId(),
+                "route_required",
+                List.copyOf(messages));
+    }
+
     private boolean requiresPayrollDashboardBreakdown(
             String prompt,
             String operationKind,
@@ -1275,6 +1298,9 @@ public class AgenticAuthoringIntentResolverService {
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringGateResult gate,
             boolean answeredBareDomainClarification) {
+        if (gate != null && gate.messages().contains("shared-rule-authoring-required")) {
+            return sharedRuleAuthoringAssistantMessage(selectedCandidate);
+        }
         if (gate != null && gate.messages().contains("resource-candidate-required")) {
             return missingResourceAssistantMessage(artifactKind);
         }
@@ -1305,6 +1331,17 @@ public class AgenticAuthoringIntentResolverService {
             return "Posso ajudar a escolher antes de criar. Para uma tabela, normalmente faz sentido definir recurso, colunas principais, filtros, ordenacao e formato dos campos.";
         }
         return "Posso ajudar a escolher antes de criar. Opcoes comuns sao dashboards para analise, formularios para entrada de dados, paginas master-detail para navegacao e tabelas para detalhe operacional.";
+    }
+
+    private String sharedRuleAuthoringAssistantMessage(AgenticAuthoringCandidate selectedCandidate) {
+        String resourcePath = selectedCandidate == null ? "" : valueOrDefault(selectedCandidate.resourcePath(), "").trim();
+        if (!resourcePath.isBlank()) {
+            return "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, "
+                    + "e nao pelo preview de formulario/pagina. "
+                    + "Use o recurso " + resourcePath + " como grounding canônico para intake e simulacao.";
+        }
+        return "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, "
+                + "e nao pelo preview de formulario/pagina.";
     }
 
     private JsonNode apiCatalogAnswer(
@@ -1713,6 +1750,15 @@ public class AgenticAuthoringIntentResolverService {
                         "cancel",
                         "Cancelar",
                         ""));
+    }
+
+    private String requestedAuthoringFlow(AgenticAuthoringIntentResolutionRequest request) {
+        JsonNode contextHints = request == null ? null : request.contextHints();
+        JsonNode domainCatalog = contextHints == null ? null : contextHints.path("domainCatalog");
+        if (domainCatalog == null || domainCatalog.isMissingNode()) {
+            return "";
+        }
+        return normalize(domainCatalog.path("recommendedAuthoringFlow").asText(""));
     }
 
     private String confirmationPromptFromQuestion(String effectivePrompt, String question) {
