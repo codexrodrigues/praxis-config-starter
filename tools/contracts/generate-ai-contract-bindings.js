@@ -185,11 +185,10 @@ export type AiDomainCatalogContextHintIntent =
   | 'validate'
   | 'ai-access-control';
 
-export type AiDomainCatalogRecommendedOperation =
-  | 'rule.visibility.add'
-  | 'rule.validation.add'
-  | 'rule.visualBlockGuidance.add'
-  | 'rule.remove';
+export type AiDomainCatalogRecommendedAuthoringFlow =
+  | 'shared_rule_authoring'
+  | 'component_authoring'
+  | 'ui_composition_authoring';
 
 export interface AiDomainCatalogRelationshipHintContract {
   enabled?: boolean;
@@ -214,7 +213,7 @@ export interface AiDomainCatalogContextHintContract {
   query?: string | null;
   contextKey?: string | null;
   nodeType?: string | null;
-  recommendedOperation?: AiDomainCatalogRecommendedOperation | null;
+  recommendedAuthoringFlow?: AiDomainCatalogRecommendedAuthoringFlow | null;
   limit?: number;
   relationships?: AiDomainCatalogRelationshipHintContract | null;
 }
