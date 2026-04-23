@@ -919,7 +919,7 @@ components:
             additionalProperties: true
         patchOperations:
           type: array
-          description: Alias legado contendo efeitos compilados nativos do compilador, inclusive handlers de dominio.
+          description: Patch aplicavel concreto. Para efeitos genericos, materializa operacoes com paths resolvidos e aplicaveis; para `compile-domain-patch`, preserva a operacao especializada emitida pelo handler.
           items:
             type: object
             additionalProperties: true

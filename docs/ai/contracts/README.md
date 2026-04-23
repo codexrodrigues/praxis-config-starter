@@ -29,13 +29,13 @@ Escopo coberto:
 
 Importante:
 
-- `ai/authoring` continua sendo a superfície canônica para authoring de
-  componente/página;
-- business-rule authoring não deve ser modelado como destino primário de
+- `ai/authoring` continua sendo a superfÃƒÂ­cie canÃƒÂ´nica para authoring de
+  componente/pÃƒÂ¡gina;
+- business-rule authoring nÃƒÂ£o deve ser modelado como destino primÃƒÂ¡rio de
   `componentEditPlan`;
-- a evolução canônica para decisão compartilhada deve acontecer na superfície
-  `/api/praxis/config/domain-rules/**`, que já concentra definição governada,
-  materialização por target e, progressivamente, intake/simulation/publication.
+- a evoluÃƒÂ§ÃƒÂ£o canÃƒÂ´nica para decisÃƒÂ£o compartilhada deve acontecer na superfÃƒÂ­cie
+  `/api/praxis/config/domain-rules/**`, que jÃƒÂ¡ concentra definiÃƒÂ§ÃƒÂ£o governada,
+  materializaÃƒÂ§ÃƒÂ£o por target e, progressivamente, intake/simulation/publication.
 
 Contexto conversacional de authoring:
 
@@ -70,12 +70,12 @@ Streaming de authoring:
 
 Authoring manifests executaveis:
 
-- Os endpoints `/api/praxis/config/ai/authoring/manifests/{componentId}/**` expõem o contrato executavel versionado projetado em `ai_registry`.
+- Os endpoints `/api/praxis/config/ai/authoring/manifests/{componentId}/**` expÃƒÂµem o contrato executavel versionado projetado em `ai_registry`.
 - `resolve-target` usa o `operation.target.resolver` declarado pelo manifest para resolver alvos de forma deterministica.
 - `validate-plan` valida plano, schema de input, validators declarados, confirmacao destrutiva e existencia de alvos sem depender de keywords.
-- `compile-patch` compila efeitos genericos como `merge-by-key`, `remove-by-key`, `set-value`, `merge-object` e `append` em `compiledOperations` canônicas com `proposedConfig` resultante. Os aliases legados `operations` e `patchOperations` continuam expondo os efeitos compilados nativos do compilador, inclusive handlers de domínio.
-- Efeitos `compile-domain-patch` continuam sendo fronteira explicita para compiladores especificos por componente.
-- Erros de configuracao desses endpoints usam `AgenticAuthoringDryRunErrorResponse`, com `failureCodes=["DRY_RUN_CONFIGURATION_INVALID"]`.
+- `compile-patch` compila efeitos genericos como `merge-by-key`, `remove-by-key`, `set-value`, `merge-object` e `append` em `compiledOperations` canÃƒÂ´nicas com `proposedConfig` resultante.
+- `operations` permanece como alias legado dos efeitos compilados nativos do compilador, inclusive handlers de domÃƒÂ­nio.
+- `patchOperations` expÃƒÂµe o patch aplicÃƒÂ¡vel concreto: para efeitos genericos, a lista materializa operaÃƒÂ§ÃƒÂµes com paths resolvidos e aplicÃƒÂ¡veis (`replace`, `add`, `remove`, `move`); para `compile-domain-patch`, a saÃƒÂ­da continua sendo a operaÃƒÂ§ÃƒÂ£o especializada emitida pelo handler.
 
 Trilha API Catalog Q&A:
 

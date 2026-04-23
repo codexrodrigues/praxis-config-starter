@@ -346,10 +346,13 @@ class AgenticAuthoringManifestControllerTest {
                 .andExpect(jsonPath("$.patch.compiledOperations[0].resolvedPath").value("columns[]/0"))
                 .andExpect(jsonPath("$.patch.compiledOperations[0].keyValue").value("email"))
                 .andExpect(jsonPath("$.patch.compiledOperations[0].value.header").value("Contato"))
-                .andExpect(jsonPath("$.patch.patchOperations[0].effectKind").value("merge-by-key"))
-                .andExpect(jsonPath("$.patch.patchOperations[0].resolvedPath").value("columns[]/0"))
-                .andExpect(jsonPath("$.patch.patchOperations[0].keyValue").value("email"))
-                .andExpect(jsonPath("$.patch.patchOperations[0].value.header").value("Contato"))
+                .andExpect(jsonPath("$.patch.operations[0].effectKind").value("merge-by-key"))
+                .andExpect(jsonPath("$.patch.operations[0].resolvedPath").value("columns[]/0"))
+                .andExpect(jsonPath("$.patch.operations[0].keyValue").value("email"))
+                .andExpect(jsonPath("$.patch.operations[0].value.header").value("Contato"))
+                .andExpect(jsonPath("$.patch.patchOperations[0].op").value("replace"))
+                .andExpect(jsonPath("$.patch.patchOperations[0].path").value("/columns/0/header"))
+                .andExpect(jsonPath("$.patch.patchOperations[0].value").value("Contato"))
                 .andExpect(jsonPath("$.patch.proposedConfig.columns[0].field").value("email"))
                 .andExpect(jsonPath("$.patch.proposedConfig.columns[0].header").value("Contato"));
     }

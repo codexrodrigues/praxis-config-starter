@@ -214,6 +214,10 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(op.path("resolvedPath").asText()).isEqualTo("columns[]/0");
         assertThat(op.path("keyValue").asText()).isEqualTo("email");
         assertThat(op.path("value").path("header").asText()).isEqualTo("Contato");
+        assertThat(result.patch().path("patchOperations").get(0).path("op").asText()).isEqualTo("replace");
+        assertThat(result.patch().path("patchOperations").get(0).path("path").asText()).isEqualTo("/columns/0/header");
+        assertThat(result.patch().path("patchOperations").get(0).path("value").asText()).isEqualTo("Contato");
+        assertThat(result.patch().path("operations").get(0).path("effectKind").asText()).isEqualTo("merge-by-key");
         assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("header").asText())
                 .isEqualTo("Contato");
     }
@@ -242,6 +246,9 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(result.compiled()).isTrue();
         assertThat(result.patch().path("compiledOperations").get(0).path("op").asText()).isEqualTo("set-value");
+        assertThat(result.patch().path("patchOperations").get(0).path("op").asText()).isEqualTo("replace");
+        assertThat(result.patch().path("patchOperations").get(0).path("path").asText()).isEqualTo("/fieldMetadata/0/label");
+        assertThat(result.patch().path("patchOperations").get(0).path("value").asText()).isEqualTo("E-mail Corporativo");
         assertThat(result.patch().path("proposedConfig").path("fieldMetadata").get(0).path("label").asText())
                 .isEqualTo("E-mail Corporativo");
     }
@@ -273,6 +280,8 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(result.compiled()).isTrue();
         assertThat(result.patch().path("compiledOperations").get(0).path("op").asText()).isEqualTo("remove-by-key");
         assertThat(result.patch().path("compiledOperations").get(0).path("removedIndex").asInt()).isZero();
+        assertThat(result.patch().path("patchOperations").get(0).path("op").asText()).isEqualTo("remove");
+        assertThat(result.patch().path("patchOperations").get(0).path("path").asText()).isEqualTo("/columns/0");
         assertThat(result.patch().path("proposedConfig").path("columns")).hasSize(1);
         assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("field").asText())
                 .isEqualTo("name");
@@ -311,6 +320,9 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(operation.path("resolvedPath").asText()).isEqualTo("fieldMetadata[]/0");
         assertThat(operation.path("keyValue").asText()).isEqualTo("email");
         assertThat(operation.path("value").path("label").asText()).isEqualTo("E-mail Corporativo");
+        assertThat(result.patch().path("patchOperations").get(0).path("op").asText()).isEqualTo("replace");
+        assertThat(result.patch().path("patchOperations").get(0).path("path").asText()).isEqualTo("/fieldMetadata/0/label");
+        assertThat(result.patch().path("patchOperations").get(0).path("value").asText()).isEqualTo("E-mail Corporativo");
         assertThat(result.patch().path("proposedConfig").path("fieldMetadata").get(0).path("label").asText())
                 .isEqualTo("E-mail Corporativo");
     }

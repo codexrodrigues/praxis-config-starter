@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -142,9 +143,10 @@ public class AgenticAuthoringManifestService {
         patch.put("manifestVersion", text(manifest, "manifestVersion"));
         patch.put("patchKind", "component-config-patch");
         ArrayNode compiledOperations = toCompiledOperations(compiledEffects);
+        ArrayNode applicablePatchOperations = toApplicablePatchOperations(compiledEffects);
         patch.set("compiledOperations", compiledOperations);
         patch.set("operations", compiledEffects.deepCopy());
-        patch.set("patchOperations", compiledEffects.deepCopy());
+        patch.set("patchOperations", applicablePatchOperations);
         patch.set("proposedConfig", proposedConfig);
         return new AgenticAuthoringManifestCompileResult(
                 true,
@@ -159,6 +161,183 @@ public class AgenticAuthoringManifestService {
             compiledOperations.add(toCompiledOperation(compiledEffect));
         }
         return compiledOperations;
+    }
+
+    private ArrayNode toApplicablePatchOperations(ArrayNode compiledEffects) {
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        for (JsonNode compiledEffect : compiledEffects) {
+            appendApplicablePatchOperations(compiledEffect, patchOperations);
+        }
+        return patchOperations;
+    }
+
+    private void appendApplicablePatchOperations(JsonNode compiledEffect, ArrayNode patchOperations) {
+        String effectKind = text(compiledEffect, "effectKind");
+        switch (effectKind) {
+            case "merge-by-key" -> appendReplaceOperations(
+                    pointerFromResolvedPath(text(compiledEffect, "resolvedPath")),
+                    compiledEffect.path("value"),
+                    patchOperations);
+            case "merge-object" -> appendReplaceOperations(
+                    pointerFromConfigPath(text(compiledEffect, "path")),
+                    compiledEffect.path("value"),
+                    patchOperations);
+            case "set-value" -> patchOperations.add(baseApplicableOperation(
+                    "replace",
+                    pointerFromResolvedPathOrConfigPath(
+                            text(compiledEffect, "resolvedPath"),
+                            text(compiledEffect, "path")))
+                    .set("value", compiledEffect.path("value")));
+            case "remove-by-key" -> patchOperations.add(baseApplicableOperation(
+                    "remove",
+                    pointerFromResolvedPathOrRemovedIndex(
+                            text(compiledEffect, "resolvedPath"),
+                            text(compiledEffect, "path"),
+                            compiledEffect.path("removedIndex").asInt(-1))));
+            case "append", "append-to-array", "append-unique" -> patchOperations.add(baseApplicableOperation(
+                    "add",
+                    pointerForAppend(compiledEffect))
+                    .set("value", compiledEffect.path("value")));
+            case "reorder-by-key" -> {
+                ObjectNode move = baseApplicableOperation(
+                        "move",
+                        pointerForArrayIndex(text(compiledEffect, "path"), compiledEffect.path("toIndex").asInt(-1)));
+                move.put("from", pointerForArrayIndex(text(compiledEffect, "path"), compiledEffect.path("fromIndex").asInt(-1)));
+                patchOperations.add(move);
+            }
+            case "compile-domain-patch" -> patchOperations.add(compiledEffect.deepCopy());
+            default -> patchOperations.add(compiledEffect.deepCopy());
+        }
+    }
+
+    private void appendReplaceOperations(String basePointer, JsonNode value, ArrayNode patchOperations) {
+        if (value == null || value.isMissingNode() || value.isNull()) {
+            patchOperations.add(baseApplicableOperation("replace", basePointer).putNull("value"));
+            return;
+        }
+        if (value.isObject()) {
+            Iterator<String> fieldNames = value.fieldNames();
+            while (fieldNames.hasNext()) {
+                String field = fieldNames.next();
+                appendReplaceOperations(joinPointer(basePointer, field), value.path(field), patchOperations);
+            }
+            return;
+        }
+        patchOperations.add(baseApplicableOperation("replace", basePointer).set("value", value.deepCopy()));
+    }
+
+    private ObjectNode baseApplicableOperation(String op, String path) {
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("op", op);
+        operation.put("path", path);
+        return operation;
+    }
+
+    private String pointerFromResolvedPathOrConfigPath(String resolvedPath, String configPath) {
+        return !resolvedPath.isBlank() ? pointerFromResolvedPath(resolvedPath) : pointerFromConfigPath(configPath);
+    }
+
+    private String pointerFromResolvedPathOrRemovedIndex(String resolvedPath, String configPath, int removedIndex) {
+        if (!resolvedPath.isBlank()) {
+            return pointerFromResolvedPath(resolvedPath);
+        }
+        if (removedIndex >= 0) {
+            return pointerForArrayIndex(configPath, removedIndex);
+        }
+        return pointerFromConfigPath(configPath);
+    }
+
+    private String pointerForAppend(JsonNode compiledEffect) {
+        String path = text(compiledEffect, "path");
+        String resolvedPath = text(compiledEffect, "resolvedPath");
+        String collectionPointer;
+        if (!resolvedPath.isBlank() && path.contains("[].")) {
+            String tail = tailAfterLastArray(path);
+            String tailCollection = collectionPath(tail);
+            collectionPointer = tailCollection.isBlank()
+                    ? pointerFromResolvedPath(resolvedPath)
+                    : joinPointer(pointerFromResolvedPath(resolvedPath), pointerTokens(tailCollection));
+        } else {
+            collectionPointer = pointerFromConfigPath(collectionPath(path));
+        }
+        return collectionPointer.endsWith("/") ? collectionPointer + "-" : collectionPointer + "/-";
+    }
+
+    private String pointerForArrayIndex(String configPath, int index) {
+        String collection = collectionPath(configPath);
+        return joinPointer(pointerFromConfigPath(collection), String.valueOf(index));
+    }
+
+    private String pointerFromResolvedPath(String resolvedPath) {
+        if (resolvedPath == null || resolvedPath.isBlank()) {
+            return "/";
+        }
+        String normalized = resolvedPath.replace("[]/", "/").replace("[]", "");
+        return joinPointer("/", pointerTokens(normalized));
+    }
+
+    private String pointerFromConfigPath(String configPath) {
+        String normalized = normalizeConfigPath(configPath);
+        return joinPointer("/", pointerTokens(normalized));
+    }
+
+    private String normalizeConfigPath(String configPath) {
+        if (configPath == null || configPath.isBlank()) {
+            return "";
+        }
+        return configPath.replace("[]", "");
+    }
+
+    private String[] pointerTokens(String path) {
+        String normalized = normalizeConfigPath(path);
+        if (normalized.isBlank()) {
+            return new String[0];
+        }
+        return normalized.split("[./]");
+    }
+
+    private String joinPointer(String basePointer, String... tokens) {
+        String pointer = (basePointer == null || basePointer.isBlank()) ? "/" : basePointer;
+        if (pointer.endsWith("/") && pointer.length() > 1) {
+            pointer = pointer.substring(0, pointer.length() - 1);
+        }
+        for (String token : tokens) {
+            if (token == null || token.isBlank()) {
+                continue;
+            }
+            if ("/".equals(pointer)) {
+                pointer = "/" + escapePointerToken(token);
+            } else {
+                pointer = pointer + "/" + escapePointerToken(token);
+            }
+        }
+        return pointer.isBlank() ? "/" : pointer;
+    }
+
+    private String escapePointerToken(String token) {
+        return token.replace("~", "~0").replace("/", "~1");
+    }
+
+    private String collectionPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        int marker = path.lastIndexOf("[]");
+        if (marker < 0) {
+            return path;
+        }
+        return path.substring(0, marker);
+    }
+
+    private String tailAfterLastArray(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        int marker = path.lastIndexOf("[].");
+        if (marker < 0) {
+            return "";
+        }
+        return path.substring(marker + 3);
     }
 
     private ObjectNode toCompiledOperation(JsonNode compiledEffect) {
