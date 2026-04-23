@@ -182,6 +182,57 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void templateFlowUsesDirectResourcePathFromBackendDrivenQuickReplyHints() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "tool": "composeDashboard",
+                  "resourcePath": "/api/human-resources/vw-analytics-folha-pagamento",
+                  "layout": "chart-list",
+                  "groupBy": "departamento"
+                }
+                """);
+
+        String resourcePath = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractTemplateResourcePath",
+                contextHints);
+
+        assertThat(resourcePath)
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void templateFlowContinuesAfterQuickReplyEvenWhenButtonTextIsNotCreateVerb() throws Exception {
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("Use Grafico + lista abaixo (/api/human-resources/vw-analytics-folha-pagamento) as the data source.")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "tool": "composeDashboard",
+                          "resourcePath": "/api/human-resources/vw-analytics-folha-pagamento"
+                        }
+                        """))
+                .build();
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-dynamic-page-builder")
+                .currentState(objectMapper.readTree("""
+                        { "widgets": [] }
+                        """))
+                .build();
+        JsonNode templateConfig = objectMapper.readTree("""
+                { "page": { "widgets": [] } }
+                """);
+
+        Boolean shouldUseTemplateFlow = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldUseTemplateFlow",
+                request,
+                context,
+                templateConfig);
+
+        assertThat(shouldUseTemplateFlow).isTrue();
+    }
+
+    @Test
     void buildExecutionPromptPreservesDomainCatalogGovernanceInRagHints() {
         AiContextDTO context = AiContextDTO.builder()
                 .componentId("praxis-table")
