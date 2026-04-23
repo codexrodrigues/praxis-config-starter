@@ -634,6 +634,9 @@ Current implementation status:
 - `GET /api/praxis/config/domain-federation/releases` and
   `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation`
   expose read-only release audit data.
+- `POST /api/praxis/config/domain-federation/releases/{releaseKey}/activate`
+  explicitly activates a candidate release and supersedes the previous active
+  release for the same tenant/environment.
 - Database foreign keys are intentionally minimal in this first slice:
   release ownership is enforced by the database, while release-local semantic
   references remain validator-enforced.

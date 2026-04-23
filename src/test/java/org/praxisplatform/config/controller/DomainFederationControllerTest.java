@@ -266,6 +266,33 @@ class DomainFederationControllerTest {
         verify(releaseService).validation("domain-federation:tenant-a:dev:v1", "tenant-a", "dev");
     }
 
+    @Test
+    void delegatesReleaseActivationToService() {
+        DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
+        DomainFederationIngestDryRunService ingestDryRunService = mock(DomainFederationIngestDryRunService.class);
+        DomainFederationIngestPersistenceService ingestPersistenceService = mock(DomainFederationIngestPersistenceService.class);
+        DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
+        DomainFederationReleaseService releaseService = mock(DomainFederationReleaseService.class);
+        DomainFederationController controller =
+                new DomainFederationController(validator, ingestDryRunService, ingestPersistenceService, queryService, releaseService);
+        DomainFederationReleaseResponse activated = new DomainFederationReleaseResponse(
+                null,
+                "domain-federation:tenant-a:dev:v1",
+                "tenant-a",
+                "dev",
+                "active",
+                "abc",
+                "system",
+                null,
+                null);
+        when(releaseService.activate("domain-federation:tenant-a:dev:v1", "tenant-a", "dev")).thenReturn(activated);
+
+        var entity = controller.activate("domain-federation:tenant-a:dev:v1", "tenant-a", "dev");
+
+        assertThat(entity.getBody()).isSameAs(activated);
+        verify(releaseService).activate("domain-federation:tenant-a:dev:v1", "tenant-a", "dev");
+    }
+
     private DomainFederationValidationRequest validRequest(String tenantId, String environment) {
         return new DomainFederationValidationRequest(
                 DomainFederationContractValidator.SCHEMA_VERSION,

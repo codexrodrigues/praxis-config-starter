@@ -107,6 +107,14 @@ public class DomainFederationController {
         return ResponseEntity.ok(domainFederationReleaseService.validation(releaseKey, tenantId, environment));
     }
 
+    @PostMapping("/releases/{releaseKey}/activate")
+    public ResponseEntity<DomainFederationReleaseResponse> activate(
+            @PathVariable String releaseKey,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainFederationReleaseService.activate(releaseKey, tenantId, environment));
+    }
+
     private DomainFederationValidationRequest applyScopeFallback(
             DomainFederationValidationRequest request,
             String tenantId,

@@ -2,7 +2,9 @@ package org.praxisplatform.config.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -60,6 +62,43 @@ class DomainFederationReleaseServiceTest {
         assertThatThrownBy(() -> service.validation("missing", "tenant-a", "dev"))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Domain federation release not found: missing");
+    }
+
+    @Test
+    void activatesCandidateAndSupersedesPreviousActiveRelease() {
+        DomainFederationReleaseRepository repository = mock(DomainFederationReleaseRepository.class);
+        DomainFederationReleaseService service = new DomainFederationReleaseService(repository, new ObjectMapper());
+        DomainFederationRelease candidate = release("release-candidate", "tenant-a", "dev", "candidate", "2026-04-23T16:00:00Z");
+        DomainFederationRelease active = release("release-active", "tenant-a", "dev", "active", "2026-04-22T16:00:00Z");
+        when(repository.findByReleaseKeyAndOptionalScope("release-candidate", "tenant-a", "dev"))
+                .thenReturn(java.util.Optional.of(candidate));
+        when(repository.findByTenantIdAndEnvironmentAndStatusOrderByCreatedAtDesc("tenant-a", "dev", "active"))
+                .thenReturn(List.of(active));
+        when(repository.save(argThat(release -> release != null && "release-active".equals(release.getReleaseKey()))))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.save(argThat(release -> release != null && "release-candidate".equals(release.getReleaseKey()))))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.activate("release-candidate", "tenant-a", "dev");
+
+        assertThat(response.status()).isEqualTo("active");
+        assertThat(response.activatedAt()).isNotNull();
+        assertThat(active.getStatus()).isEqualTo("superseded");
+        verify(repository).save(active);
+        verify(repository).save(candidate);
+    }
+
+    @Test
+    void rejectsActivationWhenReleaseIsNotCandidate() {
+        DomainFederationReleaseRepository repository = mock(DomainFederationReleaseRepository.class);
+        DomainFederationReleaseService service = new DomainFederationReleaseService(repository, new ObjectMapper());
+        DomainFederationRelease active = release("release-active", "tenant-a", "dev", "active", "2026-04-23T16:00:00Z");
+        when(repository.findByReleaseKeyAndOptionalScope("release-active", "tenant-a", "dev"))
+                .thenReturn(java.util.Optional.of(active));
+
+        assertThatThrownBy(() -> service.activate("release-active", "tenant-a", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Only candidate federation releases can be activated");
     }
 
     private DomainFederationRelease release(

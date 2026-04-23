@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainFederationRelease;
@@ -64,6 +65,43 @@ public class DomainFederationReleaseService {
                 release.getPayloadHash(),
                 read(release.getValidationReport()),
                 release.getCreatedAt());
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public DomainFederationReleaseResponse activate(
+            String releaseKey,
+            String tenantId,
+            String environment) {
+        if (!StringUtils.hasText(releaseKey)) {
+            throw new ConfigurationIngestionException("releaseKey is required");
+        }
+        String resolvedReleaseKey = releaseKey.trim();
+        String resolvedTenant = normalize(tenantId);
+        String resolvedEnvironment = normalize(environment);
+        DomainFederationRelease release = releaseRepository
+                .findByReleaseKeyAndOptionalScope(resolvedReleaseKey, resolvedTenant, resolvedEnvironment)
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Domain federation release not found: " + resolvedReleaseKey));
+        if (!"candidate".equals(release.getStatus())) {
+            throw new ConfigurationIngestionException(
+                    "Only candidate federation releases can be activated: " + resolvedReleaseKey);
+        }
+
+        Instant now = Instant.now();
+        releaseRepository.findByTenantIdAndEnvironmentAndStatusOrderByCreatedAtDesc(
+                        release.getTenantId(),
+                        release.getEnvironment(),
+                        "active")
+                .stream()
+                .filter(activeRelease -> !activeRelease.getId().equals(release.getId()))
+                .forEach(activeRelease -> {
+                    activeRelease.setStatus("superseded");
+                    releaseRepository.save(activeRelease);
+                });
+
+        release.setStatus("active");
+        release.setActivatedAt(now);
+        return toResponse(releaseRepository.save(release));
     }
 
     private DomainFederationReleaseResponse toResponse(DomainFederationRelease release) {
