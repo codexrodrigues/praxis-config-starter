@@ -1,6 +1,5 @@
 # Praxis Config Starter
 
-![Version](https://img.shields.io/badge/version-0.0.12-blue)
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.codexrodrigues/praxis-config-starter?logo=apachemaven&color=blue)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2%2B-brightgreen)
 ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20Vector-blue)
@@ -32,7 +31,7 @@ Add the dependency to your Host Application's `pom.xml` (e.g., `praxis-api-quick
 <dependency>
     <groupId>io.github.codexrodrigues</groupId>
     <artifactId>praxis-config-starter</artifactId>
-    <version>0.1.0-rc.1</version>
+    <version>0.1.0-rc.23</version>
 </dependency>
 ```
 
