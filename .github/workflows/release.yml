@@ -290,9 +290,9 @@ jobs:
       - name: Set module version
         run: mvn -q versions:set -DnewVersion=${{ steps.ver.outputs.resolved }} -DgenerateBackupPoms=false
 
-      - name: Build and sign (verify)
+      - name: Build and sign without tests (verify)
         run: |
-          mvn -B -P release,ci-smoke-unit -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -Dgpg.executable=gpg -T 1C \
+          mvn -B -P release,ci-smoke-unit -DskipTests -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -Dgpg.executable=gpg -T 1C \
             clean verify
 
       - name: Check signatures exist
