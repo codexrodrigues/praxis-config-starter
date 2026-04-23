@@ -367,12 +367,20 @@ Current filters:
 
 Current behavior:
 
-- projects context from `domain_catalog_release` and `domain_catalog_item`;
+- prefers an active persisted `domain_federation_release` for the tenant and
+  environment when one exists;
+- falls back to projection from `domain_catalog_release` and
+  `domain_catalog_item` when no active persisted release exists;
 - returns context items plus relationship rows in one envelope;
 - marks whether the result is federated or service-scoped;
+- declares the response source mode as `persisted_federation` or
+  `catalog_projection_fallback`;
 - reuses catalog retrieval guidance and adds federation-specific caveats;
 - applies the federation retrieval policy before returning relationships and context;
-- does not yet materialize `domain_contract`, `domain_resolution` or final redaction decisions.
+- materializes persisted context relationships and their linked contracts when
+  using an active persisted release;
+- does not yet materialize `domain_resolution` or final redaction decisions in
+  query results.
 
 ## Retrieval Policy v0.1
 
@@ -637,6 +645,10 @@ Current implementation status:
 - `POST /api/praxis/config/domain-federation/releases/{releaseKey}/activate`
   explicitly activates a candidate release and supersedes the previous active
   release for the same tenant/environment.
+- `GET /api/praxis/config/domain-federation/context` now prefers active
+  persisted federation releases and returns `sourceMode=persisted_federation`;
+  if no active persisted release exists, it keeps the catalog projection
+  fallback and returns `sourceMode=catalog_projection_fallback`.
 - Database foreign keys are intentionally minimal in this first slice:
   release ownership is enforced by the database, while release-local semantic
   references remain validator-enforced.

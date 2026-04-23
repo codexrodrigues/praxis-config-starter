@@ -402,6 +402,7 @@ class DomainCatalogPromptContextServiceTest {
                         "references",
                         12,
                         true,
+                        "catalog_projection_fallback",
                         List.of("Use federated context with retrieval policy."),
                         new DomainFederationRetrievalPolicyReport(
                                 "compliance_review",
@@ -488,6 +489,7 @@ class DomainCatalogPromptContextServiceTest {
                 .contains("[node/field] CPF")
                 .contains("DOMAIN_CATALOG_RELATIONSHIPS")
                 .contains("federated: true")
+                .contains("sourceMode: catalog_projection_fallback")
                 .contains("[edge/references] edge:hr.funcionario.references.security.usuario")
                 .contains("DOMAIN_FEDERATION_POLICY")
                 .contains("policyProfile: compliance_review")

@@ -94,6 +94,7 @@ class DomainFederationControllerTest {
                 "depends_on",
                 20,
                 true,
+                "catalog_projection_fallback",
                 List.of("Use only explicit relationships."),
                 null,
                 null,

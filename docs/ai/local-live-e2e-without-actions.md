@@ -33,7 +33,7 @@ Validated results:
 - Domain Federation v0.1 starter tests passed locally: `18` tests, `0` failures across controller, validator, dry-run ingest, query and retrieval policy.
 - Domain Federation v0.1 live smoke passed against the locally rebuilt quickstart jar with `schemaVersion=praxis.domain-federation/v0.1`, `dryRunValid=true`, candidate persistence, release audit, persisted validation and activation.
 - Domain Federation v0.1 live smoke passed again against the quickstart jar built with the published `praxis-config-starter:0.1.0-rc.24` dependency. The nested starter jar contains `DomainFederationController`, `DomainFederationContractValidator`, `DomainFederationQueryService` and `DomainFederationIngestDryRunService`.
-- Domain Federation v0.1 persistent live smoke passed against a quickstart jar packaged with the local starter `0.1.0-rc.5` override and `PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED=true`. The persistent ingest returned `dryRun=false`, `releaseStatus=candidate`, `releaseListed=true`, `validationReportValid=true`, `persistedSources=1`, `persistedContexts=2`, `persistedContextRelationships=1`, `persistedContracts=1` and `persistedResolutions=1`.
+- Domain Federation v0.1 persistent live smoke passed against a quickstart jar packaged with the local starter `0.1.0-rc.5` override and `PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED=true`. The persistent ingest returned `dryRun=false`, `releaseStatus=candidate`, `releaseListed=true`, `validationReportValid=true`, `persistedSources=1`, `persistedContexts=2`, `persistedContextRelationships=1`, `persistedContracts=1` and `persistedResolutions=1`. The same smoke now activates the candidate release and verifies `/domain-federation/context` returns `sourceMode=persisted_federation`.
 - The original quickstart jar built before the starter federation controller returned `404`.
 
 ## Prerequisites
@@ -155,6 +155,8 @@ This validates:
 - `POST /api/praxis/config/domain-federation/ingest?dryRun=false`;
 - persisted release lookup through `GET /api/praxis/config/domain-federation/releases?status=candidate`;
 - persisted validation report lookup through `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation`;
+- explicit activation through `POST /api/praxis/config/domain-federation/releases/{releaseKey}/activate`;
+- active persisted context retrieval through `GET /api/praxis/config/domain-federation/context`;
 - persisted counts for `domain_source`, `domain_context`, `domain_context_relationship`, `domain_contract` and `domain_resolution`.
 
 The starter version override must match the local starter version being tested.

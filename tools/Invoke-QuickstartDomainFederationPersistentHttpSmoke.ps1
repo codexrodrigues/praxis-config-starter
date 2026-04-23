@@ -302,6 +302,30 @@ try {
         throw "Release validation endpoint did not return the persisted valid report."
     }
 
+    $activated = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/domain-federation/releases/$encodedReleaseKey/activate" `
+        -Headers $headers `
+        -TimeoutSec 60
+    if ($activated.releaseKey -ne $ingest.releaseKey -or $activated.status -ne "active") {
+        throw "Release activation endpoint did not activate the persisted candidate release."
+    }
+
+    $contextQuery = "serviceKey=$([uri]::EscapeDataString($serviceKey))&contextKey=human-resources&relationshipType=references&resourceKey=assets.veiculos&limit=10"
+    $context = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$base/api/praxis/config/domain-federation/context?$contextQuery" `
+        -Headers $headers `
+        -TimeoutSec 60
+    if ($context.sourceMode -ne "persisted_federation") {
+        throw "Expected /domain-federation/context to use persisted_federation source mode, got $($context.sourceMode)."
+    }
+    $contextItemCount = @($context.context.items).Count
+    $contextRelationshipCount = @($context.relationships).Count
+    if ($contextItemCount -lt 1 -or $contextRelationshipCount -lt 1) {
+        throw "Expected persisted federation context to return context items and relationships."
+    }
+
     [pscustomobject]@{
         health = $health.status
         baseUrl = $base
@@ -321,6 +345,10 @@ try {
         persistedResolutions = $ingest.persistedCounts.resolutions
         releaseListed = $true
         validationReportValid = $validation.validationReport.valid
+        activatedStatus = $activated.status
+        contextSourceMode = $context.sourceMode
+        contextItemCount = $contextItemCount
+        contextRelationshipCount = $contextRelationshipCount
     } | ConvertTo-Json -Depth 8
 } finally {
     if ($startedQuickstart -and $null -ne $quickstartProcess) {

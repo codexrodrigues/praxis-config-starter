@@ -15,6 +15,7 @@ public record DomainFederationContextQueryResponse(
         String relationshipType,
         int limit,
         boolean federated,
+        String sourceMode,
         List<String> retrievalGuidance,
         DomainFederationRetrievalPolicyReport policyReport,
         DomainCatalogContextResponse context,
