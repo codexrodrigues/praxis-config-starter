@@ -10,10 +10,12 @@ import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainFederationContext;
+import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
 import org.praxisplatform.config.dto.DomainFederationSource;
 import org.praxisplatform.config.dto.DomainFederationValidationReport;
 import org.praxisplatform.config.dto.DomainFederationValidationRequest;
 import org.praxisplatform.config.service.DomainFederationContractValidator;
+import org.praxisplatform.config.service.DomainFederationQueryService;
 
 @Tag("unit")
 class DomainFederationControllerTest {
@@ -21,7 +23,8 @@ class DomainFederationControllerTest {
     @Test
     void returnsValidationReportForDryRun() {
         DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
-        DomainFederationController controller = new DomainFederationController(validator);
+        DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
+        DomainFederationController controller = new DomainFederationController(validator, queryService);
         DomainFederationValidationRequest request = validRequest("tenant-a", "dev");
         DomainFederationValidationReport report = new DomainFederationValidationReport(true, 0, 0, List.of());
         when(validator.validate(request)).thenReturn(report);
@@ -35,7 +38,8 @@ class DomainFederationControllerTest {
     @Test
     void usesTenantAndEnvironmentHeadersWhenRequestOmitsScope() {
         DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
-        DomainFederationController controller = new DomainFederationController(validator);
+        DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
+        DomainFederationController controller = new DomainFederationController(validator, queryService);
         DomainFederationValidationReport report = new DomainFederationValidationReport(true, 0, 0, List.of());
         when(validator.validate(argThat(request ->
                 request != null
@@ -49,6 +53,65 @@ class DomainFederationControllerTest {
                 request != null
                         && "tenant-a".equals(request.tenantId())
                         && "dev".equals(request.environment())));
+    }
+
+    @Test
+    void delegatesFederatedContextQueryToService() {
+        DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
+        DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
+        DomainFederationController controller = new DomainFederationController(validator, queryService);
+        DomainFederationContextQueryResponse response = new DomainFederationContextQueryResponse(
+                "praxis.domain-federation-context/v0.1",
+                "tenant-a",
+                "dev",
+                null,
+                null,
+                "veiculo",
+                "operations",
+                "node",
+                null,
+                "depends_on",
+                20,
+                true,
+                List.of("Use only explicit relationships."),
+                null,
+                List.of());
+        when(queryService.context(
+                null,
+                null,
+                "tenant-a",
+                "dev",
+                "node",
+                "operations",
+                null,
+                "depends_on",
+                "veiculo",
+                20)).thenReturn(response);
+
+        var entity = controller.context(
+                null,
+                null,
+                "node",
+                "operations",
+                null,
+                "depends_on",
+                "veiculo",
+                20,
+                "tenant-a",
+                "dev");
+
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(queryService).context(
+                null,
+                null,
+                "tenant-a",
+                "dev",
+                "node",
+                "operations",
+                null,
+                "depends_on",
+                "veiculo",
+                20);
     }
 
     private DomainFederationValidationRequest validRequest(String tenantId, String environment) {

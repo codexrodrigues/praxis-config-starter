@@ -330,32 +330,32 @@ Ingestion steps:
 
 ## Query v0.1
 
-Future endpoint shape:
+Current endpoint shape:
 
 ```http
 GET /api/praxis/config/domain-federation/context
 ```
 
-Recommended filters:
+Current filters:
 
 | Filter | Purpose |
 | --- | --- |
-| `serviceKey` | Restrict to one publishing service. |
-| `contextKey` | Restrict to one source context. |
+| `serviceKey` | Restrict to one publishing service. Omit for federated latest-release projection. |
 | `resourceKey` | Restrict to one resource or concept neighborhood. |
-| `targetContextKey` | Include relationships toward a target context. |
-| `relationshipType` | Restrict by context relationship type. |
-| `contractKey` | Explain one contract and related contexts. |
-| `intent` | `authoring`, `explanation`, `impact_analysis`, `compliance_review`, `troubleshooting`. |
+| `contextKey` | Restrict to one source context. |
+| `itemType` | Catalog item type filter. Defaults to `node`. |
+| `nodeType` | Optional node type filter for the context projection. |
+| `relationshipType` | Restrict relationship rows by edge type. |
 | `q` | Semantic or lexical query. |
+| `limit` | Maximum context and relationship items returned. |
 
-The response must be LLM-safe by default:
+Current behavior:
 
-- exclude `ai_visibility=deny`;
-- mask or summarize restricted concepts;
-- include source/confidence/evidence;
-- include conflicts instead of silently resolving them;
-- include only contracts visible to the caller.
+- projects context from `domain_catalog_release` and `domain_catalog_item`;
+- returns context items plus relationship rows in one envelope;
+- marks whether the result is federated or service-scoped;
+- reuses catalog retrieval guidance and adds federation-specific caveats;
+- does not yet materialize `domain_contract`, `domain_resolution` or final redaction decisions.
 
 ## Validation Rules
 
