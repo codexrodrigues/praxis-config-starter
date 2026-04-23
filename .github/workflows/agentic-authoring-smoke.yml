@@ -31,6 +31,16 @@ on:
         required: false
         default: false
         type: boolean
+      run_quickstart_http_smoke:
+        description: 'Run the quickstart agentic authoring HTTP/SSE smoke.'
+        required: false
+        default: true
+        type: boolean
+      run_domain_catalog_v2_smoke:
+        description: 'Run the quickstart Domain Catalog v2 HTTP smoke.'
+        required: false
+        default: true
+        type: boolean
       run_llm_compliance_policy_shadow:
         description: 'Run the external LLM compliance-policy shadow test against the selected provider.'
         required: false
@@ -180,6 +190,7 @@ jobs:
         run: npx playwright install chromium
 
       - name: Run quickstart authoring HTTP/SSE smoke suite
+        if: inputs.run_quickstart_http_smoke == true
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
@@ -192,6 +203,7 @@ jobs:
             -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
 
       - name: Run quickstart Domain Catalog v2 HTTP smoke
+        if: inputs.run_domain_catalog_v2_smoke == true
         shell: pwsh
         working-directory: praxis-config-starter
         run: |

@@ -37,4 +37,8 @@ GitHub Actions:
 3. Select `provider`.
 4. Enable `run_llm_compliance_policy_shadow`.
 
+To run only the compliance-policy shadow gate, disable `run_quickstart_http_smoke`,
+disable `run_domain_catalog_v2_smoke`, keep `run_page_builder_full_e2e` disabled,
+and enable `run_llm_compliance_policy_shadow`.
+
 The sanitized result is uploaded from `target/agentic-authoring/`. Secrets must remain in local env files or GitHub Actions secrets and must not be committed.
