@@ -1,0 +1,52 @@
+package org.praxisplatform.config.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+
+@Tag("unit")
+class DomainFederationRetrievalPolicyServiceTest {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final DomainFederationRetrievalPolicyService service = new DomainFederationRetrievalPolicyService();
+
+    @Test
+    void excludesDeniedItemsAndReportsGovernanceSignals() throws Exception {
+        List<DomainCatalogItemResponse> items = List.of(
+                item("allowed", "{\"confidence\":0.95}"),
+                item("masked", "{\"payloadMode\":\"governed-summary\",\"contextVisibility\":\"mask\"}"),
+                item("low-confidence", "{\"confidence\":0.41}"),
+                item("denied", "{\"aiUsage\":{\"visibility\":\"deny\"}}"));
+
+        var result = service.apply(items);
+
+        assertThat(result.items()).extracting(DomainCatalogItemResponse::itemKey)
+                .containsExactly("allowed", "masked", "low-confidence");
+        assertThat(result.report().inputItemCount()).isEqualTo(4);
+        assertThat(result.report().returnedItemCount()).isEqualTo(3);
+        assertThat(result.report().deniedItemCount()).isEqualTo(1);
+        assertThat(result.report().governedSummaryItemCount()).isEqualTo(1);
+        assertThat(result.report().lowConfidenceItemCount()).isEqualTo(1);
+        assertThat(result.report().decisions())
+                .anySatisfy(decision -> assertThat(decision).contains("Excluded denied"))
+                .anySatisfy(decision -> assertThat(decision).contains("Flagged low-confidence"));
+    }
+
+    private DomainCatalogItemResponse item(String key, String payload) throws Exception {
+        return new DomainCatalogItemResponse(
+                UUID.randomUUID(),
+                "release",
+                "node",
+                key,
+                "context",
+                "entity",
+                null,
+                null,
+                objectMapper.readTree(payload));
+    }
+}

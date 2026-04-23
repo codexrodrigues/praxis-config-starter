@@ -16,6 +16,7 @@ public record DomainFederationContextQueryResponse(
         int limit,
         boolean federated,
         List<String> retrievalGuidance,
+        DomainFederationRetrievalPolicyReport policyReport,
         DomainCatalogContextResponse context,
         List<DomainCatalogItemResponse> relationships
 ) {

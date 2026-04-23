@@ -367,7 +367,22 @@ Current behavior:
 - returns context items plus relationship rows in one envelope;
 - marks whether the result is federated or service-scoped;
 - reuses catalog retrieval guidance and adds federation-specific caveats;
+- applies the federation retrieval policy before returning relationships and context;
 - does not yet materialize `domain_contract`, `domain_resolution` or final redaction decisions.
+
+## Retrieval Policy v0.1
+
+Current policy behavior:
+
+- excludes any returned item with `aiUsage.visibility=deny`;
+- preserves catalog-level masking and `summarize_only` summaries;
+- reports governed-summary counts;
+- reports low-confidence items below `0.7`;
+- includes policy decisions in the federated context response.
+
+This is intentionally conservative. It is not yet a full authorization engine.
+It is the first LLM-facing retrieval guard that prevents obviously denied
+semantic content from leaking through federated projections.
 
 ## Validation Rules
 

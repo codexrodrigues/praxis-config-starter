@@ -81,6 +81,7 @@ class DomainFederationControllerTest {
                 true,
                 List.of("Use only explicit relationships."),
                 null,
+                null,
                 List.of());
         when(queryService.context(
                 null,
