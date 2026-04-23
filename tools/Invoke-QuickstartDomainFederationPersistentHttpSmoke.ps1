@@ -393,6 +393,66 @@ try {
         throw "Expected deny_for_llm context guidance to mention contract.visibility=deny_for_llm."
     }
 
+    $lowConfidenceRequest = Copy-DeepObject $request
+    $lowConfidenceRequest.contracts[0].contractKey = "assets.vehicle-allocation.lookup.low-confidence.v1"
+    $lowConfidenceRequest.contextRelationships[0].relationshipKey = "human-resources.funcionarios.references.assets.veiculos.low-confidence"
+    $lowConfidenceRequest.contextRelationships[0].contractKey = "assets.vehicle-allocation.lookup.low-confidence.v1"
+    $lowConfidenceRequest.contextRelationships[0].confidence = 0.79
+    $lowConfidenceRequest.resolutions[0].resolutionKey = "hr.allocated_vehicle.maps_to.assets.vehicle.low-confidence"
+    $lowConfidenceBody = ConvertTo-DeepJson $lowConfidenceRequest
+
+    $lowConfidenceDryRun = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/domain-federation/dry-run" `
+        -Headers $jsonHeaders `
+        -Body $lowConfidenceBody `
+        -TimeoutSec 90
+    if ($lowConfidenceDryRun.valid -ne $true -or $lowConfidenceDryRun.errorCount -ne 0) {
+        throw "Expected low-confidence dry-run to remain valid for persisted retrieval verification."
+    }
+
+    $lowConfidenceIngest = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/domain-federation/ingest?dryRun=false" `
+        -Headers $jsonHeaders `
+        -Body $lowConfidenceBody `
+        -TimeoutSec 90
+    if ($lowConfidenceIngest.valid -ne $true -or [string]::IsNullOrWhiteSpace($lowConfidenceIngest.releaseKey)) {
+        throw "Expected low-confidence ingest to persist a candidate release."
+    }
+
+    $lowConfidenceReleaseKey = [uri]::EscapeDataString($lowConfidenceIngest.releaseKey)
+    $lowConfidenceActivated = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/domain-federation/releases/$lowConfidenceReleaseKey/activate" `
+        -Headers $headers `
+        -TimeoutSec 60
+    if ($lowConfidenceActivated.releaseKey -ne $lowConfidenceIngest.releaseKey -or $lowConfidenceActivated.status -ne "active") {
+        throw "Expected low-confidence release activation to succeed."
+    }
+
+    $lowConfidenceContext = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$base/api/praxis/config/domain-federation/context?$contextQuery&policyProfile=authoring" `
+        -Headers $headers `
+        -TimeoutSec 60
+    if ($lowConfidenceContext.sourceMode -ne "persisted_federation") {
+        throw "Expected low-confidence context query to stay on persisted_federation mode, got $($lowConfidenceContext.sourceMode)."
+    }
+    if (@($lowConfidenceContext.context.items).Count -lt 1) {
+        throw "Expected low-confidence context query to keep persisted context items."
+    }
+    if (@($lowConfidenceContext.relationships).Count -ne 0) {
+        throw "Expected low-confidence persisted relationship to be excluded from authoring retrieval."
+    }
+    if ($lowConfidenceContext.policyReport.lowConfidenceItemCount -lt 1) {
+        throw "Expected low-confidence persisted relationship exclusion to increment lowConfidenceItemCount."
+    }
+    $lowConfidenceGuidance = @($lowConfidenceContext.retrievalGuidance)
+    if (-not ($lowConfidenceGuidance | Where-Object { $_ -like "*low-confidence*" })) {
+        throw "Expected low-confidence context guidance to mention low-confidence persisted items."
+    }
+
     [pscustomobject]@{
         health = $health.status
         baseUrl = $base
@@ -423,6 +483,13 @@ try {
         deniedContextRelationshipCount = @($unsafeContext.relationships).Count
         deniedItemCount = $unsafeContext.policyReport.deniedItemCount
         deniedGuidanceConfirmed = $true
+        lowConfidenceReleaseKey = $lowConfidenceIngest.releaseKey
+        lowConfidenceActivatedStatus = $lowConfidenceActivated.status
+        lowConfidenceContextSourceMode = $lowConfidenceContext.sourceMode
+        lowConfidenceContextItemCount = @($lowConfidenceContext.context.items).Count
+        lowConfidenceContextRelationshipCount = @($lowConfidenceContext.relationships).Count
+        lowConfidenceItemCount = $lowConfidenceContext.policyReport.lowConfidenceItemCount
+        lowConfidenceGuidanceConfirmed = $true
     } | ConvertTo-Json -Depth 8
 } finally {
     if ($startedQuickstart -and $null -ne $quickstartProcess) {
