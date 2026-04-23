@@ -7,12 +7,15 @@ import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.service.DomainRuleService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -56,6 +59,19 @@ public class DomainRuleController {
                 ruleKey));
     }
 
+    @PatchMapping("/definitions/{definitionId}/status")
+    public ResponseEntity<DomainRuleDefinitionResponse> transitionDefinitionStatus(
+            @PathVariable UUID definitionId,
+            @RequestBody DomainRuleStatusTransitionRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainRuleService.transitionDefinitionStatus(
+                definitionId,
+                request,
+                tenantId,
+                environment));
+    }
+
     @PostMapping("/materializations")
     public ResponseEntity<DomainRuleMaterializationResponse> createMaterialization(
             @RequestBody DomainRuleMaterializationRequest request,
@@ -81,5 +97,18 @@ public class DomainRuleController {
                 targetArtifactType,
                 targetArtifactKey,
                 status));
+    }
+
+    @PatchMapping("/materializations/{materializationId}/status")
+    public ResponseEntity<DomainRuleMaterializationResponse> transitionMaterializationStatus(
+            @PathVariable UUID materializationId,
+            @RequestBody DomainRuleStatusTransitionRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainRuleService.transitionMaterializationStatus(
+                materializationId,
+                request,
+                tenantId,
+                environment));
     }
 }

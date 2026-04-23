@@ -355,8 +355,10 @@ Recommended first endpoints:
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`
 - `POST /api/praxis/config/domain-rules/definitions`
 - `GET /api/praxis/config/domain-rules/definitions`
+- `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
 - `POST /api/praxis/config/domain-rules/materializations`
 - `GET /api/praxis/config/domain-rules/materializations`
+- `PATCH /api/praxis/config/domain-rules/materializations/{materializationId}/status`
 
 `/domain-catalog/context` may continue to exist as the stable public retrieval
 API. Internally it can delegate to the knowledge layer once v1 is ready.
@@ -366,6 +368,24 @@ the persistence contract for shared rule definitions and target-specific
 materialization records. A materialization row may point to
 `target_layer=form_config`, but applying that payload to `FormConfig` remains a
 separate reviewed authoring operation.
+
+Status transition endpoints accept a compact governance decision payload:
+
+```json
+{
+  "status": "active",
+  "decidedByType": "human",
+  "decidedBy": "privacy-office",
+  "validationResult": {
+    "review": "approved"
+  }
+}
+```
+
+For definitions, `approved` sets `approved_at` and `active` sets both
+`approved_at` and `activated_at` when missing. For materializations, `applied`
+sets `applied_at` when missing. These endpoints are for lifecycle governance;
+they still do not execute rules.
 
 ## LLM Runtime Contract
 

@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
@@ -27,6 +29,11 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 @ConditionalOnBean({DomainRuleDefinitionRepository.class, DomainRuleMaterializationRepository.class})
 public class DomainRuleService {
+
+    private static final List<String> DEFINITION_STATUSES = List.of(
+            "draft", "proposed", "approved", "active", "deprecated", "retired", "rejected");
+    private static final List<String> MATERIALIZATION_STATUSES = List.of(
+            "draft", "pending_review", "applied", "failed", "superseded", "reverted");
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
@@ -126,6 +133,46 @@ public class DomainRuleService {
     }
 
     @Transactional
+    public DomainRuleDefinitionResponse transitionDefinitionStatus(
+            UUID definitionId,
+            DomainRuleStatusTransitionRequest request,
+            String tenantId,
+            String environment) {
+        if (definitionId == null) {
+            throw new ConfigurationIngestionException("definitionId is required");
+        }
+        if (request == null) {
+            throw new ConfigurationIngestionException("Domain rule status transition request is required");
+        }
+        String status = requireAllowedStatus(request.status(), "status", DEFINITION_STATUSES);
+        DomainRuleDefinition definition = definitionRepository.findById(definitionId)
+                .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + definitionId));
+        requireScope(definition.getTenantId(), tenantId, "tenantId");
+        requireScope(definition.getEnvironment(), environment, "environment");
+
+        definition.setStatus(status);
+        if (request.validationResult() != null && !request.validationResult().isNull()) {
+            definition.setValidationResult(write(request.validationResult()));
+        }
+        if (StringUtils.hasText(request.decidedBy()) && ("approved".equals(status) || "active".equals(status))) {
+            definition.setApprovedBy(request.decidedBy().trim());
+        }
+        Instant now = Instant.now();
+        if ("approved".equals(status) && definition.getApprovedAt() == null) {
+            definition.setApprovedAt(now);
+        }
+        if ("active".equals(status)) {
+            if (definition.getApprovedAt() == null) {
+                definition.setApprovedAt(now);
+            }
+            if (definition.getActivatedAt() == null) {
+                definition.setActivatedAt(now);
+            }
+        }
+        return toResponse(definitionRepository.save(definition));
+    }
+
+    @Transactional
     public DomainRuleMaterializationResponse createMaterialization(
             DomainRuleMaterializationRequest request,
             String tenantId,
@@ -157,7 +204,9 @@ public class DomainRuleService {
         materialization.setStatus(normalizeOrDefault(request.status(), "draft"));
         materialization.setMaterializedPayload(writeOrDefault(request.materializedPayload(), "{}"));
         materialization.setSourceHash(normalize(request.sourceHash()));
-        materialization.setValidationResult(writeNullable(request.validationResult()));
+        if (request.validationResult() != null && !request.validationResult().isNull()) {
+            materialization.setValidationResult(write(request.validationResult()));
+        }
         materialization.setAppliedByType(normalize(request.appliedByType()));
         materialization.setAppliedBy(normalize(request.appliedBy()));
         return toResponse(materializationRepository.save(materialization));
@@ -208,6 +257,38 @@ public class DomainRuleService {
                 .filter(materialization -> matchesScope(materialization.getEnvironment(), resolvedEnvironment))
                 .map(this::toResponse)
                 .toList();
+    }
+
+    @Transactional
+    public DomainRuleMaterializationResponse transitionMaterializationStatus(
+            UUID materializationId,
+            DomainRuleStatusTransitionRequest request,
+            String tenantId,
+            String environment) {
+        if (materializationId == null) {
+            throw new ConfigurationIngestionException("materializationId is required");
+        }
+        if (request == null) {
+            throw new ConfigurationIngestionException("Domain rule status transition request is required");
+        }
+        String status = requireAllowedStatus(request.status(), "status", MATERIALIZATION_STATUSES);
+        DomainRuleMaterialization materialization = materializationRepository.findById(materializationId)
+                .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + materializationId));
+        requireScope(materialization.getTenantId(), tenantId, "tenantId");
+        requireScope(materialization.getEnvironment(), environment, "environment");
+
+        materialization.setStatus(status);
+        materialization.setValidationResult(writeNullable(request.validationResult()));
+        if (StringUtils.hasText(request.decidedByType())) {
+            materialization.setAppliedByType(request.decidedByType().trim());
+        }
+        if (StringUtils.hasText(request.decidedBy())) {
+            materialization.setAppliedBy(request.decidedBy().trim());
+        }
+        if ("applied".equals(status) && materialization.getAppliedAt() == null) {
+            materialization.setAppliedAt(Instant.now());
+        }
+        return toResponse(materializationRepository.save(materialization));
     }
 
     private DomainCatalogRelease resolveRelease(UUID releaseId) {
@@ -286,6 +367,22 @@ public class DomainRuleService {
     private void requireText(String value, String field) {
         if (!StringUtils.hasText(value)) {
             throw new ConfigurationIngestionException(field + " is required");
+        }
+    }
+
+    private String requireAllowedStatus(String value, String field, List<String> allowedStatuses) {
+        requireText(value, field);
+        String status = value.trim();
+        if (!allowedStatuses.contains(status)) {
+            throw new ConfigurationIngestionException(field + " must be one of " + allowedStatuses);
+        }
+        return status;
+    }
+
+    private void requireScope(String actual, String expected, String field) {
+        String normalizedExpected = normalize(expected);
+        if (normalizedExpected != null && !normalizedExpected.equals(actual)) {
+            throw new ConfigurationIngestionException("Rule " + field + " does not match request scope");
         }
     }
 

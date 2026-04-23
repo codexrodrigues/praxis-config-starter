@@ -13,6 +13,7 @@ import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.service.DomainRuleService;
 
 @Tag("unit")
@@ -184,5 +185,93 @@ class DomainRuleControllerTest {
 
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).createMaterialization(request, "tenant-a", "dev");
+    }
+
+    @Test
+    void transitionsDefinitionStatusWithTenantAndEnvironmentHeaders() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleController controller = new DomainRuleController(service);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleStatusTransitionRequest request = new DomainRuleStatusTransitionRequest(
+                "active",
+                "human",
+                "privacy-office",
+                null);
+        DomainRuleDefinitionResponse response = new DomainRuleDefinitionResponse(
+                definitionId,
+                "tenant-a",
+                "dev",
+                "rule-a",
+                1,
+                "visual_guidance",
+                "active",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "llm",
+                "agent",
+                "privacy-office",
+                null,
+                null,
+                null,
+                null);
+        when(service.transitionDefinitionStatus(definitionId, request, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.transitionDefinitionStatus(definitionId, request, "tenant-a", "dev");
+
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).transitionDefinitionStatus(definitionId, request, "tenant-a", "dev");
+    }
+
+    @Test
+    void transitionsMaterializationStatusWithTenantAndEnvironmentHeaders() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleController controller = new DomainRuleController(service);
+        UUID definitionId = UUID.randomUUID();
+        UUID materializationId = UUID.randomUUID();
+        DomainRuleStatusTransitionRequest request = new DomainRuleStatusTransitionRequest(
+                "applied",
+                "human",
+                "privacy-office",
+                null);
+        DomainRuleMaterializationResponse response = new DomainRuleMaterializationResponse(
+                materializationId,
+                "tenant-a",
+                "dev",
+                definitionId,
+                "rule-a",
+                1,
+                "form:rule-a",
+                "form_config",
+                "praxis-dynamic-form",
+                "funcionarios-form-demo",
+                "/formRules/-",
+                null,
+                "lgpd-cpf-guidance",
+                "applied",
+                null,
+                null,
+                null,
+                "human",
+                "privacy-office",
+                null,
+                null,
+                null);
+        when(service.transitionMaterializationStatus(materializationId, request, "tenant-a", "dev"))
+                .thenReturn(response);
+
+        var entity = controller.transitionMaterializationStatus(materializationId, request, "tenant-a", "dev");
+
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).transitionMaterializationStatus(materializationId, request, "tenant-a", "dev");
     }
 }
