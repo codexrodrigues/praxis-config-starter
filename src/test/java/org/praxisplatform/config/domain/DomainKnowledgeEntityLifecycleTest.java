@@ -80,4 +80,41 @@ class DomainKnowledgeEntityLifecycleTest {
         assertThat(changeSet.getPatch()).isEqualTo("[]");
         assertThat(changeSet.getCreatedAt()).isNotNull();
     }
+
+    @Test
+    void sharedRuleEntitiesDefaultGovernanceAndMaterializationPayloads() {
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .ruleKey("human-resources.funcionarios.rule.lgpd-cpf-guidance")
+                .ruleType("visual_guidance")
+                .resourceKey("human-resources.funcionarios")
+                .createdByType("llm")
+                .build();
+
+        definition.onInsert();
+
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .ruleDefinition(definition)
+                .materializationKey("funcionarios-form-demo:formRules:lgpd-cpf-guidance")
+                .targetLayer("form_config")
+                .targetArtifactType("praxis-dynamic-form")
+                .targetArtifactKey("funcionarios-form-demo")
+                .materializedRuleId("lgpd-cpf-guidance")
+                .build();
+
+        materialization.onInsert();
+
+        assertThat(definition.getId()).isNotNull();
+        assertThat(definition.getVersion()).isEqualTo(1);
+        assertThat(definition.getStatus()).isEqualTo("draft");
+        assertThat(definition.getDefinition()).isEqualTo("{}");
+        assertThat(definition.getParameters()).isEqualTo("{}");
+        assertThat(definition.getGovernance()).isEqualTo("{}");
+        assertThat(definition.getCreatedAt()).isNotNull();
+        assertThat(definition.getUpdatedAt()).isNotNull();
+        assertThat(materialization.getId()).isNotNull();
+        assertThat(materialization.getStatus()).isEqualTo("draft");
+        assertThat(materialization.getMaterializedPayload()).isEqualTo("{}");
+        assertThat(materialization.getCreatedAt()).isNotNull();
+        assertThat(materialization.getUpdatedAt()).isNotNull();
+    }
 }

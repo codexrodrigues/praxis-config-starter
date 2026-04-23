@@ -49,10 +49,18 @@ Keep three concepts separate:
 | --- | --- | --- | --- |
 | Domain Catalog Release | Immutable source snapshot from a producer | No | `/schemas/domain`, release payload, projected items |
 | Domain Knowledge Layer | Governed semantic graph and resolved enterprise meaning | Versioned by change set | concepts, aliases, bindings, evidence, stewardship, AI visibility |
-| Rule/Policy/Workflow Artifacts | Executable decisions or generated behavior | Versioned independently | form rules, OPA/Rego, DMN, workflow transitions |
+| Shared Rule Definition | Governed reusable rule intent, still outside concrete runtime artifacts | Versioned independently | LGPD CPF guidance, salary masking recommendation, compliance review requirement |
+| Rule Materialization | Concrete projection of a shared rule into a runtime artifact | Versioned by target artifact/release | `FormConfig.formRules[]`, backend validation, workflow transition, policy-engine reference |
+| Policy/Workflow Artifacts | Executable decisions outside the shared-rule catalog | Versioned independently | OPA/Rego, DMN, workflow engine definitions |
 
 Rules and policies may reference knowledge nodes, but knowledge nodes must not
 become executable rules.
+
+Shared rules are deliberately separated from materialized rules. A shared rule
+captures reusable business intent, ownership, evidence and governance. A
+materialization captures the specific payload applied to Angular, Java, a
+workflow engine or another target. This avoids copying enterprise governance
+directly into each `FormConfig` as if the form were the source of truth.
 
 ## Config Database Model
 
@@ -63,6 +71,12 @@ The initial table foundation is represented by Flyway migration:
 
 ```text
 src/main/resources/db/migration/V18__create_domain_knowledge_layer.sql
+```
+
+The first shared-rule foundation is represented by:
+
+```text
+src/main/resources/db/migration/V20__create_domain_shared_rule_layer.sql
 ```
 
 Do not apply this manually to the shared remote config database until the remote
@@ -240,6 +254,69 @@ Recommended fields:
 This table is the write boundary for future LLM-managed knowledge changes.
 LLMs propose change sets; deterministic services validate and apply them.
 
+### `domain_rule_definition`
+
+Reusable governed rule definition. This is the first durable boundary between
+"rule that belongs to the domain" and "rule copied into a concrete runtime
+configuration".
+
+Recommended fields:
+
+- `id`
+- `rule_key`: stable identity, unique per tenant/environment/version
+- `version`: monotonically increasing integer per rule key
+- `rule_type`: `visual_guidance`, `form_rule`, `validation`, `visibility`,
+  `calculation`, `workflow`, `compliance`, `privacy`, `ai_usage`,
+  `policy_reference`
+- `status`: `draft`, `proposed`, `approved`, `active`, `deprecated`,
+  `retired`, `rejected`
+- `context_key`, `resource_key`, `service_key`
+- `semantic_owner`, `steward`
+- `source_release_id`: catalog release that contributed evidence
+- `source_change_set_id`: analyst/LLM proposal that created or changed it
+- `definition`: canonical JSONB description of intent and effect
+- `parameters`: JSONB parameters that target materializers may bind
+- `condition`: optional JSONB condition, preferably Json Logic when applicable
+- `governance`: JSONB approval, compliance, data category and AI-use metadata
+- `validation_result`
+- `created_by_type`: `human`, `llm`, `system`, `imported`
+- `created_by`, `approved_by`
+- `created_at`, `updated_at`, `approved_at`, `activated_at`
+
+The table does not execute rules. It is a governed reusable artifact that future
+authoring services can validate, approve, version and materialize.
+
+### `domain_rule_materialization`
+
+Concrete projection of a shared rule into a runtime target.
+
+Recommended fields:
+
+- `id`
+- `rule_definition_id`
+- `materialization_key`: stable identity for a target projection
+- `target_layer`: `form_config`, `frontend_adapter`, `backend_validation`,
+  `workflow`, `policy_engine`, `notification`, `reporting`, `external_system`
+- `target_artifact_type`: for example `praxis-dynamic-form`,
+  `spring-service`, `opa-policy`, `workflow-definition`
+- `target_artifact_key`: form id, endpoint key, workflow key or policy key
+- `target_pointer`: JSON pointer/path inside the artifact
+- `target_release_key`: optional release/version of the target artifact
+- `materialized_rule_id`: local runtime rule id, for example a
+  `formRules[].id`
+- `status`: `draft`, `pending_review`, `applied`, `failed`, `superseded`,
+  `reverted`
+- `materialized_payload`: JSONB copied into or sent to the target layer
+- `source_hash`: hash of the definition/materializer inputs
+- `validation_result`
+- `applied_by_type`, `applied_by`
+- `created_at`, `updated_at`, `applied_at`
+
+For today's Dynamic Form flow, the shared rule would live in
+`domain_rule_definition`; the reviewed `visualBlockGuidance` rule applied to
+`FormConfig.formRules[]` would be one `domain_rule_materialization` row with
+`target_layer=form_config` and `target_artifact_type=praxis-dynamic-form`.
+
 ## Ingestion Flow
 
 1. A service publishes `/schemas/domain`.
@@ -250,7 +327,11 @@ LLMs propose change sets; deterministic services validate and apply them.
    `review_required`.
 5. Human/LLM curation creates `domain_knowledge_change_set`.
 6. Approved change sets update curated knowledge rows.
-7. Runtime context reads the curated knowledge layer first, then falls back to
+7. Approved shared rules are stored as `domain_rule_definition` rows.
+8. Target-specific materializers create `domain_rule_materialization` rows and
+   only then update `FormConfig`, backend validation, workflows or external
+   policy engines.
+9. Runtime context reads the curated knowledge layer first, then falls back to
    release items when curated rows are missing.
 
 The Java projection service is intentionally disabled by default until the
@@ -336,6 +417,17 @@ Raw sensitive values must not be returned through this path.
 - Do not embed executable policy in concept rows.
 - Add deterministic validation that a rule only references active/approved
   concepts.
+
+### Phase 5: Shared Rule Materialization
+
+- Store reusable rule intent in `domain_rule_definition`.
+- Store target-specific projections in `domain_rule_materialization`.
+- Require LLM-authored definitions to cite knowledge evidence and carry
+  `created_by_type=llm`.
+- Require materializations into `FormConfig` to remain reviewable and to keep
+  `metadata.origin="llm"` and `metadata.reviewStatus="pending"` until approved.
+- Add validators that compare the materialized payload hash against the source
+  shared rule and target artifact version.
 
 ## Open Decisions
 
