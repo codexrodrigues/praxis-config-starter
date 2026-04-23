@@ -96,7 +96,7 @@ public class DomainFederationReleaseService {
                 .filter(activeRelease -> !activeRelease.getId().equals(release.getId()))
                 .forEach(activeRelease -> {
                     activeRelease.setStatus("superseded");
-                    releaseRepository.save(activeRelease);
+                    releaseRepository.saveAndFlush(activeRelease);
                 });
 
         release.setStatus("active");

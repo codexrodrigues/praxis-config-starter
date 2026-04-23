@@ -74,7 +74,7 @@ class DomainFederationReleaseServiceTest {
                 .thenReturn(java.util.Optional.of(candidate));
         when(repository.findByTenantIdAndEnvironmentAndStatusOrderByCreatedAtDesc("tenant-a", "dev", "active"))
                 .thenReturn(List.of(active));
-        when(repository.save(argThat(release -> release != null && "release-active".equals(release.getReleaseKey()))))
+        when(repository.saveAndFlush(argThat(release -> release != null && "release-active".equals(release.getReleaseKey()))))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(repository.save(argThat(release -> release != null && "release-candidate".equals(release.getReleaseKey()))))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -84,7 +84,7 @@ class DomainFederationReleaseServiceTest {
         assertThat(response.status()).isEqualTo("active");
         assertThat(response.activatedAt()).isNotNull();
         assertThat(active.getStatus()).isEqualTo("superseded");
-        verify(repository).save(active);
+        verify(repository).saveAndFlush(active);
         verify(repository).save(candidate);
     }
 

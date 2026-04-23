@@ -79,16 +79,15 @@ The release workflow was adjusted so Maven Central publication can be triggered 
 ## Residual Risks
 
 - Maven Central publication status should still be treated as externally asynchronous; dependency resolution has passed, but Central Portal UI may lag.
-- The current Domain Federation v0.1 path is read-only/dry-run. It validates contract, preview and retrieval, but it does not persist federation records as durable governance data yet.
-- The local smoke bootstraps Domain Catalog v2 for the test resource before federation. Production flows need explicit ingestion orchestration or scheduled federation ingest.
+- The current Domain Federation v0.1 path now persists governed candidate releases and supports explicit activation, but query-time federation should still prefer reviewed active releases only.
+- Production flows still need explicit ingestion orchestration or scheduled federation ingest across services.
 - Browser E2E with the published `0.1.0-rc.24` quickstart dependency has not been rerun after the final starter publication; the prior browser E2E passed before this final published-dependency confirmation.
 
 ## Recommended Next Step
 
 Move from release readiness to the next architectural increment:
 
-1. Persist Domain Federation v0.1 records as governed read-only data.
+1. Expose persisted active federation releases through query-time context retrieval.
 2. Add validation endpoints/reports for cross-context relationships and contracts.
 3. Add policy checks to prevent denied or low-confidence domain content from leaking across federated context retrieval.
 4. Only after those controls are in place, allow LLM-assisted proposals for federation changes.
-

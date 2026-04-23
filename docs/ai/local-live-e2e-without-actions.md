@@ -31,7 +31,7 @@ Validated results:
 - LLM compliance passed with OpenAI and Gemini; both reported `providerStatus=ok`, `mayUseDeniedContent=false`, CPF governance guidance, and salary exclusion due to confidence.
 - Browser Playwright passed `3/3` against Angular, backend, remote DB and real LLM.
 - Domain Federation v0.1 starter tests passed locally: `18` tests, `0` failures across controller, validator, dry-run ingest, query and retrieval policy.
-- Domain Federation v0.1 live smoke passed against the locally rebuilt quickstart jar with `schemaVersion=praxis.domain-federation/v0.1`, `dryRunValid=true`, `ingestDryRunValid=true`, `contextFederated=true`, `contextItemCount=2`, `relationshipCount=2`.
+- Domain Federation v0.1 live smoke passed against the locally rebuilt quickstart jar with `schemaVersion=praxis.domain-federation/v0.1`, `dryRunValid=true`, candidate persistence, release audit, persisted validation and activation.
 - Domain Federation v0.1 live smoke passed again against the quickstart jar built with the published `praxis-config-starter:0.1.0-rc.24` dependency. The nested starter jar contains `DomainFederationController`, `DomainFederationContractValidator`, `DomainFederationQueryService` and `DomainFederationIngestDryRunService`.
 - The original quickstart jar built before the starter federation controller returned `404`.
 
@@ -103,20 +103,28 @@ cd praxis-config-starter
 ./tools/local-e2e/run-domain-federation-v01-local.sh
 ```
 
-This validates the read-only federation contract with:
+This validates the persisted federation contract with:
 
-- Domain Catalog v2 bootstrap for `human-resources.folhas-pagamento`;
-- `POST /api/praxis/config/domain-federation/dry-run`;
 - `POST /api/praxis/config/domain-federation/ingest?dryRun=true`;
-- `GET /api/praxis/config/domain-federation/context`;
+- `POST /api/praxis/config/domain-federation/ingest?dryRun=false`;
+- `GET /api/praxis/config/domain-federation/releases`;
+- `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation`;
+- `POST /api/praxis/config/domain-federation/releases/{releaseKey}/activate`;
 - explicit `domain_source`, `domain_context`, `domain_context_relationship`, `domain_contract` and `domain_resolution` payloads.
 
-The runner does not persist federation records and does not execute rules.
+The wrapper delegates to `praxis-api-quickstart/scripts/verify-domain-federation-runtime.sh`, because the quickstart is the operational reference host for published starter contracts.
 
-It requires the running quickstart jar to include `DomainFederationController`.
-The published `praxis-config-starter:0.1.0-rc.24` dependency includes this
-surface. If the endpoint probe returns `404`, confirm the quickstart jar was
-packaged against `0.1.0-rc.24` or newer before rerunning this smoke.
+The runner persists a candidate release and activates it in the selected
+`TENANT_ID` + `ENVIRONMENT` scope. It does not execute rules.
+
+It requires the running quickstart jar to include `DomainFederationController`,
+V21 to be applied in the config database, and
+`praxis.domain-federation.persistence.enabled=true`.
+The local backend starter script enables this flag by default.
+
+If the runtime returns `404`, confirm the quickstart jar was packaged against
+a starter revision that contains the federation HTTP surface before rerunning
+this smoke.
 
 ## Compliance Shadow
 
