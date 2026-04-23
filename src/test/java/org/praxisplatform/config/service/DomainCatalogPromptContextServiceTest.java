@@ -442,10 +442,10 @@ class DomainCatalogPromptContextServiceTest {
                                               "complianceTags": ["LGPD"]
                                             }
                                             """)))),
-                        List.of(new DomainCatalogItemResponse(
-                                UUID.randomUUID(),
-                                "hr:latest",
-                                "edge",
+                                List.of(new DomainCatalogItemResponse(
+                                        UUID.randomUUID(),
+                                        "hr:latest",
+                                        "edge",
                                 "edge:hr.funcionario.references.security.usuario",
                                 "human-resources",
                                 null,
@@ -456,6 +456,37 @@ class DomainCatalogPromptContextServiceTest {
                                       "sourceNodeKey": "human-resources.funcionarios.field.usuarioId",
                                       "targetNodeKey": "security.usuarios.id",
                                       "edgeType": "references"
+                                    }
+                                    """))),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "federation:active",
+                                "contract",
+                                "contract:security-user-lookup:v0.1",
+                                "security.usuarios",
+                                "rest_endpoint",
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "providerContextKey": "security.usuarios",
+                                      "consumerContextKey": "human-resources.funcionarios",
+                                      "resourceKey": "security.users"
+                                    }
+                                    """))),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "federation:active",
+                                "resolution",
+                                "resolution:employee-user:v0.1",
+                                "human-resources.funcionarios",
+                                "same_as",
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "sourceConceptKey": "funcionario",
+                                      "targetConceptKey": "user"
                                     }
                                     """)))));
 
@@ -491,6 +522,10 @@ class DomainCatalogPromptContextServiceTest {
                 .contains("federated: true")
                 .contains("sourceMode: catalog_projection_fallback")
                 .contains("[edge/references] edge:hr.funcionario.references.security.usuario")
+                .contains("DOMAIN_FEDERATION_CONTRACTS")
+                .contains("contract:security-user-lookup:v0.1")
+                .contains("DOMAIN_FEDERATION_RESOLUTIONS")
+                .contains("resolution:employee-user:v0.1")
                 .contains("DOMAIN_FEDERATION_POLICY")
                 .contains("policyProfile: compliance_review")
                 .contains("minConfidence: 0.9")

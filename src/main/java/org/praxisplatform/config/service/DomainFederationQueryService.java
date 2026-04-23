@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -14,6 +16,7 @@ import org.praxisplatform.config.domain.DomainContext;
 import org.praxisplatform.config.domain.DomainContextRelationship;
 import org.praxisplatform.config.domain.DomainContract;
 import org.praxisplatform.config.domain.DomainFederationRelease;
+import org.praxisplatform.config.domain.DomainResolution;
 import org.praxisplatform.config.domain.DomainSource;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
@@ -25,6 +28,7 @@ import org.praxisplatform.config.repository.DomainContextRelationshipRepository;
 import org.praxisplatform.config.repository.DomainContextRepository;
 import org.praxisplatform.config.repository.DomainContractRepository;
 import org.praxisplatform.config.repository.DomainFederationReleaseRepository;
+import org.praxisplatform.config.repository.DomainResolutionRepository;
 import org.praxisplatform.config.repository.DomainSourceRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
@@ -47,6 +51,7 @@ public class DomainFederationQueryService {
     private final DomainContextRepository contextRepository;
     private final DomainContextRelationshipRepository relationshipRepository;
     private final DomainContractRepository contractRepository;
+    private final DomainResolutionRepository resolutionRepository;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
@@ -182,7 +187,9 @@ public class DomainFederationQueryService {
                 catalogRetrievalGuidance(context, contextPolicy.report(), relationshipPolicy.report()),
                 mergePolicyReports(contextPolicy.report(), relationshipPolicy.report()),
                 governedContext,
-                relationshipPolicy.items());
+                relationshipPolicy.items(),
+                List.of(),
+                List.of());
     }
 
     private DomainFederationContextQueryResponse persistedContext(
@@ -203,7 +210,8 @@ public class DomainFederationQueryService {
                 .collect(Collectors.toMap(DomainSource::getSourceKey, Function.identity(), (left, right) -> left));
         List<DomainContract> contracts = contractRepository.findByFederationRelease_IdOrderByContractKey(release.getId());
         Map<String, DomainContract> contractByKey = contracts.stream()
-                .collect(Collectors.toMap(DomainContract::getContractKey, Function.identity(), (left, right) -> left));
+                .collect(Collectors.toMap(DomainContract::getContractKey, Function.identity(), (left, right) -> left, LinkedHashMap::new));
+        List<DomainResolution> resolutions = resolutionRepository.findByFederationRelease_IdOrderByResolutionKey(release.getId());
 
         String normalizedServiceKey = normalize(serviceKey);
         String normalizedResourceKey = normalize(resourceKey);
@@ -216,8 +224,8 @@ public class DomainFederationQueryService {
                 .stream()
                 .filter(context -> matchesText(context.getContextKey(), normalizedContextKey))
                 .filter(context -> matchesSourceService(sourceByKey.get(context.getSourceKey()), normalizedServiceKey))
-                .filter(context -> matchesContextResource(context, contractByKey.values().stream().toList(), normalizedResourceKey))
-                .filter(context -> matchesQuery(List.of(
+                .filter(context -> matchesContextResource(context, contracts, normalizedResourceKey))
+                .filter(context -> matchesQuery(values(
                         context.getContextKey(),
                         context.getLabel(),
                         context.getDescription(),
@@ -227,14 +235,14 @@ public class DomainFederationQueryService {
                 .map(context -> toContextItem(release, context, sourceByKey.get(context.getSourceKey())))
                 .toList();
 
-        List<DomainCatalogItemResponse> relationships = relationshipRepository
+        List<DomainCatalogItemResponse> relationshipItems = relationshipRepository
                 .findByFederationRelease_IdOrderByRelationshipKey(release.getId())
                 .stream()
                 .filter(relationship -> matchesRelationshipContext(relationship, normalizedContextKey))
                 .filter(relationship -> matchesText(relationship.getRelationshipType(), normalizedRelationshipType))
                 .filter(relationship -> matchesContractResource(contractByKey.get(relationship.getContractKey()), normalizedResourceKey))
                 .filter(relationship -> matchesRelationshipService(relationship, sourceByKey, contextItems, normalizedServiceKey))
-                .filter(relationship -> matchesQuery(List.of(
+                .filter(relationship -> matchesQuery(values(
                         relationship.getRelationshipKey(),
                         relationship.getSourceContextKey(),
                         relationship.getTargetContextKey(),
@@ -244,8 +252,39 @@ public class DomainFederationQueryService {
                 .map(relationship -> toRelationshipItem(release, relationship, contractByKey.get(relationship.getContractKey())))
                 .toList();
 
+        List<DomainCatalogItemResponse> contractItems = contracts.stream()
+                .filter(contract -> matchesContractContext(contract, normalizedContextKey))
+                .filter(contract -> matchesContractResource(contract, normalizedResourceKey))
+                .filter(contract -> matchesSourceService(sourceByKey.get(contract.getProviderSourceKey()), normalizedServiceKey))
+                .filter(contract -> matchesQuery(values(
+                        contract.getContractKey(),
+                        contract.getContractType(),
+                        contract.getProviderContextKey(),
+                        contract.getConsumerContextKey(),
+                        contract.getResourceKey(),
+                        contract.getOperationKey(),
+                        contract.getSchemaRef()), normalizedQuery))
+                .limit(effectiveLimit)
+                .map(contract -> toContractItem(release, contract))
+                .toList();
+
+        List<DomainCatalogItemResponse> resolutionItems = resolutions.stream()
+                .filter(resolution -> matchesResolutionContext(resolution, normalizedContextKey))
+                .filter(resolution -> matchesQuery(values(
+                        resolution.getResolutionKey(),
+                        resolution.getSourceConceptKey(),
+                        resolution.getTargetConceptKey(),
+                        resolution.getSourceContextKey(),
+                        resolution.getTargetContextKey(),
+                        resolution.getResolutionType()), normalizedQuery))
+                .limit(effectiveLimit)
+                .map(resolution -> toResolutionItem(release, resolution))
+                .toList();
+
         DomainFederationRetrievalPolicyService.Result contextPolicy = retrievalPolicyService.apply(contextItems, policyOptions);
-        DomainFederationRetrievalPolicyService.Result relationshipPolicy = retrievalPolicyService.apply(relationships, policyOptions);
+        DomainFederationRetrievalPolicyService.Result relationshipPolicy = retrievalPolicyService.apply(relationshipItems, policyOptions);
+        DomainFederationRetrievalPolicyService.Result contractPolicy = retrievalPolicyService.apply(contractItems, policyOptions);
+        DomainFederationRetrievalPolicyService.Result resolutionPolicy = retrievalPolicyService.apply(resolutionItems, policyOptions);
         DomainCatalogContextResponse governedContext = new DomainCatalogContextResponse(
                 "praxis.domain-federation-context-items/v0.1",
                 toReleaseResponse(release),
@@ -270,10 +309,12 @@ public class DomainFederationQueryService {
                 effectiveLimit,
                 true,
                 "persisted_federation",
-                persistedRetrievalGuidance(release, contextPolicy.report(), relationshipPolicy.report()),
-                mergePolicyReports(contextPolicy.report(), relationshipPolicy.report()),
+                persistedRetrievalGuidance(release, contextPolicy.report(), relationshipPolicy.report(), contractPolicy.report(), resolutionPolicy.report()),
+                mergePolicyReports(contextPolicy.report(), relationshipPolicy.report(), contractPolicy.report(), resolutionPolicy.report()),
                 governedContext,
-                relationshipPolicy.items());
+                relationshipPolicy.items(),
+                contractPolicy.items(),
+                resolutionPolicy.items());
     }
 
     private Optional<DomainFederationRelease> activeRelease(String tenantId, String environment) {
@@ -300,32 +341,59 @@ public class DomainFederationQueryService {
     private List<String> persistedRetrievalGuidance(
             DomainFederationRelease release,
             DomainFederationRetrievalPolicyReport contextPolicy,
-            DomainFederationRetrievalPolicyReport relationshipPolicy) {
+            DomainFederationRetrievalPolicyReport relationshipPolicy,
+            DomainFederationRetrievalPolicyReport contractPolicy,
+            DomainFederationRetrievalPolicyReport resolutionPolicy) {
         List<String> guidance = new ArrayList<>();
         guidance.add("Federated context is read from active persisted domain federation release " + release.getReleaseKey() + ".");
         guidance.add("Only explicit persisted contexts and relationships are returned; no label inference is performed.");
+        guidance.add("Contracts and semantic resolutions are included so LLM authoring can understand cross-context dependencies and term mappings.");
         guidance.add("Federation retrieval policy excludes aiUsage.visibility=deny, contract/resolution visibility restricted for LLM use, and low-confidence persisted items.");
         guidance.addAll(contextPolicy.decisions());
         guidance.addAll(relationshipPolicy.decisions());
+        guidance.addAll(contractPolicy.decisions());
+        guidance.addAll(resolutionPolicy.decisions());
         return List.copyOf(guidance);
     }
 
-    private DomainFederationRetrievalPolicyReport mergePolicyReports(
-            DomainFederationRetrievalPolicyReport contextPolicy,
-            DomainFederationRetrievalPolicyReport relationshipPolicy) {
+    private DomainFederationRetrievalPolicyReport mergePolicyReports(DomainFederationRetrievalPolicyReport... reports) {
         List<String> decisions = new ArrayList<>();
-        decisions.addAll(contextPolicy.decisions());
-        decisions.addAll(relationshipPolicy.decisions());
+        String profile = "explanation";
+        double minConfidence = 0.7d;
+        boolean includeDenied = false;
+        boolean includeLowConfidence = true;
+        int inputItemCount = 0;
+        int returnedItemCount = 0;
+        int deniedItemCount = 0;
+        int governedSummaryCount = 0;
+        int lowConfidenceCount = 0;
+
+        for (DomainFederationRetrievalPolicyReport report : reports) {
+            if (report == null) {
+                continue;
+            }
+            profile = report.policyProfile();
+            minConfidence = report.minConfidence();
+            includeDenied = report.includeDenied();
+            includeLowConfidence = report.includeLowConfidence();
+            inputItemCount += report.inputItemCount();
+            returnedItemCount += report.returnedItemCount();
+            deniedItemCount += report.deniedItemCount();
+            governedSummaryCount += report.governedSummaryItemCount();
+            lowConfidenceCount += report.lowConfidenceItemCount();
+            decisions.addAll(report.decisions());
+        }
+
         return new DomainFederationRetrievalPolicyReport(
-                contextPolicy.policyProfile(),
-                contextPolicy.minConfidence(),
-                contextPolicy.includeDenied(),
-                contextPolicy.includeLowConfidence(),
-                contextPolicy.inputItemCount() + relationshipPolicy.inputItemCount(),
-                contextPolicy.returnedItemCount() + relationshipPolicy.returnedItemCount(),
-                contextPolicy.deniedItemCount() + relationshipPolicy.deniedItemCount(),
-                contextPolicy.governedSummaryItemCount() + relationshipPolicy.governedSummaryItemCount(),
-                contextPolicy.lowConfidenceItemCount() + relationshipPolicy.lowConfidenceItemCount(),
+                profile,
+                minConfidence,
+                includeDenied,
+                includeLowConfidence,
+                inputItemCount,
+                returnedItemCount,
+                deniedItemCount,
+                governedSummaryCount,
+                lowConfidenceCount,
                 List.copyOf(decisions));
     }
 
@@ -402,6 +470,65 @@ public class DomainFederationQueryService {
                 payload);
     }
 
+    private DomainCatalogItemResponse toContractItem(DomainFederationRelease release, DomainContract contract) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("sourceMode", "persisted_federation");
+        payload.put("releaseKey", release.getReleaseKey());
+        ObjectNode contractNode = payload.putObject("contract");
+        putIfText(contractNode, "contractKey", contract.getContractKey());
+        putIfText(contractNode, "contractType", contract.getContractType());
+        putIfText(contractNode, "providerSourceKey", contract.getProviderSourceKey());
+        putIfText(contractNode, "providerContextKey", contract.getProviderContextKey());
+        putIfText(contractNode, "consumerContextKey", contract.getConsumerContextKey());
+        putIfText(contractNode, "resourceKey", contract.getResourceKey());
+        putIfText(contractNode, "operationKey", contract.getOperationKey());
+        putIfText(contractNode, "schemaRef", contract.getSchemaRef());
+        putIfText(contractNode, "compatibility", contract.getCompatibility());
+        putIfText(contractNode, "visibility", contract.getVisibility());
+        putIfText(contractNode, "status", contract.getStatus());
+        payload.set("evidence", read(contract.getEvidence()));
+        return new DomainCatalogItemResponse(
+                contract.getId(),
+                release.getReleaseKey(),
+                "contract",
+                contract.getContractKey(),
+                contract.getProviderContextKey(),
+                contract.getContractType(),
+                null,
+                null,
+                payload);
+    }
+
+    private DomainCatalogItemResponse toResolutionItem(DomainFederationRelease release, DomainResolution resolution) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("sourceMode", "persisted_federation");
+        payload.put("releaseKey", release.getReleaseKey());
+        ObjectNode resolutionNode = payload.putObject("resolution");
+        putIfText(resolutionNode, "resolutionKey", resolution.getResolutionKey());
+        putIfText(resolutionNode, "sourceConceptKey", resolution.getSourceConceptKey());
+        putIfText(resolutionNode, "targetConceptKey", resolution.getTargetConceptKey());
+        putIfText(resolutionNode, "sourceContextKey", resolution.getSourceContextKey());
+        putIfText(resolutionNode, "targetContextKey", resolution.getTargetContextKey());
+        putIfText(resolutionNode, "resolutionType", resolution.getResolutionType());
+        putIfText(resolutionNode, "status", resolution.getStatus());
+        putIfText(resolutionNode, "reviewOwner", resolution.getReviewOwner());
+        if (resolution.getConfidence() != null) {
+            resolutionNode.put("confidence", resolution.getConfidence());
+            payload.put("confidence", resolution.getConfidence());
+        }
+        payload.set("evidence", read(resolution.getEvidence()));
+        return new DomainCatalogItemResponse(
+                resolution.getId(),
+                release.getReleaseKey(),
+                "resolution",
+                resolution.getResolutionKey(),
+                resolution.getSourceContextKey(),
+                resolution.getResolutionType(),
+                null,
+                null,
+                payload);
+    }
+
     private DomainCatalogReleaseResponse toReleaseResponse(DomainFederationRelease release) {
         return new DomainCatalogReleaseResponse(
                 release.getId(),
@@ -446,6 +573,18 @@ public class DomainFederationQueryService {
                 || matchesText(relationship.getTargetContextKey(), contextKey);
     }
 
+    private boolean matchesContractContext(DomainContract contract, String contextKey) {
+        return !StringUtils.hasText(contextKey)
+                || matchesText(contract.getProviderContextKey(), contextKey)
+                || matchesText(contract.getConsumerContextKey(), contextKey);
+    }
+
+    private boolean matchesResolutionContext(DomainResolution resolution, String contextKey) {
+        return !StringUtils.hasText(contextKey)
+                || matchesText(resolution.getSourceContextKey(), contextKey)
+                || matchesText(resolution.getTargetContextKey(), contextKey);
+    }
+
     private boolean matchesContextResource(DomainContext context, List<DomainContract> contracts, String resourceKey) {
         return !StringUtils.hasText(resourceKey)
                 || contracts.stream().anyMatch(contract -> matchesContractResource(contract, resourceKey)
@@ -471,6 +610,10 @@ public class DomainFederationQueryService {
 
     private boolean matchesText(String value, String expected) {
         return !StringUtils.hasText(expected) || expected.equals(value);
+    }
+
+    private List<String> values(String... values) {
+        return Arrays.asList(values);
     }
 
     private JsonNode read(String raw) {

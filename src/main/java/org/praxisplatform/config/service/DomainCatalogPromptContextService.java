@@ -138,8 +138,16 @@ public class DomainCatalogPromptContextService {
                     new DomainFederationRetrievalPolicyOptions(policyProfile(request), null, null, null));
             String contextBlock = formatContext(response.context());
             String relationshipBlock = formatFederatedRelationships(response);
+            String contractBlock = formatFederatedArtifacts("DOMAIN_FEDERATION_CONTRACTS", response.contracts(), "contract");
+            String resolutionBlock = formatFederatedArtifacts("DOMAIN_FEDERATION_RESOLUTIONS", response.resolutions(), "resolution");
             String policyBlock = formatPolicyReport(response.policyReport());
-            return appendOptionalPromptBlock(appendOptionalPromptBlock(contextBlock, relationshipBlock), policyBlock);
+            return appendOptionalPromptBlock(
+                    appendOptionalPromptBlock(
+                            appendOptionalPromptBlock(
+                                    appendOptionalPromptBlock(contextBlock, relationshipBlock),
+                                    contractBlock),
+                            resolutionBlock),
+                    policyBlock);
         } catch (RuntimeException ex) {
             log.warn("Could not build federated domain catalog prompt context: {}", ex.getMessage());
             return "";
@@ -273,6 +281,29 @@ public class DomainCatalogPromptContextService {
         for (DomainCatalogItemResponse item : response.relationships()) {
             builder.append("- [edge/")
                     .append(nullToDash(item.edgeType()))
+                    .append("] ")
+                    .append(label(item))
+                    .append(" (")
+                    .append(item.itemKey())
+                    .append(")");
+            appendPayloadSummary(builder, item.payload());
+            builder.append('\n');
+        }
+        return builder.toString().trim();
+    }
+
+    private String formatFederatedArtifacts(String blockName, List<DomainCatalogItemResponse> items, String defaultType) {
+        if (items == null || items.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append(blockName).append('\n');
+        builder.append("items:\n");
+        for (DomainCatalogItemResponse item : items) {
+            builder.append("- [")
+                    .append(nullToDash(item.itemType()))
+                    .append("/")
+                    .append(nullToDash(StringUtils.hasText(item.nodeType()) ? item.nodeType() : defaultType))
                     .append("] ")
                     .append(label(item))
                     .append(" (")

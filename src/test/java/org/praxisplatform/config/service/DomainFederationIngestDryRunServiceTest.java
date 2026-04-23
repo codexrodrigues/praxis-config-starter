@@ -42,6 +42,8 @@ class DomainFederationIngestDryRunServiceTest {
                 List.of("Use explicit relationships."),
                 null,
                 null,
+                List.of(),
+                List.of(),
                 List.of());
         when(validator.validate(request)).thenReturn(validation);
         when(queryService.context(

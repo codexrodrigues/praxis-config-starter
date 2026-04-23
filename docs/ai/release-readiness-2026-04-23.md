@@ -134,7 +134,7 @@ The release workflow was adjusted so Maven Central publication can be triggered 
 ## Residual Risks
 
 - Maven Central publication status should still be treated as externally asynchronous; dependency resolution has passed, but Central Portal UI may lag.
-- The current Domain Federation v0.1 path persists governed candidate releases and supports explicit activation. Query-time federation should still prefer reviewed active releases only.
+- The current Domain Federation v0.1 path persists governed candidate releases, supports explicit activation, and now prefers reviewed active releases during query-time federation retrieval.
 - Production flows still need explicit ingestion orchestration or scheduled federation ingest across services.
 - Browser E2E with the published `0.1.0-rc.24` quickstart dependency has not been rerun after the final starter publication; the prior browser E2E passed before this final published-dependency confirmation.
 
@@ -142,7 +142,7 @@ The release workflow was adjusted so Maven Central publication can be triggered 
 
 Move from release readiness to the next architectural increment:
 
-1. Expose persisted active federation releases through query-time context retrieval.
+1. Add policy checks to prevent denied or low-confidence domain content from leaking across persisted federated context retrieval.
 2. Run the browser E2E again after packaging quickstart with the same starter version used by the next release candidate.
-3. Record the browser E2E evidence against this same persisted-federation baseline.
-4. Only after those controls are in place and revalidated end to end, allow LLM-assisted proposals for federation changes.
+3. Feed persisted contracts and semantic resolutions into the UI explainability path and authoring prompts by default.
+4. Only after those controls are in place, allow LLM-assisted proposals for federation changes.

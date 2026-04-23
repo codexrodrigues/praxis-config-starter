@@ -367,20 +367,16 @@ Current filters:
 
 Current behavior:
 
-- prefers an active persisted `domain_federation_release` for the tenant and
-  environment when one exists;
-- falls back to projection from `domain_catalog_release` and
-  `domain_catalog_item` when no active persisted release exists;
+- prefers the latest `active` `domain_federation_release` for the tenant/environment scope;
+- falls back to projection from `domain_catalog_release` and `domain_catalog_item` when no active federated release exists;
 - returns context items plus relationship rows in one envelope;
+- when an active federated release exists, also returns `domain_contract` and `domain_resolution` materialized in the same response;
 - marks whether the result is federated or service-scoped;
 - declares the response source mode as `persisted_federation` or
   `catalog_projection_fallback`;
 - reuses catalog retrieval guidance and adds federation-specific caveats;
 - applies the federation retrieval policy before returning relationships and context;
-- materializes persisted context relationships and their linked contracts when
-  using an active persisted release;
-- does not yet materialize `domain_resolution` or final redaction decisions in
-  query results.
+- still does not materialize final redaction decisions.
 
 ## Retrieval Policy v0.1
 

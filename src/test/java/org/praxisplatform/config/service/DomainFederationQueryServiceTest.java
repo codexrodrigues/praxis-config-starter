@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +16,7 @@ import org.praxisplatform.config.domain.DomainContext;
 import org.praxisplatform.config.domain.DomainContextRelationship;
 import org.praxisplatform.config.domain.DomainContract;
 import org.praxisplatform.config.domain.DomainFederationRelease;
+import org.praxisplatform.config.domain.DomainResolution;
 import org.praxisplatform.config.domain.DomainSource;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
@@ -23,6 +25,7 @@ import org.praxisplatform.config.repository.DomainContextRelationshipRepository;
 import org.praxisplatform.config.repository.DomainContextRepository;
 import org.praxisplatform.config.repository.DomainContractRepository;
 import org.praxisplatform.config.repository.DomainFederationReleaseRepository;
+import org.praxisplatform.config.repository.DomainResolutionRepository;
 import org.praxisplatform.config.repository.DomainSourceRepository;
 
 @Tag("unit")
@@ -112,6 +115,8 @@ class DomainFederationQueryServiceTest {
         assertThat(response.context().items()).containsExactlyElementsOf(catalogContext.items());
         assertThat(response.relationships()).extracting(DomainCatalogItemResponse::itemKey)
                 .containsExactly("operations.mission.depends_on.assets.vehicle");
+        assertThat(response.contracts()).isEmpty();
+        assertThat(response.resolutions()).isEmpty();
         assertThat(response.policyReport().inputItemCount()).isEqualTo(3);
         assertThat(response.policyReport().returnedItemCount()).isEqualTo(2);
         assertThat(response.policyReport().policyProfile()).isEqualTo("explanation");
@@ -283,7 +288,7 @@ class DomainFederationQueryServiceTest {
     }
 
     @Test
-    void prefersActivePersistedFederationReleaseWhenAvailable() throws Exception {
+    void prefersActivePersistedFederationReleaseWhenAvailable() {
         DomainCatalogIngestionService catalogService = mock(DomainCatalogIngestionService.class);
         Fixture fixture = fixture(catalogService);
         DomainFederationRelease release = DomainFederationRelease.builder()
@@ -347,14 +352,29 @@ class DomainFederationQueryServiceTest {
                 .status("active")
                 .evidence("{}")
                 .build();
+        DomainResolution resolution = DomainResolution.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .resolutionKey("resolution:operations-mission")
+                .sourceConceptKey("missao")
+                .targetConceptKey("mission")
+                .sourceContextKey("operations")
+                .targetContextKey("operations")
+                .resolutionType("same_as")
+                .confidence(0.97d)
+                .status("active")
+                .reviewOwner("Operacoes")
+                .evidence("{}")
+                .build();
         when(fixture.releaseRepository().findActiveByOptionalScope("tenant-a", "dev")).thenReturn(List.of(release));
         when(fixture.sourceRepository().findByFederationRelease_IdOrderBySourceKey(release.getId())).thenReturn(List.of(source));
         when(fixture.contextRepository().findByFederationRelease_IdOrderByContextKey(release.getId())).thenReturn(List.of(context));
         when(fixture.contractRepository().findByFederationRelease_IdOrderByContractKey(release.getId())).thenReturn(List.of(contract));
         when(fixture.relationshipRepository().findByFederationRelease_IdOrderByRelationshipKey(release.getId())).thenReturn(List.of(relationship));
+        when(fixture.resolutionRepository().findByFederationRelease_IdOrderByResolutionKey(release.getId())).thenReturn(List.of(resolution));
 
         var response = fixture.service().context(
-                "operations-service",
+                null,
                 "assets.veiculos",
                 "tenant-a",
                 "dev",
@@ -362,7 +382,7 @@ class DomainFederationQueryServiceTest {
                 "operations",
                 null,
                 "uses",
-                "operations",
+                null,
                 20);
 
         assertThat(response.sourceMode()).isEqualTo("persisted_federation");
@@ -379,8 +399,14 @@ class DomainFederationQueryServiceTest {
             assertThat(item.edgeType()).isEqualTo("uses");
             assertThat(item.payload().path("contract").path("resourceKey").asText()).isEqualTo("assets.veiculos");
         });
+        assertThat(response.contracts()).singleElement().satisfies(item ->
+                assertThat(item.itemKey()).isEqualTo("assets.vehicle-allocation.v1"));
+        assertThat(response.resolutions()).singleElement().satisfies(item ->
+                assertThat(item.itemKey()).isEqualTo("resolution:operations-mission"));
         assertThat(response.retrievalGuidance())
-                .anySatisfy(guidance -> assertThat(guidance).contains("active persisted domain federation release"));
+                .anySatisfy(guidance -> assertThat(guidance).contains("active persisted domain federation release"))
+                .anySatisfy(guidance -> assertThat(guidance).contains("Contracts and semantic resolutions are included"));
+        verifyNoInteractions(catalogService);
     }
 
     @Test
@@ -452,6 +478,7 @@ class DomainFederationQueryServiceTest {
         when(fixture.contextRepository().findByFederationRelease_IdOrderByContextKey(release.getId())).thenReturn(List.of(context));
         when(fixture.contractRepository().findByFederationRelease_IdOrderByContractKey(release.getId())).thenReturn(List.of(restrictedContract));
         when(fixture.relationshipRepository().findByFederationRelease_IdOrderByRelationshipKey(release.getId())).thenReturn(List.of(relationship));
+        when(fixture.resolutionRepository().findByFederationRelease_IdOrderByResolutionKey(release.getId())).thenReturn(List.of());
 
         var response = fixture.service().context(
                 "operations-service",
@@ -469,7 +496,8 @@ class DomainFederationQueryServiceTest {
         assertThat(response.sourceMode()).isEqualTo("persisted_federation");
         assertThat(response.context().items()).hasSize(1);
         assertThat(response.relationships()).isEmpty();
-        assertThat(response.policyReport().deniedItemCount()).isEqualTo(1);
+        assertThat(response.contracts()).isEmpty();
+        assertThat(response.policyReport().deniedItemCount()).isGreaterThanOrEqualTo(1);
         assertThat(response.retrievalGuidance())
                 .anySatisfy(guidance -> assertThat(guidance).contains("contract.visibility=deny_for_llm"));
     }
@@ -480,6 +508,7 @@ class DomainFederationQueryServiceTest {
         DomainContextRepository contextRepository = mock(DomainContextRepository.class);
         DomainContextRelationshipRepository relationshipRepository = mock(DomainContextRelationshipRepository.class);
         DomainContractRepository contractRepository = mock(DomainContractRepository.class);
+        DomainResolutionRepository resolutionRepository = mock(DomainResolutionRepository.class);
         when(releaseRepository.findActiveByOptionalScope(null, null)).thenReturn(List.of());
         when(releaseRepository.findActiveByOptionalScope("tenant-a", "dev")).thenReturn(List.of());
         return new Fixture(
@@ -491,12 +520,14 @@ class DomainFederationQueryServiceTest {
                         contextRepository,
                         relationshipRepository,
                         contractRepository,
+                        resolutionRepository,
                         objectMapper),
                 releaseRepository,
                 sourceRepository,
                 contextRepository,
                 relationshipRepository,
-                contractRepository);
+                contractRepository,
+                resolutionRepository);
     }
 
     private record Fixture(
@@ -505,6 +536,7 @@ class DomainFederationQueryServiceTest {
             DomainSourceRepository sourceRepository,
             DomainContextRepository contextRepository,
             DomainContextRelationshipRepository relationshipRepository,
-            DomainContractRepository contractRepository) {
+            DomainContractRepository contractRepository,
+            DomainResolutionRepository resolutionRepository) {
     }
 }

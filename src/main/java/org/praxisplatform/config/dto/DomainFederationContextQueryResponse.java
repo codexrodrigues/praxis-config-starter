@@ -19,6 +19,8 @@ public record DomainFederationContextQueryResponse(
         List<String> retrievalGuidance,
         DomainFederationRetrievalPolicyReport policyReport,
         DomainCatalogContextResponse context,
-        List<DomainCatalogItemResponse> relationships
+        List<DomainCatalogItemResponse> relationships,
+        List<DomainCatalogItemResponse> contracts,
+        List<DomainCatalogItemResponse> resolutions
 ) {
 }
