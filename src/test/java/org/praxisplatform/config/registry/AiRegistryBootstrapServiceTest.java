@@ -14,6 +14,7 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.AiRegistry;
@@ -26,6 +27,7 @@ import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ResourceLoader;
 
+@Tag("unit")
 class AiRegistryBootstrapServiceTest {
 
     private static final String SNAPSHOT = """
