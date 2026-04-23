@@ -42,6 +42,12 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("human-resources.funcionarios");
         assertThat(contextHints.path("domainCatalog").path("nodeType").asText())
                 .isEqualTo("field");
+        assertThat(contextHints.path("domainCatalog").path("intent").asText())
+                .isEqualTo("authoring");
+        assertThat(contextHints.path("domainCatalog").path("itemTypes").path(0).asText())
+                .isEqualTo("node");
+        assertThat(contextHints.path("domainCatalog").path("itemTypes").path(1).asText())
+                .isEqualTo("governance");
         assertThat(contextHints.path("domainCatalog").path("recommendedOperation").asText())
                 .isEqualTo("rule.visualBlockGuidance.add");
         assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
@@ -78,6 +84,12 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("operations.missoes");
         assertThat(contextHints.path("domainCatalog").path("nodeType").isMissingNode())
                 .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("intent").asText())
+                .isEqualTo("authoring");
+        assertThat(contextHints.path("domainCatalog").path("itemTypes").path(0).asText())
+                .isEqualTo("node");
+        assertThat(contextHints.path("domainCatalog").path("itemTypes").size())
+                .isEqualTo(1);
         assertThat(contextHints.path("domainCatalog").path("recommendedOperation").isMissingNode())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("query").asText())

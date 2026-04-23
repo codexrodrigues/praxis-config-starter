@@ -29,6 +29,7 @@ final class AgenticAuthoringDomainCatalogHints {
         domainCatalog.put("schemaVersion", AiContractSpec.DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION);
         domainCatalog.put("serviceKey", resolvedServiceKey);
         domainCatalog.put("type", "node");
+        domainCatalog.put("intent", "authoring");
         domainCatalog.put("limit", 12);
         String contextKey = contextKey(candidate.resourcePath());
         if (!contextKey.isBlank()) {
@@ -41,6 +42,11 @@ final class AgenticAuthoringDomainCatalogHints {
         String query = query(userPrompt, candidate.resourcePath());
         if (!query.isBlank()) {
             domainCatalog.put("query", query);
+        }
+        var itemTypes = domainCatalog.putArray("itemTypes");
+        itemTypes.add("node");
+        if (requiresGovernanceContext(userPrompt)) {
+            itemTypes.add("governance");
         }
         ObjectNode relationships = domainCatalog.putObject("relationships");
         relationships.put("enabled", true);
@@ -112,6 +118,15 @@ final class AgenticAuthoringDomainCatalogHints {
             return "rule.visualBlockGuidance.add";
         }
         return "";
+    }
+
+    private static boolean requiresGovernanceContext(String userPrompt) {
+        String prompt = normalizeText(userPrompt);
+        return prompt.contains("lgpd")
+                || prompt.contains("gdpr")
+                || prompt.contains("compliance")
+                || prompt.contains("governanca")
+                || prompt.contains("privacidade");
     }
 
     private static String lastSegment(String resourcePath) {
