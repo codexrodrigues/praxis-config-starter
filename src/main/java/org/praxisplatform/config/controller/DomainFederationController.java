@@ -3,6 +3,7 @@ package org.praxisplatform.config.controller;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
 import org.praxisplatform.config.dto.DomainFederationIngestDryRunResponse;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 import org.praxisplatform.config.dto.DomainFederationValidationReport;
 import org.praxisplatform.config.dto.DomainFederationValidationRequest;
 import org.praxisplatform.config.service.DomainFederationContractValidator;
@@ -37,6 +38,9 @@ public class DomainFederationController {
             @RequestParam(required = false) String relationshipType,
             @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) Double minConfidence,
+            @RequestParam(defaultValue = "false") boolean includeDenied,
+            @RequestParam(defaultValue = "true") boolean includeLowConfidence,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         return ResponseEntity.ok(domainFederationQueryService.context(
@@ -49,7 +53,8 @@ public class DomainFederationController {
                 nodeType,
                 relationshipType,
                 q,
-                limit));
+                limit,
+                new DomainFederationRetrievalPolicyOptions(minConfidence, includeDenied, includeLowConfidence)));
     }
 
     @PostMapping("/dry-run")

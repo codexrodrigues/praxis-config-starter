@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyReport;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,33 @@ public class DomainFederationQueryService {
             String relationshipType,
             String query,
             int limit) {
+        return context(
+                serviceKey,
+                resourceKey,
+                tenantId,
+                environment,
+                itemType,
+                contextKey,
+                nodeType,
+                relationshipType,
+                query,
+                limit,
+                null);
+    }
+
+    @Transactional(readOnly = true)
+    public DomainFederationContextQueryResponse context(
+            String serviceKey,
+            String resourceKey,
+            String tenantId,
+            String environment,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String relationshipType,
+            String query,
+            int limit,
+            DomainFederationRetrievalPolicyOptions policyOptions) {
         int effectiveLimit = clampLimit(limit);
         DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
                 normalize(serviceKey),
@@ -58,8 +86,9 @@ public class DomainFederationQueryService {
                 normalize(query),
                 effectiveLimit);
         DomainFederationRetrievalPolicyService.Result contextPolicy = retrievalPolicyService.apply(
-                context == null ? List.of() : context.items());
-        DomainFederationRetrievalPolicyService.Result relationshipPolicy = retrievalPolicyService.apply(relationships);
+                context == null ? List.of() : context.items(),
+                policyOptions);
+        DomainFederationRetrievalPolicyService.Result relationshipPolicy = retrievalPolicyService.apply(relationships, policyOptions);
         DomainCatalogContextResponse governedContext = context == null ? null : new DomainCatalogContextResponse(
                 context.schemaVersion(),
                 context.release(),
@@ -112,6 +141,9 @@ public class DomainFederationQueryService {
         decisions.addAll(contextPolicy.decisions());
         decisions.addAll(relationshipPolicy.decisions());
         return new DomainFederationRetrievalPolicyReport(
+                contextPolicy.minConfidence(),
+                contextPolicy.includeDenied(),
+                contextPolicy.includeLowConfidence(),
                 contextPolicy.inputItemCount() + relationshipPolicy.inputItemCount(),
                 contextPolicy.returnedItemCount() + relationshipPolicy.returnedItemCount(),
                 contextPolicy.deniedItemCount() + relationshipPolicy.deniedItemCount(),

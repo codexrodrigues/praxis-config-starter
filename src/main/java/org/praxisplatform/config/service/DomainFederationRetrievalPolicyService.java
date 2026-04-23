@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyReport;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -14,7 +15,14 @@ public class DomainFederationRetrievalPolicyService {
     private static final double LOW_CONFIDENCE_THRESHOLD = 0.7d;
 
     public Result apply(List<DomainCatalogItemResponse> items) {
+        return apply(items, null);
+    }
+
+    public Result apply(List<DomainCatalogItemResponse> items, DomainFederationRetrievalPolicyOptions options) {
         List<DomainCatalogItemResponse> effectiveItems = items == null ? List.of() : items;
+        double minConfidence = minConfidence(options);
+        boolean includeDenied = includeDenied(options);
+        boolean includeLowConfidence = includeLowConfidence(options);
         List<DomainCatalogItemResponse> returnedItems = new ArrayList<>();
         List<String> decisions = new ArrayList<>();
         int denied = 0;
@@ -27,20 +35,30 @@ public class DomainFederationRetrievalPolicyService {
             }
             if (deniesAiVisibility(item.payload())) {
                 denied++;
-                decisions.add("Excluded " + item.itemKey() + " because aiUsage.visibility=deny.");
-                continue;
+                if (!includeDenied) {
+                    decisions.add("Excluded " + item.itemKey() + " because aiUsage.visibility=deny.");
+                    continue;
+                }
+                decisions.add("Included " + item.itemKey() + " despite aiUsage.visibility=deny because includeDenied=true.");
             }
             if (isGovernedSummary(item.payload())) {
                 governedSummary++;
             }
-            if (isLowConfidence(item.payload())) {
+            if (isLowConfidence(item.payload(), minConfidence)) {
                 lowConfidence++;
                 decisions.add("Flagged " + item.itemKey() + " as low confidence for federated retrieval.");
+                if (!includeLowConfidence) {
+                    decisions.add("Excluded " + item.itemKey() + " because confidence is below minConfidence.");
+                    continue;
+                }
             }
             returnedItems.add(item);
         }
 
         DomainFederationRetrievalPolicyReport report = new DomainFederationRetrievalPolicyReport(
+                minConfidence,
+                includeDenied,
+                includeLowConfidence,
                 effectiveItems.size(),
                 returnedItems.size(),
                 denied,
@@ -60,12 +78,27 @@ public class DomainFederationRetrievalPolicyService {
         return "governed-summary".equals(mode) || "mask".equals(visibility) || "summarize_only".equals(visibility);
     }
 
-    private boolean isLowConfidence(JsonNode payload) {
+    private boolean isLowConfidence(JsonNode payload, double minConfidence) {
         if (payload == null) {
             return false;
         }
         JsonNode confidence = payload.path("confidence");
-        return confidence.isNumber() && confidence.asDouble() < LOW_CONFIDENCE_THRESHOLD;
+        return confidence.isNumber() && confidence.asDouble() < minConfidence;
+    }
+
+    private double minConfidence(DomainFederationRetrievalPolicyOptions options) {
+        if (options == null || options.minConfidence() == null || options.minConfidence().isNaN()) {
+            return LOW_CONFIDENCE_THRESHOLD;
+        }
+        return Math.max(0.0d, Math.min(1.0d, options.minConfidence()));
+    }
+
+    private boolean includeDenied(DomainFederationRetrievalPolicyOptions options) {
+        return options != null && Boolean.TRUE.equals(options.includeDenied());
+    }
+
+    private boolean includeLowConfidence(DomainFederationRetrievalPolicyOptions options) {
+        return options == null || options.includeLowConfidence() == null || Boolean.TRUE.equals(options.includeLowConfidence());
     }
 
     private String aiVisibility(JsonNode payload) {

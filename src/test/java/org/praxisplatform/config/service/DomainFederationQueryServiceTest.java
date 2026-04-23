@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 
 @Tag("unit")
 class DomainFederationQueryServiceTest {
@@ -102,6 +103,7 @@ class DomainFederationQueryServiceTest {
                 .containsExactly("operations.mission.depends_on.assets.vehicle");
         assertThat(response.policyReport().inputItemCount()).isEqualTo(3);
         assertThat(response.policyReport().returnedItemCount()).isEqualTo(2);
+        assertThat(response.policyReport().minConfidence()).isEqualTo(0.7d);
         assertThat(response.policyReport().deniedItemCount()).isEqualTo(1);
         assertThat(response.policyReport().lowConfidenceItemCount()).isEqualTo(1);
         assertThat(response.retrievalGuidance())
@@ -129,6 +131,81 @@ class DomainFederationQueryServiceTest {
                 "depends_on",
                 "veiculo",
                 20);
+    }
+
+    @Test
+    void appliesRuntimeRetrievalPolicyOptions() throws Exception {
+        DomainCatalogIngestionService catalogService = mock(DomainCatalogIngestionService.class);
+        DomainFederationQueryService service = new DomainFederationQueryService(
+                catalogService,
+                new DomainFederationRetrievalPolicyService());
+        DomainCatalogContextResponse catalogContext = new DomainCatalogContextResponse(
+                "praxis.domain-catalog-context/v0.1",
+                null,
+                "veiculo",
+                "node",
+                "operations",
+                null,
+                List.of(),
+                List.of(new DomainCatalogItemResponse(
+                        UUID.randomUUID(),
+                        "domain-catalog:operations:v1",
+                        "node",
+                        "operations.low-confidence",
+                        "operations",
+                        "entity",
+                        null,
+                        null,
+                        objectMapper.readTree("{\"confidence\":0.72}"))));
+        when(catalogService.contextLatest(
+                null,
+                null,
+                "tenant-a",
+                "dev",
+                "node",
+                "operations",
+                null,
+                "veiculo",
+                20)).thenReturn(catalogContext);
+        when(catalogService.relationshipsLatest(
+                null,
+                null,
+                "tenant-a",
+                "dev",
+                null,
+                null,
+                null,
+                "veiculo",
+                20)).thenReturn(List.of(new DomainCatalogItemResponse(
+                UUID.randomUUID(),
+                "domain-catalog:operations:v1",
+                "edge",
+                "operations.denied",
+                "operations",
+                null,
+                null,
+                null,
+                objectMapper.readTree("{\"aiUsage\":{\"visibility\":\"deny\"},\"confidence\":0.95}"))));
+
+        var response = service.context(
+                null,
+                null,
+                "tenant-a",
+                "dev",
+                "node",
+                "operations",
+                null,
+                null,
+                "veiculo",
+                20,
+                new DomainFederationRetrievalPolicyOptions(0.8d, true, false));
+
+        assertThat(response.context().items()).isEmpty();
+        assertThat(response.relationships()).extracting(DomainCatalogItemResponse::itemKey)
+                .containsExactly("operations.denied");
+        assertThat(response.policyReport().minConfidence()).isEqualTo(0.8d);
+        assertThat(response.policyReport().includeDenied()).isTrue();
+        assertThat(response.policyReport().includeLowConfidence()).isFalse();
     }
 
     @Test

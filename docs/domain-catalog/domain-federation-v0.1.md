@@ -360,6 +360,9 @@ Current filters:
 | `relationshipType` | Restrict relationship rows by edge type. |
 | `q` | Semantic or lexical query. |
 | `limit` | Maximum context and relationship items returned. |
+| `minConfidence` | Runtime retrieval threshold. Defaults to `0.7`. |
+| `includeDenied` | Include `aiUsage.visibility=deny` items for privileged diagnostics. Defaults to `false`. |
+| `includeLowConfidence` | Include items below `minConfidence`. Defaults to `true`. |
 
 Current behavior:
 
@@ -379,6 +382,12 @@ Current policy behavior:
 - reports governed-summary counts;
 - reports low-confidence items below `0.7`;
 - includes policy decisions in the federated context response.
+
+Runtime options:
+
+- `minConfidence`: clamps to `0.0..1.0`;
+- `includeDenied`: defaults to `false`;
+- `includeLowConfidence`: defaults to `true`.
 
 This is intentionally conservative. It is not yet a full authorization engine.
 It is the first LLM-facing retrieval guard that prevents obviously denied

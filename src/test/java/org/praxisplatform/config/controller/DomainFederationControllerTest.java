@@ -13,6 +13,7 @@ import org.praxisplatform.config.dto.DomainFederationContext;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
 import org.praxisplatform.config.dto.DomainFederationIngestDryRunResponse;
 import org.praxisplatform.config.dto.DomainFederationIngestPreviewItemResponse;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 import org.praxisplatform.config.dto.DomainFederationSource;
 import org.praxisplatform.config.dto.DomainFederationValidationReport;
 import org.praxisplatform.config.dto.DomainFederationValidationRequest;
@@ -93,7 +94,8 @@ class DomainFederationControllerTest {
                 null,
                 "depends_on",
                 "veiculo",
-                20)).thenReturn(response);
+                20,
+                new DomainFederationRetrievalPolicyOptions(0.8d, false, false))).thenReturn(response);
 
         var entity = controller.context(
                 null,
@@ -104,6 +106,9 @@ class DomainFederationControllerTest {
                 "depends_on",
                 "veiculo",
                 20,
+                0.8d,
+                false,
+                false,
                 "tenant-a",
                 "dev");
 
@@ -118,7 +123,8 @@ class DomainFederationControllerTest {
                 null,
                 "depends_on",
                 "veiculo",
-                20);
+                20,
+                new DomainFederationRetrievalPolicyOptions(0.8d, false, false));
     }
 
     @Test
