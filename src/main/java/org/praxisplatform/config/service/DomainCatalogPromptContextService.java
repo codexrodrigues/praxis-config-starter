@@ -266,6 +266,7 @@ public class DomainCatalogPromptContextService {
         StringBuilder builder = new StringBuilder();
         builder.append("DOMAIN_CATALOG_RELATIONSHIPS\n");
         builder.append("federated: true\n");
+        appendLine(builder, "sourceMode", response.sourceMode());
         appendLine(builder, "query", response.query());
         appendLine(builder, "relationshipType", response.relationshipType());
         builder.append("items:\n");

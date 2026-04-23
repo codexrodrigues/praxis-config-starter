@@ -74,6 +74,10 @@ Persisted federation smoke result:
 - `releaseStatus=candidate`;
 - `releaseListed=true`;
 - `validationReportValid=true`;
+- `activatedStatus=active`;
+- `contextSourceMode=persisted_federation`;
+- `contextItemCount=1`;
+- `contextRelationshipCount=1`;
 - `persistedSources=1`;
 - `persistedContexts=2`;
 - `persistedContextRelationships=1`;

@@ -6,13 +6,24 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.praxisplatform.config.domain.DomainContext;
+import org.praxisplatform.config.domain.DomainContextRelationship;
+import org.praxisplatform.config.domain.DomainContract;
+import org.praxisplatform.config.domain.DomainFederationRelease;
+import org.praxisplatform.config.domain.DomainSource;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
+import org.praxisplatform.config.repository.DomainContextRelationshipRepository;
+import org.praxisplatform.config.repository.DomainContextRepository;
+import org.praxisplatform.config.repository.DomainContractRepository;
+import org.praxisplatform.config.repository.DomainFederationReleaseRepository;
+import org.praxisplatform.config.repository.DomainSourceRepository;
 
 @Tag("unit")
 class DomainFederationQueryServiceTest {
@@ -22,9 +33,8 @@ class DomainFederationQueryServiceTest {
     @Test
     void buildsFederatedContextFromCatalogProjection() throws Exception {
         DomainCatalogIngestionService catalogService = mock(DomainCatalogIngestionService.class);
-        DomainFederationQueryService service = new DomainFederationQueryService(
-                catalogService,
-                new DomainFederationRetrievalPolicyService());
+        Fixture fixture = fixture(catalogService);
+        DomainFederationQueryService service = fixture.service();
         DomainCatalogContextResponse catalogContext = new DomainCatalogContextResponse(
                 "praxis.domain-catalog-context/v0.1",
                 null,
@@ -98,6 +108,7 @@ class DomainFederationQueryServiceTest {
                 20);
 
         assertThat(response.federated()).isTrue();
+        assertThat(response.sourceMode()).isEqualTo("catalog_projection_fallback");
         assertThat(response.context().items()).containsExactlyElementsOf(catalogContext.items());
         assertThat(response.relationships()).extracting(DomainCatalogItemResponse::itemKey)
                 .containsExactly("operations.mission.depends_on.assets.vehicle");
@@ -137,9 +148,8 @@ class DomainFederationQueryServiceTest {
     @Test
     void appliesRuntimeRetrievalPolicyOptions() throws Exception {
         DomainCatalogIngestionService catalogService = mock(DomainCatalogIngestionService.class);
-        DomainFederationQueryService service = new DomainFederationQueryService(
-                catalogService,
-                new DomainFederationRetrievalPolicyService());
+        Fixture fixture = fixture(catalogService);
+        DomainFederationQueryService service = fixture.service();
         DomainCatalogContextResponse catalogContext = new DomainCatalogContextResponse(
                 "praxis.domain-catalog-context/v0.1",
                 null,
@@ -213,9 +223,8 @@ class DomainFederationQueryServiceTest {
     @Test
     void clampsInvalidLimitAndPreservesScopedQuery() {
         DomainCatalogIngestionService catalogService = mock(DomainCatalogIngestionService.class);
-        DomainFederationQueryService service = new DomainFederationQueryService(
-                catalogService,
-                new DomainFederationRetrievalPolicyService());
+        Fixture fixture = fixture(catalogService);
+        DomainFederationQueryService service = fixture.service();
         DomainCatalogContextResponse catalogContext = new DomainCatalogContextResponse(
                 "praxis.domain-catalog-context/v0.1",
                 null,
@@ -259,6 +268,7 @@ class DomainFederationQueryServiceTest {
                 -1);
 
         assertThat(response.federated()).isFalse();
+        assertThat(response.sourceMode()).isEqualTo("catalog_projection_fallback");
         assertThat(response.limit()).isEqualTo(20);
         verify(catalogService).contextLatest(
                 "praxis-api-quickstart",
@@ -270,5 +280,140 @@ class DomainFederationQueryServiceTest {
                 "entity",
                 "employee",
                 20);
+    }
+
+    @Test
+    void prefersActivePersistedFederationReleaseWhenAvailable() throws Exception {
+        DomainCatalogIngestionService catalogService = mock(DomainCatalogIngestionService.class);
+        Fixture fixture = fixture(catalogService);
+        DomainFederationRelease release = DomainFederationRelease.builder()
+                .id(UUID.randomUUID())
+                .releaseKey("domain-federation:tenant-a:dev:v1")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .status("active")
+                .payloadHash("abc")
+                .createdAt(Instant.parse("2026-04-23T10:00:00Z"))
+                .activatedAt(Instant.parse("2026-04-23T10:01:00Z"))
+                .build();
+        DomainSource source = DomainSource.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .sourceKey("operations-source")
+                .serviceKey("operations-service")
+                .serviceName("Operations")
+                .status("active")
+                .evidence("{}")
+                .build();
+        DomainContext context = DomainContext.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .contextKey("operations")
+                .sourceKey("operations-source")
+                .contextType("bounded_context")
+                .label("Operations")
+                .description("Mission execution concepts.")
+                .semanticOwner("Operacoes")
+                .technicalOwner("Platform")
+                .status("active")
+                .evidence("{\"confidence\":0.91}")
+                .build();
+        DomainContract contract = DomainContract.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .contractKey("assets.vehicle-allocation.v1")
+                .contractType("lookup_option_source")
+                .providerSourceKey("assets-source")
+                .providerContextKey("assets")
+                .consumerContextKey("operations")
+                .resourceKey("assets.veiculos")
+                .operationKey("vehicleAllocationLookup")
+                .compatibility("stable")
+                .visibility("internal")
+                .status("active")
+                .evidence("{}")
+                .build();
+        DomainContextRelationship relationship = DomainContextRelationship.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .relationshipKey("operations.uses.assets")
+                .sourceContextKey("operations")
+                .targetContextKey("assets")
+                .relationshipType("uses")
+                .contractKey("assets.vehicle-allocation.v1")
+                .direction("source_to_target")
+                .ownership("target_owned")
+                .confidence(0.92d)
+                .status("active")
+                .evidence("{}")
+                .build();
+        when(fixture.releaseRepository().findActiveByOptionalScope("tenant-a", "dev")).thenReturn(List.of(release));
+        when(fixture.sourceRepository().findByFederationRelease_IdOrderBySourceKey(release.getId())).thenReturn(List.of(source));
+        when(fixture.contextRepository().findByFederationRelease_IdOrderByContextKey(release.getId())).thenReturn(List.of(context));
+        when(fixture.contractRepository().findByFederationRelease_IdOrderByContractKey(release.getId())).thenReturn(List.of(contract));
+        when(fixture.relationshipRepository().findByFederationRelease_IdOrderByRelationshipKey(release.getId())).thenReturn(List.of(relationship));
+
+        var response = fixture.service().context(
+                "operations-service",
+                "assets.veiculos",
+                "tenant-a",
+                "dev",
+                "node",
+                "operations",
+                null,
+                "uses",
+                "operations",
+                20);
+
+        assertThat(response.sourceMode()).isEqualTo("persisted_federation");
+        assertThat(response.federated()).isTrue();
+        assertThat(response.context().release().releaseKey()).isEqualTo("domain-federation:tenant-a:dev:v1");
+        assertThat(response.context().items()).singleElement().satisfies(item -> {
+            assertThat(item.itemType()).isEqualTo("context");
+            assertThat(item.itemKey()).isEqualTo("operations");
+            assertThat(item.payload().path("sourceMode").asText()).isEqualTo("persisted_federation");
+            assertThat(item.payload().path("serviceKey").asText()).isEqualTo("operations-service");
+        });
+        assertThat(response.relationships()).singleElement().satisfies(item -> {
+            assertThat(item.itemType()).isEqualTo("edge");
+            assertThat(item.edgeType()).isEqualTo("uses");
+            assertThat(item.payload().path("contract").path("resourceKey").asText()).isEqualTo("assets.veiculos");
+        });
+        assertThat(response.retrievalGuidance())
+                .anySatisfy(guidance -> assertThat(guidance).contains("active persisted domain federation release"));
+    }
+
+    private Fixture fixture(DomainCatalogIngestionService catalogService) {
+        DomainFederationReleaseRepository releaseRepository = mock(DomainFederationReleaseRepository.class);
+        DomainSourceRepository sourceRepository = mock(DomainSourceRepository.class);
+        DomainContextRepository contextRepository = mock(DomainContextRepository.class);
+        DomainContextRelationshipRepository relationshipRepository = mock(DomainContextRelationshipRepository.class);
+        DomainContractRepository contractRepository = mock(DomainContractRepository.class);
+        when(releaseRepository.findActiveByOptionalScope(null, null)).thenReturn(List.of());
+        when(releaseRepository.findActiveByOptionalScope("tenant-a", "dev")).thenReturn(List.of());
+        return new Fixture(
+                new DomainFederationQueryService(
+                        catalogService,
+                        new DomainFederationRetrievalPolicyService(),
+                        releaseRepository,
+                        sourceRepository,
+                        contextRepository,
+                        relationshipRepository,
+                        contractRepository,
+                        objectMapper),
+                releaseRepository,
+                sourceRepository,
+                contextRepository,
+                relationshipRepository,
+                contractRepository);
+    }
+
+    private record Fixture(
+            DomainFederationQueryService service,
+            DomainFederationReleaseRepository releaseRepository,
+            DomainSourceRepository sourceRepository,
+            DomainContextRepository contextRepository,
+            DomainContextRelationshipRepository relationshipRepository,
+            DomainContractRepository contractRepository) {
     }
 }
