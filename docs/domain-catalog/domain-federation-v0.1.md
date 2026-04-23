@@ -620,6 +620,17 @@ Recommended first implementation slice:
 
 The second slice can switch `/context` to prefer active persisted releases.
 
+Current implementation status:
+
+- Flyway migration added in `V21__create_domain_federation_read_model.sql`.
+- The migration creates `domain_federation_release`, `domain_source`,
+  `domain_context`, `domain_context_relationship`, `domain_contract` and
+  `domain_resolution`.
+- Database foreign keys are intentionally minimal in this first slice:
+  release ownership is enforced by the database, while release-local semantic
+  references remain validator-enforced.
+- No remote database execution has been performed by this change.
+
 ## Example Scenario
 
 Human Resources publishes:
