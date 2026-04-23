@@ -1,11 +1,14 @@
 target/
+artifacts/
 .idea/
 .vscode/
 *.iml
 *.log
 
 # Local AI provider secrets. Keep real API keys out of Git.
+.env.openai.local.sh
 .env.openai.local.ps1
+.env.*.local.sh
 .env.*.local.ps1
 
 # OS artifacts
