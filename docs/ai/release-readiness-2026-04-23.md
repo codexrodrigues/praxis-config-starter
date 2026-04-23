@@ -83,6 +83,11 @@ Persisted federation smoke result:
 - `deniedContextRelationshipCount=0`;
 - `deniedItemCount=1`;
 - `deniedGuidanceConfirmed=true`;
+- `lowConfidenceContextSourceMode=persisted_federation`;
+- `lowConfidenceContextItemCount=1`;
+- `lowConfidenceContextRelationshipCount=0`;
+- `lowConfidenceItemCount=1`;
+- `lowConfidenceGuidanceConfirmed=true`;
 - `persistedSources=1`;
 - `persistedContexts=2`;
 - `persistedContextRelationships=1`;
@@ -97,7 +102,9 @@ The current persisted retrieval policy has also been validated locally to:
   `payload.evidence.confidence` and `payload.resolution.confidence`;
 - redact persisted relationships when the linked contract is not LLM-safe;
 - prove the `deny_for_llm` redaction path over real HTTP against the packaged
-  quickstart host, not only through focal tests.
+  quickstart host, not only through focal tests;
+- prove the `low-confidence` exclusion path over real HTTP for
+  `policyProfile=authoring` against the packaged quickstart host.
 
 The persistent smoke runner is:
 
@@ -136,6 +143,6 @@ The release workflow was adjusted so Maven Central publication can be triggered 
 Move from release readiness to the next architectural increment:
 
 1. Expose persisted active federation releases through query-time context retrieval.
-2. Add one more persistent smoke branch for low-confidence persisted retrieval over real HTTP, mirroring the current `deny_for_llm` proof.
-3. Run the browser E2E again after packaging quickstart with the same starter version used by the next release candidate.
+2. Run the browser E2E again after packaging quickstart with the same starter version used by the next release candidate.
+3. Record the browser E2E evidence against this same persisted-federation baseline.
 4. Only after those controls are in place and revalidated end to end, allow LLM-assisted proposals for federation changes.

@@ -662,6 +662,9 @@ Current implementation status:
 - The same persistent smoke now also activates a `deny_for_llm` candidate
   release and proves over real HTTP that persisted relationships linked to that
   contract are redacted from `/domain-federation/context`.
+- The same persistent smoke also activates a low-confidence candidate release
+  and proves over real HTTP that low-confidence persisted relationships are
+  excluded from `/domain-federation/context` under `policyProfile=authoring`.
 
 ## Example Scenario
 
