@@ -285,6 +285,21 @@ The federated release should include:
 The federated release must be immutable. Corrections create a new federated
 release.
 
+## Dry-Run Validation v0.1
+
+Current endpoint shape:
+
+```http
+POST /api/praxis/config/domain-federation/dry-run
+```
+
+Behavior:
+
+- accepts a `DomainFederationValidationRequest` envelope;
+- returns `200 OK` with `DomainFederationValidationReport`;
+- uses `X-Tenant-ID` and `X-Env` as fallback scope when the envelope omits them;
+- does not persist anything.
+
 ## Ingestion v0.1
 
 Future endpoint shape:
