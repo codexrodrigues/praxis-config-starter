@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: 8ee46bce6fd8445afc9244c0e84ef152141f643ad0b55fc145f0373fa396b654
+        default: 67016c9ee2035e6671d3c2edf375f30ae46ffafb064cb11b49b8d032d99d1258
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 8ee46bce6fd8445afc9244c0e84ef152141f643ad0b55fc145f0373fa396b654
+        example: 67016c9ee2035e6671d3c2edf375f30ae46ffafb064cb11b49b8d032d99d1258
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -891,9 +891,98 @@ components:
           items:
             type: string
         patch:
+          $ref: '#/components/schemas/AgenticAuthoringCompiledComponentPatch'
+      additionalProperties: false
+
+    AgenticAuthoringCompiledComponentPatch:
+      type: object
+      description: Patch compilado para configuracao de componente. `compiledOperations` e a representacao canonica preferencial para backend tools; `operations` e `patchOperations` permanecem como aliases legados dos efeitos compilados nativos.
+      properties:
+        componentId:
+          type: string
+        manifestVersion:
+          type: string
+          nullable: true
+        patchKind:
+          type: string
+          enum: [component-config-patch]
+        compiledOperations:
+          type: array
+          description: Operacoes canonicas normalizadas, independentes dos nomes internos de handlers.
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringCompiledPatchOperation'
+        operations:
+          type: array
+          description: Alias legado contendo efeitos compilados nativos do compilador, inclusive handlers de dominio.
+          items:
+            type: object
+            additionalProperties: true
+        patchOperations:
+          type: array
+          description: Alias legado contendo efeitos compilados nativos do compilador, inclusive handlers de dominio.
+          items:
+            type: object
+            additionalProperties: true
+        proposedConfig:
           type: object
           additionalProperties: true
-      additionalProperties: false
+      additionalProperties: true
+
+    AgenticAuthoringCompiledPatchOperation:
+      type: object
+      description: Operacao compilada canonica para aplicacao ou auditoria de patch.
+      properties:
+        op:
+          type: string
+          enum:
+            - merge-object-by-key
+            - merge-object
+            - set-value
+            - remove-by-key
+            - append
+            - append-unique
+            - reorder-by-key
+            - domain-patch
+        componentId:
+          type: string
+        operationId:
+          type: string
+        path:
+          type: string
+        resolvedPath:
+          type: string
+          nullable: true
+        key:
+          type: string
+          nullable: true
+        keyValue:
+          nullable: true
+        value:
+          nullable: true
+        removedValue:
+          nullable: true
+        removedIndex:
+          type: integer
+          nullable: true
+        fromIndex:
+          type: integer
+          nullable: true
+        toIndex:
+          type: integer
+          nullable: true
+        appendedIndex:
+          type: integer
+          nullable: true
+        handler:
+          type: string
+          nullable: true
+        submissionImpact:
+          type: string
+          nullable: true
+        compilerBoundary:
+          type: boolean
+          nullable: true
+      additionalProperties: true
 
     AgenticAuthoringConversationMessage:
       type: object
@@ -1484,6 +1573,16 @@ components:
           nullable: true
           description: Tipo de no semantico quando type=node.
           example: field
+        recommendedOperation:
+          type: string
+          nullable: true
+          description: Operacao autoral recomendada pelo catalogo de dominio para transformar o hint em plano revisavel.
+          enum:
+            - rule.visibility.add
+            - rule.validation.add
+            - rule.visualBlockGuidance.add
+            - rule.remove
+          example: rule.visualBlockGuidance.add
         limit:
           type: integer
           format: int32

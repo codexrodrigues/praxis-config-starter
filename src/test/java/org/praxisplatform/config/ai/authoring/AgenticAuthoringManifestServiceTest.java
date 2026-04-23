@@ -208,9 +208,9 @@ class AgenticAuthoringManifestServiceTest {
                 objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
 
         assertThat(result.compiled()).isTrue();
-        assertThat(result.patch().path("operations")).hasSize(1);
-        JsonNode op = result.patch().path("operations").get(0);
-        assertThat(op.path("effectKind").asText()).isEqualTo("merge-by-key");
+        assertThat(result.patch().path("compiledOperations")).hasSize(1);
+        JsonNode op = result.patch().path("compiledOperations").get(0);
+        assertThat(op.path("op").asText()).isEqualTo("merge-object-by-key");
         assertThat(op.path("resolvedPath").asText()).isEqualTo("columns[]/0");
         assertThat(op.path("keyValue").asText()).isEqualTo("email");
         assertThat(op.path("value").path("header").asText()).isEqualTo("Contato");
@@ -241,7 +241,7 @@ class AgenticAuthoringManifestServiceTest {
                 objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
 
         assertThat(result.compiled()).isTrue();
-        assertThat(result.patch().path("operations").get(0).path("op").asText()).isEqualTo("set-value");
+        assertThat(result.patch().path("compiledOperations").get(0).path("op").asText()).isEqualTo("set-value");
         assertThat(result.patch().path("proposedConfig").path("fieldMetadata").get(0).path("label").asText())
                 .isEqualTo("E-mail Corporativo");
     }
@@ -271,8 +271,8 @@ class AgenticAuthoringManifestServiceTest {
                 objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
 
         assertThat(result.compiled()).isTrue();
-        assertThat(result.patch().path("operations").get(0).path("op").asText()).isEqualTo("remove-by-key");
-        assertThat(result.patch().path("operations").get(0).path("removedIndex").asInt()).isZero();
+        assertThat(result.patch().path("compiledOperations").get(0).path("op").asText()).isEqualTo("remove-by-key");
+        assertThat(result.patch().path("compiledOperations").get(0).path("removedIndex").asInt()).isZero();
         assertThat(result.patch().path("proposedConfig").path("columns")).hasSize(1);
         assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("field").asText())
                 .isEqualTo("name");
@@ -305,9 +305,9 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(result.compiled()).isTrue();
         assertThat(result.failures()).isEmpty();
         assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.5.0");
-        JsonNode operation = result.patch().path("operations").get(0);
+        JsonNode operation = result.patch().path("compiledOperations").get(0);
         assertThat(operation.path("operationId").asText()).isEqualTo("field.label.set");
-        assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");
+        assertThat(operation.path("op").asText()).isEqualTo("merge-object-by-key");
         assertThat(operation.path("resolvedPath").asText()).isEqualTo("fieldMetadata[]/0");
         assertThat(operation.path("keyValue").asText()).isEqualTo("email");
         assertThat(operation.path("value").path("label").asText()).isEqualTo("E-mail Corporativo");

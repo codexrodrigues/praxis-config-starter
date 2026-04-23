@@ -6,6 +6,7 @@ import org.praxisplatform.config.registry.AiRegistryBootstrapService;
 import org.praxisplatform.config.registry.AiRegistryBootstrapState;
 import org.praxisplatform.config.registry.AiRegistryHealthProperties;
 import org.praxisplatform.config.registry.AiRegistryStatusService;
+import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.boot.ApplicationRunner;
@@ -49,14 +50,18 @@ public class AiRegistryBootstrapAutoConfiguration {
             ResourceLoader resourceLoader,
             AiRegistryBootstrapProperties bootstrapProperties,
             AiRegistryStatusService statusService,
-            AiRegistryBootstrapState bootstrapState) {
+            AiRegistryBootstrapState bootstrapState,
+            AiRegistryRepository repository,
+            RagVectorStoreService ragVectorStoreService) {
         return new AiRegistryBootstrapService(
                 ingestionService,
                 objectMapper,
                 resourceLoader,
                 bootstrapProperties,
                 statusService,
-                bootstrapState);
+                bootstrapState,
+                repository,
+                ragVectorStoreService);
     }
 
     @Bean

@@ -87,6 +87,8 @@ class AiApiContractOpenApiTest {
                 "AgenticAuthoringResolvedTarget",
                 "AgenticAuthoringManifestValidationResult",
                 "AgenticAuthoringManifestCompileResult",
+                "AgenticAuthoringCompiledComponentPatch",
+                "AgenticAuthoringCompiledPatchOperation",
                 "AgenticAuthoringResourceCandidatesRequest",
                 "AgenticAuthoringResourceCandidatesResult",
                 "AgenticAuthoringCandidate",
@@ -111,8 +113,15 @@ class AiApiContractOpenApiTest {
                 "query",
                 "contextKey",
                 "nodeType",
+                "recommendedOperation",
                 "limit",
                 "relationships");
+        assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("recommendedOperation")).get("enum"))
+                .containsExactly(
+                        "rule.visibility.add",
+                        "rule.validation.add",
+                        "rule.visualBlockGuidance.add",
+                        "rule.remove");
         assertThat((Map<String, Object>) domainCatalogHintProperties.get("schemaVersion"))
                 .containsEntry("default", "praxis.ai.context-hints.domain-catalog/v0.1");
         assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("type")).get("enum"))
@@ -201,6 +210,58 @@ class AiApiContractOpenApiTest {
                 "value",
                 "candidates",
                 "failures");
+        Map<String, Object> compileResult =
+                (Map<String, Object>) schemas.get("AgenticAuthoringManifestCompileResult");
+        Map<String, Object> compileResultProperties =
+                (Map<String, Object>) compileResult.get("properties");
+        assertThat((Map<String, Object>) compileResultProperties.get("patch"))
+                .containsEntry("$ref", "#/components/schemas/AgenticAuthoringCompiledComponentPatch");
+        Map<String, Object> compiledPatch =
+                (Map<String, Object>) schemas.get("AgenticAuthoringCompiledComponentPatch");
+        Map<String, Object> compiledPatchProperties =
+                (Map<String, Object>) compiledPatch.get("properties");
+        assertThat(compiledPatchProperties).containsKeys(
+                "componentId",
+                "manifestVersion",
+                "patchKind",
+                "compiledOperations",
+                "operations",
+                "patchOperations",
+                "proposedConfig");
+        assertThat((Map<String, Object>) compiledPatchProperties.get("compiledOperations"))
+                .extracting("items")
+                .isEqualTo(Map.of("$ref", "#/components/schemas/AgenticAuthoringCompiledPatchOperation"));
+        Map<String, Object> compiledOperation =
+                (Map<String, Object>) schemas.get("AgenticAuthoringCompiledPatchOperation");
+        Map<String, Object> compiledOperationProperties =
+                (Map<String, Object>) compiledOperation.get("properties");
+        assertThat(compiledOperationProperties).containsKeys(
+                "op",
+                "componentId",
+                "operationId",
+                "path",
+                "resolvedPath",
+                "key",
+                "keyValue",
+                "value",
+                "removedValue",
+                "removedIndex",
+                "fromIndex",
+                "toIndex",
+                "appendedIndex",
+                "handler",
+                "submissionImpact",
+                "compilerBoundary");
+        assertThat((List<String>) ((Map<String, Object>) compiledOperationProperties.get("op")).get("enum"))
+                .containsExactly(
+                        "merge-object-by-key",
+                        "merge-object",
+                        "set-value",
+                        "remove-by-key",
+                        "append",
+                        "append-unique",
+                        "reorder-by-key",
+                        "domain-patch");
 
         assertManifestEndpointUsesAuthoringError(paths,
                 "/api/praxis/config/ai/authoring/manifests/{componentId}");

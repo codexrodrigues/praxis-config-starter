@@ -63,7 +63,7 @@ Authoring manifests executaveis:
 - Os endpoints `/api/praxis/config/ai/authoring/manifests/{componentId}/**` expõem o contrato executavel versionado projetado em `ai_registry`.
 - `resolve-target` usa o `operation.target.resolver` declarado pelo manifest para resolver alvos de forma deterministica.
 - `validate-plan` valida plano, schema de input, validators declarados, confirmacao destrutiva e existencia de alvos sem depender de keywords.
-- `compile-patch` compila efeitos genericos como `merge-by-key`, `remove-by-key`, `set-value`, `merge-object` e `append` em patch de configuracao com `proposedConfig`.
+- `compile-patch` compila efeitos genericos como `merge-by-key`, `remove-by-key`, `set-value`, `merge-object` e `append` em `compiledOperations` canônicas com `proposedConfig` resultante. Os aliases legados `operations` e `patchOperations` continuam expondo os efeitos compilados nativos do compilador, inclusive handlers de domínio.
 - Efeitos `compile-domain-patch` continuam sendo fronteira explicita para compiladores especificos por componente.
 - Erros de configuracao desses endpoints usam `AgenticAuthoringDryRunErrorResponse`, com `failureCodes=["DRY_RUN_CONFIGURATION_INVALID"]`.
 
