@@ -62,6 +62,9 @@ The same shape is valid for:
   routed to the shared rule/decision flow under
   `/api/praxis/config/domain-rules/**`, instead of being materialized first as
   a page/component preview.
+- `recommendedRuleType` seeds the canonical shared-rule type when the request
+  is routed to `shared_rule_authoring`, so hosts can open `simulation` without
+  inventing a local rule taxonomy.
 
 When a resource candidate is selected from authoring discovery, Praxis derives:
 
