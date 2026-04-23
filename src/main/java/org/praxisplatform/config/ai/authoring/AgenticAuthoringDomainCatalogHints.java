@@ -53,6 +53,10 @@ final class AgenticAuthoringDomainCatalogHints {
         if (!nodeType.isBlank()) {
             domainCatalog.put("nodeType", nodeType);
         }
+        String recommendedOperation = recommendedOperation(artifactKind, userPrompt);
+        if (!recommendedOperation.isBlank()) {
+            domainCatalog.put("recommendedOperation", recommendedOperation);
+        }
     }
 
     private static String contextKey(String resourcePath) {
@@ -92,6 +96,22 @@ final class AgenticAuthoringDomainCatalogHints {
             case "form", "table" -> "field";
             default -> "";
         };
+    }
+
+    private static String recommendedOperation(String artifactKind, String userPrompt) {
+        if (!"form".equals(valueOrDefault(artifactKind, "unknown"))) {
+            return "";
+        }
+        String prompt = normalizeText(userPrompt);
+        if (prompt.contains("lgpd")
+                || prompt.contains("gdpr")
+                || prompt.contains("compliance")
+                || prompt.contains("governanca")
+                || prompt.contains("privacidade")
+                || prompt.contains("orientacao visual")) {
+            return "rule.visualBlockGuidance.add";
+        }
+        return "";
     }
 
     private static String lastSegment(String resourcePath) {

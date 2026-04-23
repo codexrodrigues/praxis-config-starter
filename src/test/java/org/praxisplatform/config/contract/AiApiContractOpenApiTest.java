@@ -111,6 +111,7 @@ class AiApiContractOpenApiTest {
                 "query",
                 "contextKey",
                 "nodeType",
+                "recommendedOperation",
                 "limit",
                 "relationships");
         assertThat((Map<String, Object>) domainCatalogHintProperties.get("schemaVersion"))
@@ -119,6 +120,8 @@ class AiApiContractOpenApiTest {
                 .containsExactly("context", "node", "edge", "binding", "evidence", "governance", "vocabulary", "relationship");
         assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("intent")).get("enum"))
                 .containsExactly("authoring", "explain", "validate", "ai-access-control");
+        assertThat((List<String>) ((Map<String, Object>) domainCatalogHintProperties.get("recommendedOperation")).get("enum"))
+                .containsExactly("rule.visibility.add", "rule.validation.add", "rule.visualBlockGuidance.add", "rule.remove");
         assertThat((Map<String, Object>) domainCatalogHintProperties.get("relationships"))
                 .containsEntry("$ref", "#/components/schemas/AiDomainCatalogRelationshipHint");
 

@@ -185,6 +185,12 @@ export type AiDomainCatalogContextHintIntent =
   | 'validate'
   | 'ai-access-control';
 
+export type AiDomainCatalogRecommendedOperation =
+  | 'rule.visibility.add'
+  | 'rule.validation.add'
+  | 'rule.visualBlockGuidance.add'
+  | 'rule.remove';
+
 export interface AiDomainCatalogRelationshipHintContract {
   enabled?: boolean;
   federated?: boolean;
@@ -208,6 +214,7 @@ export interface AiDomainCatalogContextHintContract {
   query?: string | null;
   contextKey?: string | null;
   nodeType?: string | null;
+  recommendedOperation?: AiDomainCatalogRecommendedOperation | null;
   limit?: number;
   relationships?: AiDomainCatalogRelationshipHintContract | null;
 }

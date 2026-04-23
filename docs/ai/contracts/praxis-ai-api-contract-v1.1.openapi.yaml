@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: 8ee46bce6fd8445afc9244c0e84ef152141f643ad0b55fc145f0373fa396b654
+        default: af6037b884417c7ec7b3d7e98737699c3972fde5b610f22a6d7c76eb77eb0e0a
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 8ee46bce6fd8445afc9244c0e84ef152141f643ad0b55fc145f0373fa396b654
+        example: af6037b884417c7ec7b3d7e98737699c3972fde5b610f22a6d7c76eb77eb0e0a
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1484,6 +1484,16 @@ components:
           nullable: true
           description: Tipo de no semantico quando type=node.
           example: field
+        recommendedOperation:
+          type: string
+          nullable: true
+          description: Operacao autoral recomendada para materializar um rascunho aprovado pelo agente/frontend.
+          enum:
+            - rule.visibility.add
+            - rule.validation.add
+            - rule.visualBlockGuidance.add
+            - rule.remove
+          example: rule.visualBlockGuidance.add
         limit:
           type: integer
           format: int32

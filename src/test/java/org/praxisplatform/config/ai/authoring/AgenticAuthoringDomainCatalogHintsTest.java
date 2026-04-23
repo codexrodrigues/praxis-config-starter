@@ -42,6 +42,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("human-resources.funcionarios");
         assertThat(contextHints.path("domainCatalog").path("nodeType").asText())
                 .isEqualTo("field");
+        assertThat(contextHints.path("domainCatalog").path("recommendedOperation").asText())
+                .isEqualTo("rule.visualBlockGuidance.add");
         assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("federated").asBoolean())
@@ -75,6 +77,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
         assertThat(contextHints.path("domainCatalog").path("resourceKey").asText())
                 .isEqualTo("operations.missoes");
         assertThat(contextHints.path("domainCatalog").path("nodeType").isMissingNode())
+                .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("recommendedOperation").isMissingNode())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("query").asText())
                 .contains("dashboard de status de missoes")
