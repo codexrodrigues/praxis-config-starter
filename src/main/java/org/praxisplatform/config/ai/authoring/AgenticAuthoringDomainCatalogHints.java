@@ -29,14 +29,24 @@ final class AgenticAuthoringDomainCatalogHints {
         domainCatalog.put("schemaVersion", AiContractSpec.DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION);
         domainCatalog.put("serviceKey", resolvedServiceKey);
         domainCatalog.put("type", "node");
+        domainCatalog.put("intent", "authoring");
         domainCatalog.put("limit", 12);
         String contextKey = contextKey(candidate.resourcePath());
         if (!contextKey.isBlank()) {
             domainCatalog.put("contextKey", contextKey);
         }
+        String resourceKey = resourceKey(candidate.resourcePath());
+        if (!resourceKey.isBlank()) {
+            domainCatalog.put("resourceKey", resourceKey);
+        }
         String query = query(userPrompt, candidate.resourcePath());
         if (!query.isBlank()) {
             domainCatalog.put("query", query);
+        }
+        var itemTypes = domainCatalog.putArray("itemTypes");
+        itemTypes.add("node");
+        if (requiresGovernanceContext(userPrompt)) {
+            itemTypes.add("governance");
         }
         ObjectNode relationships = domainCatalog.putObject("relationships");
         relationships.put("enabled", true);
@@ -49,6 +59,10 @@ final class AgenticAuthoringDomainCatalogHints {
         if (!nodeType.isBlank()) {
             domainCatalog.put("nodeType", nodeType);
         }
+        String recommendedOperation = recommendedOperation(artifactKind, userPrompt);
+        if (!recommendedOperation.isBlank()) {
+            domainCatalog.put("recommendedOperation", recommendedOperation);
+        }
     }
 
     private static String contextKey(String resourcePath) {
@@ -56,6 +70,16 @@ final class AgenticAuthoringDomainCatalogHints {
         for (int i = 0; i < parts.length - 1; i++) {
             if ("api".equals(parts[i]) && !parts[i + 1].isBlank()) {
                 return parts[i + 1];
+            }
+        }
+        return "";
+    }
+
+    private static String resourceKey(String resourcePath) {
+        String[] parts = resourcePath.split("/");
+        for (int i = 0; i < parts.length - 2; i++) {
+            if ("api".equals(parts[i]) && !parts[i + 1].isBlank() && !parts[i + 2].isBlank()) {
+                return parts[i + 1] + "." + parts[i + 2];
             }
         }
         return "";
@@ -78,6 +102,31 @@ final class AgenticAuthoringDomainCatalogHints {
             case "form", "table" -> "field";
             default -> "";
         };
+    }
+
+    private static String recommendedOperation(String artifactKind, String userPrompt) {
+        if (!"form".equals(valueOrDefault(artifactKind, "unknown"))) {
+            return "";
+        }
+        String prompt = normalizeText(userPrompt);
+        if (prompt.contains("lgpd")
+                || prompt.contains("gdpr")
+                || prompt.contains("compliance")
+                || prompt.contains("governanca")
+                || prompt.contains("privacidade")
+                || prompt.contains("orientacao visual")) {
+            return "rule.visualBlockGuidance.add";
+        }
+        return "";
+    }
+
+    private static boolean requiresGovernanceContext(String userPrompt) {
+        String prompt = normalizeText(userPrompt);
+        return prompt.contains("lgpd")
+                || prompt.contains("gdpr")
+                || prompt.contains("compliance")
+                || prompt.contains("governanca")
+                || prompt.contains("privacidade");
     }
 
     private static String lastSegment(String resourcePath) {

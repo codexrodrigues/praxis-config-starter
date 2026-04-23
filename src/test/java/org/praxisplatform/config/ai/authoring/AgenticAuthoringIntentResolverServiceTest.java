@@ -2544,6 +2544,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("praxis-service");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("contextKey").asText())
                 .isEqualTo("human-resources");
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("resourceKey").asText())
+                .isEqualTo("human-resources.beneficios");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("query").asText())
                 .contains("manutencoes preventivas")
                 .contains("beneficios");

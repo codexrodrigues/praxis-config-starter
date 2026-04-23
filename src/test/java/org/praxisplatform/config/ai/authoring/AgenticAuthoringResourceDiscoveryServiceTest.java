@@ -81,6 +81,8 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .isEqualTo("praxis-service");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("contextKey").asText())
                 .isEqualTo("human-resources");
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("resourceKey").asText())
+                .isEqualTo("human-resources.vw-analytics-folha-pagamento");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("query").asText())
                 .contains("folha de pagamento")
                 .contains("analytics folha pagamento");

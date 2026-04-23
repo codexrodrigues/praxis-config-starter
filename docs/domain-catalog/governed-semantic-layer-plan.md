@@ -38,6 +38,11 @@ The gap is not storage. The gap is governed semantics: ownership, lifecycle,
 field/entity/API-to-business mappings, cross-service relationships, authoring
 operations, validation gates and compact LLM context rules.
 
+The concrete v1 config-store design for this governed read model is captured in
+[`domain-knowledge-layer-v1.md`](domain-knowledge-layer-v1.md). That document
+defines the proposed `domain_knowledge_*` tables, indexing strategy, read APIs,
+change-set boundary and migration phases.
+
 ## Target Outcome
 
 The target platform behavior is:

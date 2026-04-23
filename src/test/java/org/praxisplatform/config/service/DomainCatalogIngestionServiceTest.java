@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -15,6 +16,7 @@ import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
+import org.springframework.ai.document.Document;
 import org.springframework.data.domain.Pageable;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -517,6 +520,249 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void contextLatestSelectsLatestReleaseForRequestedResourceKey() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease operationsRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:operations.missoes:2026-04-22T11:02:22Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-22T11:02:22Z"))
+                .createdAt(Instant.parse("2026-04-22T11:02:23Z"))
+                .build();
+        DomainCatalogRelease funcionariosRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-22T11:01:23Z"))
+                .createdAt(Instant.parse("2026-04-22T11:01:24Z"))
+                .build();
+        DomainCatalogItem cpfGovernance = DomainCatalogItem.builder()
+                .release(funcionariosRelease)
+                .itemType("governance")
+                .itemKey("governance:human-resources.funcionarios.field.cpf:privacy")
+                .payload("""
+                    {
+                      "governanceKey": "governance:human-resources.funcionarios.field.cpf:privacy",
+                      "nodeKey": "human-resources.funcionarios.field.cpf",
+                      "annotationType": "privacy",
+                      "classification": "confidential",
+                      "dataCategory": "personal",
+                      "complianceTags": ["LGPD"],
+                      "aiUsage": {
+                        "visibility": "mask",
+                        "trainingUse": "deny",
+                        "reasoningUse": "review_required"
+                      }
+                    }
+                    """)
+                .build();
+
+        when(releaseRepository.findLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(operationsRelease, funcionariosRelease));
+        when(itemRepository.search(
+                eq("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z"),
+                eq("governance"),
+                eq(null),
+                eq(null),
+                eq("cpf"),
+                any(Pageable.class)))
+                .thenReturn(List.of(cpfGovernance));
+
+        var context = service.contextLatest(
+                "praxis-service",
+                "human-resources.funcionarios",
+                "tenant-a",
+                "dev",
+                "governance",
+                null,
+                null,
+                "cpf",
+                5);
+
+        assertThat(context.release().releaseKey())
+                .isEqualTo("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z");
+        assertThat(context.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.itemKey()).isEqualTo("governance:human-resources.funcionarios.field.cpf:privacy");
+                    assertThat(item.payload().path("payloadMode").asText()).isEqualTo("governed-summary");
+                });
+    }
+
+    @Test
+    void contextLatestAppliesAiVisibilityBeforeReturningLlmContext() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease latestRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-api-quickstart:latest")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-api-quickstart")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+        DomainCatalogItem masked = DomainCatalogItem.builder()
+                .release(latestRelease)
+                .itemType("governance")
+                .itemKey("governance:human-resources.funcionarios.field.cpf:privacy")
+                .payload("""
+                    {
+                      "governanceKey": "governance:human-resources.funcionarios.field.cpf:privacy",
+                      "nodeKey": "human-resources.funcionarios.field.cpf",
+                      "annotationType": "privacy",
+                      "classification": "confidential",
+                      "dataCategory": "personal",
+                      "complianceTags": ["LGPD"],
+                      "retentionPolicy": "raw-values-never-for-prompts",
+                      "aiUsage": {
+                        "visibility": "mask",
+                        "trainingUse": "deny",
+                        "reasoningUse": "review_required"
+                      },
+                      "source": "manual-sensitive-review"
+                    }
+                    """)
+                .build();
+        DomainCatalogItem denied = DomainCatalogItem.builder()
+                .release(latestRelease)
+                .itemType("governance")
+                .itemKey("governance:human-resources.funcionarios.field.private-token:privacy")
+                .payload("""
+                    {
+                      "governanceKey": "governance:human-resources.funcionarios.field.private-token:privacy",
+                      "nodeKey": "human-resources.funcionarios.field.private-token",
+                      "annotationType": "privacy",
+                      "classification": "restricted",
+                      "dataCategory": "credential",
+                      "aiUsage": {
+                        "visibility": "deny",
+                        "trainingUse": "deny",
+                        "reasoningUse": "deny"
+                      }
+                    }
+                    """)
+                .build();
+
+        when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(latestRelease));
+        when(itemRepository.search(
+                eq("praxis-api-quickstart:latest"),
+                eq("governance"),
+                eq("human-resources"),
+                eq(null),
+                eq("LGPD"),
+                any(Pageable.class)))
+                .thenReturn(List.of(masked, denied));
+
+        var context = service.contextLatest(
+                "praxis-api-quickstart",
+                "tenant-a",
+                "dev",
+                "governance",
+                "human-resources",
+                null,
+                "LGPD",
+                5);
+
+        assertThat(context.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.itemKey()).isEqualTo("governance:human-resources.funcionarios.field.cpf:privacy");
+                    assertThat(item.payload().path("contextVisibility").asText()).isEqualTo("mask");
+                    assertThat(item.payload().path("payloadMode").asText()).isEqualTo("governed-summary");
+                    assertThat(item.payload().path("retentionPolicy").isMissingNode()).isTrue();
+                    assertThat(item.payload().path("source").isMissingNode()).isTrue();
+                    assertThat(item.payload().path("aiUsage").path("visibility").asText()).isEqualTo("mask");
+                });
+    }
+
+    @Test
+    void ragPublicationSkipsAiDeniedDomainCatalogItems() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalogWithDeniedGovernance(), "tenant-a", "dev");
+
+        assertThat(response.itemCount()).isEqualTo(10);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Document>> documentsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(ragVectorStoreService).upsertDocuments(documentsCaptor.capture());
+        List<Document> documents = documentsCaptor.getValue();
+
+        assertThat(documents).hasSize(9);
+        assertThat(documents)
+                .noneSatisfy(document -> assertThat(document.getMetadata())
+                        .containsEntry("resourceId", "governance:human-resources.folhas-pagamento.field.secret-token:privacy"));
+        assertThat(documents)
+                .anySatisfy(document -> {
+                    assertThat(document.getMetadata())
+                            .containsEntry("resourceId", "governance:human-resources.folhas-pagamento.field.valor-liquido:privacy");
+                    assertThat(document.getText()).contains("confidential", "financial", "LGPD");
+                });
+    }
+
+    @Test
+    void canDisableDomainCatalogRagPublicationWithoutBlockingCatalogPersistence() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                false
+        );
+        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
+        assertThat(response.itemCount()).isEqualTo(9);
+        verify(releaseRepository).save(any(DomainCatalogRelease.class));
+        verify(itemRepository).saveAll(any());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
     void rejectsInvalidDomainCatalogBeforePersistence() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
@@ -756,6 +1002,29 @@ class DomainCatalogIngestionServiceTest {
               ]
             }
             """);
+    }
+
+    private JsonNode sampleCatalogWithDeniedGovernance() throws Exception {
+        JsonNode catalog = sampleCatalog().deepCopy();
+        ((ArrayNode) catalog.path("governance")).add(objectMapper.readTree("""
+            {
+              "governanceKey": "governance:human-resources.folhas-pagamento.field.secret-token:privacy",
+              "nodeKey": "human-resources.folhas-pagamento.field.secret-token",
+              "annotationType": "privacy",
+              "classification": "restricted",
+              "dataCategory": "credential",
+              "complianceTags": ["INTERNAL_POLICY"],
+              "aiUsage": {
+                "visibility": "deny",
+                "trainingUse": "deny",
+                "ruleAuthoring": "deny",
+                "reasoningUse": "deny"
+              },
+              "source": "manual-sensitive-review",
+              "confidence": 1.0
+            }
+            """));
+        return catalog;
     }
 
     private DomainCatalogSchemaValidationService validationService() {

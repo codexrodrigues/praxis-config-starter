@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
@@ -76,6 +77,54 @@ class AiStreamTransactionContractTest {
         assertTxManager(prepareTurn, ConfigTransactionManagerNames.CONFIG);
         assertTxManager(storeAssistant, ConfigTransactionManagerNames.CONFIG);
         assertTxManager(summarize, ConfigTransactionManagerNames.CONFIG);
+    }
+
+    @Test
+    void domainRuleServiceMustUseConfigTransactionManager() throws NoSuchMethodException {
+        List<Method> methods = List.of(
+                DomainRuleService.class.getMethod(
+                        "createDefinition",
+                        org.praxisplatform.config.dto.DomainRuleDefinitionRequest.class,
+                        String.class,
+                        String.class),
+                DomainRuleService.class.getMethod(
+                        "definitions",
+                        String.class,
+                        String.class,
+                        String.class,
+                        String.class,
+                        String.class,
+                        String.class),
+                DomainRuleService.class.getMethod(
+                        "transitionDefinitionStatus",
+                        UUID.class,
+                        org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest.class,
+                        String.class,
+                        String.class),
+                DomainRuleService.class.getMethod(
+                        "createMaterialization",
+                        org.praxisplatform.config.dto.DomainRuleMaterializationRequest.class,
+                        String.class,
+                        String.class),
+                DomainRuleService.class.getMethod(
+                        "materializations",
+                        String.class,
+                        String.class,
+                        UUID.class,
+                        String.class,
+                        String.class,
+                        String.class,
+                        String.class),
+                DomainRuleService.class.getMethod(
+                        "transitionMaterializationStatus",
+                        UUID.class,
+                        org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest.class,
+                        String.class,
+                        String.class));
+
+        for (Method method : methods) {
+            assertTxManager(method, ConfigTransactionManagerNames.CONFIG);
+        }
     }
 
     private void assertTxManager(Method method, String expectedManager) {

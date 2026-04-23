@@ -116,7 +116,7 @@ public class EmbeddingService {
                 Integer effectiveDimensions = overrideDimensions != null ? overrideDimensions : resolveDefaultDimensions(selected);
                 return embedWithOpenAi(text, override, effectiveApiKey, effectiveModel, effectiveDimensions);
             } catch (Exception e) {
-                throw new IllegalStateException("OpenAI embedding failed.", e);
+                throw new IllegalStateException("OpenAI embedding failed: " + rootCauseMessage(e), e);
             }
         }
         throw new IllegalStateException(
@@ -245,10 +245,14 @@ public class EmbeddingService {
             return new OpenAiEmbeddingModel(api);
         }
         OpenAiEmbeddingModel client = openAiEmbeddingClientProvider.getIfAvailable();
-        if (client == null) {
-            throw new IllegalStateException("OpenAI EmbeddingClient not configured.");
+        if (client != null) {
+            return client;
         }
-        return client;
+        OpenAiApi api = OpenAiApi.builder()
+                .apiKey(apiKey)
+                .baseUrl(resolveBaseUrl(openaiBaseUrl))
+                .build();
+        return new OpenAiEmbeddingModel(api);
     }
 
     private List<Float> embedWithGoogleGenAiRest(String text, String apiKey) throws Exception {
@@ -339,5 +343,17 @@ public class EmbeddingService {
         if (value == null) return null;
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String rootCauseMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        if (message == null || message.isBlank()) {
+            return current.getClass().getSimpleName();
+        }
+        return message.replaceAll("sk-[A-Za-z0-9_-]+", "sk-***");
     }
 }

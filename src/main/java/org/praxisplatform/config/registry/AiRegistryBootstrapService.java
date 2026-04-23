@@ -127,6 +127,9 @@ public class AiRegistryBootstrapService {
         if (statusReport == null || !statusReport.isReady()) {
             return false;
         }
+        if (bootstrapProperties != null && bootstrapProperties.isForce()) {
+            return false;
+        }
         if (bootstrapProperties != null && !bootstrapProperties.isRefreshOnSnapshotDrift()) {
             return true;
         }

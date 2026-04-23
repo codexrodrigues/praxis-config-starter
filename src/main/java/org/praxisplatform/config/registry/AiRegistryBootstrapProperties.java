@@ -11,6 +11,11 @@ public class AiRegistryBootstrapProperties {
     private boolean enabled = true;
 
     /**
+     * Reingest the configured snapshot even when minimum readiness checks already pass.
+     */
+    private boolean force = false;
+
+    /**
      * Reingest the versioned snapshot when the persisted registry was previously
      * considered ready but was bootstrapped from a different snapshot.
      */

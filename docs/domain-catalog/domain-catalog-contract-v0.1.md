@@ -142,7 +142,7 @@ LLMs should consume the catalog through compact runtime APIs, not source code.
 Recommended runtime query:
 
 ```text
-GET /api/praxis/config/domain-catalog/context
+GET /api/praxis/config/domain-catalog/context?serviceKey=<service>&resourceKey=<resource>
 ```
 
 The response should give the LLM:
@@ -153,15 +153,18 @@ The response should give the LLM:
 - retrieval guidance;
 - source release metadata.
 
+When one `serviceKey` publishes multiple resource catalogs, pass `resourceKey`
+so the context pack is scoped to the intended business resource.
+
 Recommended explicit relationship query:
 
 ```text
 GET /api/praxis/config/domain-catalog/relationships/latest
 ```
 
-Supported relationship filters are `serviceKey`, `sourceNodeKey`, `targetNodeKey`,
-`edgeType`, `q` and `limit`. When `serviceKey` is omitted, `praxis-config-starter`
-searches the latest release of each service in the requested tenant/environment.
+Supported relationship filters are `serviceKey`, `resourceKey`, `sourceNodeKey`,
+`targetNodeKey`, `edgeType`, `q` and `limit`. When `serviceKey` is omitted,
+`praxis-config-starter` searches the latest release of each service in the requested tenant/environment.
 This endpoint returns explicit `edge` items only; it must not synthesize
 relationships from names, labels or aliases.
 
@@ -176,4 +179,3 @@ it is executable.
 - Current `surface` nodes remain valid.
 - Current `policy_hint` nodes remain valid as non-executable semantic hints.
 - The `metadata` map remains the forward-compatible extension point.
-

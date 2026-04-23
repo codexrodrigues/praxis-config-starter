@@ -141,7 +141,7 @@ LLM/runtime clients should prefer `context` when they do not already know the ac
 
 ```bash
 curl -sS \
-  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/context?serviceKey=praxis-service&type=node&nodeType=field&q=salario&limit=10" \
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/context?serviceKey=praxis-service&resourceKey=human-resources.folhas-pagamento&type=node&nodeType=field&q=salario&limit=10" \
   -H "X-Tenant-ID: $TENANT_ID" \
   -H "X-Env: $ENVIRONMENT"
 ```
@@ -149,12 +149,22 @@ curl -sS \
 The response includes:
 
 - `schemaVersion`: context contract version;
-- `release`: the latest release selected for `serviceKey`, tenant and environment;
+- `release`: the latest release selected for `serviceKey`, optional `resourceKey`, tenant and environment;
 - `retrievalGuidance`: instructions for LLM/runtime interpretation;
 - `items`: semantic catalog items relevant to the query.
 
 Use `items/latest` when the client only needs raw items. Use `context` when the client is an LLM
 or an orchestration service that needs an explicit semantic contract.
+
+`context` applies direct `aiUsage.visibility` constraints before returning items to LLM/runtime
+consumers:
+
+- `deny`: the item is excluded from the context pack;
+- `mask` and `summarize_only`: the item payload is reduced to governed summary fields such as
+  `nodeKey`, `annotationType`, `classification`, `dataCategory`, `complianceTags` and `aiUsage`.
+
+The raw `/items` endpoints remain deterministic persistence reads and may return the original
+payload for authorized system clients.
 
 ## 6. Query Latest Explicit Relationships
 
@@ -172,6 +182,7 @@ Supported filters:
 
 - `serviceKey`: optional. When omitted, the query federates across the latest release of each
   service in the requested tenant and environment.
+- `resourceKey`: optional. Use it when one service publishes multiple resource catalogs.
 - `sourceNodeKey`: optional exact canonical source node key.
 - `targetNodeKey`: optional exact canonical target node key.
 - `edgeType`: optional exact edge type such as `references`, `same_as`, `governed_by` or
@@ -243,7 +254,7 @@ For a field classification request:
 Runtime retrieval should call:
 
 ```text
-GET /api/praxis/config/domain-catalog/context?serviceKey=<service>&type=node&nodeType=field&q=salario
+GET /api/praxis/config/domain-catalog/context?serviceKey=<service>&resourceKey=<resource>&type=node&nodeType=field&q=salario
 ```
 
 The LLM should use returned field nodes, inspect `payload.metadata.fieldName`, and then propose a
@@ -256,7 +267,7 @@ For a cross-service relationship request:
 Runtime retrieval should call:
 
 ```text
-GET /api/praxis/config/domain-catalog/relationships/latest?sourceNodeKey=<field-node-key>&edgeType=references
+GET /api/praxis/config/domain-catalog/relationships/latest?serviceKey=<service>&resourceKey=<resource>&sourceNodeKey=<field-node-key>&edgeType=references
 ```
 
 The LLM should only cite returned relationship edges and their evidence. It should not invent
@@ -275,6 +286,10 @@ The MVP currently supports:
   requested tenant/environment;
 - explicit latest relationship lookup across one service or across the latest
   release of each service in the requested tenant/environment;
+- direct AI visibility enforcement in LLM context packs for `deny`, `mask` and
+  `summarize_only`;
+- RAG publication skips `deny` items and indexes `mask`/`summarize_only` items
+  only as governed summaries;
 - optional RAG publication when `VectorStore` is available.
 
 The MVP does not yet support:

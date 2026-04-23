@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: 67016c9ee2035e6671d3c2edf375f30ae46ffafb064cb11b49b8d032d99d1258
+        default: c9c4e0975bea7043b09e9456aab8dada655fc1a6f7c81d04c3dc7b70d0151211
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 67016c9ee2035e6671d3c2edf375f30ae46ffafb064cb11b49b8d032d99d1258
+        example: c9c4e0975bea7043b09e9456aab8dada655fc1a6f7c81d04c3dc7b70d0151211
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1576,7 +1576,7 @@ components:
         recommendedOperation:
           type: string
           nullable: true
-          description: Operacao autoral recomendada pelo catalogo de dominio para transformar o hint em plano revisavel.
+          description: Operacao autoral recomendada para materializar um rascunho aprovado pelo agente/frontend.
           enum:
             - rule.visibility.add
             - rule.validation.add

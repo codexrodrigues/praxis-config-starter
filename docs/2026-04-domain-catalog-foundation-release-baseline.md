@@ -344,6 +344,146 @@ Confirmed steps:
 - quickstart Domain Catalog v2 HTTP smoke;
 - page-builder agentic full Playwright E2E gate.
 
+## Published AI Visibility Governance Line
+
+After hardening Domain Catalog LLM context visibility, the config starter was
+published again and the operational quickstart was advanced to consume the new
+coordinate directly from Maven Central.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-config-starter` | `0.1.0-rc.9` / `412a24b` | published to Maven Central by [`24779789126`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24779789126) |
+| `praxis-api-quickstart` | `3abb9c9` | consumes `praxis-config-starter:0.1.0-rc.9`; CI passed in [`24780498818`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24780498818) |
+
+This line confirms that:
+
+- `aiUsage.visibility=deny` items are excluded from LLM prompt context and RAG
+  publication;
+- `aiUsage.visibility=mask` and `summarize_only` items are exposed to LLMs only
+  as governed summaries;
+- raw deterministic catalog reads remain available through `/items`;
+- the quickstart consumed the published artifact without local overrides;
+- the Render-hosted catalog context remained ready for
+  `human-resources.funcionarios`, `human-resources.folhas-pagamento` and
+  `operations.missoes`.
+
+## Published Resource-Scoped Context Line
+
+After validating the Render-hosted quickstart with multiple resource catalogs
+under the same `serviceKey`, a runtime defect was found in the LLM context
+lookup: `/api/praxis/config/domain-catalog/context` selected the latest release
+for the service, which could return `operations.missoes` context for a query
+that belonged to `human-resources.funcionarios`.
+
+The config starter now supports `resourceKey` scoping for latest-release
+retrieval APIs while preserving the previous service-wide behavior when
+`resourceKey` is omitted.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-config-starter` | `0.1.0-rc.10` / `4e5aec4` | published to Maven Central by [`24781078326`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24781078326) |
+| `praxis-api-quickstart` | `7e42d37` | consumes `praxis-config-starter:0.1.0-rc.10`; CI passed in [`24781951059`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24781951059) |
+
+This line confirms that:
+
+- `/context`, `/items/latest` and `/relationships/latest` can be scoped by
+  `resourceKey`;
+- prompt context retrieval can read `contextHints.domainCatalog.resourceKey` or
+  a top-level `domainResourceKey`;
+- service-wide latest-release lookup remains available for broad discovery;
+- no database migration was required for this release;
+- local quickstart validation passed against the remote database with Flyway at
+  version `17` and the schema already up to date.
+
+## Published Resource-Aware Authoring Envelope Line
+
+After resource-scoped runtime context was published, the authoring hint contract
+was advanced so LLM task envelopes can carry the canonical domain resource key
+derived from the selected REST resource.
+
+| Project | Version / Commit | Evidence |
+| --- | --- | --- |
+| `praxis-config-starter` | `0.1.0-rc.11` / `3f39725` | published to Maven Central by [`24782442986`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24782442986) |
+| `praxis-api-quickstart` | `d3932a0` | consumes `praxis-config-starter:0.1.0-rc.11`; CI passed in [`24784518411`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24784518411) |
+
+This line confirms that:
+
+- authoring discovery now carries `contextHints.domainCatalog.resourceKey`;
+- `/api/{context}/{resource}` paths resolve to canonical keys such as
+  `human-resources.funcionarios`;
+- the agentic domain task envelope is documented in
+  `docs/ai/agentic-domain-task-envelope.md`;
+- local quickstart validation passed against the remote database with Flyway at
+  version `17`; the schema was already up to date and no migration was applied;
+- the quickstart consumed the published `0.1.0-rc.11` artifact from Maven
+  Central without local overrides.
+
+The Render-hosted quickstart was also validated after publication:
+
+- `/api/praxis/config/domain-catalog/context` returned resource-scoped releases
+  for `human-resources.funcionarios`, `human-resources.folhas-pagamento` and
+  `operations.missoes`;
+- CPF and salary governance context remained exposed only as
+  `payloadMode=governed-summary`;
+- `/api/praxis/config/ai/authoring/resource-candidates` returned resource
+  quick replies whose `contextHints.domainCatalog.resourceKey` values included
+  `human-resources.folhas-pagamento` and `human-resources.eventos-folha`;
+- returned authoring hints included relationship retrieval with
+  `relationships.enabled=true` and `relationships.federated=true`.
+
+The same read-only runtime check is now repeatable from
+`praxis-api-quickstart` commit `ef54722` through:
+
+```bash
+BACKEND_URL=https://praxis-api-quickstart.onrender.com scripts/verify-domain-catalog-authoring-runtime.sh
+```
+
+The quickstart CI for this script passed in
+[`24785032531`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24785032531).
+
+The quickstart then added the manual/scheduled `Domain Catalog Runtime Smoke`
+workflow in commit `aa8ce93`. The first manual dispatch against the Render
+host passed in
+[`24785680070`](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/24785680070).
+
+The authoring envelope derivation is also locked by
+`AgenticAuthoringDomainCatalogHintsTest` in commit `a855838`. It covers
+collection paths such as `/api/human-resources/funcionarios`, action paths such
+as `/api/operations/missoes/{id}/actions/start`, canonical `resourceKey`,
+`contextKey`, service override and federated relationship hints. The CI for
+that guard passed in
+[`24785870646`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24785870646).
+
+The next implementation design is captured in
+`docs/domain-catalog/domain-knowledge-layer-v1.md`, which separates immutable
+catalog releases from curated domain knowledge and future executable
+rule/policy artifacts.
+
+The first database foundation for that design is staged as
+`V18__create_domain_knowledge_layer.sql`. This migration must not be applied
+manually to the shared remote config database without validating the remote
+Flyway history first.
+
+The first Java runtime model for the same foundation was added in
+`praxis-config-starter` commit `3c28422`. It introduces JPA entities and Spring
+Data repositories for:
+
+- `domain_knowledge_concept`
+- `domain_knowledge_alias`
+- `domain_knowledge_binding`
+- `domain_knowledge_relationship`
+- `domain_knowledge_evidence`
+- `domain_knowledge_change_set`
+
+Local focused validation passed with:
+
+```bash
+mvn -Dtest=DomainKnowledgeEntityLifecycleTest test
+```
+
+The corresponding main-branch CI passed in
+[`24786618645`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/24786618645).
+
 ## Release Pipeline Adjustment
 
 The first publication workflows for both starters uploaded successfully to

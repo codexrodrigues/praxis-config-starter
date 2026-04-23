@@ -60,6 +60,7 @@ public class DomainCatalogPromptContextService {
                 text(contextHints, "retrievalQuery"),
                 userPrompt);
         String itemType = firstText(text(domainCatalog, "type"), text(domainCatalog, "itemType"), "node");
+        String resourceKey = firstText(text(domainCatalog, "resourceKey"), text(contextHints, "domainResourceKey"));
         String contextKey = firstText(text(domainCatalog, "contextKey"), text(contextHints, "domainContextKey"));
         String nodeType = firstText(text(domainCatalog, "nodeType"), text(contextHints, "domainNodeType"));
         int limit = clampLimit(domainCatalog != null && domainCatalog.has("limit")
@@ -69,6 +70,7 @@ public class DomainCatalogPromptContextService {
 
         return new DomainCatalogRequest(
                 serviceKey,
+                resourceKey,
                 itemType,
                 contextKey,
                 nodeType,
@@ -134,15 +136,26 @@ public class DomainCatalogPromptContextService {
 
     private String formatContext(DomainCatalogRequest request, String tenantId, String environment) {
         try {
-            DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
-                    request.serviceKey(),
-                    tenantId,
-                    environment,
-                    request.itemType(),
-                    request.contextKey(),
-                    request.nodeType(),
-                    request.query(),
-                    request.limit());
+            DomainCatalogContextResponse context = StringUtils.hasText(request.resourceKey())
+                    ? domainCatalogIngestionService.contextLatest(
+                            request.serviceKey(),
+                            request.resourceKey(),
+                            tenantId,
+                            environment,
+                            request.itemType(),
+                            request.contextKey(),
+                            request.nodeType(),
+                            request.query(),
+                            request.limit())
+                    : domainCatalogIngestionService.contextLatest(
+                            request.serviceKey(),
+                            tenantId,
+                            environment,
+                            request.itemType(),
+                            request.contextKey(),
+                            request.nodeType(),
+                            request.query(),
+                            request.limit());
             return formatContext(context);
         } catch (RuntimeException ex) {
             log.warn(
@@ -365,6 +378,7 @@ public class DomainCatalogPromptContextService {
 
     private record DomainCatalogRequest(
             String serviceKey,
+            String resourceKey,
             String itemType,
             String contextKey,
             String nodeType,
