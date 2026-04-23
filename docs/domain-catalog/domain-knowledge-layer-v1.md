@@ -450,6 +450,11 @@ Raw sensitive values must not be returned through this path.
 
 ### Phase 5: Shared Rule Materialization
 
+- Promote `domain_rule_definition` from a lateral persistence concept into the
+  canonical shared-decision layer used by business-rule authoring.
+- Keep the public `/api/praxis/config/domain-rules/**` surface and evolve it
+  with intake/simulation/publication capabilities before considering a second
+  public root.
 - Store reusable rule intent in `domain_rule_definition`.
 - Store target-specific projections in `domain_rule_materialization`.
 - Require LLM-authored definitions to cite knowledge evidence and carry

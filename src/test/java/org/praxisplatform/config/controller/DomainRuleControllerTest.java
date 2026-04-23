@@ -13,6 +13,8 @@ import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
+import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.service.DomainRuleService;
 
@@ -230,6 +232,47 @@ class DomainRuleControllerTest {
 
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).transitionDefinitionStatus(definitionId, request, "tenant-a", "dev");
+    }
+
+    @Test
+    void simulatesRuleWithTenantAndEnvironmentHeaders() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleSimulationRequest request = new DomainRuleSimulationRequest(
+                null,
+                "procurement.suppliers.rule.selection-eligibility",
+                "policy_reference",
+                "procurement",
+                "procurement.suppliers",
+                "praxis-api-quickstart",
+                null,
+                null,
+                null,
+                null);
+        DomainRuleSimulationResponse response = new DomainRuleSimulationResponse(
+                UUID.randomUUID(),
+                null,
+                "tenant-a",
+                "dev",
+                "procurement.suppliers.rule.selection-eligibility",
+                null,
+                "policy_reference",
+                "procurement",
+                "procurement.suppliers",
+                "praxis-api-quickstart",
+                "pass",
+                null,
+                null,
+                null,
+                null,
+                null,
+                java.time.Instant.now());
+        when(service.simulate(request, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.simulate(request, "tenant-a", "dev");
+
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).simulate(request, "tenant-a", "dev");
     }
 
     @Test

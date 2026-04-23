@@ -6,6 +6,10 @@ Escopo e Heranca
 - Foco deste guia: preservar a fronteira canonica de `/api/praxis/config/**`, contratos AI, release Maven Central e validacao downstream com `praxis-api-quickstart`.
 - Nao editar por padrao: `target/`, `logs/`, artefatos em `artifacts/`, outputs de apidoc e arquivos gerados por build, salvo quando a tarefa for explicitamente sobre output gerado.
 
+Premissa Local
+- Neste starter, assumir como direcao preferencial que o Praxis e uma plataforma de decisoes semanticas authoradas por IA.
+- Sempre que uma necessidade de authoring, explainability, preview, governance ou runtime decision surgir, preferir modelar o problema como decisao canônica governada em `/api/praxis/config/**`, e nao como patch solto, editor local ou mero artefato de componente.
+
 Classificacao Padrao da Mudanca
 - `docs-apenas`: mudancas restritas a `AGENTS.md`, `README.md`, `RELEASING.md`, `docs/**` ou comentarios/Javadoc sem efeito em contrato ou comportamento.
 - `local-pequena`: mudanca confinada ao starter, sem alterar endpoints, headers, ETag, entidades persistidas, contratos AI ou artefatos de release.
@@ -23,6 +27,7 @@ Fronteira Canonica Local
   - ETag de configuracao;
   - endpoints sob `/api/praxis/config/**`;
   - contratos AI, authoring manifests, validacao, compilacao de patch e streaming SSE.
+- Quando houver disputa entre manter o foco em authoring de componente e promover authoring de decisao, a recomendacao local deve favorecer authoring de decisao canônica com materializacao derivada.
 - O starter nao deve depender de semantica local do `praxis-api-quickstart` para definir contrato.
 - O quickstart e o host operacional de prova downstream. Use-o para validar consumo real, nao para redefinir a semantica canonica do starter.
 - O starter deve funcionar como repositorio isolado no GitHub Actions. Nao assuma que o checkout contem a raiz completa do monorepo.

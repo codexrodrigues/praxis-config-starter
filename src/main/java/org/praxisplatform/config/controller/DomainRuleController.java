@@ -7,6 +7,8 @@ import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
+import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
@@ -70,6 +72,14 @@ public class DomainRuleController {
                 request,
                 tenantId,
                 environment));
+    }
+
+    @PostMapping("/simulations")
+    public ResponseEntity<DomainRuleSimulationResponse> simulate(
+            @RequestBody DomainRuleSimulationRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainRuleService.simulate(request, tenantId, environment));
     }
 
     @PostMapping("/materializations")

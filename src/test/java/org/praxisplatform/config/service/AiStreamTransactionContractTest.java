@@ -102,6 +102,11 @@ class AiStreamTransactionContractTest {
                         String.class,
                         String.class),
                 DomainRuleService.class.getMethod(
+                        "simulate",
+                        org.praxisplatform.config.dto.DomainRuleSimulationRequest.class,
+                        String.class,
+                        String.class),
+                DomainRuleService.class.getMethod(
                         "createMaterialization",
                         org.praxisplatform.config.dto.DomainRuleMaterializationRequest.class,
                         String.class,
