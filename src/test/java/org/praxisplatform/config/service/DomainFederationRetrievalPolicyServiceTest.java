@@ -81,6 +81,38 @@ class DomainFederationRetrievalPolicyServiceTest {
         assertThat(result.report().includeLowConfidence()).isFalse();
     }
 
+    @Test
+    void excludesPersistedFederationContractsDeniedForLlm() throws Exception {
+        List<DomainCatalogItemResponse> items = List.of(
+                item("allowed-contract", "{\"contract\":{\"visibility\":\"internal\"},\"confidence\":0.95}"),
+                item("restricted-contract", "{\"contract\":{\"visibility\":\"restricted\"},\"confidence\":0.95}"),
+                item("denied-contract", "{\"contract\":{\"visibility\":\"deny_for_llm\"},\"confidence\":0.95}"));
+
+        var result = service.apply(items, new DomainFederationRetrievalPolicyOptions("authoring", null, null, null));
+
+        assertThat(result.items()).extracting(DomainCatalogItemResponse::itemKey)
+                .containsExactly("allowed-contract");
+        assertThat(result.report().deniedItemCount()).isEqualTo(2);
+        assertThat(result.report().decisions())
+                .anySatisfy(decision -> assertThat(decision).contains("contract.visibility=restricted"))
+                .anySatisfy(decision -> assertThat(decision).contains("contract.visibility=deny_for_llm"));
+    }
+
+    @Test
+    void readsLowConfidenceFromPersistedEvidenceOrResolutionPayload() throws Exception {
+        List<DomainCatalogItemResponse> items = List.of(
+                item("context-evidence-low", "{\"evidence\":{\"confidence\":0.71}}"),
+                item("resolution-low", "{\"resolution\":{\"confidence\":0.79}}"));
+
+        var result = service.apply(items, new DomainFederationRetrievalPolicyOptions("authoring", null, null, null));
+
+        assertThat(result.items()).isEmpty();
+        assertThat(result.report().lowConfidenceItemCount()).isEqualTo(2);
+        assertThat(result.report().decisions())
+                .anySatisfy(decision -> assertThat(decision).contains("context-evidence-low"))
+                .anySatisfy(decision -> assertThat(decision).contains("resolution-low"));
+    }
+
     private DomainCatalogItemResponse item(String key, String payload) throws Exception {
         return new DomainCatalogItemResponse(
                 UUID.randomUUID(),
