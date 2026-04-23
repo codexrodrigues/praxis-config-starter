@@ -18,6 +18,7 @@ import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
+import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
@@ -225,6 +226,90 @@ class DomainRuleServiceTest {
         assertThat(response.activatedAt()).isNotNull();
         assertThat(response.validationResult().path("review").asText()).isEqualTo("approved");
         verify(definitionRepository).save(definition);
+    }
+
+    @Test
+    void simulatesProcurementRuleAndDetectsExistingCoverage() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        DomainRuleDefinition existing = DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-policy")
+                .version(3)
+                .ruleType("policy_reference")
+                .status("active")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("""
+                        {
+                          "summary": "Bloquear fornecedores inativos ou bloqueados no lookup de pedidos."
+                        }
+                        """)
+                .parameters("""
+                        {
+                          "optionSourceKey": "supplier"
+                        }
+                        """)
+                .governance("""
+                        {
+                          "requiredApprovals": ["procurement-owner"]
+                        }
+                        """)
+                .build();
+
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of(existing));
+
+        var response = service.simulate(
+                new DomainRuleSimulationRequest(
+                        null,
+                        "procurement.suppliers.rule.selection-eligibility",
+                        "policy_reference",
+                        "procurement",
+                        "procurement.suppliers",
+                        "praxis-api-quickstart",
+                        objectMapper.readTree("""
+                                {
+                                  "summary": "Impedir seleção de fornecedores bloqueados em pedidos de compra."
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "optionSourceKey": "supplier"
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "in": [
+                                    { "var": "status" },
+                                    ["INACTIVE", "BLOCKED"]
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "requiredApprovals": ["procurement-owner"]
+                                }
+                                """)),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.result()).isEqualTo("pass_with_existing_coverage");
+        assertThat(response.existingCoverage()).hasSize(1);
+        assertThat(response.predictedMaterializations()).hasSize(1);
+        assertThat(response.predictedMaterializations().get(0).path("targetLayer").asText()).isEqualTo("option_source");
+        assertThat(response.requiredApprovals()).hasSize(1);
+        assertThat(response.requiredApprovals().get(0).asText()).isEqualTo("procurement-owner");
+        assertThat(response.grounding().path("source").asText()).isEqualTo("ad_hoc_request");
     }
 
     @Test

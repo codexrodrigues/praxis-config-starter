@@ -2,6 +2,8 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -14,6 +16,8 @@ import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
+import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
@@ -35,6 +39,7 @@ public class DomainRuleService {
             "draft", "proposed", "approved", "active", "deprecated", "retired", "rejected");
     private static final List<String> MATERIALIZATION_STATUSES = List.of(
             "draft", "pending_review", "applied", "failed", "superseded", "reverted");
+    private static final List<String> COVERAGE_STATUSES = List.of("approved", "active");
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
@@ -173,6 +178,86 @@ public class DomainRuleService {
         return toResponse(definitionRepository.save(definition));
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public DomainRuleSimulationResponse simulate(
+            DomainRuleSimulationRequest request,
+            String tenantId,
+            String environment) {
+        if (request == null) {
+            throw new ConfigurationIngestionException("Domain rule simulation request is required");
+        }
+
+        DomainRuleDefinition persistedDefinition = resolveDefinitionForSimulation(request, tenantId, environment);
+        String resolvedTenant = normalize(tenantId);
+        String resolvedEnvironment = normalize(environment);
+
+        UUID ruleDefinitionId = persistedDefinition != null ? persistedDefinition.getId() : request.ruleDefinitionId();
+        String ruleKey = persistedDefinition != null ? persistedDefinition.getRuleKey() : normalize(request.ruleKey());
+        Integer ruleVersion = persistedDefinition != null ? persistedDefinition.getVersion() : null;
+        String ruleType = persistedDefinition != null ? persistedDefinition.getRuleType() : normalize(request.ruleType());
+        String contextKey = persistedDefinition != null ? persistedDefinition.getContextKey() : normalize(request.contextKey());
+        String resourceKey = persistedDefinition != null ? persistedDefinition.getResourceKey() : normalize(request.resourceKey());
+        String serviceKey = persistedDefinition != null ? persistedDefinition.getServiceKey() : normalize(request.serviceKey());
+        JsonNode definition = persistedDefinition != null ? read(persistedDefinition.getDefinition()) : request.definition();
+        JsonNode parameters = persistedDefinition != null ? read(persistedDefinition.getParameters()) : request.parameters();
+        JsonNode condition = persistedDefinition != null ? read(persistedDefinition.getCondition()) : request.condition();
+        JsonNode governance = persistedDefinition != null ? read(persistedDefinition.getGovernance()) : request.governance();
+
+        if (!StringUtils.hasText(ruleType)) {
+            throw new ConfigurationIngestionException("ruleType is required for simulation");
+        }
+        if (!StringUtils.hasText(resourceKey)) {
+            throw new ConfigurationIngestionException("resourceKey is required for simulation");
+        }
+
+        ArrayNode existingCoverage = buildExistingCoverage(
+                resolvedTenant,
+                resolvedEnvironment,
+                resourceKey,
+                ruleType,
+                ruleDefinitionId,
+                ruleKey);
+        ArrayNode predictedMaterializations = buildPredictedMaterializations(
+                resourceKey,
+                ruleType,
+                definition,
+                parameters);
+        ArrayNode requiredApprovals = buildRequiredApprovals(governance);
+        ArrayNode warnings = buildWarnings(ruleType, predictedMaterializations, existingCoverage, governance);
+
+        ObjectNode grounding = objectMapper.createObjectNode();
+        if (StringUtils.hasText(serviceKey)) {
+            grounding.put("serviceKey", serviceKey);
+        }
+        if (StringUtils.hasText(contextKey)) {
+            grounding.put("contextKey", contextKey);
+        }
+        grounding.put("resourceKey", resourceKey);
+        grounding.put("ruleType", ruleType);
+        grounding.put("source", persistedDefinition != null ? "persisted_definition" : "ad_hoc_request");
+        grounding.put("conditionPresent", condition != null && !condition.isNull());
+
+        String result = existingCoverage.isEmpty() ? "pass" : "pass_with_existing_coverage";
+        return new DomainRuleSimulationResponse(
+                UUID.randomUUID(),
+                ruleDefinitionId,
+                resolvedTenant,
+                resolvedEnvironment,
+                ruleKey,
+                ruleVersion,
+                ruleType,
+                contextKey,
+                resourceKey,
+                serviceKey,
+                result,
+                grounding,
+                existingCoverage,
+                predictedMaterializations,
+                requiredApprovals,
+                warnings,
+                Instant.now());
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleMaterializationResponse createMaterialization(
             DomainRuleMaterializationRequest request,
@@ -211,6 +296,204 @@ public class DomainRuleService {
         materialization.setAppliedByType(normalize(request.appliedByType()));
         materialization.setAppliedBy(normalize(request.appliedBy()));
         return toResponse(materializationRepository.save(materialization));
+    }
+
+    private DomainRuleDefinition resolveDefinitionForSimulation(
+            DomainRuleSimulationRequest request,
+            String tenantId,
+            String environment) {
+        if (request.ruleDefinitionId() == null) {
+            return null;
+        }
+        DomainRuleDefinition definition = definitionRepository.findById(request.ruleDefinitionId())
+                .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + request.ruleDefinitionId()));
+        requireScope(definition.getTenantId(), tenantId, "tenantId");
+        requireScope(definition.getEnvironment(), environment, "environment");
+        return definition;
+    }
+
+    private ArrayNode buildExistingCoverage(
+            String tenantId,
+            String environment,
+            String resourceKey,
+            String ruleType,
+            UUID currentDefinitionId,
+            String currentRuleKey) {
+        ArrayNode coverage = objectMapper.createArrayNode();
+        List<DomainRuleDefinition> candidates = findCoverageCandidates(tenantId, environment, resourceKey);
+        for (DomainRuleDefinition candidate : candidates) {
+            if (!ruleType.equals(candidate.getRuleType())) {
+                continue;
+            }
+            if (currentDefinitionId != null && currentDefinitionId.equals(candidate.getId())) {
+                continue;
+            }
+            if (currentDefinitionId == null
+                    && StringUtils.hasText(currentRuleKey)
+                    && currentRuleKey.equals(candidate.getRuleKey())) {
+                continue;
+            }
+            ObjectNode item = coverage.addObject();
+            item.put("ruleDefinitionId", candidate.getId().toString());
+            item.put("ruleKey", candidate.getRuleKey());
+            item.put("ruleType", candidate.getRuleType());
+            item.put("status", candidate.getStatus());
+            item.put("version", candidate.getVersion());
+            JsonNode definition = read(candidate.getDefinition());
+            if (definition != null && definition.isObject()) {
+                String summary = definition.path("summary").asText(null);
+                if (StringUtils.hasText(summary)) {
+                    item.put("summary", summary);
+                }
+                String operation = definition.path("recommendedOperation").asText(null);
+                if (StringUtils.hasText(operation)) {
+                    item.put("recommendedOperation", operation);
+                }
+            }
+        }
+        return coverage;
+    }
+
+    private List<DomainRuleDefinition> findCoverageCandidates(
+            String tenantId,
+            String environment,
+            String resourceKey) {
+        if (tenantId != null && environment != null) {
+            return definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                    tenantId,
+                    environment,
+                    resourceKey,
+                    COVERAGE_STATUSES);
+        }
+        return definitionRepository.findAll().stream()
+                .filter(definition -> matchesScope(definition.getTenantId(), tenantId))
+                .filter(definition -> matchesScope(definition.getEnvironment(), environment))
+                .filter(definition -> resourceKey.equals(definition.getResourceKey()))
+                .filter(definition -> COVERAGE_STATUSES.contains(definition.getStatus()))
+                .toList();
+    }
+
+    private ArrayNode buildPredictedMaterializations(
+            String resourceKey,
+            String ruleType,
+            JsonNode definition,
+            JsonNode parameters) {
+        ArrayNode targets = objectMapper.createArrayNode();
+        String recommendedOperation = definition != null ? normalize(definition.path("recommendedOperation").asText(null)) : null;
+        JsonNode params = parameters == null || parameters.isNull() ? null : parameters;
+
+        if (looksLikeOptionSourceTarget(resourceKey, ruleType, definition, params)) {
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", "option_source");
+            target.put("targetArtifactType", "resource-option-source");
+            target.put("targetArtifactKey", deriveOptionSourceKey(resourceKey, params));
+            target.put("operation", "selection_policy.review");
+        }
+
+        if ("validation".equals(ruleType) || "compliance".equals(ruleType) || "privacy".equals(ruleType)) {
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", "backend_validation");
+            target.put("targetArtifactType", "resource-validation");
+            target.put("targetArtifactKey", resourceKey);
+            target.put("operation", "validation_rule.review");
+        }
+
+        if ("workflow".equals(ruleType)) {
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", "workflow");
+            target.put("targetArtifactType", "workflow-policy");
+            target.put("targetArtifactKey", resourceKey);
+            target.put("operation", "workflow_rule.review");
+        }
+
+        if ("visual_guidance".equals(ruleType)
+                || "form_rule".equals(ruleType)
+                || "rule.visualBlockGuidance.add".equals(recommendedOperation)) {
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", "form_config");
+            target.put("targetArtifactType", "praxis-dynamic-form");
+            target.put("targetArtifactKey", resourceKey);
+            target.put("operation", recommendedOperation != null ? recommendedOperation : "rule.review");
+        }
+
+        if (targets.isEmpty()) {
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", "shared_rule_review");
+            target.put("targetArtifactType", "domain-rule-definition");
+            target.put("targetArtifactKey", resourceKey);
+            target.put("operation", "governance.review");
+        }
+        return targets;
+    }
+
+    private boolean looksLikeOptionSourceTarget(
+            String resourceKey,
+            String ruleType,
+            JsonNode definition,
+            JsonNode parameters) {
+        if (parameters != null && parameters.isObject()) {
+            if (StringUtils.hasText(parameters.path("optionSourceKey").asText(null))
+                    || StringUtils.hasText(parameters.path("lookupSource").asText(null))) {
+                return true;
+            }
+        }
+        String summary = definition != null ? normalize(definition.path("summary").asText(null)) : null;
+        return "policy_reference".equals(ruleType)
+                || resourceKey.contains("procurement.suppliers")
+                || (summary != null && (summary.contains("sele") || summary.contains("fornecedor") || summary.contains("supplier")));
+    }
+
+    private String deriveOptionSourceKey(String resourceKey, JsonNode parameters) {
+        if (parameters != null && parameters.isObject()) {
+            String explicit = normalize(parameters.path("optionSourceKey").asText(null));
+            if (StringUtils.hasText(explicit)) {
+                return explicit;
+            }
+            explicit = normalize(parameters.path("lookupSource").asText(null));
+            if (StringUtils.hasText(explicit)) {
+                return explicit;
+            }
+        }
+        if (resourceKey.contains("procurement.suppliers")) {
+            return "supplier";
+        }
+        return resourceKey;
+    }
+
+    private ArrayNode buildRequiredApprovals(JsonNode governance) {
+        ArrayNode approvals = objectMapper.createArrayNode();
+        if (governance != null && governance.isObject()) {
+            JsonNode explicit = governance.get("requiredApprovals");
+            if (explicit != null && explicit.isArray()) {
+                explicit.forEach(item -> {
+                    if (item != null && item.isTextual() && StringUtils.hasText(item.asText())) {
+                        approvals.add(item.asText().trim());
+                    }
+                });
+            }
+            if (approvals.isEmpty() && "review_required".equals(governance.path("ruleAuthoring").asText())) {
+                approvals.add("human-review");
+            }
+        }
+        return approvals;
+    }
+
+    private ArrayNode buildWarnings(
+            String ruleType,
+            ArrayNode predictedMaterializations,
+            ArrayNode existingCoverage,
+            JsonNode governance) {
+        ArrayNode warnings = objectMapper.createArrayNode();
+        if (!existingCoverage.isEmpty()) {
+            warnings.add("Simulation found active or approved shared rules covering the same resource and rule type.");
+        }
+        if (governance != null && governance.isObject() && "review_required".equals(governance.path("ruleAuthoring").asText())) {
+            warnings.add("Governance requires human review before publication or target-specific materialization.");
+        }
+        if ("visual_guidance".equals(ruleType) && predictedMaterializations.size() == 1) {
+            warnings.add("This rule currently projects only to form guidance; business validation may still require a non-UI target.");
+        }
+        return warnings;
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)

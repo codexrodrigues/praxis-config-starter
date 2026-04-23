@@ -166,6 +166,12 @@ Do not edit the quickstart `pom.xml` just to validate an unpublished starter;
 use the Maven property override and keep the Maven Central publication step
 decoupled from local platform validation.
 
+When the quickstart is being rebuilt against a local starter that reuses the
+same beta version string already present in the local Maven cache, prefer
+`mvn clean package` instead of `mvn package`. This avoids stale nested starter
+jars inside `target/praxis-api-quickstart-*.jar`, which can otherwise make the
+host look older than the freshly installed local starter.
+
 ## Compliance Shadow
 
 ```bash

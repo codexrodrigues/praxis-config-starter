@@ -27,6 +27,16 @@ Escopo coberto:
 - `POST /api/praxis/config/ai/authoring/page-preview`
 - `POST /api/praxis/config/ai/authoring/page-apply`
 
+Importante:
+
+- `ai/authoring` continua sendo a superfície canônica para authoring de
+  componente/página;
+- business-rule authoring não deve ser modelado como destino primário de
+  `componentEditPlan`;
+- a evolução canônica para decisão compartilhada deve acontecer na superfície
+  `/api/praxis/config/domain-rules/**`, que já concentra definição governada,
+  materialização por target e, progressivamente, intake/simulation/publication.
+
 Contexto conversacional de authoring:
 
 - `intent-resolution` e `page-preview` compartilham `AgenticAuthoringConversationContext`.
