@@ -302,18 +302,30 @@ Behavior:
 
 ## Ingestion v0.1
 
-Future endpoint shape:
+Current endpoint shape:
 
 ```http
 POST /api/praxis/config/domain-federation/ingest
 ```
 
-Input should accept:
+Current behavior:
+
+- accepts the same `DomainFederationValidationRequest` envelope used by `/dry-run`;
+- requires `dryRun=true`;
+- returns validation plus per-context retrieval previews in one response;
+- does not persist anything yet.
+
+Preview behavior:
+
+- each `domain_context` attempts a preview using its publishing source `serviceKey`;
+- preview query defaults to the context label, falling back to `contextKey`;
+- preview failures are returned per context instead of aborting the whole dry-run.
+
+Future input should also accept:
 
 - source release keys;
 - optional source filters by `serviceKey`, `contextKey`, tenant and environment;
-- curated relationship/contract/resolution payloads;
-- `dryRun=true` for validation without persistence.
+- curated relationship/contract/resolution payloads.
 
 Ingestion steps:
 

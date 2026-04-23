@@ -2,9 +2,11 @@ package org.praxisplatform.config.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
+import org.praxisplatform.config.dto.DomainFederationIngestDryRunResponse;
 import org.praxisplatform.config.dto.DomainFederationValidationReport;
 import org.praxisplatform.config.dto.DomainFederationValidationRequest;
 import org.praxisplatform.config.service.DomainFederationContractValidator;
+import org.praxisplatform.config.service.DomainFederationIngestDryRunService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class DomainFederationController {
 
     private final DomainFederationContractValidator domainFederationContractValidator;
+    private final DomainFederationIngestDryRunService domainFederationIngestDryRunService;
     private final DomainFederationQueryService domainFederationQueryService;
 
     @GetMapping("/context")
@@ -56,6 +59,20 @@ public class DomainFederationController {
             @RequestHeader(value = "X-Env", required = false) String environment) {
         DomainFederationValidationRequest effectiveRequest = applyScopeFallback(request, tenantId, environment);
         return ResponseEntity.ok(domainFederationContractValidator.validate(effectiveRequest));
+    }
+
+    @PostMapping("/ingest")
+    public ResponseEntity<?> ingest(
+            @RequestBody(required = false) DomainFederationValidationRequest request,
+            @RequestParam(defaultValue = "true") boolean dryRun,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        if (!dryRun) {
+            return ResponseEntity.badRequest().body("Persistent federation ingest is not implemented yet. Use dryRun=true.");
+        }
+        DomainFederationValidationRequest effectiveRequest = applyScopeFallback(request, tenantId, environment);
+        DomainFederationIngestDryRunResponse response = domainFederationIngestDryRunService.dryRun(effectiveRequest);
+        return ResponseEntity.ok(response);
     }
 
     private DomainFederationValidationRequest applyScopeFallback(
