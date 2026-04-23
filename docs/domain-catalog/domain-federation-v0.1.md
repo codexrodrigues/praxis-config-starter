@@ -1,6 +1,6 @@
 # Domain Federation Contract v0.1
 
-Status: planning contract  
+Status: implemented foundation
 Date: 2026-04-23  
 Depends on: `domain-catalog-contract-v0.2`, `domain-knowledge-layer-v1`
 
@@ -311,9 +311,18 @@ POST /api/praxis/config/domain-federation/ingest
 Current behavior:
 
 - accepts the same `DomainFederationValidationRequest` envelope used by `/dry-run`;
-- requires `dryRun=true`;
-- returns validation plus per-context retrieval previews in one response;
-- does not persist anything yet.
+- with `dryRun=true`, returns validation plus per-context retrieval previews without writes;
+- with `dryRun=false`, validates first and persists a deterministic read-only release only when the report is valid;
+- invalid persistent ingest returns `422` with the validation report embedded in the response.
+
+Persistent ingest writes:
+
+- one `domain_federation_release` row with the raw validated envelope, validation report and deterministic source hash;
+- one `domain_federation_item` row per source, context, context relationship, contract and resolution;
+- a deterministic `releaseKey` shaped as `domain-federation:{tenant}:{environment}:{hashPrefix}`.
+
+The persisted release is a governed read model. It does not execute rules, call
+remote systems, mutate UI config, or give LLMs write access to federation data.
 
 Preview behavior:
 
@@ -433,15 +442,17 @@ v0.1 can be implemented without immediately replacing the current schema:
 | `domain_contract` | `domain_catalog_item.item_type=binding`, `domain_knowledge_binding` | `domain_contract` |
 | `domain_resolution` | `domain_knowledge_relationship` with `same_as`, `maps_to`, `broader_than`, `narrower_than` | `domain_resolution` |
 
-The first implementation may project these artifacts from existing
-`domain_catalog_item` and `domain_knowledge_*` rows, then persist first-class
-tables in a later migration once the contract stabilizes.
+The first implementation persists the validated envelope into
+`domain_federation_release` and `domain_federation_item`. Query still projects
+LLM-safe context from `domain_catalog_item` and `domain_knowledge_*` rows until
+the persisted read model is promoted into `/context` retrieval.
 
 ## Persistent Read Model Plan
 
-The next architectural increment is to persist federation records as governed
-read-only data. This should not introduce rule execution or LLM write access.
-It should make the validated federation map durable, queryable and auditable.
+The current architectural increment persists federation records as governed
+read-only data. It does not introduce rule execution or LLM write access. The
+validated federation map is now durable and auditable; query-first retrieval from
+the persisted store remains the next slice.
 
 ### Migration Boundary
 
@@ -587,16 +598,15 @@ Do not add authoring yet. Add only operational read/validation endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /api/praxis/config/domain-federation/ingest?dryRun=false` | Persist a candidate release after validation. |
+| `POST /api/praxis/config/domain-federation/ingest?dryRun=false` | Persist a validated read-only release after validation. |
 | `POST /api/praxis/config/domain-federation/releases/{releaseKey}/activate` | Explicitly activate a candidate release. |
 | `GET /api/praxis/config/domain-federation/releases` | List releases by tenant/environment/status. |
 | `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation` | Return validation report and evidence. |
 
-`dryRun=false` must be guarded by configuration at first, for example:
-
-```properties
-praxis.domain-federation.persistence.enabled=false
-```
+The first persisted slice intentionally does not add an activation state yet.
+It stores deterministic read-only releases and keeps `/context` on the proven
+catalog projection. Activation/listing endpoints are the next increment before
+persisted releases become retrieval sources.
 
 ### LLM Safety Rules
 
@@ -610,15 +620,18 @@ Persisted federation data must remain LLM-safe by construction:
 
 ### Implementation Slice
 
-Recommended first implementation slice:
+Implemented first slice:
 
-1. Add the Flyway migration and JPA entities/repositories.
-2. Add persistence service behind `praxis.domain-federation.persistence.enabled`.
-3. Extend `/ingest` so `dryRun=false` persists only candidate releases.
-4. Add release list and validation read endpoints.
-5. Keep `/context` behavior unchanged until candidate persistence is proven.
+1. Added Flyway migration and JPA entities/repositories for release/item storage.
+2. Extended `/ingest` so `dryRun=false` persists only valid envelopes.
+3. Kept `/context` behavior unchanged until persisted retrieval is proven.
 
-The second slice can switch `/context` to prefer active persisted releases.
+Recommended next slice:
+
+1. Add release list and validation read endpoints.
+2. Add a persisted federation query service over `domain_federation_item`.
+3. Switch `/context` to prefer persisted federation releases when present, then
+   fall back to current Domain Catalog projection.
 
 Current implementation status:
 
@@ -683,8 +696,9 @@ constraints. It should not infer extra relationships from similar labels.
 2. Add read-only DTOs and validators.
 3. Add dry-run validation endpoint.
 4. Add query endpoint returning an LLM-safe federated context.
-5. Add persistence tables only after validator semantics are stable.
-6. Allow LLM proposal envelopes only after validation and review workflows exist.
+5. Add persistence tables after validator semantics are stable.
+6. Add persisted release listing and validation report retrieval.
+7. Allow LLM proposal envelopes only after validation and review workflows exist.
 
 ## Non-Goals For v0.1
 

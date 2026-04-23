@@ -7,10 +7,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainFederationContext;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
+import org.praxisplatform.config.dto.DomainFederationIngestResponse;
 import org.praxisplatform.config.dto.DomainFederationIngestDryRunResponse;
 import org.praxisplatform.config.dto.DomainFederationIngestPreviewItemResponse;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
@@ -19,6 +21,7 @@ import org.praxisplatform.config.dto.DomainFederationValidationReport;
 import org.praxisplatform.config.dto.DomainFederationValidationRequest;
 import org.praxisplatform.config.service.DomainFederationContractValidator;
 import org.praxisplatform.config.service.DomainFederationIngestDryRunService;
+import org.praxisplatform.config.service.DomainFederationIngestionService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
 
 @Tag("unit")
@@ -28,8 +31,10 @@ class DomainFederationControllerTest {
     void returnsValidationReportForDryRun() {
         DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
         DomainFederationIngestDryRunService ingestDryRunService = mock(DomainFederationIngestDryRunService.class);
+        DomainFederationIngestionService ingestionService = mock(DomainFederationIngestionService.class);
         DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
-        DomainFederationController controller = new DomainFederationController(validator, ingestDryRunService, queryService);
+        DomainFederationController controller =
+                new DomainFederationController(validator, ingestDryRunService, ingestionService, queryService);
         DomainFederationValidationRequest request = validRequest("tenant-a", "dev");
         DomainFederationValidationReport report = new DomainFederationValidationReport(true, 0, 0, List.of());
         when(validator.validate(request)).thenReturn(report);
@@ -44,8 +49,10 @@ class DomainFederationControllerTest {
     void usesTenantAndEnvironmentHeadersWhenRequestOmitsScope() {
         DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
         DomainFederationIngestDryRunService ingestDryRunService = mock(DomainFederationIngestDryRunService.class);
+        DomainFederationIngestionService ingestionService = mock(DomainFederationIngestionService.class);
         DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
-        DomainFederationController controller = new DomainFederationController(validator, ingestDryRunService, queryService);
+        DomainFederationController controller =
+                new DomainFederationController(validator, ingestDryRunService, ingestionService, queryService);
         DomainFederationValidationReport report = new DomainFederationValidationReport(true, 0, 0, List.of());
         when(validator.validate(argThat(request ->
                 request != null
@@ -65,8 +72,10 @@ class DomainFederationControllerTest {
     void delegatesFederatedContextQueryToService() {
         DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
         DomainFederationIngestDryRunService ingestDryRunService = mock(DomainFederationIngestDryRunService.class);
+        DomainFederationIngestionService ingestionService = mock(DomainFederationIngestionService.class);
         DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
-        DomainFederationController controller = new DomainFederationController(validator, ingestDryRunService, queryService);
+        DomainFederationController controller =
+                new DomainFederationController(validator, ingestDryRunService, ingestionService, queryService);
         DomainFederationContextQueryResponse response = new DomainFederationContextQueryResponse(
                 "praxis.domain-federation-context/v0.1",
                 "tenant-a",
@@ -132,8 +141,10 @@ class DomainFederationControllerTest {
     void delegatesDryRunIngestToService() {
         DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
         DomainFederationIngestDryRunService ingestDryRunService = mock(DomainFederationIngestDryRunService.class);
+        DomainFederationIngestionService ingestionService = mock(DomainFederationIngestionService.class);
         DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
-        DomainFederationController controller = new DomainFederationController(validator, ingestDryRunService, queryService);
+        DomainFederationController controller =
+                new DomainFederationController(validator, ingestDryRunService, ingestionService, queryService);
         DomainFederationValidationRequest request = validRequest(null, null);
         DomainFederationIngestDryRunResponse response = new DomainFederationIngestDryRunResponse(
                 "praxis.domain-federation-ingest-dry-run/v0.1",
@@ -164,16 +175,62 @@ class DomainFederationControllerTest {
     }
 
     @Test
-    void rejectsPersistentIngestForNow() {
+    void delegatesPersistentIngestToService() {
         DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
         DomainFederationIngestDryRunService ingestDryRunService = mock(DomainFederationIngestDryRunService.class);
+        DomainFederationIngestionService ingestionService = mock(DomainFederationIngestionService.class);
         DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
-        DomainFederationController controller = new DomainFederationController(validator, ingestDryRunService, queryService);
+        DomainFederationController controller =
+                new DomainFederationController(validator, ingestDryRunService, ingestionService, queryService);
+        DomainFederationIngestResponse response = new DomainFederationIngestResponse(
+                "praxis.domain-federation-ingest/v0.1",
+                false,
+                true,
+                true,
+                UUID.randomUUID(),
+                "domain-federation:tenant-a:dev:abc",
+                2,
+                new DomainFederationValidationReport(true, 0, 0, List.of()),
+                List.of());
+        when(ingestionService.ingest(argThat(effective ->
+                effective != null
+                        && "tenant-a".equals(effective.tenantId())
+                        && "dev".equals(effective.environment())))).thenReturn(response);
 
         var entity = controller.ingest(validRequest("tenant-a", "dev"), false, "tenant-a", "dev");
 
-        assertThat(entity.getStatusCode().is4xxClientError()).isTrue();
-        assertThat(entity.getBody()).isEqualTo("Persistent federation ingest is not implemented yet. Use dryRun=true.");
+        assertThat(entity.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(ingestionService).ingest(argThat(effective ->
+                effective != null
+                        && "tenant-a".equals(effective.tenantId())
+                        && "dev".equals(effective.environment())));
+    }
+
+    @Test
+    void returnsUnprocessableEntityWhenPersistentIngestIsInvalid() {
+        DomainFederationContractValidator validator = mock(DomainFederationContractValidator.class);
+        DomainFederationIngestDryRunService ingestDryRunService = mock(DomainFederationIngestDryRunService.class);
+        DomainFederationIngestionService ingestionService = mock(DomainFederationIngestionService.class);
+        DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
+        DomainFederationController controller =
+                new DomainFederationController(validator, ingestDryRunService, ingestionService, queryService);
+        DomainFederationIngestResponse response = new DomainFederationIngestResponse(
+                "praxis.domain-federation-ingest/v0.1",
+                false,
+                false,
+                false,
+                null,
+                null,
+                0,
+                new DomainFederationValidationReport(false, 1, 0, List.of()),
+                List.of());
+        when(ingestionService.ingest(validRequest("tenant-a", "dev"))).thenReturn(response);
+
+        var entity = controller.ingest(validRequest("tenant-a", "dev"), false, null, null);
+
+        assertThat(entity.getStatusCode().value()).isEqualTo(422);
+        assertThat(entity.getBody()).isSameAs(response);
     }
 
     private DomainFederationValidationRequest validRequest(String tenantId, String environment) {

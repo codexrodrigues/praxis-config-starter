@@ -2,13 +2,16 @@ package org.praxisplatform.config.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
+import org.praxisplatform.config.dto.DomainFederationIngestResponse;
 import org.praxisplatform.config.dto.DomainFederationIngestDryRunResponse;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 import org.praxisplatform.config.dto.DomainFederationValidationReport;
 import org.praxisplatform.config.dto.DomainFederationValidationRequest;
 import org.praxisplatform.config.service.DomainFederationContractValidator;
 import org.praxisplatform.config.service.DomainFederationIngestDryRunService;
+import org.praxisplatform.config.service.DomainFederationIngestionService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,6 +29,7 @@ public class DomainFederationController {
 
     private final DomainFederationContractValidator domainFederationContractValidator;
     private final DomainFederationIngestDryRunService domainFederationIngestDryRunService;
+    private final DomainFederationIngestionService domainFederationIngestionService;
     private final DomainFederationQueryService domainFederationQueryService;
 
     @GetMapping("/context")
@@ -73,10 +77,14 @@ public class DomainFederationController {
             @RequestParam(defaultValue = "true") boolean dryRun,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
-        if (!dryRun) {
-            return ResponseEntity.badRequest().body("Persistent federation ingest is not implemented yet. Use dryRun=true.");
-        }
         DomainFederationValidationRequest effectiveRequest = applyScopeFallback(request, tenantId, environment);
+        if (!dryRun) {
+            DomainFederationIngestResponse response = domainFederationIngestionService.ingest(effectiveRequest);
+            if (!response.valid()) {
+                return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+            }
+            return ResponseEntity.ok(response);
+        }
         DomainFederationIngestDryRunResponse response = domainFederationIngestDryRunService.dryRun(effectiveRequest);
         return ResponseEntity.ok(response);
     }

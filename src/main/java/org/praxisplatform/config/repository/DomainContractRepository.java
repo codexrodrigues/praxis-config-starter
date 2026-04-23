@@ -10,6 +10,8 @@ public interface DomainContractRepository extends JpaRepository<DomainContract, 
 
     Optional<DomainContract> findByFederationRelease_IdAndContractKey(UUID federationReleaseId, String contractKey);
 
+    List<DomainContract> findByFederationRelease_IdOrderByContractKey(UUID federationReleaseId);
+
     List<DomainContract> findByFederationRelease_IdAndProviderContextKeyOrderByContractKey(
             UUID federationReleaseId,
             String providerContextKey);

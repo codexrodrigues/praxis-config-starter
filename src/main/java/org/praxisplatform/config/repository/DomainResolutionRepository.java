@@ -10,6 +10,8 @@ public interface DomainResolutionRepository extends JpaRepository<DomainResoluti
 
     Optional<DomainResolution> findByFederationRelease_IdAndResolutionKey(UUID federationReleaseId, String resolutionKey);
 
+    List<DomainResolution> findByFederationRelease_IdOrderByResolutionKey(UUID federationReleaseId);
+
     List<DomainResolution> findByFederationRelease_IdAndSourceContextKeyOrderByResolutionKey(
             UUID federationReleaseId,
             String sourceContextKey);

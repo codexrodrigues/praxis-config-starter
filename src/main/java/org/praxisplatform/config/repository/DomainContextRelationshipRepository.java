@@ -12,6 +12,8 @@ public interface DomainContextRelationshipRepository extends JpaRepository<Domai
             UUID federationReleaseId,
             String relationshipKey);
 
+    List<DomainContextRelationship> findByFederationRelease_IdOrderByRelationshipKey(UUID federationReleaseId);
+
     List<DomainContextRelationship> findByFederationRelease_IdAndSourceContextKeyOrderByRelationshipKey(
             UUID federationReleaseId,
             String sourceContextKey);
