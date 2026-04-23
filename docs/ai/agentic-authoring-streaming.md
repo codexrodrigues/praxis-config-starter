@@ -140,6 +140,30 @@ O Page Builder deve:
   ainda estiver ativo;
 - tratar `result` como a unica fonte para aplicar preview local.
 
+## Evidencia de validacao ponta a ponta
+
+Em 2026-04-23, o fluxo full local foi validado com o runner canonico:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\tools\Invoke-PbAgenticFullE2E.ps1 `
+  -Provider openai `
+  -QuickstartRoot ..\praxis-api-quickstart `
+  -UiRoot ..\praxis-ui-angular `
+  -StreamProcessingTimeoutSeconds 180
+```
+
+Resultado:
+
+- `praxis-api-quickstart` subiu em `http://localhost:8088` com `PRAXIS_AI_STREAM_AUTH_MODE=signed-url-token`;
+- `praxis-ui-angular` subiu em `http://localhost:4003`;
+- o Playwright executou `praxis-page-builder-agentic-validation.playwright.config.ts`;
+- os fluxos de dashboard de pagamentos e formulario de funcionarios passaram usando browser real, backend SSE real e provider OpenAI real;
+- a auditoria confirmou que `praxis-ai.service.ts` nao continha `getMockPatch` nem `extractUserIntent`;
+- total: `3 passed`.
+
+Essa validacao fecha o marco operacional do primeiro ciclo backend-driven: o frontend nao dependeu de caminho mockado de authoring e o resultado aplicado veio do contrato retornado pelo backend.
+
 ## Fora de escopo
 
 Esta decisao nao muda os endpoints sincronos existentes. Integracao do Page Builder
