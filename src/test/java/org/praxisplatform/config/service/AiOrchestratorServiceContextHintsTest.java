@@ -233,6 +233,46 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void templateFlowExtractsResourcePathFromQuickReplyTextWhenHintsAreMissing() {
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("Use Grafico por setor + lista embaixo (/api/human-resources/folhas-pagamento) as the data source.")
+                .build();
+
+        String resourcePath = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractTemplateResourcePath",
+                request);
+
+        assertThat(resourcePath)
+                .isEqualTo("/api/human-resources/folhas-pagamento");
+    }
+
+    @Test
+    void templateFlowContinuesFromQuickReplyTextResourcePathWithoutHints() throws Exception {
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("Use Grafico por setor + lista embaixo (/api/human-resources/folhas-pagamento) as the data source.")
+                .build();
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-dynamic-page-builder")
+                .currentState(objectMapper.readTree("""
+                        { "page": { "widgets": [] } }
+                        """))
+                .build();
+        JsonNode templateConfig = objectMapper.readTree("""
+                { "page": { "widgets": [] } }
+                """);
+
+        Boolean shouldUseTemplateFlow = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldUseTemplateFlow",
+                request,
+                context,
+                templateConfig);
+
+        assertThat(shouldUseTemplateFlow).isTrue();
+    }
+
+    @Test
     void buildExecutionPromptPreservesDomainCatalogGovernanceInRagHints() {
         AiContextDTO context = AiContextDTO.builder()
                 .componentId("praxis-table")
