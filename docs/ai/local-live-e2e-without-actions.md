@@ -4,16 +4,15 @@ Use this runbook when GitHub Actions quota is constrained. These checks call rea
 
 ## Last Validated
 
-Validated locally on 2026-04-23 with:
+Latest local validation cycle completed on 2026-04-23 with:
 
-- `praxis-config-starter` local commit containing this runbook (`git rev-parse --short HEAD`);
-- `praxis-ui-angular` commit `03e5b9ce`;
-- `praxis-api-quickstart` commit `85a2d5c`;
-- `praxis-api-quickstart` jar `target/praxis-api-quickstart-2.0.0-rc.9.jar`, rebuilt locally with `-Dpraxis.config.version=0.1.0-rc.5` after installing the current local starter;
-- Java `21.0.10`;
+- `praxis-config-starter` commit `13b8e9c`;
+- `praxis-ui-angular` commit `ce3c773b`;
+- `praxis-api-quickstart` commit `6c72262`;
+- `praxis-api-quickstart` jar `target/praxis-api-quickstart-2.0.0-rc.9.jar` (`89936944` bytes);
+- Java 21 from `D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21`;
 - remote PostgreSQL via quickstart configuration;
-- real OpenAI provider `gpt-5.4-mini`;
-- real Gemini provider `gemini-2.5-flash`;
+- real OpenAI provider through `.env.openai.local.ps1`;
 - GitHub Actions not used.
 
 Observed backend startup:
@@ -23,15 +22,18 @@ Observed backend startup:
 - schema was up to date;
 - no migration was applied during the local E2E run.
 
-Validated results:
+Validated results in this cycle:
 
-- Agentic HTTP/SSE smoke passed with `planValid=true`, `compileValid=true`, `previewValid=true`, `applyPersisted=true`, `applyCleanupDeleted=true`, `streamTerminalSeen=true`, `streamReplayChecked=true`, `streamEventCount=6`.
-- Domain Catalog v2 passed with schema `praxis.domain-catalog/v0.2`, `nodeCount=2`, `aliasCount=4`, `governanceCount=3`, `relationshipCount=10`, `semanticNodeCount=2`.
-- LLM compliance passed with OpenAI and Gemini; both reported `providerStatus=ok`, `mayUseDeniedContent=false`, CPF governance guidance, and salary exclusion due to confidence.
-- Browser Playwright passed `3/3` against Angular, backend, remote DB and real LLM.
-- Domain Federation v0.1 starter tests passed locally: `18` tests, `0` failures across controller, validator, dry-run ingest, query and retrieval policy.
-- Domain Federation v0.1 live smoke passed against the locally rebuilt quickstart jar with `schemaVersion=praxis.domain-federation/v0.1`, `dryRunValid=true`, `ingestDryRunValid=true`, `contextFederated=true`, `contextItemCount=2`, `relationshipCount=2`.
-- The original quickstart jar built before this starter change returned `404`; package quickstart with a starter build containing `DomainFederationController` before running the live federation smoke.
+- Browser full E2E passed `3/3` against Angular on `http://localhost:4003`, quickstart on `http://localhost:8088`, backend SSE real and OpenAI real.
+- Agentic HTTP/SSE smoke passed with `planValid=true`, `compileValid=true`, `previewValid=true`, `applyPersisted=true`, `applyCleanupDeleted=true`, `streamTerminalSeen=true`, `streamReplayChecked=true`.
+- Domain Catalog v2 passed with schema `praxis.domain-catalog/v0.2`, `nodeCount=24`, `ingestItemCount=175`, `projectedNodeCount=2`, `projectedAliasCount=4`, `projectedGovernanceCount=3`, `projectedRelationshipCount=10`, `semanticPayloadSeen=true`.
+- Domain Federation v0.1 live smoke passed with `schemaVersion=praxis.domain-federation/v0.1`, `dryRunValid=true`, `dryRunIssueCount=0`, `ingestDryRunValid=true`, `previewCount=2`, `contextFederated=true`, `contextItemCount=2`, `relationshipCount=2`.
+
+Validations not rerun in this cycle:
+
+- Gemini provider validation.
+- LLM compliance shadow validation.
+- Domain Federation v0.1 starter unit/integration test suite.
 
 ## Prerequisites
 
