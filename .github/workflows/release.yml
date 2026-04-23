@@ -210,7 +210,7 @@ jobs:
 
   release:
     name: Publish to Maven Central
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.create_tag == false)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -278,8 +278,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          V="${TAG#v}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            V="${{ inputs.version }}"
+            V="${V#v}"
+            if [[ -z "${V:-}" ]]; then
+              echo "::error::Manual publish requires the version input when create_tag=false."
+              exit 1
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+            V="${TAG#v}"
+          fi
           if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Invalid release version '$V'. Expected semver, e.g. 1.2.3 or 1.2.3-rc.1"
             exit 1
