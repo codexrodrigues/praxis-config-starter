@@ -41,4 +41,10 @@ To run only the compliance-policy shadow gate, disable `run_quickstart_http_smok
 disable `run_domain_catalog_v2_smoke`, keep `run_page_builder_full_e2e` disabled,
 and enable `run_llm_compliance_policy_shadow`.
 
+By default, provider quota or temporary provider unavailability writes a sanitized
+`providerStatus=unavailable` report and skips the compliance-policy assertion. Enable
+`fail_llm_compliance_on_provider_unavailable` in GitHub Actions, or set
+`PRAXIS_AGENTIC_AUTHORING_LLM_COMPLIANCE_FAIL_ON_PROVIDER_UNAVAILABLE=true` locally,
+when the validation must fail hard on provider outages.
+
 The sanitized result is uploaded from `target/agentic-authoring/`. Secrets must remain in local env files or GitHub Actions secrets and must not be committed.

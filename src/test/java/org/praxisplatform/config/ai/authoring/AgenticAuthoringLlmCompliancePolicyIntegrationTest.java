@@ -26,6 +26,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AgenticAuthoringLlmCompliancePolicyIntegrationTest {
 
     private static final String ENABLE_ENV = "PRAXIS_AGENTIC_AUTHORING_LLM_COMPLIANCE_POLICY";
+    private static final String FAIL_ON_PROVIDER_UNAVAILABLE_ENV =
+            "PRAXIS_AGENTIC_AUTHORING_LLM_COMPLIANCE_FAIL_ON_PROVIDER_UNAVAILABLE";
     private static final String EXPECTED_PROFILE = "compliance_review";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -38,10 +40,21 @@ class AgenticAuthoringLlmCompliancePolicyIntegrationTest {
         String providerName = normalize(envOrDefault("PRAXIS_AGENTIC_AUTHORING_SHADOW_PROVIDER", "openai"));
         AiProvider provider = createProvider(providerName);
 
-        JsonNode result = provider.generateJson(
-                compliancePrompt(providerName),
-                AiJsonSchema.ofSchema(complianceResultSchema()),
-                callConfig(providerName));
+        JsonNode result;
+        try {
+            result = provider.generateJson(
+                    compliancePrompt(providerName),
+                    AiJsonSchema.ofSchema(complianceResultSchema()),
+                    callConfig(providerName));
+        } catch (RuntimeException ex) {
+            writeProviderUnavailableReport(providerName, ex);
+            if (booleanEnv(FAIL_ON_PROVIDER_UNAVAILABLE_ENV)) {
+                throw ex;
+            }
+            assumeTrue(false, "Provider unavailable for LLM compliance policy run: "
+                    + providerName + " (" + providerErrorCode(ex) + ")");
+            return;
+        }
 
         assertComplianceResult(result);
         writeSanitizedReport(providerName, result);
@@ -216,10 +229,66 @@ class AgenticAuthoringLlmCompliancePolicyIntegrationTest {
         root.put("provider", providerName);
         root.put("model", modelFor(providerName));
         root.put("schemaVersion", "praxis.agentic-authoring.llm-compliance-policy-result/v0.1");
+        root.put("providerStatus", "ok");
         root.set("result", result);
 
         objectMapper.writerWithDefaultPrettyPrinter()
                 .writeValue(reportDir.resolve("llm-compliance-policy-result." + providerName + ".json").toFile(), root);
+    }
+
+    private void writeProviderUnavailableReport(String providerName, RuntimeException ex) {
+        try {
+            Path reportDir = Path.of("target", "agentic-authoring");
+            Files.createDirectories(reportDir);
+
+            ObjectNode root = objectMapper.createObjectNode();
+            root.put("provider", providerName);
+            root.put("model", modelFor(providerName));
+            root.put("schemaVersion", "praxis.agentic-authoring.llm-compliance-policy-result/v0.1");
+            root.put("providerStatus", "unavailable");
+            ObjectNode error = root.putObject("providerError");
+            error.put("code", providerErrorCode(ex));
+            error.put("message", sanitizeErrorMessage(ex));
+
+            objectMapper.writerWithDefaultPrettyPrinter()
+                    .writeValue(reportDir.resolve("llm-compliance-policy-result." + providerName + ".json").toFile(), root);
+        } catch (Exception reportError) {
+            throw new IllegalStateException("Failed to write LLM compliance provider report.", reportError);
+        }
+    }
+
+    private String providerErrorCode(Throwable throwable) {
+        String message = providerErrorChain(throwable).toUpperCase();
+        if (message.contains("RESOURCE_EXHAUSTED") || message.contains("QUOTA")
+                || message.contains("HTTP 429") || message.contains("RATE LIMIT")) {
+            return "quota-exhausted";
+        }
+        if (message.contains("UNAVAILABLE") || message.contains("HIGH DEMAND")
+                || message.contains("HTTP 503") || message.contains("CAPACITY")) {
+            return "provider-unavailable";
+        }
+        return "provider-call-failed";
+    }
+
+    private String sanitizeErrorMessage(Throwable throwable) {
+        String message = providerErrorChain(throwable);
+        return message
+                .replaceAll("(?i)(api[_-]?key|key|token|authorization)[^\\s,}]*", "$1=***")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String providerErrorChain(Throwable throwable) {
+        StringBuilder builder = new StringBuilder();
+        Throwable current = throwable;
+        while (current != null) {
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append(String.valueOf(current.getMessage()));
+            current = current.getCause();
+        }
+        return builder.toString();
     }
 
     private String requireEnv(String name) {
@@ -241,6 +310,10 @@ class AgenticAuthoringLlmCompliancePolicyIntegrationTest {
             return fallback;
         }
         return Integer.parseInt(value.trim());
+    }
+
+    private boolean booleanEnv(String name) {
+        return Boolean.parseBoolean(envOrDefault(name, "false"));
     }
 
     private String env(String name) {

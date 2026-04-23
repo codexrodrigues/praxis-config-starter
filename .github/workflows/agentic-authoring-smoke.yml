@@ -46,6 +46,11 @@ on:
         required: false
         default: false
         type: boolean
+      fail_llm_compliance_on_provider_unavailable:
+        description: 'Fail the compliance-policy shadow when the selected provider is unavailable or quota-limited.'
+        required: false
+        default: false
+        type: boolean
       stream_processing_timeout_seconds:
         description: 'Backend LLM stream processing timeout used by HTTP smoke and page-builder E2E.'
         required: false
@@ -218,6 +223,7 @@ jobs:
         working-directory: praxis-config-starter
         env:
           PRAXIS_AGENTIC_AUTHORING_LLM_COMPLIANCE_POLICY: "true"
+          PRAXIS_AGENTIC_AUTHORING_LLM_COMPLIANCE_FAIL_ON_PROVIDER_UNAVAILABLE: ${{ inputs.fail_llm_compliance_on_provider_unavailable }}
           PRAXIS_AGENTIC_AUTHORING_SHADOW_PROVIDER: ${{ inputs.provider }}
           PRAXIS_AI_PROVIDER: ${{ inputs.provider }}
         run: mvn -B "-Dtest=AgenticAuthoringLlmCompliancePolicyIntegrationTest" test
