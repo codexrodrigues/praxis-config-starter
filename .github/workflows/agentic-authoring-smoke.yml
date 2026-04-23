@@ -31,6 +31,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_llm_compliance_policy_shadow:
+        description: 'Run the external LLM compliance-policy shadow test against the selected provider.'
+        required: false
+        default: false
+        type: boolean
       stream_processing_timeout_seconds:
         description: 'Backend LLM stream processing timeout used by HTTP smoke and page-builder E2E.'
         required: false
@@ -195,6 +200,16 @@ jobs:
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}')
 
+      - name: Run LLM compliance-policy shadow
+        if: inputs.run_llm_compliance_policy_shadow == true
+        shell: pwsh
+        working-directory: praxis-config-starter
+        env:
+          PRAXIS_AGENTIC_AUTHORING_LLM_COMPLIANCE_POLICY: "true"
+          PRAXIS_AGENTIC_AUTHORING_SHADOW_PROVIDER: ${{ inputs.provider }}
+          PRAXIS_AI_PROVIDER: ${{ inputs.provider }}
+        run: mvn -B "-Dtest=AgenticAuthoringLlmCompliancePolicyIntegrationTest" test
+
       - name: Run page-builder agentic full E2E gate
         if: inputs.run_page_builder_full_e2e == true
         shell: pwsh
@@ -216,6 +231,7 @@ jobs:
           name: agentic-authoring-smoke-artifacts
           path: |
             artifacts/ai-sse-smoke/**
+            praxis-config-starter/target/agentic-authoring/**
             artifacts/page-builder-agentic-full-e2e/**
             praxis-api-quickstart/logs/**
             praxis-ui-angular/test-results/**
