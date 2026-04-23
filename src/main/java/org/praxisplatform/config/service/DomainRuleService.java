@@ -20,6 +20,7 @@ import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,7 +42,7 @@ public class DomainRuleService {
     private final DomainKnowledgeChangeSetRepository changeSetRepository;
     private final ObjectMapper objectMapper;
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleDefinitionResponse createDefinition(
             DomainRuleDefinitionRequest request,
             String tenantId,
@@ -77,7 +78,7 @@ public class DomainRuleService {
         return toResponse(definitionRepository.save(definition));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainRuleDefinitionResponse> definitions(
             String tenantId,
             String environment,
@@ -132,7 +133,7 @@ public class DomainRuleService {
                 .toList();
     }
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleDefinitionResponse transitionDefinitionStatus(
             UUID definitionId,
             DomainRuleStatusTransitionRequest request,
@@ -172,7 +173,7 @@ public class DomainRuleService {
         return toResponse(definitionRepository.save(definition));
     }
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleMaterializationResponse createMaterialization(
             DomainRuleMaterializationRequest request,
             String tenantId,
@@ -212,7 +213,7 @@ public class DomainRuleService {
         return toResponse(materializationRepository.save(materialization));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainRuleMaterializationResponse> materializations(
             String tenantId,
             String environment,
@@ -259,7 +260,7 @@ public class DomainRuleService {
                 .toList();
     }
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleMaterializationResponse transitionMaterializationStatus(
             UUID materializationId,
             DomainRuleStatusTransitionRequest request,
