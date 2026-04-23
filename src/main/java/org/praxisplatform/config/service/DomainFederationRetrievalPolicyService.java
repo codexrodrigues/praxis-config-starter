@@ -33,13 +33,14 @@ public class DomainFederationRetrievalPolicyService {
             if (item == null) {
                 continue;
             }
-            if (deniesAiVisibility(item.payload())) {
+            String denialReason = denialReason(item.payload());
+            if (denialReason != null) {
                 denied++;
                 if (!policy.includeDenied()) {
-                    decisions.add("Excluded " + item.itemKey() + " because aiUsage.visibility=deny.");
+                    decisions.add("Excluded " + item.itemKey() + " because " + denialReason + ".");
                     continue;
                 }
-                decisions.add("Included " + item.itemKey() + " despite aiUsage.visibility=deny because policyProfile="
+                decisions.add("Included " + item.itemKey() + " despite " + denialReason + " because policyProfile="
                         + policy.profile() + " allows it.");
             }
             if (isGovernedSummary(item.payload())) {
@@ -70,8 +71,25 @@ public class DomainFederationRetrievalPolicyService {
         return new Result(List.copyOf(returnedItems), report);
     }
 
-    private boolean deniesAiVisibility(JsonNode payload) {
-        return "deny".equals(aiVisibility(payload));
+    private String denialReason(JsonNode payload) {
+        if ("deny".equals(aiVisibility(payload))) {
+            return "aiUsage.visibility=deny";
+        }
+        String contractVisibility = text(payload == null ? null : payload.path("contract"), "visibility");
+        if ("deny_for_llm".equals(contractVisibility)) {
+            return "contract.visibility=deny_for_llm";
+        }
+        if ("restricted".equals(contractVisibility)) {
+            return "contract.visibility=restricted";
+        }
+        String resolutionVisibility = text(payload == null ? null : payload.path("resolution"), "visibility");
+        if ("deny_for_llm".equals(resolutionVisibility)) {
+            return "resolution.visibility=deny_for_llm";
+        }
+        if ("restricted".equals(resolutionVisibility)) {
+            return "resolution.visibility=restricted";
+        }
+        return null;
     }
 
     private boolean isGovernedSummary(JsonNode payload) {
@@ -85,6 +103,12 @@ public class DomainFederationRetrievalPolicyService {
             return false;
         }
         JsonNode confidence = payload.path("confidence");
+        if (!confidence.isNumber()) {
+            confidence = payload.path("evidence").path("confidence");
+        }
+        if (!confidence.isNumber()) {
+            confidence = payload.path("resolution").path("confidence");
+        }
         return confidence.isNumber() && confidence.asDouble() < minConfidence;
     }
 

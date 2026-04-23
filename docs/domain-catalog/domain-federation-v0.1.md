@@ -387,9 +387,12 @@ Current behavior:
 Current policy behavior:
 
 - excludes any returned item with `aiUsage.visibility=deny`;
+- excludes persisted items whose linked `contract.visibility` or `resolution.visibility`
+  is `restricted` or `deny_for_llm` outside diagnostics;
 - preserves catalog-level masking and `summarize_only` summaries;
 - reports governed-summary counts;
-- reports low-confidence items below `0.7`;
+- reports low-confidence items using `payload.confidence`,
+  `payload.evidence.confidence` or `payload.resolution.confidence` when present;
 - includes policy decisions in the federated context response.
 
 Runtime options:

@@ -304,7 +304,7 @@ public class DomainFederationQueryService {
         List<String> guidance = new ArrayList<>();
         guidance.add("Federated context is read from active persisted domain federation release " + release.getReleaseKey() + ".");
         guidance.add("Only explicit persisted contexts and relationships are returned; no label inference is performed.");
-        guidance.add("Federation retrieval policy excludes aiUsage.visibility=deny and reports governed or low-confidence items.");
+        guidance.add("Federation retrieval policy excludes aiUsage.visibility=deny, contract/resolution visibility restricted for LLM use, and low-confidence persisted items.");
         guidance.addAll(contextPolicy.decisions());
         guidance.addAll(relationshipPolicy.decisions());
         return List.copyOf(guidance);

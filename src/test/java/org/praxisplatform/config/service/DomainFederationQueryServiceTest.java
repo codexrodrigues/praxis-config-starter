@@ -383,6 +383,97 @@ class DomainFederationQueryServiceTest {
                 .anySatisfy(guidance -> assertThat(guidance).contains("active persisted domain federation release"));
     }
 
+    @Test
+    void redactsPersistedRelationshipsWhenLinkedContractIsNotLlmSafe() {
+        DomainCatalogIngestionService catalogService = mock(DomainCatalogIngestionService.class);
+        Fixture fixture = fixture(catalogService);
+        DomainFederationRelease release = DomainFederationRelease.builder()
+                .id(UUID.randomUUID())
+                .releaseKey("domain-federation:tenant-a:dev:v2")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .status("active")
+                .payloadHash("def")
+                .createdAt(Instant.parse("2026-04-23T10:10:00Z"))
+                .activatedAt(Instant.parse("2026-04-23T10:11:00Z"))
+                .build();
+        DomainSource source = DomainSource.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .sourceKey("operations-source")
+                .serviceKey("operations-service")
+                .serviceName("Operations")
+                .status("active")
+                .evidence("{}")
+                .build();
+        DomainContext context = DomainContext.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .contextKey("operations")
+                .sourceKey("operations-source")
+                .contextType("bounded_context")
+                .label("Operations")
+                .description("Mission execution concepts.")
+                .semanticOwner("Operacoes")
+                .technicalOwner("Platform")
+                .status("active")
+                .evidence("{}")
+                .build();
+        DomainContract restrictedContract = DomainContract.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .contractKey("assets.vehicle-allocation.v2")
+                .contractType("lookup_option_source")
+                .providerSourceKey("assets-source")
+                .providerContextKey("assets")
+                .consumerContextKey("operations")
+                .resourceKey("assets.veiculos")
+                .compatibility("stable")
+                .visibility("deny_for_llm")
+                .status("active")
+                .evidence("{}")
+                .build();
+        DomainContextRelationship relationship = DomainContextRelationship.builder()
+                .id(UUID.randomUUID())
+                .federationRelease(release)
+                .relationshipKey("operations.uses.assets.denied")
+                .sourceContextKey("operations")
+                .targetContextKey("assets")
+                .relationshipType("uses")
+                .contractKey("assets.vehicle-allocation.v2")
+                .direction("source_to_target")
+                .ownership("target_owned")
+                .confidence(0.95d)
+                .status("active")
+                .evidence("{}")
+                .build();
+        when(fixture.releaseRepository().findActiveByOptionalScope("tenant-a", "dev")).thenReturn(List.of(release));
+        when(fixture.sourceRepository().findByFederationRelease_IdOrderBySourceKey(release.getId())).thenReturn(List.of(source));
+        when(fixture.contextRepository().findByFederationRelease_IdOrderByContextKey(release.getId())).thenReturn(List.of(context));
+        when(fixture.contractRepository().findByFederationRelease_IdOrderByContractKey(release.getId())).thenReturn(List.of(restrictedContract));
+        when(fixture.relationshipRepository().findByFederationRelease_IdOrderByRelationshipKey(release.getId())).thenReturn(List.of(relationship));
+
+        var response = fixture.service().context(
+                "operations-service",
+                "assets.veiculos",
+                "tenant-a",
+                "dev",
+                "node",
+                "operations",
+                null,
+                "uses",
+                "operations",
+                20,
+                new DomainFederationRetrievalPolicyOptions("authoring", null, null, null));
+
+        assertThat(response.sourceMode()).isEqualTo("persisted_federation");
+        assertThat(response.context().items()).hasSize(1);
+        assertThat(response.relationships()).isEmpty();
+        assertThat(response.policyReport().deniedItemCount()).isEqualTo(1);
+        assertThat(response.retrievalGuidance())
+                .anySatisfy(guidance -> assertThat(guidance).contains("contract.visibility=deny_for_llm"));
+    }
+
     private Fixture fixture(DomainCatalogIngestionService catalogService) {
         DomainFederationReleaseRepository releaseRepository = mock(DomainFederationReleaseRepository.class);
         DomainSourceRepository sourceRepository = mock(DomainSourceRepository.class);
