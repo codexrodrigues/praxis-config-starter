@@ -631,6 +631,9 @@ Current implementation status:
 - `POST /api/praxis/config/domain-federation/ingest?dryRun=false` can now
   persist a validated candidate release when
   `praxis.domain-federation.persistence.enabled=true`.
+- `GET /api/praxis/config/domain-federation/releases` and
+  `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation`
+  expose read-only release audit data.
 - Database foreign keys are intentionally minimal in this first slice:
   release ownership is enforced by the database, while release-local semantic
   references remain validator-enforced.
