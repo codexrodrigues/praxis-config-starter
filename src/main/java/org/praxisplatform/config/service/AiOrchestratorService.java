@@ -5779,7 +5779,8 @@ public class AiOrchestratorService {
         if (request == null || context == null) {
             return false;
         }
-        if (!isCreateTemplatePrompt(request.getUserPrompt())) {
+        if (!isCreateTemplatePrompt(request.getUserPrompt())
+                && !hasTemplateFlowContinuationHints(request.getContextHints())) {
             return false;
         }
         if (!isEmptyTemplateTarget(context.getCurrentState())) {
@@ -5812,6 +5813,19 @@ public class AiOrchestratorService {
                 || normalized.contains("master detail")
                 || normalized.contains("master-detail")
                 || normalized.contains("detalhe");
+    }
+
+    private boolean hasTemplateFlowContinuationHints(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return false;
+        }
+        String tool = textOrNull(contextHints.get("tool"));
+        if ("composeDashboard".equalsIgnoreCase(tool)
+                || "composePage".equalsIgnoreCase(tool)
+                || "applyTemplate".equalsIgnoreCase(tool)) {
+            return true;
+        }
+        return !isBlank(extractTemplateResourcePath(contextHints));
     }
 
     private boolean isEmptyTemplateTarget(JsonNode currentState) {
@@ -6005,6 +6019,13 @@ public class AiOrchestratorService {
     private String extractTemplateResourcePath(JsonNode contextHints) {
         if (contextHints == null || !contextHints.isObject()) {
             return null;
+        }
+        String direct = firstNonBlank(
+                textOrNull(contextHints.get("resourcePath")),
+                textOrNull(contextHints.get("apiResourcePath")),
+                textOrNull(contextHints.get("selectedResourcePath")));
+        if (!isBlank(direct)) {
+            return direct;
         }
         JsonNode templateInputs = contextHints.get("templateInputs");
         if (templateInputs != null && templateInputs.isObject()) {
