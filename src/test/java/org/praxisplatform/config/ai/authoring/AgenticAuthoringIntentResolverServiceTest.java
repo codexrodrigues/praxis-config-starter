@@ -1268,6 +1268,70 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void resolvesNaturalPayrollDashboardConversationWithImperfectLanguageToExecutableCreate() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "pode fazer agora",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                "session-1",
+                "turn-5",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "m1",
+                                "user",
+                                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Posso ajudar a escolher antes de criar. Para folha de pagamento, faz sentido um dashboard com grafico e detalhamento.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m3",
+                                "user",
+                                "nao sei se e dashbord ou relatorio, mas queria ver por setor",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m4",
+                                "assistant",
+                                "Entendi. Um dashboard por setor funciona melhor para esse caso.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m5",
+                                "user",
+                                "coloca grafico e uma lista embaixo pra conferir",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m6",
+                                "assistant",
+                                "Consigo montar essa combinacao. Se precisar, confirmamos a fonte de dados no proximo passo.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m7",
+                                "user",
+                                "se precisar usa os dados de folha de pagamento",
+                                null)),
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.pendingClarification()).isNull();
+        assertThat(result.quickReplies()).isEmpty();
+    }
+
+    @Test
     void asksForConcreteCustomBreakdownWhenPayrollDashboardAnswerIsOther() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "outro",

@@ -238,6 +238,13 @@ public class AgenticAuthoringIntentResolverService {
             }
         }
         candidates = withEmployeeFormPriorityCandidate(prompt, candidates);
+        candidates = withDeterministicPayrollDashboardCandidates(
+                prompt,
+                effectivePrompt,
+                request.conversationMessages(),
+                artifactKind,
+                target,
+                candidates);
         boolean deterministicEmployeeFormCreate = target == null && isEmployeeFormCreatePrompt(prompt);
         if (deterministicEmployeeFormCreate) {
             operationKind = "create";
@@ -249,9 +256,16 @@ public class AgenticAuthoringIntentResolverService {
         selectedCandidate = selectLlmCandidate(llmIntent, candidates, selectedCandidate);
         selectedCandidate = selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
         selectedCandidate = selectDeterministicFormCandidate(prompt, candidates, selectedCandidate);
+        selectedCandidate = selectDeterministicPayrollDashboardCandidate(
+                prompt,
+                effectivePrompt,
+                request.conversationMessages(),
+                candidates,
+                selectedCandidate);
         boolean deterministicPayrollDashboardConfirmation = isConfirmedPayrollDashboardCreate(
                 prompt,
                 effectivePrompt,
+                request.conversationMessages(),
                 selectedCandidate);
         if (deterministicPayrollDashboardConfirmation) {
             operationKind = "create";
@@ -601,6 +615,58 @@ public class AgenticAuthoringIntentResolverService {
                         || candidate.schemaUrl().contains("operation=post"))
                 .findFirst()
                 .orElse(fallback);
+    }
+
+    private AgenticAuthoringCandidate selectDeterministicPayrollDashboardCandidate(
+            String prompt,
+            String effectivePrompt,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringCandidate fallback) {
+        if (fallback != null && isPayrollDashboardCandidate(fallback)) {
+            return fallback;
+        }
+        if (candidates == null || candidates.isEmpty()) {
+            return fallback;
+        }
+        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
+        if (!isPayrollAnalyticsPrompt(combinedPrompt)
+                || !isExplicitDashboardPrompt(combinedPrompt)
+                || !hasPayrollDashboardBreakdown(combinedPrompt)) {
+            return fallback;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(this::isPayrollDashboardCandidate)
+                .sorted(Comparator.comparingInt(candidate ->
+                        PAYROLL_ANALYTICS.equals(normalizePath(candidate.resourcePath())) ? 0 : 1))
+                .findFirst()
+                .orElse(fallback);
+    }
+
+    private List<AgenticAuthoringCandidate> withDeterministicPayrollDashboardCandidates(
+            String prompt,
+            String effectivePrompt,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            String artifactKind,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringCandidate> candidates) {
+        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
+        if (!isPayrollAnalyticsPrompt(combinedPrompt)
+                || !isExplicitDashboardPrompt(combinedPrompt)
+                || !hasPayrollDashboardBreakdown(combinedPrompt)) {
+            return candidates;
+        }
+        boolean alreadyHasPayrollCandidate = candidates != null && candidates.stream()
+                .filter(Objects::nonNull)
+                .anyMatch(this::isPayrollDashboardCandidate);
+        if (alreadyHasPayrollCandidate) {
+            return candidates;
+        }
+        List<AgenticAuthoringCandidate> enriched = new ArrayList<>(
+                candidates == null ? List.of() : candidates);
+        enriched.addAll(discoverCandidates(combinedPrompt, artifactKind, target));
+        return deduplicateCandidates(enriched);
     }
 
     private List<String> warnings(AgenticAuthoringLlmIntentResolution llmIntent) {
@@ -1055,16 +1121,35 @@ public class AgenticAuthoringIntentResolverService {
     private boolean isConfirmedPayrollDashboardCreate(
             String prompt,
             String effectivePrompt,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
             AgenticAuthoringCandidate selectedCandidate) {
         if (selectedCandidate == null || !isPayrollDashboardCandidate(selectedCandidate)) {
             return false;
         }
-        String combinedPrompt = normalize(valueOrDefault(effectivePrompt, "") + "\n" + valueOrDefault(prompt, ""));
+        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
         if (!isExplicitDashboardPrompt(combinedPrompt) || !hasPayrollDashboardBreakdown(combinedPrompt)) {
             return false;
         }
         return isExplicitCreateConfirmation(combinedPrompt)
                 || isConfirmedDataSourceSelection(combinedPrompt);
+    }
+
+    private String payrollDashboardConversationContext(
+            String prompt,
+            String effectivePrompt,
+            List<AgenticAuthoringConversationMessage> conversationMessages) {
+        String history = conversationMessages == null ? "" : conversationMessages.stream()
+                .filter(Objects::nonNull)
+                .filter(message -> "user".equals(message.role()))
+                .map(AgenticAuthoringConversationMessage::text)
+                .map(text -> valueOrDefault(text, "").trim())
+                .filter(text -> !text.isBlank())
+                .skip(Math.max(0, (conversationMessages.stream()
+                        .filter(Objects::nonNull)
+                        .filter(message -> "user".equals(message.role()))
+                        .count()) - 4))
+                .collect(Collectors.joining("\n"));
+        return normalize(history + "\n" + valueOrDefault(effectivePrompt, "") + "\n" + valueOrDefault(prompt, ""));
     }
 
     private boolean isPayrollDashboardCandidate(AgenticAuthoringCandidate selectedCandidate) {
