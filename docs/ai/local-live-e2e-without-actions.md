@@ -7,9 +7,10 @@ Use this runbook when GitHub Actions quota is constrained. These checks call rea
 Validated locally on 2026-04-23 with:
 
 - `praxis-config-starter` local commit containing this runbook (`git rev-parse --short HEAD`);
-- `praxis-ui-angular` commit `03e5b9ce`;
-- `praxis-api-quickstart` commit `85a2d5c`;
-- `praxis-api-quickstart` jar `target/praxis-api-quickstart-2.0.0-rc.9.jar`, rebuilt locally with `-Dpraxis.config.version=0.1.0-rc.5` after installing the current local starter;
+- `praxis-config-starter` published dependency `0.1.0-rc.24`;
+- `praxis-ui-angular` commit `b17b74a8`;
+- `praxis-api-quickstart` commit `57bfc85`;
+- `praxis-api-quickstart` jar `target/praxis-api-quickstart-2.0.0-rc.9.jar`, rebuilt locally against the published `praxis-config-starter:0.1.0-rc.24` dependency with no local starter override;
 - Java `21.0.10`;
 - remote PostgreSQL via quickstart configuration;
 - real OpenAI provider `gpt-5.4-mini`;
@@ -31,7 +32,8 @@ Validated results:
 - Browser Playwright passed `3/3` against Angular, backend, remote DB and real LLM.
 - Domain Federation v0.1 starter tests passed locally: `18` tests, `0` failures across controller, validator, dry-run ingest, query and retrieval policy.
 - Domain Federation v0.1 live smoke passed against the locally rebuilt quickstart jar with `schemaVersion=praxis.domain-federation/v0.1`, `dryRunValid=true`, `ingestDryRunValid=true`, `contextFederated=true`, `contextItemCount=2`, `relationshipCount=2`.
-- The original quickstart jar built before this starter change returned `404`; package quickstart with a starter build containing `DomainFederationController` before running the live federation smoke.
+- Domain Federation v0.1 live smoke passed again against the quickstart jar built with the published `praxis-config-starter:0.1.0-rc.24` dependency. The nested starter jar contains `DomainFederationController`, `DomainFederationContractValidator`, `DomainFederationQueryService` and `DomainFederationIngestDryRunService`.
+- The original quickstart jar built before the starter federation controller returned `404`.
 
 ## Prerequisites
 
@@ -112,9 +114,9 @@ This validates the read-only federation contract with:
 The runner does not persist federation records and does not execute rules.
 
 It requires the running quickstart jar to include `DomainFederationController`.
-If the endpoint probe returns `404`, package `praxis-api-quickstart` with a
-`praxis-config-starter` build that contains the federation controller before
-rerunning this smoke.
+The published `praxis-config-starter:0.1.0-rc.24` dependency includes this
+surface. If the endpoint probe returns `404`, confirm the quickstart jar was
+packaged against `0.1.0-rc.24` or newer before rerunning this smoke.
 
 ## Compliance Shadow
 
