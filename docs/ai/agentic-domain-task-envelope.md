@@ -8,8 +8,8 @@ the backend which business resource the user is talking about, which semantic
 context may be retrieved, and which governed output shape is expected.
 
 This envelope is not a rules engine. It is the bridge between user intent,
-Domain Catalog context, AI visibility constraints and the existing authoring
-manifest flow.
+Domain Catalog context, AI visibility constraints and the governed authoring
+surfaces exposed by Praxis.
 
 ## Canonical Request Shape
 
@@ -58,6 +58,10 @@ The same shape is valid for:
 - `query` narrows semantic retrieval to the user's business wording.
 - `relationships.federated=true` allows cross-service semantic links when the
   domain spans multiple services.
+- `recommendedAuthoringFlow=shared_rule_authoring` means the request should be
+  routed to the shared rule/decision flow under
+  `/api/praxis/config/domain-rules/**`, instead of being materialized first as
+  a page/component preview.
 
 When a resource candidate is selected from authoring discovery, Praxis derives:
 
@@ -73,14 +77,18 @@ An LLM or agent using this envelope must:
   fields, compliance, privacy, validation or business terminology;
 - respect `aiUsage.visibility`, `trainingUse`, `reasoningUse` and
   `ruleAuthoring`;
-- prefer `componentEditPlan` or manifest-backed edit operations over free-form
-  patches;
+- route business-rule or shared-decision requests to
+  `/api/praxis/config/domain-rules/**` when `recommendedAuthoringFlow` asks for
+  `shared_rule_authoring`;
+- only prefer `componentEditPlan` or manifest-backed edit operations when the
+  request remains in component/page authoring;
 - include an explanation that references the domain concepts used;
 - leave review-required items as proposals, not direct approvals.
 
 ## Safe Output Shape
 
-For authoring, the terminal result should preserve the existing contract:
+For component/page authoring, the terminal result should preserve the existing
+contract:
 
 ```json
 {
@@ -104,6 +112,26 @@ For authoring, the terminal result should preserve the existing contract:
 
 The output may explain governed summaries, but it must not reconstruct hidden
 payload fields or expose values marked as `deny`, `mask` or `summarize_only`.
+
+For shared rule/decision authoring, the safe output shape is a governed route,
+not a page preview:
+
+```json
+{
+  "intentResolution": {
+    "valid": false,
+    "selectedCandidate": {
+      "resourcePath": "/api/human-resources/funcionarios"
+    },
+    "gate": {
+      "status": "route_required",
+      "messages": ["shared-rule-authoring-required"]
+    }
+  },
+  "assistantMessage": "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, e nao pelo preview de formulario/pagina.",
+  "canApply": false
+}
+```
 
 ## Why This Matters
 

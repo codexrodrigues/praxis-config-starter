@@ -284,6 +284,24 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.assistantMessage()).contains("Usei a fonte Ranking reputacao");
     }
 
+    @Test
+    void previewRejectsIntentThatMustRouteToSharedRuleAuthoring() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma regra LGPD para CPF",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                sharedRuleRouteIntent());
+
+        AgenticAuthoringPreviewResult result = service().preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("intent-resolution-shared-rule-route-required");
+        assertThat(result.warnings()).contains("preview-skipped-invalid-intent-resolution");
+        assertThat(result.compiledFormPatch().isMissingNode()).isTrue();
+    }
+
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
     }
@@ -408,6 +426,39 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of(),
                 List.of(),
                 List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult sharedRuleRouteIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                "create",
+                "form",
+                "create_artifact",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.99,
+                        "selected resource for shared rule grounding",
+                        List.of("quick-reply-context")),
+                List.of(),
+                new AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "route_required",
+                        List.of("shared-rule-authoring-required")),
+                "Crie uma regra LGPD para CPF",
+                "Esse pedido deve seguir pela trilha governada de regra compartilhada.",
+                List.of(),
+                List.of(),
+                List.of("keyword-fallback-applied"),
+                List.of("shared-rule-authoring-required"),
                 objectMapper.createObjectNode());
     }
 }
