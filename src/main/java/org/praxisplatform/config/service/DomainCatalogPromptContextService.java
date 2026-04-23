@@ -2,16 +2,18 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyReport;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 @ConditionalOnBean(DomainCatalogIngestionService.class)
 public class DomainCatalogPromptContextService {
@@ -20,6 +22,19 @@ public class DomainCatalogPromptContextService {
     private static final int MAX_LIMIT = 30;
 
     private final DomainCatalogIngestionService domainCatalogIngestionService;
+    private final DomainFederationQueryService domainFederationQueryService;
+
+    public DomainCatalogPromptContextService(DomainCatalogIngestionService domainCatalogIngestionService) {
+        this(domainCatalogIngestionService, null);
+    }
+
+    @Autowired
+    public DomainCatalogPromptContextService(
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            DomainFederationQueryService domainFederationQueryService) {
+        this.domainCatalogIngestionService = domainCatalogIngestionService;
+        this.domainFederationQueryService = domainFederationQueryService;
+    }
 
     public String buildPromptContext(
             String userPrompt,
@@ -29,6 +44,9 @@ public class DomainCatalogPromptContextService {
         DomainCatalogRequest request = resolveRequest(userPrompt, contextHints);
         if (request == null) {
             return "";
+        }
+        if (request.relationships() != null && request.relationships().federated() && domainFederationQueryService != null) {
+            return formatFederatedContext(request, tenantId, environment);
         }
         String contextBlock = formatContext(request, tenantId, environment);
         String relationshipBlock = formatRelationships(request.relationships(), tenantId, environment);
@@ -63,6 +81,7 @@ public class DomainCatalogPromptContextService {
         String resourceKey = firstText(text(domainCatalog, "resourceKey"), text(contextHints, "domainResourceKey"));
         String contextKey = firstText(text(domainCatalog, "contextKey"), text(contextHints, "domainContextKey"));
         String nodeType = firstText(text(domainCatalog, "nodeType"), text(contextHints, "domainNodeType"));
+        String policyProfile = firstText(text(domainCatalog, "policyProfile"), text(contextHints, "domainPolicyProfile"));
         int limit = clampLimit(domainCatalog != null && domainCatalog.has("limit")
                 ? domainCatalog.path("limit").asInt(DEFAULT_LIMIT)
                 : DEFAULT_LIMIT);
@@ -76,6 +95,7 @@ public class DomainCatalogPromptContextService {
                 nodeType,
                 query,
                 limit,
+                policyProfile,
                 relationships);
     }
 
@@ -97,7 +117,33 @@ public class DomainCatalogPromptContextService {
                 text(relationships, "edgeType"),
                 relationshipQuery,
                 relationshipLimit,
+                text(relationships, "policyProfile"),
                 federated);
+    }
+
+    private String formatFederatedContext(DomainCatalogRequest request, String tenantId, String environment) {
+        try {
+            RelationshipRequest relationships = request.relationships();
+            DomainFederationContextQueryResponse response = domainFederationQueryService.context(
+                    null,
+                    request.resourceKey(),
+                    tenantId,
+                    environment,
+                    request.itemType(),
+                    request.contextKey(),
+                    request.nodeType(),
+                    relationships == null ? null : relationships.edgeType(),
+                    request.query(),
+                    Math.max(request.limit(), relationships == null ? 0 : relationships.limit()),
+                    new DomainFederationRetrievalPolicyOptions(policyProfile(request), null, null, null));
+            String contextBlock = formatContext(response.context());
+            String relationshipBlock = formatFederatedRelationships(response);
+            String policyBlock = formatPolicyReport(response.policyReport());
+            return appendOptionalPromptBlock(appendOptionalPromptBlock(contextBlock, relationshipBlock), policyBlock);
+        } catch (RuntimeException ex) {
+            log.warn("Could not build federated domain catalog prompt context: {}", ex.getMessage());
+            return "";
+        }
     }
 
     private String formatContext(DomainCatalogContextResponse context) {
@@ -211,6 +257,47 @@ public class DomainCatalogPromptContextService {
             log.warn("Could not build domain catalog relationship prompt context: {}", ex.getMessage());
             return "";
         }
+    }
+
+    private String formatFederatedRelationships(DomainFederationContextQueryResponse response) {
+        if (response == null || response.relationships() == null || response.relationships().isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append("DOMAIN_CATALOG_RELATIONSHIPS\n");
+        builder.append("federated: true\n");
+        appendLine(builder, "query", response.query());
+        appendLine(builder, "relationshipType", response.relationshipType());
+        builder.append("items:\n");
+        for (DomainCatalogItemResponse item : response.relationships()) {
+            builder.append("- [edge/")
+                    .append(nullToDash(item.edgeType()))
+                    .append("] ")
+                    .append(label(item))
+                    .append(" (")
+                    .append(item.itemKey())
+                    .append(")");
+            appendPayloadSummary(builder, item.payload());
+            builder.append('\n');
+        }
+        return builder.toString().trim();
+    }
+
+    private String formatPolicyReport(DomainFederationRetrievalPolicyReport report) {
+        if (report == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append("DOMAIN_FEDERATION_POLICY\n");
+        appendLine(builder, "policyProfile", report.policyProfile());
+        builder.append("minConfidence: ").append(report.minConfidence()).append('\n');
+        builder.append("includeDenied: ").append(report.includeDenied()).append('\n');
+        builder.append("includeLowConfidence: ").append(report.includeLowConfidence()).append('\n');
+        if (report.decisions() != null && !report.decisions().isEmpty()) {
+            builder.append("decisions:\n");
+            report.decisions().forEach(decision -> builder.append("- ").append(decision).append('\n'));
+        }
+        return builder.toString().trim();
     }
 
     private void appendGuidance(StringBuilder builder, List<String> guidance) {
@@ -376,6 +463,11 @@ public class DomainCatalogPromptContextService {
         return StringUtils.hasText(value) ? value : "-";
     }
 
+    private String policyProfile(DomainCatalogRequest request) {
+        String relationshipProfile = request.relationships() == null ? null : request.relationships().policyProfile();
+        return firstText(relationshipProfile, request.policyProfile(), "authoring");
+    }
+
     private record DomainCatalogRequest(
             String serviceKey,
             String resourceKey,
@@ -384,6 +476,7 @@ public class DomainCatalogPromptContextService {
             String nodeType,
             String query,
             int limit,
+            String policyProfile,
             RelationshipRequest relationships) {
     }
 
@@ -394,6 +487,7 @@ public class DomainCatalogPromptContextService {
             String edgeType,
             String query,
             int limit,
+            String policyProfile,
             boolean federated) {
     }
 }

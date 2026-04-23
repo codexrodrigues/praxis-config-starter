@@ -92,6 +92,8 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .isTrue();
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("federated").asBoolean())
                 .isTrue();
+        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("policyProfile").asText())
+                .isEqualTo("authoring");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("query").asText())
                 .contains("folha de pagamento")
                 .contains("analytics folha pagamento");

@@ -30,6 +30,7 @@ final class AgenticAuthoringDomainCatalogHints {
         domainCatalog.put("serviceKey", resolvedServiceKey);
         domainCatalog.put("type", "node");
         domainCatalog.put("intent", "authoring");
+        domainCatalog.put("policyProfile", policyProfile(userPrompt));
         domainCatalog.put("limit", 12);
         String contextKey = contextKey(candidate.resourcePath());
         if (!contextKey.isBlank()) {
@@ -51,6 +52,7 @@ final class AgenticAuthoringDomainCatalogHints {
         ObjectNode relationships = domainCatalog.putObject("relationships");
         relationships.put("enabled", true);
         relationships.put("federated", true);
+        relationships.put("policyProfile", domainCatalog.path("policyProfile").asText());
         relationships.put("limit", 8);
         if (!query.isBlank()) {
             relationships.put("query", query);
@@ -127,6 +129,10 @@ final class AgenticAuthoringDomainCatalogHints {
                 || prompt.contains("compliance")
                 || prompt.contains("governanca")
                 || prompt.contains("privacidade");
+    }
+
+    private static String policyProfile(String userPrompt) {
+        return requiresGovernanceContext(userPrompt) ? "compliance_review" : "authoring";
     }
 
     private static String lastSegment(String resourcePath) {

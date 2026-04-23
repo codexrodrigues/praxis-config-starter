@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.dto.DomainCatalogReleaseResponse;
+import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
+import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyReport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -364,6 +367,133 @@ class DomainCatalogPromptContextServiceTest {
                 .contains("sourceNodeKey=human-resources.employee.field.costCenterId")
                 .contains("targetNodeKey=finance.cost-center")
                 .contains("sourceEvidenceKeys=evidence:domain-catalog:hr");
+    }
+
+    @Test
+    void usesFederatedQueryServiceWhenFederatedRelationshipHintIsPresent() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainFederationQueryService federationQueryService = mock(DomainFederationQueryService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(
+                ingestionService,
+                federationQueryService);
+
+        when(federationQueryService.context(
+                eq(null),
+                eq("human-resources.funcionarios"),
+                eq("tenant-a"),
+                eq("dev"),
+                eq("node"),
+                eq("human-resources"),
+                eq("field"),
+                eq("references"),
+                eq("cpf lgpd"),
+                eq(12),
+                eq(new DomainFederationRetrievalPolicyOptions("compliance_review", null, null, null))))
+                .thenReturn(new DomainFederationContextQueryResponse(
+                        "praxis.domain-federation-context/v0.1",
+                        "tenant-a",
+                        "dev",
+                        null,
+                        "human-resources.funcionarios",
+                        "cpf lgpd",
+                        "human-resources",
+                        "node",
+                        "field",
+                        "references",
+                        12,
+                        true,
+                        List.of("Use federated context with retrieval policy."),
+                        new DomainFederationRetrievalPolicyReport(
+                                "compliance_review",
+                                0.9d,
+                                false,
+                                false,
+                                2,
+                                1,
+                                1,
+                                0,
+                                1,
+                                List.of("Excluded denied because aiUsage.visibility=deny.")),
+                        new DomainCatalogContextResponse(
+                                "praxis.domain-catalog-context/v0.1",
+                                null,
+                                "cpf lgpd",
+                                "node",
+                                "human-resources",
+                                "field",
+                                List.of("Use this context as governed vocabulary."),
+                                List.of(new DomainCatalogItemResponse(
+                                        UUID.randomUUID(),
+                                        "hr:latest",
+                                        "node",
+                                        "human-resources.funcionarios.field.cpf",
+                                        "human-resources",
+                                        "field",
+                                        null,
+                                        null,
+                                        objectMapper.readTree("""
+                                            {
+                                              "label": "CPF",
+                                              "metadata": {
+                                                "fieldName": "cpf",
+                                                "type": "string"
+                                              },
+                                              "complianceTags": ["LGPD"]
+                                            }
+                                            """)))),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "hr:latest",
+                                "edge",
+                                "edge:hr.funcionario.references.security.usuario",
+                                "human-resources",
+                                null,
+                                null,
+                                "references",
+                                objectMapper.readTree("""
+                                    {
+                                      "sourceNodeKey": "human-resources.funcionarios.field.usuarioId",
+                                      "targetNodeKey": "security.usuarios.id",
+                                      "edgeType": "references"
+                                    }
+                                    """)))));
+
+        String promptContext = service.buildPromptContext(
+                "cpf lgpd",
+                objectMapper.readTree("""
+                    {
+                      "domainCatalog": {
+                        "serviceKey": "praxis-service",
+                        "resourceKey": "human-resources.funcionarios",
+                        "contextKey": "human-resources",
+                        "nodeType": "field",
+                        "query": "cpf lgpd",
+                        "policyProfile": "compliance_review",
+                        "limit": 12,
+                        "relationships": {
+                          "enabled": true,
+                          "federated": true,
+                          "edgeType": "references",
+                          "policyProfile": "compliance_review",
+                          "limit": 8
+                        }
+                      }
+                    }
+                    """),
+                "tenant-a",
+                "dev");
+
+        assertThat(promptContext)
+                .contains("DOMAIN_CATALOG_CONTEXT")
+                .contains("[node/field] CPF")
+                .contains("DOMAIN_CATALOG_RELATIONSHIPS")
+                .contains("federated: true")
+                .contains("[edge/references] edge:hr.funcionario.references.security.usuario")
+                .contains("DOMAIN_FEDERATION_POLICY")
+                .contains("policyProfile: compliance_review")
+                .contains("minConfidence: 0.9")
+                .contains("Excluded denied because aiUsage.visibility=deny.");
+        verifyNoInteractions(ingestionService);
     }
 
     @Test
