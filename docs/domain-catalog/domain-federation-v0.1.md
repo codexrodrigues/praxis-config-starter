@@ -360,14 +360,54 @@ Current filters:
 | `relationshipType` | Restrict relationship rows by edge type. |
 | `q` | Semantic or lexical query. |
 | `limit` | Maximum context and relationship items returned. |
+| `policyProfile` | Named runtime policy profile: `explanation`, `authoring`, `compliance_review` or `diagnostics`. Defaults to `explanation`. |
+| `minConfidence` | Optional runtime retrieval threshold override. |
+| `includeDenied` | Optional override to include `aiUsage.visibility=deny` items for privileged diagnostics. |
+| `includeLowConfidence` | Optional override to include items below `minConfidence`. |
 
 Current behavior:
 
-- projects context from `domain_catalog_release` and `domain_catalog_item`;
+- prefers an active persisted `domain_federation_release` for the tenant and
+  environment when one exists;
+- falls back to projection from `domain_catalog_release` and
+  `domain_catalog_item` when no active persisted release exists;
 - returns context items plus relationship rows in one envelope;
 - marks whether the result is federated or service-scoped;
+- declares the response source mode as `persisted_federation` or
+  `catalog_projection_fallback`;
 - reuses catalog retrieval guidance and adds federation-specific caveats;
-- does not yet materialize `domain_contract`, `domain_resolution` or final redaction decisions.
+- applies the federation retrieval policy before returning relationships and context;
+- materializes persisted context relationships and their linked contracts when
+  using an active persisted release;
+- does not yet materialize `domain_resolution` or final redaction decisions in
+  query results.
+
+## Retrieval Policy v0.1
+
+Current policy behavior:
+
+- excludes any returned item with `aiUsage.visibility=deny`;
+- excludes persisted items whose linked `contract.visibility` or `resolution.visibility`
+  is `restricted` or `deny_for_llm` outside diagnostics;
+- preserves catalog-level masking and `summarize_only` summaries;
+- reports governed-summary counts;
+- reports low-confidence items using `payload.confidence`,
+  `payload.evidence.confidence` or `payload.resolution.confidence` when present;
+- includes policy decisions in the federated context response.
+
+Runtime options:
+
+- `policyProfile=explanation`: `minConfidence=0.7`, `includeDenied=false`, `includeLowConfidence=true`;
+- `policyProfile=authoring`: `minConfidence=0.8`, `includeDenied=false`, `includeLowConfidence=false`;
+- `policyProfile=compliance_review`: `minConfidence=0.9`, `includeDenied=false`, `includeLowConfidence=false`;
+- `policyProfile=diagnostics`: `minConfidence=0.0`, `includeDenied=true`, `includeLowConfidence=true`;
+- `minConfidence`: optional override, clamped to `0.0..1.0`;
+- `includeDenied`: optional override;
+- `includeLowConfidence`: optional override.
+
+This is intentionally conservative. It is not yet a full authorization engine.
+It is the first LLM-facing retrieval guard that prevents obviously denied
+semantic content from leaking through federated projections.
 
 ## Validation Rules
 
@@ -407,6 +447,224 @@ v0.1 can be implemented without immediately replacing the current schema:
 The first implementation may project these artifacts from existing
 `domain_catalog_item` and `domain_knowledge_*` rows, then persist first-class
 tables in a later migration once the contract stabilizes.
+
+## Persistent Read Model Plan
+
+The next architectural increment is to persist federation records as governed
+read-only data. This should not introduce rule execution or LLM write access.
+It should make the validated federation map durable, queryable and auditable.
+
+### Migration Boundary
+
+Use a new Flyway migration after the current domain catalog/shared-rule layer.
+The migration should be additive only:
+
+- do not alter `domain_catalog_release`;
+- do not alter `domain_catalog_item`;
+- do not alter `domain_knowledge_*`;
+- do not materialize rules into `FormConfig`;
+- do not execute remote contracts.
+
+Recommended table set:
+
+1. `domain_federation_release`;
+2. `domain_source`;
+3. `domain_context`;
+4. `domain_context_relationship`;
+5. `domain_contract`;
+6. `domain_resolution`.
+
+### `domain_federation_release`
+
+Purpose: immutable publication envelope for one accepted federation snapshot.
+
+Recommended columns:
+
+| Column | Notes |
+| --- | --- |
+| `id` | UUID primary key. |
+| `release_key` | Unique stable key, for example `domain-federation:tenant:env:v2026-04-23T16:00Z`. |
+| `tenant_id` | Tenant scope. |
+| `environment` | Runtime environment. |
+| `status` | `candidate`, `active`, `superseded`, `blocked`, `retired`. |
+| `source_release_ids` | JSONB array of accepted source `domain_catalog_release.id` values. |
+| `validation_report` | JSONB validation report used to approve the release. |
+| `payload_hash` | Hash of the normalized federation payload. |
+| `created_by` | Human, system or automation actor. |
+| `created_at` | Creation timestamp. |
+| `activated_at` | Nullable activation timestamp. |
+
+Indexes:
+
+- unique `(tenant_id, environment, release_key)`;
+- `(tenant_id, environment, status, created_at desc)`;
+- unique active release per `(tenant_id, environment)` where `status='active'`.
+
+### Shared Persistence Columns
+
+Each first-class federation artifact should include these common fields:
+
+| Column | Notes |
+| --- | --- |
+| `id` | UUID primary key. |
+| `federation_release_id` | FK to `domain_federation_release(id)` with cascade delete for candidate cleanup. |
+| `tenant_id` | Denormalized for filters and safety checks. |
+| `environment` | Denormalized for filters and safety checks. |
+| `status` | Lifecycle state for the record. |
+| `confidence` | Nullable where confidence is not meaningful. |
+| `evidence` | JSONB proof, source refs and review notes. |
+| `created_at` | Creation timestamp. |
+
+All lookup keys should be unique within one federation release, tenant and
+environment. Do not make business labels unique.
+
+### Table-Specific Identity
+
+Recommended natural keys:
+
+| Table | Natural key |
+| --- | --- |
+| `domain_source` | `(federation_release_id, source_key)` |
+| `domain_context` | `(federation_release_id, context_key)` |
+| `domain_context_relationship` | `(federation_release_id, relationship_key)` |
+| `domain_contract` | `(federation_release_id, contract_key)` |
+| `domain_resolution` | `(federation_release_id, resolution_key)` |
+
+Recommended FK-like constraints:
+
+- `domain_context.source_key` must reference a `domain_source.source_key` in the same release.
+- `domain_context_relationship.source_context_key` and `target_context_key` must reference contexts in the same release.
+- `domain_context_relationship.contract_key`, when present, must reference a contract in the same release.
+- `domain_contract.provider_source_key` must reference a source in the same release.
+- `domain_contract.provider_context_key` and `consumer_context_key`, when present, must reference contexts in the same release.
+- `domain_resolution.source_context_key` and `target_context_key` must reference contexts in the same release.
+
+PostgreSQL cannot enforce these composite key references cleanly if the source
+columns are not physically unique, so the migration should either define
+composite unique constraints for those keys or keep database FKs minimal and
+enforce release-local referential integrity in the validator. The conservative
+starting point is validator-enforced integrity plus unique indexes.
+
+### Persistence Flow
+
+The first persisted flow should remain validation-first:
+
+1. Receive `DomainFederationValidationRequest`.
+2. Normalize tenant/environment from headers and payload.
+3. Validate all references, owners, trust, visibility and confidence rules.
+4. Compute a deterministic `payload_hash`.
+5. If `dryRun=true`, return report and previews without writes.
+6. If persistence is enabled and validation has no blocking errors, create a `candidate` `domain_federation_release`.
+7. Insert source, context, relationship, contract and resolution rows for that release.
+8. Activate the release only through an explicit activation operation.
+9. Supersede the previous active release for the same tenant/environment.
+
+The first implementation should keep activation explicit. That prevents an LLM
+or automation from accidentally making a candidate federation map authoritative.
+
+### Query Flow
+
+The query endpoint should prefer active persisted federation releases when they
+exist, then fall back to the current projected behavior from
+`domain_catalog_release` and `domain_catalog_item`.
+
+Recommended read order:
+
+1. Locate active `domain_federation_release` for tenant/environment.
+2. Apply service/context/resource filters.
+3. Join federation relationships/contracts/resolutions by release-local keys.
+4. Apply retrieval policy before serializing any LLM-facing response.
+5. Include release metadata and policy report in the response.
+
+Fallback behavior should be explicit in the response:
+
+```json
+{
+  "sourceMode": "persisted_federation"
+}
+```
+
+or:
+
+```json
+{
+  "sourceMode": "catalog_projection_fallback"
+}
+```
+
+### Minimal Endpoint Additions
+
+Do not add authoring yet. Add only operational read/validation endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/praxis/config/domain-federation/ingest?dryRun=false` | Persist a candidate release after validation. |
+| `POST /api/praxis/config/domain-federation/releases/{releaseKey}/activate` | Explicitly activate a candidate release. |
+| `GET /api/praxis/config/domain-federation/releases` | List releases by tenant/environment/status. |
+| `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation` | Return validation report and evidence. |
+
+`dryRun=false` must be guarded by configuration at first, for example:
+
+```properties
+praxis.domain-federation.persistence.enabled=false
+```
+
+### LLM Safety Rules
+
+Persisted federation data must remain LLM-safe by construction:
+
+- Never persist or return raw secrets in `evidence`.
+- Treat `visibility=deny_for_llm` contracts as non-returnable outside diagnostics.
+- Do not return low-confidence resolutions in `authoring` or `compliance_review`.
+- Do not cross tenant/environment boundaries unless an explicit federation release includes both scopes.
+- Include source mode, release key and policy report in every LLM-facing context response.
+
+### Implementation Slice
+
+Recommended first implementation slice:
+
+1. Add the Flyway migration and JPA entities/repositories.
+2. Add persistence service behind `praxis.domain-federation.persistence.enabled`.
+3. Extend `/ingest` so `dryRun=false` persists only candidate releases.
+4. Add release list and validation read endpoints.
+5. Keep `/context` behavior unchanged until candidate persistence is proven.
+
+The second slice can switch `/context` to prefer active persisted releases.
+
+Current implementation status:
+
+- Flyway migration added in `V21__create_domain_federation_read_model.sql`.
+- The migration creates `domain_federation_release`, `domain_source`,
+  `domain_context`, `domain_context_relationship`, `domain_contract` and
+  `domain_resolution`.
+- JPA entities and repositories have been added for the same six persistence
+  surfaces.
+- `POST /api/praxis/config/domain-federation/ingest?dryRun=false` can now
+  persist a validated candidate release when
+  `praxis.domain-federation.persistence.enabled=true`.
+- `GET /api/praxis/config/domain-federation/releases` and
+  `GET /api/praxis/config/domain-federation/releases/{releaseKey}/validation`
+  expose read-only release audit data.
+- `POST /api/praxis/config/domain-federation/releases/{releaseKey}/activate`
+  explicitly activates a candidate release and supersedes the previous active
+  release for the same tenant/environment.
+- `GET /api/praxis/config/domain-federation/context` now prefers active
+  persisted federation releases and returns `sourceMode=persisted_federation`;
+  if no active persisted release exists, it keeps the catalog projection
+  fallback and returns `sourceMode=catalog_projection_fallback`.
+- Database foreign keys are intentionally minimal in this first slice:
+  release ownership is enforced by the database, while release-local semantic
+  references remain validator-enforced.
+- Remote database execution has been validated through the quickstart host with
+  `PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED=true`: a persistent smoke
+  created a candidate release, listed it through the release endpoint and read
+  its persisted validation report.
+- The same persistent smoke now also activates a `deny_for_llm` candidate
+  release and proves over real HTTP that persisted relationships linked to that
+  contract are redacted from `/domain-federation/context`.
+- The same persistent smoke also activates a low-confidence candidate release
+  and proves over real HTTP that low-confidence persisted relationships are
+  excluded from `/domain-federation/context` under `policyProfile=authoring`.
 
 ## Example Scenario
 

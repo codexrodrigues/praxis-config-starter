@@ -113,6 +113,8 @@ public class AiOrchestratorService {
             "\\b(remover|remove|remova|limpar|limpe|limpa|resetar|reset|desfazer|apagar|tirar|retirar|desativar|desligar|desabilitar|disable|unset|sem)\\b");
     private static final java.util.regex.Pattern HEX_COLOR_PATTERN = java.util.regex.Pattern.compile(
             "^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$");
+    private static final java.util.regex.Pattern API_RESOURCE_PATH_PATTERN = java.util.regex.Pattern.compile(
+            "/api/[A-Za-z0-9_./~-]+");
     private static final List<String> TABLE_DENSITY_ALLOWED_VALUES = List.of(
             "compact",
             "comfortable",
@@ -5730,9 +5732,8 @@ public class AiOrchestratorService {
             return null;
         }
         String resourcePath = firstNonBlank(
-                request.getResourcePath(),
                 context.getResourcePath(),
-                extractTemplateResourcePath(request.getContextHints()));
+                extractTemplateResourcePath(request));
         if (isBlank(resourcePath)) {
             return resolveTemplateResourceClarification(
                     request,
@@ -5779,7 +5780,9 @@ public class AiOrchestratorService {
         if (request == null || context == null) {
             return false;
         }
-        if (!isCreateTemplatePrompt(request.getUserPrompt())) {
+        if (!isCreateTemplatePrompt(request.getUserPrompt())
+                && !hasTemplateFlowContinuationHints(request.getContextHints())
+                && isBlank(extractTemplateResourcePath(request))) {
             return false;
         }
         if (!isEmptyTemplateTarget(context.getCurrentState())) {
@@ -5812,6 +5815,19 @@ public class AiOrchestratorService {
                 || normalized.contains("master detail")
                 || normalized.contains("master-detail")
                 || normalized.contains("detalhe");
+    }
+
+    private boolean hasTemplateFlowContinuationHints(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return false;
+        }
+        String tool = textOrNull(contextHints.get("tool"));
+        if ("composeDashboard".equalsIgnoreCase(tool)
+                || "composePage".equalsIgnoreCase(tool)
+                || "applyTemplate".equalsIgnoreCase(tool)) {
+            return true;
+        }
+        return !isBlank(extractTemplateResourcePath(contextHints));
     }
 
     private boolean isEmptyTemplateTarget(JsonNode currentState) {
@@ -6006,6 +6022,13 @@ public class AiOrchestratorService {
         if (contextHints == null || !contextHints.isObject()) {
             return null;
         }
+        String direct = firstNonBlank(
+                textOrNull(contextHints.get("resourcePath")),
+                textOrNull(contextHints.get("apiResourcePath")),
+                textOrNull(contextHints.get("selectedResourcePath")));
+        if (!isBlank(direct)) {
+            return direct;
+        }
         JsonNode templateInputs = contextHints.get("templateInputs");
         if (templateInputs != null && templateInputs.isObject()) {
             String resourcePath = textOrNull(templateInputs.get("resourcePath"));
@@ -6014,6 +6037,34 @@ public class AiOrchestratorService {
             }
         }
         return null;
+    }
+
+    private String extractTemplateResourcePath(AiOrchestratorRequest request) {
+        if (request == null) {
+            return null;
+        }
+        String explicit = firstNonBlank(
+                request.getResourcePath(),
+                extractTemplateResourcePath(request.getContextHints()));
+        if (!isBlank(explicit)) {
+            return explicit;
+        }
+        return extractTemplateResourcePathFromPrompt(request.getUserPrompt());
+    }
+
+    private String extractTemplateResourcePathFromPrompt(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = API_RESOURCE_PATH_PATTERN.matcher(prompt);
+        if (!matcher.find()) {
+            return null;
+        }
+        String candidate = matcher.group();
+        if (candidate == null) {
+            return null;
+        }
+        return candidate.replaceAll("[),.;:]+$", "");
     }
 
     private JsonNode resolveTemplateConfig(JsonNode templateConfig, String componentId) {

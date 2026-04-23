@@ -38,7 +38,9 @@ class DomainFederationIngestDryRunServiceTest {
                 null,
                 12,
                 false,
+                "catalog_projection_fallback",
                 List.of("Use explicit relationships."),
+                null,
                 null,
                 List.of());
         when(validator.validate(request)).thenReturn(validation);

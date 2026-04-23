@@ -117,4 +117,77 @@ class DomainKnowledgeEntityLifecycleTest {
         assertThat(materialization.getCreatedAt()).isNotNull();
         assertThat(materialization.getUpdatedAt()).isNotNull();
     }
+
+    @Test
+    void federationEntitiesDefaultLifecycleAndEvidencePayloads() {
+        DomainFederationRelease release = DomainFederationRelease.builder()
+                .releaseKey("domain-federation:default:dev:v2026-04-23T16:00Z")
+                .tenantId("default")
+                .environment("dev")
+                .build();
+
+        release.onInsert();
+
+        DomainSource source = DomainSource.builder()
+                .federationRelease(release)
+                .sourceKey("praxis-api-quickstart")
+                .sourceType("microservice")
+                .build();
+        DomainContext context = DomainContext.builder()
+                .federationRelease(release)
+                .contextKey("human-resources")
+                .sourceKey("praxis-api-quickstart")
+                .build();
+        DomainContextRelationship relationship = DomainContextRelationship.builder()
+                .federationRelease(release)
+                .relationshipKey("human-resources.references.security")
+                .sourceContextKey("human-resources")
+                .targetContextKey("security")
+                .relationshipType("references")
+                .build();
+        DomainContract contract = DomainContract.builder()
+                .federationRelease(release)
+                .contractKey("security.users.lookup.v1")
+                .contractType("rest_endpoint")
+                .providerSourceKey("security-service")
+                .providerContextKey("security")
+                .build();
+        DomainResolution resolution = DomainResolution.builder()
+                .federationRelease(release)
+                .resolutionKey("hr.funcionario.same_as.security.user.employee")
+                .sourceConceptKey("human-resources.funcionario")
+                .targetConceptKey("security.user.employee")
+                .sourceContextKey("human-resources")
+                .targetContextKey("security")
+                .resolutionType("same_as")
+                .build();
+
+        source.onInsert();
+        context.onInsert();
+        relationship.onInsert();
+        contract.onInsert();
+        resolution.onInsert();
+
+        assertThat(release.getId()).isNotNull();
+        assertThat(release.getStatus()).isEqualTo("candidate");
+        assertThat(release.getSourceReleaseIds()).isEqualTo("[]");
+        assertThat(release.getValidationReport()).isEqualTo("{}");
+        assertThat(release.getCreatedAt()).isNotNull();
+        assertThat(source.getTrustLevel()).isEqualTo("generated");
+        assertThat(source.getStatus()).isEqualTo("active");
+        assertThat(source.getEvidence()).isEqualTo("{}");
+        assertThat(context.getContextType()).isEqualTo("bounded_context");
+        assertThat(context.getStatus()).isEqualTo("candidate");
+        assertThat(context.getEvidence()).isEqualTo("{}");
+        assertThat(relationship.getDirection()).isEqualTo("source_to_target");
+        assertThat(relationship.getOwnership()).isEqualTo("unknown");
+        assertThat(relationship.getStatus()).isEqualTo("candidate");
+        assertThat(relationship.getEvidence()).isEqualTo("{}");
+        assertThat(contract.getCompatibility()).isEqualTo("experimental");
+        assertThat(contract.getVisibility()).isEqualTo("internal");
+        assertThat(contract.getStatus()).isEqualTo("candidate");
+        assertThat(contract.getEvidence()).isEqualTo("{}");
+        assertThat(resolution.getStatus()).isEqualTo("candidate");
+        assertThat(resolution.getEvidence()).isEqualTo("{}");
+    }
 }

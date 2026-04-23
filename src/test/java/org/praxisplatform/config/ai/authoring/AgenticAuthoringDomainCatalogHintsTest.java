@@ -44,6 +44,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("field");
         assertThat(contextHints.path("domainCatalog").path("intent").asText())
                 .isEqualTo("authoring");
+        assertThat(contextHints.path("domainCatalog").path("policyProfile").asText())
+                .isEqualTo("compliance_review");
         assertThat(contextHints.path("domainCatalog").path("itemTypes").path(0).asText())
                 .isEqualTo("node");
         assertThat(contextHints.path("domainCatalog").path("itemTypes").path(1).asText())
@@ -54,6 +56,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("federated").asBoolean())
                 .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("relationships").path("policyProfile").asText())
+                .isEqualTo("compliance_review");
     }
 
     @Test
@@ -85,6 +89,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
         assertThat(contextHints.path("domainCatalog").path("nodeType").isMissingNode())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("intent").asText())
+                .isEqualTo("authoring");
+        assertThat(contextHints.path("domainCatalog").path("policyProfile").asText())
                 .isEqualTo("authoring");
         assertThat(contextHints.path("domainCatalog").path("itemTypes").path(0).asText())
                 .isEqualTo("node");
