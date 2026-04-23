@@ -124,7 +124,9 @@ class AgenticAuthoringManifestControllerTest {
                 {
                   "componentId": "praxis-table",
                   "patchKind": "component-config-patch",
+                  "compiledOperations": [],
                   "operations": [],
+                  "patchOperations": [],
                   "proposedConfig": {}
                 }
                 """);
@@ -235,6 +237,9 @@ class AgenticAuthoringManifestControllerTest {
                 List.of(),
                 objectMapper.readTree("""
                         {
+                          "compiledOperations": [
+                            { "op": "set-value", "path": "/columns/0/header", "value": "Contato" }
+                          ],
                           "patchOperations": [
                             { "op": "replace", "path": "/columns/0/header", "value": "Contato" }
                           ],
@@ -285,6 +290,8 @@ class AgenticAuthoringManifestControllerTest {
                         .content(objectMapper.writeValueAsString(planRequest)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.compiled").value(true))
+                .andExpect(jsonPath("$.patch.compiledOperations[0].op").value("set-value"))
+                .andExpect(jsonPath("$.patch.compiledOperations[0].path").value("/columns/0/header"))
                 .andExpect(jsonPath("$.patch.patchOperations[0].path").value("/columns/0/header"));
     }
 
@@ -335,6 +342,10 @@ class AgenticAuthoringManifestControllerTest {
                 .andExpect(jsonPath("$.failures").isEmpty())
                 .andExpect(jsonPath("$.patch.componentId").value("praxis-table"))
                 .andExpect(jsonPath("$.patch.patchKind").value("component-config-patch"))
+                .andExpect(jsonPath("$.patch.compiledOperations[0].op").value("merge-object-by-key"))
+                .andExpect(jsonPath("$.patch.compiledOperations[0].resolvedPath").value("columns[]/0"))
+                .andExpect(jsonPath("$.patch.compiledOperations[0].keyValue").value("email"))
+                .andExpect(jsonPath("$.patch.compiledOperations[0].value.header").value("Contato"))
                 .andExpect(jsonPath("$.patch.patchOperations[0].effectKind").value("merge-by-key"))
                 .andExpect(jsonPath("$.patch.patchOperations[0].resolvedPath").value("columns[]/0"))
                 .andExpect(jsonPath("$.patch.patchOperations[0].keyValue").value("email"))

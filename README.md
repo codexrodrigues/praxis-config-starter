@@ -207,6 +207,16 @@ During `/api/praxis/config/ai/patch` orchestration, the projected manifest is al
 
 The backend does not redefine component semantics. Operations with `compile-domain-patch` are returned as explicit compiler boundaries so a component-specific compiler can be added after that component manifest passes semantic approval.
 
+### AI registry bootstrap
+
+When `praxis.ai.registry.bootstrap.enabled=true`, the starter loads the versioned registry snapshot from `classpath:ai-registry/registry-snapshot.json` or from `praxis.ai.registry.bootstrap.snapshot-location` when provided.
+
+Bootstrap readiness is no longer based only on minimum counts and required components. The starter persists snapshot metadata in `ai_registry` and compares the current snapshot hash with the last bootstrapped hash. If the registry is "ready" but was bootstrapped from an older snapshot, the starter reingests the canonical snapshot automatically.
+
+During this canonical bootstrap, `component_definition` records that no longer exist in the snapshot are pruned from `ai_registry`. When the previous snapshot metadata is known, the starter also removes the corresponding derived component-definition documents from the vector store using deterministic document IDs.
+
+Set `praxis.ai.registry.bootstrap.refresh-on-snapshot-drift=false` only when you intentionally want readiness checks to skip this refresh behavior.
+
 ### AI key maintenance (clear / rotate)
 
 Both endpoints require `X-Tenant-ID` (and `X-User-ID` when `scope=user`).

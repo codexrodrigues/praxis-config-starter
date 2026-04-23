@@ -16,6 +16,12 @@ public class AiRegistryBootstrapProperties {
     private boolean force = false;
 
     /**
+     * Reingest the versioned snapshot when the persisted registry was previously
+     * considered ready but was bootstrapped from a different snapshot.
+     */
+    private boolean refreshOnSnapshotDrift = true;
+
+    /**
      * Optional external snapshot location (file:/... or classpath:/...).
      * When empty, falls back to classpath:ai-registry/registry-snapshot.json.
      */

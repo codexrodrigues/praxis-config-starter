@@ -758,7 +758,7 @@ components:
       required: false
       schema:
         type: string
-        default: af6037b884417c7ec7b3d7e98737699c3972fde5b610f22a6d7c76eb77eb0e0a
+        default: c9c4e0975bea7043b09e9456aab8dada655fc1a6f7c81d04c3dc7b70d0151211
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +788,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: af6037b884417c7ec7b3d7e98737699c3972fde5b610f22a6d7c76eb77eb0e0a
+        example: c9c4e0975bea7043b09e9456aab8dada655fc1a6f7c81d04c3dc7b70d0151211
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -891,9 +891,98 @@ components:
           items:
             type: string
         patch:
+          $ref: '#/components/schemas/AgenticAuthoringCompiledComponentPatch'
+      additionalProperties: false
+
+    AgenticAuthoringCompiledComponentPatch:
+      type: object
+      description: Patch compilado para configuracao de componente. `compiledOperations` e a representacao canonica preferencial para backend tools; `operations` e `patchOperations` permanecem como aliases legados dos efeitos compilados nativos.
+      properties:
+        componentId:
+          type: string
+        manifestVersion:
+          type: string
+          nullable: true
+        patchKind:
+          type: string
+          enum: [component-config-patch]
+        compiledOperations:
+          type: array
+          description: Operacoes canonicas normalizadas, independentes dos nomes internos de handlers.
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringCompiledPatchOperation'
+        operations:
+          type: array
+          description: Alias legado contendo efeitos compilados nativos do compilador, inclusive handlers de dominio.
+          items:
+            type: object
+            additionalProperties: true
+        patchOperations:
+          type: array
+          description: Alias legado contendo efeitos compilados nativos do compilador, inclusive handlers de dominio.
+          items:
+            type: object
+            additionalProperties: true
+        proposedConfig:
           type: object
           additionalProperties: true
-      additionalProperties: false
+      additionalProperties: true
+
+    AgenticAuthoringCompiledPatchOperation:
+      type: object
+      description: Operacao compilada canonica para aplicacao ou auditoria de patch.
+      properties:
+        op:
+          type: string
+          enum:
+            - merge-object-by-key
+            - merge-object
+            - set-value
+            - remove-by-key
+            - append
+            - append-unique
+            - reorder-by-key
+            - domain-patch
+        componentId:
+          type: string
+        operationId:
+          type: string
+        path:
+          type: string
+        resolvedPath:
+          type: string
+          nullable: true
+        key:
+          type: string
+          nullable: true
+        keyValue:
+          nullable: true
+        value:
+          nullable: true
+        removedValue:
+          nullable: true
+        removedIndex:
+          type: integer
+          nullable: true
+        fromIndex:
+          type: integer
+          nullable: true
+        toIndex:
+          type: integer
+          nullable: true
+        appendedIndex:
+          type: integer
+          nullable: true
+        handler:
+          type: string
+          nullable: true
+        submissionImpact:
+          type: string
+          nullable: true
+        compilerBoundary:
+          type: boolean
+          nullable: true
+      additionalProperties: true
 
     AgenticAuthoringConversationMessage:
       type: object

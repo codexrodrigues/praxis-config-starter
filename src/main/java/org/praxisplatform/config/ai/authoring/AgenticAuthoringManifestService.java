@@ -113,7 +113,7 @@ public class AgenticAuthoringManifestService {
                     objectMapper.createObjectNode());
         }
         JsonNode manifest = getManifest(componentId);
-        ArrayNode patchOperations = objectMapper.createArrayNode();
+        ArrayNode compiledEffects = objectMapper.createArrayNode();
         List<String> warnings = new ArrayList<>(validation.warnings());
         List<String> failures = new ArrayList<>();
         ObjectNode proposedConfig = request != null && request.config() != null && request.config().isObject()
@@ -126,7 +126,7 @@ public class AgenticAuthoringManifestService {
                     operation,
                     planOperation,
                     proposedConfig,
-                    patchOperations,
+                    compiledEffects,
                     failures,
                     warnings);
         }
@@ -141,14 +141,69 @@ public class AgenticAuthoringManifestService {
         patch.put("componentId", componentId);
         patch.put("manifestVersion", text(manifest, "manifestVersion"));
         patch.put("patchKind", "component-config-patch");
-        patch.set("operations", patchOperations);
-        patch.set("patchOperations", patchOperations);
+        ArrayNode compiledOperations = toCompiledOperations(compiledEffects);
+        patch.set("compiledOperations", compiledOperations);
+        patch.set("operations", compiledEffects.deepCopy());
+        patch.set("patchOperations", compiledEffects.deepCopy());
         patch.set("proposedConfig", proposedConfig);
         return new AgenticAuthoringManifestCompileResult(
                 true,
                 List.of(),
                 List.copyOf(warnings),
                 patch);
+    }
+
+    private ArrayNode toCompiledOperations(ArrayNode compiledEffects) {
+        ArrayNode compiledOperations = objectMapper.createArrayNode();
+        for (JsonNode compiledEffect : compiledEffects) {
+            compiledOperations.add(toCompiledOperation(compiledEffect));
+        }
+        return compiledOperations;
+    }
+
+    private ObjectNode toCompiledOperation(JsonNode compiledEffect) {
+        ObjectNode compiledOperation = objectMapper.createObjectNode();
+        String effectKind = text(compiledEffect, "effectKind");
+        compiledOperation.put("op", normalizeCompiledOperation(effectKind));
+        copyIfPresent(compiledEffect, compiledOperation, "componentId");
+        copyIfPresent(compiledEffect, compiledOperation, "operationId");
+        copyIfPresent(compiledEffect, compiledOperation, "path");
+        copyIfPresent(compiledEffect, compiledOperation, "resolvedPath");
+        copyIfPresent(compiledEffect, compiledOperation, "key");
+        copyIfPresent(compiledEffect, compiledOperation, "keyValue");
+        copyIfPresent(compiledEffect, compiledOperation, "value");
+        copyIfPresent(compiledEffect, compiledOperation, "removedValue");
+        copyIfPresent(compiledEffect, compiledOperation, "removedIndex");
+        copyIfPresent(compiledEffect, compiledOperation, "fromIndex");
+        copyIfPresent(compiledEffect, compiledOperation, "toIndex");
+        copyIfPresent(compiledEffect, compiledOperation, "appendedIndex");
+        copyIfPresent(compiledEffect, compiledOperation, "handler");
+        copyIfPresent(compiledEffect, compiledOperation, "submissionImpact");
+        if ("compile-domain-patch".equals(effectKind)) {
+            compiledOperation.put("compilerBoundary", true);
+        }
+        return compiledOperation;
+    }
+
+    private String normalizeCompiledOperation(String effectKind) {
+        return switch (effectKind) {
+            case "merge-by-key" -> "merge-object-by-key";
+            case "merge-object" -> "merge-object";
+            case "set-value" -> "set-value";
+            case "remove-by-key" -> "remove-by-key";
+            case "append", "append-to-array" -> "append";
+            case "append-unique" -> "append-unique";
+            case "reorder-by-key" -> "reorder-by-key";
+            case "compile-domain-patch" -> "domain-patch";
+            default -> effectKind;
+        };
+    }
+
+    private void copyIfPresent(JsonNode source, ObjectNode target, String field) {
+        JsonNode value = source.path(field);
+        if (!value.isMissingNode() && !value.isNull()) {
+            target.set(field, value.deepCopy());
+        }
     }
 
     private Optional<JsonNode> findManifest(String componentId) {

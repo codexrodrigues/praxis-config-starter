@@ -18,4 +18,8 @@ public class AiRegistryBootstrapState {
     private String resolvedSnapshotLocation;
     private String source;
     private String error;
+    private String snapshotHash;
+    private String previousSnapshotHash;
+    private long snapshotComponentCount;
+    private String skipReason;
 }

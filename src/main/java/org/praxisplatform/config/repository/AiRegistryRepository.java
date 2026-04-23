@@ -18,6 +18,9 @@ public interface AiRegistryRepository extends JpaRepository<AiRegistry, UUID> {
   Optional<AiRegistry> findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
       String registryType, String registryKey, String componentType, Scope scope, String scopeKey);
 
+  List<AiRegistry> findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+      String registryType, String componentType, Scope scope, String scopeKey);
+
   @Query(
       value =
           """

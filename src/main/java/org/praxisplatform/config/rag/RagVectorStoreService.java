@@ -57,6 +57,21 @@ public class RagVectorStoreService {
         vectorStore.add(validDocuments);
     }
 
+    public void deleteDocuments(List<String> ids) {
+        VectorStore vectorStore = vectorStoreProvider.getIfAvailable();
+        if (vectorStore == null || ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<String> validIds = ids.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .toList();
+        if (validIds.isEmpty()) {
+            return;
+        }
+        vectorStore.delete(validIds);
+    }
+
     public List<Document> search(String query, int limit, Filter.Expression filterExpression) {
         VectorStore vectorStore = vectorStoreProvider.getIfAvailable();
         if (vectorStore == null || query == null || query.isBlank()) {
