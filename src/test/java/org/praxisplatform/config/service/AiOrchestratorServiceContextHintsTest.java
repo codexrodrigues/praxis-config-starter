@@ -404,6 +404,142 @@ class AiOrchestratorServiceContextHintsTest {
                 .contains("component-edit-plan-validated-by-authoring-manifest");
     }
 
+    @Test
+    void componentEditPlanResponseAcceptsOperationInputCollapsedIntoTarget() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [
+                    { "kind": "visualBlock", "resolver": "visual-block-by-id" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "rule.visualBlockGuidance.add",
+                      "target": {
+                        "kind": "visualBlock",
+                        "resolver": "visual-block-by-id",
+                        "required": true
+                      },
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["type", "targetType", "targets", "condition", "properties", "metadata"]
+                      },
+                      "submissionImpact": { "kind": "none" }
+                    }
+                  ]
+                }
+                """);
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "operations": [
+                      {
+                        "operationId": "rule.visualBlockGuidance.add",
+                        "target": {
+                          "kind": "visualBlock",
+                          "id": "lgpd-cpf-guidance",
+                          "type": "visualBlockGuidance",
+                          "targetType": "visualBlock",
+                          "targets": ["lgpd-notice"],
+                          "condition": { "!==": [{ "var": "cpf" }, null] },
+                          "properties": {
+                            "message": "CPF e dado pessoal.",
+                            "messageNodeId": "message"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "explanation": "Criei orientacao LGPD."
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-dynamic-form")
+                .componentType("form")
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-manifest-contract-used"),
+                manifest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        assertThat(response.getWarnings())
+                .contains("component-edit-plan-validated-by-authoring-manifest");
+    }
+
+    @Test
+    void componentEditPlanResponseAcceptsVisualGuidanceAliasesFromActionPlan() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [
+                    { "kind": "visualBlock", "resolver": "visual-block-by-id" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "rule.visualBlockGuidance.add",
+                      "target": {
+                        "kind": "visualBlock",
+                        "resolver": "visual-block-by-id",
+                        "required": true
+                      },
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["id", "type", "targetType", "targets", "condition", "properties", "metadata"]
+                      },
+                      "submissionImpact": { "kind": "none" }
+                    }
+                  ]
+                }
+                """);
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "operations": [
+                      {
+                        "operationId": "rule.visualBlockGuidance.add",
+                        "target": { "kind": "visualBlock" },
+                        "targetType": "visualBlock",
+                        "targetId": "lgpd-notice",
+                        "nodeId": "message",
+                        "ruleId": "lgpd-cpf-guidance",
+                        "input": {
+                          "name": "LGPD guidance for CPF",
+                          "description": "Orienta o uso do campo CPF conforme LGPD.",
+                          "effect": {
+                            "condition": { "==": [1, 1] }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "explanation": "Criei orientacao LGPD."
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-dynamic-form")
+                .componentType("form")
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-manifest-contract-used"),
+                manifest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        assertThat(response.getWarnings())
+                .contains("component-edit-plan-validated-by-authoring-manifest");
+    }
+
     private JsonNode minimalAuthoringManifest() throws Exception {
         return objectMapper.readTree("""
                 {

@@ -11,6 +11,11 @@ public class AiRegistryBootstrapProperties {
     private boolean enabled = true;
 
     /**
+     * Reingest the configured snapshot even when minimum readiness checks already pass.
+     */
+    private boolean force = false;
+
+    /**
      * Optional external snapshot location (file:/... or classpath:/...).
      * When empty, falls back to classpath:ai-registry/registry-snapshot.json.
      */

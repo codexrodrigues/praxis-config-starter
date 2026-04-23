@@ -39,7 +39,8 @@ public class AiRegistryBootstrapService {
         }
 
         AiRegistryStatusReport statusReport = statusService.getStatus();
-        if (statusReport.isReady()) {
+        boolean forceBootstrap = bootstrapProperties != null && bootstrapProperties.isForce();
+        if (statusReport.isReady() && !forceBootstrap) {
             bootstrapState.setSkipped(true);
             log.info("AI registry already ready (componentDefinitions={}, templates={}).",
                     statusReport.getComponentDefinitionCount(), statusReport.getTemplateCount());

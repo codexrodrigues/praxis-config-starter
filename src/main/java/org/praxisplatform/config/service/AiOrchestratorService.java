@@ -13915,7 +13915,7 @@ public class AiOrchestratorService {
             }
         }
         validateInputSchemaRequiredFields(
-                planOperation.get("input"),
+                componentEditPlanOperationInput(planOperation),
                 manifestOperation.at("/inputSchema/required"),
                 path,
                 operationId,
@@ -13935,6 +13935,118 @@ public class AiOrchestratorService {
         }
     }
 
+    private JsonNode componentEditPlanOperationInput(JsonNode planOperation) {
+        ObjectNode merged = objectMapper.createObjectNode();
+        planOperation.fields().forEachRemaining(entry -> {
+            if (!List.of("input", "params", "payload", "arguments", "data", "rule", "target").contains(entry.getKey())) {
+                merged.set(entry.getKey(), entry.getValue());
+            }
+        });
+        JsonNode target = planOperation.get("target");
+        if (target != null && target.isObject()) {
+            String targetId = textOrNull(target.get("id"));
+            if (targetId != null && !targetId.isBlank() && !merged.has("targetId")) {
+                merged.put("targetId", targetId);
+            }
+            target.fields().forEachRemaining(entry -> merged.set(entry.getKey(), entry.getValue()));
+        } else if (target != null && target.isTextual() && !merged.has("targetId")) {
+            merged.put("targetId", target.asText());
+        }
+        for (String candidateKey : List.of("params", "input", "payload", "arguments", "data", "rule", "value")) {
+            JsonNode candidate = planOperation.get(candidateKey);
+            if (candidate != null && candidate.isObject()) {
+                candidate.fields().forEachRemaining(entry -> merged.set(entry.getKey(), entry.getValue()));
+            }
+        }
+        normalizeVisualBlockGuidanceOperationInput(planOperation, merged);
+        return merged.isEmpty() ? planOperation : merged;
+    }
+
+    private void normalizeVisualBlockGuidanceOperationInput(JsonNode planOperation, ObjectNode input) {
+        String operationId = textOrNull(planOperation.get("operationId"));
+        if (!"rule.visualBlockGuidance.add".equals(operationId)) {
+            return;
+        }
+        String ruleId = textOrNull(input.get("ruleId"));
+        if (ruleId != null && !ruleId.isBlank()) {
+            input.put("id", ruleId);
+        }
+        if (!input.has("type")) {
+            input.put("type", "visualBlockGuidance");
+        }
+        if (!input.has("targetType")) {
+            input.put("targetType", "visualBlock");
+        }
+        if (!input.has("targets")) {
+            String targetId = textOrNull(input.get("targetId"));
+            if (targetId == null || targetId.isBlank()) {
+                targetId = textOrNull(input.get("visualBlockId"));
+            }
+            if (targetId != null && !targetId.isBlank()) {
+                ArrayNode targets = objectMapper.createArrayNode();
+                targets.add(targetId);
+                input.set("targets", targets);
+            }
+        }
+        JsonNode effect = input.get("effect");
+        if (effect != null && effect.isObject()) {
+            if (!input.has("condition") && effect.get("condition") != null) {
+                input.set("condition", effect.get("condition"));
+            }
+            if (!input.has("properties") && effect.get("properties") != null && effect.get("properties").isObject()) {
+                input.set("properties", effect.get("properties"));
+            }
+        }
+        if (!input.has("properties")) {
+            String nodeId = textOrNull(input.get("nodeId"));
+            if (nodeId == null || nodeId.isBlank()) {
+                nodeId = textOrNull(input.get("targetNodeId"));
+            }
+            String message = textOrNull(input.get("message"));
+            if (message == null || message.isBlank()) {
+                message = textOrNull(input.get("description"));
+            }
+            if (message == null || message.isBlank()) {
+                message = textOrNull(input.get("name"));
+            }
+            if (nodeId != null && !nodeId.isBlank()) {
+                ObjectNode properties = objectMapper.createObjectNode();
+                properties.put("messageNodeId", nodeId);
+                if (message != null && !message.isBlank()) {
+                    properties.put("message", message);
+                }
+                input.set("properties", properties);
+            } else if (message != null && !message.isBlank()) {
+                ObjectNode properties = objectMapper.createObjectNode();
+                properties.put("message", message);
+                input.set("properties", properties);
+            } else {
+                ObjectNode properties = objectMapper.createObjectNode();
+                properties.put("message", "Revise a orientacao configurada antes de salvar.");
+                input.set("properties", properties);
+            }
+        }
+        if (!input.has("condition")) {
+            ObjectNode condition = objectMapper.createObjectNode();
+            ArrayNode equalsArgs = objectMapper.createArrayNode();
+            equalsArgs.add(1);
+            equalsArgs.add(1);
+            condition.set("==", equalsArgs);
+            input.set("condition", condition);
+        }
+        JsonNode metadataNode = input.get("metadata");
+        ObjectNode metadata = metadataNode != null && metadataNode.isObject()
+                ? (ObjectNode) metadataNode
+                : objectMapper.createObjectNode();
+        if (!metadata.has("origin")) {
+            metadata.put("origin", "llm");
+        }
+        if (!metadata.has("reviewStatus")) {
+            metadata.put("reviewStatus", "pending");
+        }
+        input.set("metadata", metadata);
+    }
+
     private void validateInputSchemaRequiredFields(
             JsonNode input,
             JsonNode requiredFields,
@@ -13945,13 +14057,13 @@ public class AiOrchestratorService {
             return;
         }
         if (input == null || !input.isObject()) {
-            failures.add(path + " deve declarar input para " + operationId + ".");
+            failures.add(path + " deve declarar input, params ou campos da operacao para " + operationId + ".");
             return;
         }
         for (JsonNode field : requiredFields) {
             String fieldName = field.asText(null);
             if (fieldName != null && !fieldName.isBlank() && !input.has(fieldName)) {
-                failures.add(path + ".input nao declara campo obrigatorio " + fieldName + " para " + operationId + ".");
+                failures.add(path + ".input/params/operacao nao declara campo obrigatorio " + fieldName + " para " + operationId + ".");
             }
         }
     }
