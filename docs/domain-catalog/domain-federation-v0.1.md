@@ -38,7 +38,7 @@ The current foundation already provides:
 - `domain_knowledge_relationship`: concept-to-concept relationships, including cross-context relationships.
 - `domain_knowledge_evidence`: proof for semantic claims.
 
-Federation v0.1 does not replace these tables. It adds four explicit federation
+Federation v0.1 does not replace these tables. It adds five explicit federation
 surfaces around them.
 
 ## Core Artifacts
@@ -82,7 +82,47 @@ Example:
 }
 ```
 
-### 2. `domain_context_relationship`
+### 2. `domain_context`
+
+Represents a bounded context as a governable domain surface published by a
+source.
+
+Required fields:
+
+| Field | Purpose |
+| --- | --- |
+| `context_key` | Stable bounded context key, for example `human-resources`. |
+| `source_key` | Publishing `domain_source.source_key`. |
+| `context_type` | `bounded_context`, `subdomain`, `capability`, `external_context` or `federated_context`. |
+| `label` | Human-friendly context label. |
+| `description` | Short business description of the context boundary. |
+| `semantic_owner` | Business owner accountable for meaning. |
+| `technical_owner` | Team or service owner accountable for implementation. |
+| `tenant_id` | Tenant scope. Nullable only for global catalogs. |
+| `environment` | Environment scope such as `dev`, `staging`, `prod`. |
+| `status` | `candidate`, `active`, `deprecated`, `blocked` or `retired`. |
+| `latest_release_key` | Optional pointer to the latest accepted domain catalog release for this context. |
+| `evidence` | JSON proof, repository links, schema refs or review notes. |
+
+Example:
+
+```json
+{
+  "contextKey": "human-resources",
+  "sourceKey": "praxis-api-quickstart",
+  "contextType": "bounded_context",
+  "label": "Human Resources",
+  "description": "People, employment lifecycle and payroll concepts.",
+  "semanticOwner": "RH",
+  "technicalOwner": "Platform",
+  "tenantId": "default",
+  "environment": "prod",
+  "status": "active",
+  "latestReleaseKey": "domain-catalog:human-resources.folhas-pagamento:v2026-04-21"
+}
+```
+
+### 3. `domain_context_relationship`
 
 Represents a relationship between bounded contexts, not just between semantic
 nodes.
@@ -132,7 +172,7 @@ Examples:
 }
 ```
 
-### 3. `domain_contract`
+### 4. `domain_contract`
 
 Represents the concrete integration contract between contexts/services.
 
@@ -171,7 +211,7 @@ Example:
 }
 ```
 
-### 4. `domain_resolution`
+### 5. `domain_resolution`
 
 Represents semantic resolution between terms, concepts and context-local names.
 
@@ -235,6 +275,7 @@ The federated release should include:
 
 - source release references;
 - accepted `domain_source` records;
+- accepted `domain_context` records;
 - accepted context relationships;
 - accepted contracts;
 - accepted or reviewable resolutions;
@@ -263,13 +304,14 @@ Ingestion steps:
 
 1. Load latest or specified `domain_catalog_release` records.
 2. Validate `domain_source` records against releases.
-3. Validate relationship endpoints against known contexts.
-4. Validate contracts against source/context ownership.
-5. Validate resolutions against known concepts/aliases.
-6. Check governance and AI visibility constraints.
-7. Produce a validation report.
-8. Persist only if the report has no blocking errors.
-9. Generate a federated release snapshot.
+3. Validate `domain_context` records against known sources.
+4. Validate relationship endpoints against known contexts.
+5. Validate contracts against source/context ownership.
+6. Validate resolutions against known concepts/aliases.
+7. Check governance and AI visibility constraints.
+8. Produce a validation report.
+9. Persist only if the report has no blocking errors.
+10. Generate a federated release snapshot.
 
 ## Query v0.1
 
@@ -330,6 +372,7 @@ v0.1 can be implemented without immediately replacing the current schema:
 | Federation artifact | Existing foundation | Future first-class table |
 | --- | --- | --- |
 | `domain_source` | `domain_catalog_release.service_key`, `raw_payload.service`, evidence payloads | `domain_source` |
+| `domain_context` | `domain_catalog_item.item_type=context`, `domain_knowledge_concept.node_type=bounded_context` | `domain_context` |
 | `domain_context_relationship` | `domain_catalog_item.item_type=edge`, `domain_knowledge_relationship.cross_context=true` | `domain_context_relationship` |
 | `domain_contract` | `domain_catalog_item.item_type=binding`, `domain_knowledge_binding` | `domain_contract` |
 | `domain_resolution` | `domain_knowledge_relationship` with `same_as`, `maps_to`, `broader_than`, `narrower_than` | `domain_resolution` |
@@ -384,7 +427,7 @@ constraints. It should not infer extra relationships from similar labels.
 
 ## Implementation Sequence
 
-1. Add schema/documentation for the four artifacts.
+1. Add schema/documentation for the five artifacts.
 2. Add read-only DTOs and validators.
 3. Add dry-run validation endpoint.
 4. Add query endpoint returning an LLM-safe federated context.
