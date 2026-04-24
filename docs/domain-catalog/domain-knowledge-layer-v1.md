@@ -334,7 +334,10 @@ For today's Dynamic Form flow, the shared rule would live in
    materializations without requiring each host to reconstruct publication
    policy heuristics locally. For `selection_eligibility`, this step can
    already derive a canonical `option_source` materialization payload for the
-   predicted lookup target.
+   predicted lookup target. For `validation`, `compliance` and `privacy`, it
+   can also derive a canonical `backend_validation` payload with
+   `kind=resource_validation_policy` for the predicted resource-validation
+   target.
 9. Target-specific materializers create `domain_rule_materialization` rows and
    only then update `FormConfig`, backend validation, workflows or external
    policy engines.
@@ -471,6 +474,9 @@ Raw sensitive values must not be returned through this path.
 - Store target-specific projections in `domain_rule_materialization`.
 - Require LLM-authored definitions to cite knowledge evidence and carry
   `created_by_type=llm`.
+- Treat generated `option_source` and `backend_validation` payloads as derived
+  materializations of the same governed rule, not as competing sources of
+  business truth.
 - Require materializations into `FormConfig` to remain reviewable and to keep
   `metadata.origin="llm"` and `metadata.reviewStatus="pending"` until approved.
 - Add validators that compare the materialized payload hash against the source

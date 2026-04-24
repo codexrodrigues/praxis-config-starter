@@ -94,7 +94,9 @@ An LLM or agent using this envelope must:
   `explainability.publicationReadiness=ready_to_publish`; for
   `selection_eligibility`, the publication flow may already derive the
   canonical `option_source` materialization payload instead of forcing the host
-  to handcraft a local lookup policy patch;
+  to handcraft a local lookup policy patch; for `validation`, `compliance` and
+  `privacy`, the same publication flow may derive a canonical
+  `backend_validation` materialization payload for downstream enforcement;
 - only prefer `componentEditPlan` or manifest-backed edit operations when the
   request remains in component/page authoring;
 - include an explanation that references the domain concepts used;
