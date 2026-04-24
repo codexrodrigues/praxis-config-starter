@@ -34,8 +34,8 @@ Importante:
 - business-rule authoring não deve ser modelado como destino primário de
   `componentEditPlan`;
 - a evolução canônica para decisão compartilhada deve acontecer na superfície
-  `/api/praxis/config/domain-rules/**`, que já concentra definição governada,
-  materialização por target e, progressivamente, intake/simulation/publication.
+  `/api/praxis/config/domain-rules/**`, que já concentra intake governado,
+  definição versionada, simulation e materialização por target.
 
 Contexto conversacional de authoring:
 
@@ -56,6 +56,8 @@ Resolucao de intencao e chips ricos:
 - `description`, `icon` e `tone` orientam a apresentacao visual do chip; `contextHints` preserva dados estruturados como `resourcePath`, `submitUrl`, `operation` e `schemaUrl` para o proximo turno.
 - `contextHints.domainCatalog` e um subcontrato versionado (`schemaVersion=praxis.ai.context-hints.domain-catalog/v0.2`) para solicitar contexto semantico/governanca no proximo turno. Os campos canonicos sao `serviceKey`, `resourceKey`, `releaseId`, `releaseKey`, `type`, `itemTypes`, `intent`, `query`, `contextKey`, `nodeType`, `recommendedAuthoringFlow`, `recommendedRuleType` e `limit`.
 - Quando `contextHints.domainCatalog.recommendedAuthoringFlow=shared_rule_authoring`, o backend deve tratar o pedido como authoring governado de regra/decisao compartilhada. Nessa situacao, `intent-resolution` pode responder com `gate.status=route_required` e `failureCodes=["shared-rule-authoring-required"]`, sinalizando que o proximo passo canonico esta em `/api/praxis/config/domain-rules/**`, e nao em `page-preview`/`componentEditPlan`.
+- O primeiro passo canônico dessa trilha pode ser `POST /api/praxis/config/domain-rules/intake`, que persiste um draft governado a partir do prompt e devolve grounding suficiente para o host continuar em `simulation`.
+- `POST /api/praxis/config/domain-rules/simulations` deve responder com grounding, cobertura existente, materializações previstas, aprovações requeridas e um bloco aditivo de `explainability`, para que a explicação canônica venha do backend e não de heurísticas locais no host.
 - `contextHints.domainCatalog.relationships` solicita edges explicitas do Domain Catalog para o prompt do proximo turno. Os campos canonicos sao `enabled`, `federated`, `serviceKey`, `sourceNodeKey`, `targetNodeKey`, `edgeType`, `query` e `limit`. Quando `federated=true`, o backend consulta o latest release de cada servico no tenant/environment e nao sintetiza relacoes por labels, aliases ou nomes parecidos.
 - Clientes devem preservar esses campos no round-trip e enviar `contextHints` como parte da acao do proximo turno. Reduzir `quickReplies` para texto simples ou recriar opcoes localmente quebra o contrato de authoring.
 - Depois que o usuario confirmar um recurso para `operationKind=create`, `artifactKind=dashboard` e `changeKind=create_artifact`, `page-preview` pode retornar `uiCompositionPlan` com `layoutPreset=resource-dashboard`. Esse caminho e canonico para dashboards orientados por recurso e nao deve cair na validacao exclusiva de formulario.

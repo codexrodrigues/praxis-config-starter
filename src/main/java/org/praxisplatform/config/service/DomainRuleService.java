@@ -14,6 +14,8 @@ import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
+import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
@@ -46,6 +48,84 @@ public class DomainRuleService {
     private final DomainCatalogReleaseRepository releaseRepository;
     private final DomainKnowledgeChangeSetRepository changeSetRepository;
     private final ObjectMapper objectMapper;
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public DomainRuleIntakeResponse intake(
+            DomainRuleIntakeRequest request,
+            String tenantId,
+            String environment) {
+        if (request == null) {
+            throw new ConfigurationIngestionException("Domain rule intake request is required");
+        }
+        requireText(request.prompt(), "prompt");
+        requireText(request.ruleType(), "ruleType");
+        requireText(request.resourceKey(), "resourceKey");
+
+        ObjectNode definition = request.definition() != null && request.definition().isObject()
+                ? request.definition().deepCopy()
+                : objectMapper.createObjectNode();
+        if (!StringUtils.hasText(definition.path("summary").asText(null))) {
+            definition.put("summary", request.prompt().trim());
+        }
+        definition.put("sourcePrompt", request.prompt().trim());
+        if (StringUtils.hasText(request.assistantMessage())) {
+            definition.put("assistantMessage", request.assistantMessage().trim());
+        }
+
+        DomainRuleDefinitionResponse persisted = createDefinition(
+                new DomainRuleDefinitionRequest(
+                        StringUtils.hasText(request.ruleKey())
+                                ? request.ruleKey().trim()
+                                : deriveRuleKey(request.resourceKey(), request.ruleType()),
+                        null,
+                        request.ruleType().trim(),
+                        "draft",
+                        normalize(request.contextKey()),
+                        request.resourceKey().trim(),
+                        normalize(request.serviceKey()),
+                        null,
+                        null,
+                        null,
+                        null,
+                        definition,
+                        request.parameters(),
+                        request.condition(),
+                        request.governance(),
+                        null,
+                        normalizeOrDefault(request.createdByType(), "llm"),
+                        normalize(request.createdBy()),
+                        null),
+                tenantId,
+                environment);
+
+        ObjectNode grounding = objectMapper.createObjectNode();
+        grounding.put("source", "intake");
+        grounding.put("nextEndpoint", "/api/praxis/config/domain-rules/simulations");
+        grounding.put("ruleDefinitionId", persisted.id().toString());
+        grounding.put("ruleKey", persisted.ruleKey());
+        grounding.put("ruleType", persisted.ruleType());
+        grounding.put("resourceKey", persisted.resourceKey());
+        if (StringUtils.hasText(persisted.contextKey())) {
+            grounding.put("contextKey", persisted.contextKey());
+        }
+        if (StringUtils.hasText(persisted.serviceKey())) {
+            grounding.put("serviceKey", persisted.serviceKey());
+        }
+
+        return new DomainRuleIntakeResponse(
+                UUID.randomUUID(),
+                persisted.tenantId(),
+                persisted.environment(),
+                persisted.ruleKey(),
+                persisted.ruleType(),
+                persisted.contextKey(),
+                persisted.resourceKey(),
+                persisted.serviceKey(),
+                persisted.status(),
+                grounding,
+                persisted,
+                Instant.now());
+    }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleDefinitionResponse createDefinition(
@@ -224,6 +304,15 @@ public class DomainRuleService {
                 parameters);
         ArrayNode requiredApprovals = buildRequiredApprovals(governance);
         ArrayNode warnings = buildWarnings(ruleType, predictedMaterializations, existingCoverage, governance);
+        ObjectNode explainability = buildExplainability(
+                ruleKey,
+                ruleType,
+                resourceKey,
+                existingCoverage,
+                predictedMaterializations,
+                requiredApprovals,
+                warnings,
+                persistedDefinition != null);
 
         ObjectNode grounding = objectMapper.createObjectNode();
         if (StringUtils.hasText(serviceKey)) {
@@ -255,6 +344,7 @@ public class DomainRuleService {
                 predictedMaterializations,
                 requiredApprovals,
                 warnings,
+                explainability,
                 Instant.now());
     }
 
@@ -460,6 +550,16 @@ public class DomainRuleService {
         return resourceKey;
     }
 
+    private String deriveRuleKey(String resourceKey, String ruleType) {
+        String normalizedResource = resourceKey.trim();
+        String normalizedRuleType = ruleType.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-");
+        normalizedRuleType = normalizedRuleType.replaceAll("(^-+|-+$)", "");
+        if (!StringUtils.hasText(normalizedRuleType)) {
+            normalizedRuleType = "draft";
+        }
+        return normalizedResource + ".rule." + normalizedRuleType;
+    }
+
     private ArrayNode buildRequiredApprovals(JsonNode governance) {
         ArrayNode approvals = objectMapper.createArrayNode();
         if (governance != null && governance.isObject()) {
@@ -494,6 +594,121 @@ public class DomainRuleService {
             warnings.add("This rule currently projects only to form guidance; business validation may still require a non-UI target.");
         }
         return warnings;
+    }
+
+    private ObjectNode buildExplainability(
+            String ruleKey,
+            String ruleType,
+            String resourceKey,
+            ArrayNode existingCoverage,
+            ArrayNode predictedMaterializations,
+            ArrayNode requiredApprovals,
+            ArrayNode warnings,
+            boolean persistedDefinition) {
+        ObjectNode explainability = objectMapper.createObjectNode();
+        explainability.put(
+                "summary",
+                buildExplainabilitySummary(ruleType, resourceKey, existingCoverage, predictedMaterializations, requiredApprovals));
+        explainability.put(
+                "recommendedAction",
+                buildRecommendedAction(existingCoverage, requiredApprovals, persistedDefinition));
+        explainability.put(
+                "publicationReadiness",
+                buildPublicationReadiness(existingCoverage, requiredApprovals));
+
+        ArrayNode highlights = explainability.putArray("highlights");
+        highlights.add("ruleKey=" + (StringUtils.hasText(ruleKey) ? ruleKey : resourceKey + ".rule.draft"));
+        highlights.add("ruleType=" + ruleType);
+        highlights.add("predictedTargets=" + predictedMaterializations.size());
+        if (!existingCoverage.isEmpty()) {
+            highlights.add("existingCoverage=" + existingCoverage.size());
+        }
+        if (!requiredApprovals.isEmpty()) {
+            highlights.add("requiredApprovals=" + requiredApprovals.size());
+        }
+
+        ArrayNode nextSteps = explainability.putArray("nextSteps");
+        if (!existingCoverage.isEmpty()) {
+            ObjectNode step = nextSteps.addObject();
+            step.put("kind", "review_existing_coverage");
+            step.put("title", "Review active shared-rule coverage before publishing a duplicate decision.");
+            step.put("endpoint", "/api/praxis/config/domain-rules/definitions");
+        }
+        if (!requiredApprovals.isEmpty()) {
+            ObjectNode step = nextSteps.addObject();
+            step.put("kind", "request_approval");
+            step.put("title", "Collect the required approvals before publication or target-specific materialization.");
+            step.set("approvers", requiredApprovals.deepCopy());
+        }
+        if (persistedDefinition) {
+            ObjectNode step = nextSteps.addObject();
+            step.put("kind", "materialize_or_activate");
+            step.put("title", "Advance the persisted shared rule through status review and target-specific materialization.");
+            step.put("definitionStatusEndpoint", "/api/praxis/config/domain-rules/definitions/{definitionId}/status");
+            step.put("materializationsEndpoint", "/api/praxis/config/domain-rules/materializations");
+        } else {
+            ObjectNode step = nextSteps.addObject();
+            step.put("kind", "persist_definition");
+            step.put("title", "Persist the shared-rule definition after reviewing the simulation grounding.");
+            step.put("endpoint", "/api/praxis/config/domain-rules/definitions");
+        }
+        if (!warnings.isEmpty()) {
+            ObjectNode step = nextSteps.addObject();
+            step.put("kind", "resolve_warnings");
+            step.put("title", "Review simulation warnings before applying downstream targets.");
+            step.set("warnings", warnings.deepCopy());
+        }
+        return explainability;
+    }
+
+    private String buildExplainabilitySummary(
+            String ruleType,
+            String resourceKey,
+            ArrayNode existingCoverage,
+            ArrayNode predictedMaterializations,
+            ArrayNode requiredApprovals) {
+        StringBuilder summary = new StringBuilder();
+        summary.append("Simulation resolved a shared ");
+        summary.append(ruleType);
+        summary.append(" rule for ");
+        summary.append(resourceKey);
+        summary.append(" with ");
+        summary.append(predictedMaterializations.size());
+        summary.append(predictedMaterializations.size() == 1 ? " predicted target." : " predicted targets.");
+        if (!existingCoverage.isEmpty()) {
+            summary.append(" Existing approved or active coverage was found for the same resource and rule type.");
+        } else {
+            summary.append(" No approved or active shared-rule coverage was found for the same scope.");
+        }
+        if (!requiredApprovals.isEmpty()) {
+            summary.append(" Human approval is required before publication or target-specific materialization.");
+        }
+        return summary.toString();
+    }
+
+    private String buildRecommendedAction(
+            ArrayNode existingCoverage,
+            ArrayNode requiredApprovals,
+            boolean persistedDefinition) {
+        if (!existingCoverage.isEmpty()) {
+            return "review_existing_coverage";
+        }
+        if (!requiredApprovals.isEmpty()) {
+            return "request_approval";
+        }
+        return persistedDefinition ? "materialize_or_activate" : "persist_definition";
+    }
+
+    private String buildPublicationReadiness(
+            ArrayNode existingCoverage,
+            ArrayNode requiredApprovals) {
+        if (!existingCoverage.isEmpty()) {
+            return "blocked_by_existing_coverage";
+        }
+        if (!requiredApprovals.isEmpty()) {
+            return "approval_required";
+        }
+        return "ready_for_definition_review";
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
