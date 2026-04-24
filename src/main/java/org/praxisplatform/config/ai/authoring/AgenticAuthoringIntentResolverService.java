@@ -626,7 +626,7 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringCandidate fallback) {
-        if (!"dashboard".equals(artifactKind)) {
+        if (!shouldPreservePayrollDashboardSource(prompt, effectivePrompt, conversationMessages, artifactKind)) {
             return fallback;
         }
         if (fallback != null && isCanonicalPayrollDashboardCandidate(fallback)) {
@@ -655,12 +655,10 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidates) {
-        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
-        if (!isPayrollAnalyticsPrompt(combinedPrompt)
-                || !isExplicitDashboardPrompt(combinedPrompt)
-                || !hasPayrollDashboardBreakdown(combinedPrompt)) {
+        if (!shouldPreservePayrollDashboardSource(prompt, effectivePrompt, conversationMessages, artifactKind)) {
             return candidates;
         }
+        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
         boolean alreadyHasPayrollCandidate = candidates != null && candidates.stream()
                 .filter(Objects::nonNull)
                 .anyMatch(this::isCanonicalPayrollDashboardCandidate);
@@ -669,7 +667,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         List<AgenticAuthoringCandidate> enriched = new ArrayList<>(
                 candidates == null ? List.of() : candidates);
-        enriched.addAll(discoverCandidates(combinedPrompt, artifactKind, target));
+        enriched.addAll(discoverCandidates(combinedPrompt, "dashboard", target));
         return deduplicateCandidates(enriched);
     }
 
@@ -1152,12 +1150,38 @@ public class AgenticAuthoringIntentResolverService {
         if (selectedCandidate == null || !isCanonicalPayrollDashboardCandidate(selectedCandidate)) {
             return false;
         }
-        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
-        if (!isExplicitDashboardPrompt(combinedPrompt) || !hasPayrollDashboardBreakdown(combinedPrompt)) {
+        if (!shouldPreservePayrollDashboardSource(prompt, effectivePrompt, conversationMessages, "dashboard")) {
             return false;
         }
+        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
         return isExplicitCreateConfirmation(combinedPrompt)
                 || isConfirmedDataSourceSelection(combinedPrompt);
+    }
+
+    private boolean shouldPreservePayrollDashboardSource(
+            String prompt,
+            String effectivePrompt,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            String artifactKind) {
+        String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
+        if (!isPayrollAnalyticsPrompt(combinedPrompt)
+                || !isExplicitDashboardPrompt(combinedPrompt)
+                || !hasPayrollDashboardBreakdown(combinedPrompt)) {
+            return false;
+        }
+        String normalizedPrompt = normalize(valueOrDefault(prompt, ""));
+        if (!"dashboard".equals(artifactKind)) {
+            boolean switchedToForm = containsAny(normalizedPrompt,
+                    "formulario", "form", "cadastro", "ficha");
+            boolean switchedToTable = isTablePrompt(normalizedPrompt)
+                    && !containsAny(normalizedPrompt,
+                    "dashboard", "painel", "grafico", "graficos", "chart", "charts",
+                    "drill down", "drill-down", "drilldown");
+            if (switchedToForm || switchedToTable) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String payrollDashboardConversationContext(

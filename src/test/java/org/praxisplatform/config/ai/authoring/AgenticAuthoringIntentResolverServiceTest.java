@@ -143,6 +143,90 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void preservesCanonicalPayrollAnalyticsSourceWhenDepartmentFollowUpTriesToSwitchDashboardDataSource() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate departmentCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/departamentos",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/departamentos/all&operation=get&schemaType=response",
+                "/api/human-resources/departamentos/all",
+                "get",
+                0.98d,
+                "llm selected department collection for grouping",
+                List.of("api-metadata", "semantic-retrieval"));
+        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString()))
+                .thenReturn(List.of(departmentCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "clarification_answer",
+                        "unknown",
+                        "clarify_resource",
+                        "/api/human-resources/departamentos",
+                        null,
+                        "none",
+                        "Use a API de departamentos como fonte.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-selected-departments"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Use Agrupar por departamento (/api/human-resources/departamentos) as the data source.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-6",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user",
+                                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito", null),
+                        new AgenticAuthoringConversationMessage("m2", "user",
+                                "nao sei se e dashbord ou relatorio, mas queria ver por setor", null),
+                        new AgenticAuthoringConversationMessage("m3", "user",
+                                "coloca grafico e uma lista embaixo pra conferir", null),
+                        new AgenticAuthoringConversationMessage("m4", "user",
+                                "se precisar usa os dados de folha de pagamento", null),
+                        new AgenticAuthoringConversationMessage("m5", "user",
+                                "pode fazer agora", null),
+                        new AgenticAuthoringConversationMessage("m6", "user",
+                                "Quero o grafico de barras mostrando os pagamentos por setor.", null)),
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedCandidate().submitUrl())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        assertThat(result.warnings()).contains("llm-selected-departments");
+    }
+
+    @Test
     void usesLlmIntentResolutionWhenAvailableAndPreservesRichQuickReplies() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
