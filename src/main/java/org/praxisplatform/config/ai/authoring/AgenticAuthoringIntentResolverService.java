@@ -260,6 +260,7 @@ public class AgenticAuthoringIntentResolverService {
                 prompt,
                 effectivePrompt,
                 request.conversationMessages(),
+                artifactKind,
                 candidates,
                 selectedCandidate);
         boolean deterministicPayrollDashboardConfirmation = isConfirmedPayrollDashboardCreate(
@@ -621,9 +622,13 @@ public class AgenticAuthoringIntentResolverService {
             String prompt,
             String effectivePrompt,
             List<AgenticAuthoringConversationMessage> conversationMessages,
+            String artifactKind,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringCandidate fallback) {
-        if (fallback != null && isPayrollDashboardCandidate(fallback)) {
+        if (!"dashboard".equals(artifactKind)) {
+            return fallback;
+        }
+        if (fallback != null && isCanonicalPayrollDashboardCandidate(fallback)) {
             return fallback;
         }
         if (candidates == null || candidates.isEmpty()) {
@@ -637,9 +642,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         return candidates.stream()
                 .filter(Objects::nonNull)
-                .filter(this::isPayrollDashboardCandidate)
-                .sorted(Comparator.comparingInt(candidate ->
-                        PAYROLL_ANALYTICS.equals(normalizePath(candidate.resourcePath())) ? 0 : 1))
+                .filter(this::isCanonicalPayrollDashboardCandidate)
                 .findFirst()
                 .orElse(fallback);
     }
@@ -659,7 +662,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         boolean alreadyHasPayrollCandidate = candidates != null && candidates.stream()
                 .filter(Objects::nonNull)
-                .anyMatch(this::isPayrollDashboardCandidate);
+                .anyMatch(this::isCanonicalPayrollDashboardCandidate);
         if (alreadyHasPayrollCandidate) {
             return candidates;
         }
@@ -1123,7 +1126,7 @@ public class AgenticAuthoringIntentResolverService {
             String effectivePrompt,
             List<AgenticAuthoringConversationMessage> conversationMessages,
             AgenticAuthoringCandidate selectedCandidate) {
-        if (selectedCandidate == null || !isPayrollDashboardCandidate(selectedCandidate)) {
+        if (selectedCandidate == null || !isCanonicalPayrollDashboardCandidate(selectedCandidate)) {
             return false;
         }
         String combinedPrompt = payrollDashboardConversationContext(prompt, effectivePrompt, conversationMessages);
@@ -1152,9 +1155,9 @@ public class AgenticAuthoringIntentResolverService {
         return normalize(history + "\n" + valueOrDefault(effectivePrompt, "") + "\n" + valueOrDefault(prompt, ""));
     }
 
-    private boolean isPayrollDashboardCandidate(AgenticAuthoringCandidate selectedCandidate) {
+    private boolean isCanonicalPayrollDashboardCandidate(AgenticAuthoringCandidate selectedCandidate) {
         String resourcePath = selectedCandidate == null ? "" : normalizePath(selectedCandidate.resourcePath());
-        return PAYROLL_ANALYTICS.equals(resourcePath) || PAYROLL.equals(resourcePath);
+        return PAYROLL_ANALYTICS.equals(resourcePath);
     }
 
     private boolean isConfirmedDataSourceSelection(String prompt) {

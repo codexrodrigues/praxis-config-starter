@@ -504,7 +504,9 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.artifactKind()).isEqualTo("dashboard");
         assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
         assertThat(result.selectedCandidate().resourcePath())
-                .isEqualTo("/api/human-resources/folhas-pagamento");
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedCandidate().submitUrl())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.pendingClarification()).isNull();
         assertThat(result.quickReplies()).isEmpty();
