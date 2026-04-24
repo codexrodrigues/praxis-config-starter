@@ -102,6 +102,39 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void skipsDomainCatalogReingestionWhenSourceHashAlreadyExists() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+        DomainCatalogRelease existingRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-api-quickstart:test")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-api-quickstart")
+                .sourceHash("sha256:test")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.of(existingRelease));
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(9L);
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
+        assertThat(response.itemCount()).isEqualTo(9);
+        verify(releaseRepository, never()).save(any(DomainCatalogRelease.class));
+        verify(itemRepository, never()).deleteByRelease(any(DomainCatalogRelease.class));
+        verify(itemRepository, never()).saveAll(any());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
     void searchesLatestReleaseForRuntimeClients() {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);

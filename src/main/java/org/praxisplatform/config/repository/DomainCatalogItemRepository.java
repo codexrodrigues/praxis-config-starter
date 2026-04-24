@@ -15,6 +15,8 @@ public interface DomainCatalogItemRepository extends JpaRepository<DomainCatalog
     @Modifying
     void deleteByRelease(DomainCatalogRelease release);
 
+    long countByRelease(DomainCatalogRelease release);
+
     @Query("""
         select i from DomainCatalogItem i
         where i.release.releaseKey = :releaseKey

@@ -35,6 +35,19 @@ The top-level shape remains unchanged:
 }
 ```
 
+## Release Identity
+
+`release.sourceHash` is the canonical SHA-256 fingerprint of the semantic
+catalog payload, excluding volatile publication metadata such as `generatedAt`.
+Publishers should derive `release.releaseKey` from the service key, semantic
+scope and source hash, so identical semantics keep the same release identity
+across process restarts and repeated publication attempts.
+
+The config store treats a release with the same `releaseKey`, `schemaVersion`,
+tenant, environment and `sourceHash` as already ingested. In that case,
+`/api/praxis/config/domain-catalog/ingest` returns the existing release and item
+count without deleting/reinserting items or republishing RAG documents.
+
 ## Additions From v0.1
 
 Context items may now include:
