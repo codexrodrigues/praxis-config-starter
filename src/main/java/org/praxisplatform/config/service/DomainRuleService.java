@@ -620,16 +620,20 @@ public class DomainRuleService {
             String ruleType,
             JsonNode definition,
             JsonNode parameters) {
+        boolean explicitlyTargetsOptionSource = false;
         if (parameters != null && parameters.isObject()) {
             if (StringUtils.hasText(parameters.path("optionSourceKey").asText(null))
                     || StringUtils.hasText(parameters.path("lookupSource").asText(null))) {
-                return true;
+                explicitlyTargetsOptionSource = true;
             }
         }
         String summary = definition != null ? normalize(definition.path("summary").asText(null)) : null;
+        if (explicitlyTargetsOptionSource || "selection_eligibility".equals(ruleType)) {
+            return true;
+        }
         return "policy_reference".equals(ruleType)
-                || resourceKey.contains("procurement.suppliers")
-                || (summary != null && (summary.contains("sele") || summary.contains("fornecedor") || summary.contains("supplier")));
+                && (resourceKey.contains("procurement.suppliers")
+                || (summary != null && (summary.contains("sele") || summary.contains("fornecedor") || summary.contains("supplier"))));
     }
 
     private String deriveOptionSourceKey(String resourceKey, JsonNode parameters) {
@@ -660,6 +664,12 @@ public class DomainRuleService {
                 && definition != null
                 && "selection_eligibility".equals(definition.getRuleType())) {
             return buildOptionSourceMaterializedPayload(definition, request.targetArtifactKey());
+        }
+        if ("backend_validation".equals(request.targetLayer())
+                && "resource-validation".equals(request.targetArtifactType())
+                && definition != null
+                && isBackendValidationRuleType(definition.getRuleType())) {
+            return buildBackendValidationMaterializedPayload(definition, request.targetArtifactKey());
         }
         return objectMapper.createObjectNode();
     }
@@ -705,6 +715,46 @@ public class DomainRuleService {
                     }
                 });
             }
+        }
+        return payload;
+    }
+
+    private ObjectNode buildBackendValidationMaterializedPayload(
+            DomainRuleDefinition definition,
+            String targetArtifactKey) {
+        JsonNode parameters = read(definition.getParameters());
+        JsonNode condition = read(definition.getCondition());
+
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("kind", "resource_validation_policy");
+        payload.put("resourceKey", StringUtils.hasText(targetArtifactKey)
+                ? targetArtifactKey
+                : normalize(definition.getResourceKey()));
+
+        ObjectNode metadata = payload.putObject("metadata");
+        metadata.put("origin", "domain_rule_definition");
+        metadata.put("ruleType", normalizeOrDefault(definition.getRuleType(), "validation"));
+        metadata.put("reviewStatus", "pending");
+
+        ObjectNode validationPolicy = payload.putObject("validationPolicy");
+        validationPolicy.put("ruleKey", definition.getRuleKey());
+        validationPolicy.put("ruleVersion", definition.getVersion());
+        validationPolicy.put("resourceKey", StringUtils.hasText(targetArtifactKey)
+                ? targetArtifactKey
+                : normalize(definition.getResourceKey()));
+        if (StringUtils.hasText(definition.getServiceKey())) {
+            validationPolicy.put("serviceKey", definition.getServiceKey());
+        }
+        if (StringUtils.hasText(definition.getContextKey())) {
+            validationPolicy.put("contextKey", definition.getContextKey());
+        }
+        if (condition != null && !condition.isNull()) {
+            validationPolicy.set("condition", condition);
+        }
+        if (parameters != null && !parameters.isNull()) {
+            validationPolicy.set("parameters", parameters);
+            copyText(parameters, validationPolicy, "validationMessageTemplate");
+            copyText(parameters, validationPolicy, "severity");
         }
         return payload;
     }
@@ -1003,12 +1053,33 @@ public class DomainRuleService {
         String targetLayer = normalize(target.path("targetLayer").asText(null));
         String targetArtifactType = normalize(target.path("targetArtifactType").asText(null));
         String targetArtifactKey = normalize(target.path("targetArtifactKey").asText(null));
-        if (!"option_source".equals(targetLayer)
-                || !"resource-option-source".equals(targetArtifactType)
-                || !StringUtils.hasText(targetArtifactKey)) {
+        if (!StringUtils.hasText(targetArtifactKey)) {
             return null;
         }
+        if ("option_source".equals(targetLayer) && "resource-option-source".equals(targetArtifactType)) {
+            return createOptionSourceMaterialization(definition, targetLayer, targetArtifactType, targetArtifactKey, tenantId, environment);
+        }
+        if ("backend_validation".equals(targetLayer)
+                && "resource-validation".equals(targetArtifactType)
+                && isBackendValidationRuleType(definition.getRuleType())) {
+            return createBackendValidationMaterialization(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    tenantId,
+                    environment);
+        }
+        return null;
+    }
 
+    private DomainRuleMaterialization createOptionSourceMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String tenantId,
+            String environment) {
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
         materialization.setTenantId(normalize(tenantId));
         materialization.setEnvironment(normalize(environment));
@@ -1026,6 +1097,38 @@ public class DomainRuleService {
                 targetArtifactKey)));
         materialization.setSourceHash("derived:" + definition.getRuleKey() + ":" + targetArtifactKey);
         return materializationRepository.save(materialization);
+    }
+
+    private DomainRuleMaterialization createBackendValidationMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String tenantId,
+            String environment) {
+        DomainRuleMaterialization materialization = new DomainRuleMaterialization();
+        materialization.setTenantId(normalize(tenantId));
+        materialization.setEnvironment(normalize(environment));
+        materialization.setRuleDefinition(definition);
+        materialization.setMaterializationKey(
+                definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey);
+        materialization.setTargetLayer(targetLayer);
+        materialization.setTargetArtifactType(targetArtifactType);
+        materialization.setTargetArtifactKey(targetArtifactKey);
+        materialization.setTargetPointer("/validationPolicy");
+        materialization.setMaterializedRuleId("backend-validation-policy");
+        materialization.setStatus("pending_review");
+        materialization.setMaterializedPayload(write(buildBackendValidationMaterializedPayload(
+                definition,
+                targetArtifactKey)));
+        materialization.setSourceHash("derived:" + definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey);
+        return materializationRepository.save(materialization);
+    }
+
+    private boolean isBackendValidationRuleType(String ruleType) {
+        return "validation".equals(ruleType)
+                || "compliance".equals(ruleType)
+                || "privacy".equals(ruleType);
     }
 
     private DomainRuleMaterialization maybeApplyMaterialization(

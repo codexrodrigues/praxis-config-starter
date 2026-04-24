@@ -289,6 +289,79 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void createsBackendValidationMaterializationFromValidationDefinitionWhenPayloadIsOmitted() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .ruleKey("procurement.suppliers.rule.status-validation")
+                .version(1)
+                .ruleType("validation")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Bloquear fornecedores inativos no backend.\"}")
+                .parameters("""
+                        {
+                          "severity": "error",
+                          "validationMessageTemplate": "Fornecedor indisponivel"
+                        }
+                        """)
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["INACTIVE", "BLOCKED"]
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.createMaterialization(new DomainRuleMaterializationRequest(
+                definitionId,
+                "procurement.suppliers.rule.status-validation:backend_validation:procurement.suppliers",
+                "backend_validation",
+                "resource-validation",
+                "procurement.suppliers",
+                "/validationPolicy",
+                null,
+                "backend-validation-policy",
+                "pending_review",
+                null,
+                "hash-status-validation",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+
+        assertThat(response.targetLayer()).isEqualTo("backend_validation");
+        assertThat(response.targetArtifactType()).isEqualTo("resource-validation");
+        assertThat(response.targetArtifactKey()).isEqualTo("procurement.suppliers");
+        assertThat(response.materializedPayload().path("kind").asText()).isEqualTo("resource_validation_policy");
+        assertThat(response.materializedPayload().path("validationPolicy").path("ruleKey").asText())
+                .isEqualTo("procurement.suppliers.rule.status-validation");
+        assertThat(response.materializedPayload().path("validationPolicy").path("resourceKey").asText())
+                .isEqualTo("procurement.suppliers");
+        assertThat(response.materializedPayload().path("validationPolicy").path("condition").path("in"))
+                .hasSize(2);
+        assertThat(response.materializedPayload().path("validationPolicy").path("severity").asText())
+                .isEqualTo("error");
+        assertThat(response.materializedPayload().path("validationPolicy").path("validationMessageTemplate").asText())
+                .isEqualTo("Fornecedor indisponivel");
+    }
+
+    @Test
     void findsDefinitionsByResourceAndDefaultAuthoringStatuses() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -600,6 +673,85 @@ class DomainRuleServiceTest {
                     assertThat(item.materializedPayload().path("selectionPolicy").path("blockedStatuses"))
                             .extracting(JsonNode::asText)
                             .containsExactly("INACTIVE", "BLOCKED");
+                });
+    }
+
+    @Test
+    void publishesValidationRuleByAutoCreatingBackendValidationMaterialization() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.status-validation")
+                .version(1)
+                .ruleType("validation")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Bloquear fornecedores inativos no backend.\"}")
+                .parameters("{\"severity\":\"error\",\"validationMessageTemplate\":\"Fornecedor indisponivel\"}")
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["INACTIVE", "BLOCKED"]
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            if (materialization.getId() == null) {
+                materialization.setId(UUID.randomUUID());
+            }
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.materializations()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.targetLayer()).isEqualTo("backend_validation");
+                    assertThat(item.targetArtifactType()).isEqualTo("resource-validation");
+                    assertThat(item.targetArtifactKey()).isEqualTo("procurement.suppliers");
+                    assertThat(item.targetPointer()).isEqualTo("/validationPolicy");
+                    assertThat(item.materializedRuleId()).isEqualTo("backend-validation-policy");
+                    assertThat(item.status()).isEqualTo("applied");
+                    assertThat(item.materializedPayload().path("kind").asText()).isEqualTo("resource_validation_policy");
+                    assertThat(item.materializedPayload().path("validationPolicy").path("severity").asText())
+                            .isEqualTo("error");
                 });
     }
 
