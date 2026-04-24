@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -132,6 +133,37 @@ class DomainCatalogIngestionServiceTest {
         verify(itemRepository, never()).deleteByRelease(any(DomainCatalogRelease.class));
         verify(itemRepository, never()).saveAll(any());
         verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
+    void publishesDomainCatalogRagDocumentsInConfiguredBatches() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                true,
+                false,
+                4
+        );
+
+        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Document>> documentsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(ragVectorStoreService, times(3)).upsertDocuments(documentsCaptor.capture());
+        assertThat(documentsCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(4, 4, 1);
     }
 
     @Test

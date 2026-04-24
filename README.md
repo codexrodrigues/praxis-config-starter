@@ -161,6 +161,7 @@ Para OpenAI, o serviço envia `dimensions` quando configurado em `spring.ai.open
 Para Gemini, `listModels` requer API key; sem key, o backend retorna apenas o modelo configurado.
 Para o RAG nativo, o Spring AI usa o `vector_store` (pgvector). Para desabilitar o VectorStore, use `praxis.ai.rag.vector-store.enabled=false`.
 Para ingerir o catálogo semântico apenas no store transacional/projeção `domain_knowledge_*`, sem publicar documentos RAG nem acionar embeddings, use `praxis.domain-catalog.rag-publication.enabled=false`.
+Por padrão, a publicação RAG do catálogo de domínio é uma materialização derivada pós-commit (`praxis.domain-catalog.rag-publication.async-enabled=true`) e usa lotes de `100` documentos (`praxis.domain-catalog.rag-publication.batch-size=100`). Isso mantém `POST /api/praxis/config/domain-catalog/ingest` focado na persistência canônica e reduz picos de embeddings/vector-store em hosts pequenos.
 Para ativar RAG no chat (Advisors), habilite `praxis.ai.rag.chat.enabled=true` e escolha `praxis.ai.rag.chat.mode=naive|modular`.
 Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG e usados para filtrar resultados quando presentes. Documentos globais (sem tenant/env) continuam visíveis quando esses headers são informados.
 `praxis.ai.rag.max-hints` controla quantas dicas (hints) do componente entram no bloco RAG (default: 6).

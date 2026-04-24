@@ -12,6 +12,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
@@ -33,6 +40,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -58,6 +67,9 @@ public class DomainCatalogIngestionService {
     private final DomainCatalogSchemaValidationService schemaValidationService;
     private final DomainKnowledgeProjectionService domainKnowledgeProjectionService;
     private final boolean domainCatalogRagPublicationEnabled;
+    private final boolean asyncRagPublicationEnabled;
+    private final int ragPublicationBatchSize;
+    private final ExecutorService ragPublicationExecutor;
 
     public DomainCatalogIngestionService(
             DomainCatalogReleaseRepository releaseRepository,
@@ -72,7 +84,9 @@ public class DomainCatalogIngestionService {
                 ragVectorStoreService,
                 schemaValidationService,
                 (DomainKnowledgeProjectionService) null,
-                true);
+                true,
+                false,
+                100);
     }
 
     DomainCatalogIngestionService(
@@ -89,7 +103,30 @@ public class DomainCatalogIngestionService {
                 ragVectorStoreService,
                 schemaValidationService,
                 (DomainKnowledgeProjectionService) null,
-                domainCatalogRagPublicationEnabled);
+                domainCatalogRagPublicationEnabled,
+                false,
+                100);
+    }
+
+    DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            boolean domainCatalogRagPublicationEnabled,
+            boolean asyncRagPublicationEnabled,
+            int ragPublicationBatchSize) {
+        this(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                schemaValidationService,
+                (DomainKnowledgeProjectionService) null,
+                domainCatalogRagPublicationEnabled,
+                asyncRagPublicationEnabled,
+                ragPublicationBatchSize);
     }
 
     @Autowired
@@ -101,7 +138,11 @@ public class DomainCatalogIngestionService {
             DomainCatalogSchemaValidationService schemaValidationService,
             ObjectProvider<DomainKnowledgeProjectionService> domainKnowledgeProjectionService,
             @Value("${praxis.domain-catalog.rag-publication.enabled:true}")
-            boolean domainCatalogRagPublicationEnabled) {
+            boolean domainCatalogRagPublicationEnabled,
+            @Value("${praxis.domain-catalog.rag-publication.async-enabled:true}")
+            boolean asyncRagPublicationEnabled,
+            @Value("${praxis.domain-catalog.rag-publication.batch-size:100}")
+            int ragPublicationBatchSize) {
         this(
                 releaseRepository,
                 itemRepository,
@@ -109,7 +150,9 @@ public class DomainCatalogIngestionService {
                 ragVectorStoreService,
                 schemaValidationService,
                 domainKnowledgeProjectionService.getIfAvailable(),
-                domainCatalogRagPublicationEnabled);
+                domainCatalogRagPublicationEnabled,
+                asyncRagPublicationEnabled,
+                ragPublicationBatchSize);
     }
 
     private DomainCatalogIngestionService(
@@ -119,7 +162,9 @@ public class DomainCatalogIngestionService {
             RagVectorStoreService ragVectorStoreService,
             DomainCatalogSchemaValidationService schemaValidationService,
             DomainKnowledgeProjectionService domainKnowledgeProjectionService,
-            boolean domainCatalogRagPublicationEnabled) {
+            boolean domainCatalogRagPublicationEnabled,
+            boolean asyncRagPublicationEnabled,
+            int ragPublicationBatchSize) {
         this.releaseRepository = releaseRepository;
         this.itemRepository = itemRepository;
         this.objectMapper = objectMapper;
@@ -127,6 +172,9 @@ public class DomainCatalogIngestionService {
         this.schemaValidationService = schemaValidationService;
         this.domainKnowledgeProjectionService = domainKnowledgeProjectionService;
         this.domainCatalogRagPublicationEnabled = domainCatalogRagPublicationEnabled;
+        this.asyncRagPublicationEnabled = asyncRagPublicationEnabled;
+        this.ragPublicationBatchSize = Math.max(1, ragPublicationBatchSize);
+        this.ragPublicationExecutor = asyncRagPublicationEnabled ? createRagPublicationExecutor() : null;
     }
 
     @Transactional
@@ -177,21 +225,20 @@ public class DomainCatalogIngestionService {
             domainKnowledgeProjectionService.project(release, items);
         }
         if (domainCatalogRagPublicationEnabled) {
-            try {
-                publishRagDocuments(release, items);
-            } catch (RuntimeException ex) {
-                log.warn(
-                        "Domain catalog release {} was persisted, but RAG publication failed: {}",
-                        release.getReleaseKey(),
-                        ex.getMessage()
-                );
-            }
+            publishRagDocumentsAfterPersistence(release, items);
         } else {
             log.debug("Domain catalog RAG publication disabled for release {}", release.getReleaseKey());
         }
 
         log.info("Ingested domain catalog release {} with {} item(s)", release.getReleaseKey(), items.size());
         return new DomainCatalogIngestionResponse(release.getId(), release.getReleaseKey(), items.size());
+    }
+
+    @PreDestroy
+    void shutdownRagPublicationExecutor() {
+        if (ragPublicationExecutor != null) {
+            ragPublicationExecutor.shutdownNow();
+        }
     }
 
     private boolean sameCatalogRelease(
@@ -444,6 +491,7 @@ public class DomainCatalogIngestionService {
         if (!ragVectorStoreService.isAvailable() || items == null || items.isEmpty()) {
             return;
         }
+        long startedAt = System.nanoTime();
         List<Document> documents = new ArrayList<>();
         int index = 0;
         for (DomainCatalogItem item : items) {
@@ -484,7 +532,78 @@ public class DomainCatalogIngestionService {
         if (documents.isEmpty()) {
             return;
         }
-        ragVectorStoreService.upsertDocuments(documents);
+        int publishedDocuments = 0;
+        for (int start = 0; start < documents.size(); start += ragPublicationBatchSize) {
+            int end = Math.min(start + ragPublicationBatchSize, documents.size());
+            ragVectorStoreService.upsertDocuments(documents.subList(start, end));
+            publishedDocuments += end - start;
+        }
+        log.info(
+                "Published {} domain catalog RAG document(s) for release {} in {} ms using batchSize={}",
+                publishedDocuments,
+                release.getReleaseKey(),
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
+                ragPublicationBatchSize);
+    }
+
+    private void publishRagDocumentsAfterPersistence(DomainCatalogRelease release, List<DomainCatalogItem> items) {
+        Runnable task = () -> {
+            try {
+                publishRagDocuments(release, items);
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "Domain catalog release {} was persisted, but RAG publication failed: {}",
+                        release.getReleaseKey(),
+                        ex.getMessage()
+                );
+            }
+        };
+        if (!asyncRagPublicationEnabled) {
+            task.run();
+            return;
+        }
+        Runnable asyncTask = () -> {
+            try {
+                ragPublicationExecutor.execute(task);
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "Domain catalog release {} was persisted, but RAG publication could not be scheduled: {}",
+                        release.getReleaseKey(),
+                        ex.getMessage()
+                );
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    asyncTask.run();
+                }
+            });
+        } else {
+            asyncTask.run();
+        }
+        log.debug("Scheduled asynchronous domain catalog RAG publication for release {}", release.getReleaseKey());
+    }
+
+    private ExecutorService createRagPublicationExecutor() {
+        return new ThreadPoolExecutor(
+                1,
+                1,
+                30,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(32),
+                ragPublicationThreadFactory(),
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    private ThreadFactory ragPublicationThreadFactory() {
+        AtomicInteger sequence = new AtomicInteger();
+        return runnable -> {
+            Thread thread = new Thread(runnable, "praxis-domain-catalog-rag-" + sequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
     }
 
     private List<DomainCatalogItemResponse> governedContextItems(List<DomainCatalogItemResponse> items) {

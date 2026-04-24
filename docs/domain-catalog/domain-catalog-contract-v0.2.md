@@ -48,6 +48,15 @@ tenant, environment and `sourceHash` as already ingested. In that case,
 `/api/praxis/config/domain-catalog/ingest` returns the existing release and item
 count without deleting/reinserting items or republishing RAG documents.
 
+RAG publication is a derived materialization, not the source of truth for the
+catalog. By default the starter schedules RAG publication after the catalog
+transaction commits (`praxis.domain-catalog.rag-publication.async-enabled=true`)
+and publishes documents in bounded batches
+(`praxis.domain-catalog.rag-publication.batch-size=100`). Operators can still
+disable this materialization with
+`praxis.domain-catalog.rag-publication.enabled=false`; `/items` and `/context`
+continue to read the canonical transactional store.
+
 ## Additions From v0.1
 
 Context items may now include:
