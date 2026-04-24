@@ -53,9 +53,13 @@ Expected top-level shape:
 
 ```json
 {
-  "schemaVersion": "praxis.domain-catalog/v0.1",
+  "schemaVersion": "praxis.domain-catalog/v0.2",
   "service": {},
-  "release": {},
+  "release": {
+    "releaseKey": "praxis-service:human-resources.folhas-pagamento:0123456789abcdef",
+    "generatedAt": "2026-04-24T12:00:00Z",
+    "sourceHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
   "contexts": [],
   "nodes": [],
   "edges": [],
@@ -87,15 +91,19 @@ Expected response:
 ```json
 {
   "releaseId": "00000000-0000-0000-0000-000000000000",
-  "releaseKey": "praxis-api-quickstart:example",
+  "releaseKey": "praxis-service:human-resources.folhas-pagamento:0123456789abcdef",
   "itemCount": 42
 }
 ```
 
+Repeated ingestion of the same `releaseKey` and `sourceHash` is idempotent: the
+config store returns the existing item count without deleting/reinserting the
+catalog items or republishing RAG documents.
+
 Save the returned `releaseKey`.
 
 ```bash
-export DOMAIN_RELEASE_KEY="praxis-api-quickstart:example"
+export DOMAIN_RELEASE_KEY="praxis-service:human-resources.folhas-pagamento:0123456789abcdef"
 ```
 
 ## 4. Query Persisted Items

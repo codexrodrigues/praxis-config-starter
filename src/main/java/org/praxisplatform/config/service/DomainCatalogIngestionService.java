@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.StringJoiner;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.DomainCatalogItem;
@@ -136,8 +137,26 @@ public class DomainCatalogIngestionService {
         schemaValidationService.validate(payload);
         String schemaVersion = requiredText(payload, "schemaVersion");
         String releaseKey = releaseKey(payload);
+        String sourceHash = text(payload.path("release"), "sourceHash");
+        Optional<DomainCatalogRelease> existingRelease = releaseRepository.findByReleaseKey(releaseKey);
+        if (existingRelease
+                .filter(release -> sameCatalogRelease(release, schemaVersion, sourceHash, tenantId, environment))
+                .isPresent()) {
+            DomainCatalogRelease release = existingRelease.get();
+            long existingItemCount = itemRepository.countByRelease(release);
+            log.info(
+                    "Skipped domain catalog release {} because sourceHash {} is already ingested",
+                    release.getReleaseKey(),
+                    release.getSourceHash()
+            );
+            return new DomainCatalogIngestionResponse(
+                    release.getId(),
+                    release.getReleaseKey(),
+                    Math.toIntExact(Math.min(existingItemCount, Integer.MAX_VALUE))
+            );
+        }
 
-        DomainCatalogRelease release = releaseRepository.findByReleaseKey(releaseKey)
+        DomainCatalogRelease release = existingRelease
                 .orElseGet(DomainCatalogRelease::new);
         release.setReleaseKey(releaseKey);
         release.setSchemaVersion(schemaVersion);
@@ -145,7 +164,7 @@ public class DomainCatalogIngestionService {
         release.setServiceName(text(payload.path("service"), "name"));
         release.setServiceVersion(text(payload.path("service"), "version"));
         release.setGeneratedAt(parseInstant(text(payload.path("release"), "generatedAt")));
-        release.setSourceHash(text(payload.path("release"), "sourceHash"));
+        release.setSourceHash(sourceHash);
         release.setTenantId(normalize(tenantId));
         release.setEnvironment(normalize(environment));
         release.setRawPayload(write(payload));
@@ -173,6 +192,20 @@ public class DomainCatalogIngestionService {
 
         log.info("Ingested domain catalog release {} with {} item(s)", release.getReleaseKey(), items.size());
         return new DomainCatalogIngestionResponse(release.getId(), release.getReleaseKey(), items.size());
+    }
+
+    private boolean sameCatalogRelease(
+            DomainCatalogRelease release,
+            String schemaVersion,
+            String sourceHash,
+            String tenantId,
+            String environment) {
+        return release != null
+                && StringUtils.hasText(sourceHash)
+                && Objects.equals(release.getSchemaVersion(), schemaVersion)
+                && Objects.equals(release.getSourceHash(), sourceHash)
+                && Objects.equals(normalize(release.getTenantId()), normalize(tenantId))
+                && Objects.equals(normalize(release.getEnvironment()), normalize(environment));
     }
 
     @Transactional(readOnly = true)
