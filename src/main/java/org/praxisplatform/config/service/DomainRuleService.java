@@ -4,7 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -1095,7 +1099,7 @@ public class DomainRuleService {
         materialization.setMaterializedPayload(write(buildOptionSourceMaterializedPayload(
                 definition,
                 targetArtifactKey)));
-        materialization.setSourceHash("derived:" + definition.getRuleKey() + ":" + targetArtifactKey);
+        materialization.setSourceHash(derivedSourceHash(definition, targetLayer, targetArtifactKey));
         return materializationRepository.save(materialization);
     }
 
@@ -1121,8 +1125,22 @@ public class DomainRuleService {
         materialization.setMaterializedPayload(write(buildBackendValidationMaterializedPayload(
                 definition,
                 targetArtifactKey)));
-        materialization.setSourceHash("derived:" + definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey);
+        materialization.setSourceHash(derivedSourceHash(definition, targetLayer, targetArtifactKey));
         return materializationRepository.save(materialization);
+    }
+
+    private static String derivedSourceHash(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactKey) {
+        String source = definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(source.getBytes(StandardCharsets.UTF_8));
+            return "derived:sha256:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 digest is not available", ex);
+        }
     }
 
     private boolean isBackendValidationRuleType(String ruleType) {

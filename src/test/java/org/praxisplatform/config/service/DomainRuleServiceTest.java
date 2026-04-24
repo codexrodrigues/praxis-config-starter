@@ -687,12 +687,12 @@ class DomainRuleServiceTest {
                 .id(definitionId)
                 .tenantId("tenant-a")
                 .environment("dev")
-                .ruleKey("procurement.suppliers.rule.status-validation")
+                .ruleKey("procurement.purchase-orders.rule.supplier-backend-validation.20260424231531")
                 .version(1)
                 .ruleType("validation")
                 .status("approved")
                 .contextKey("procurement")
-                .resourceKey("procurement.suppliers")
+                .resourceKey("procurement.purchase-orders")
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Bloquear fornecedores inativos no backend.\"}")
                 .parameters("{\"severity\":\"error\",\"validationMessageTemplate\":\"Fornecedor indisponivel\"}")
@@ -711,7 +711,7 @@ class DomainRuleServiceTest {
         when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
                 "tenant-a",
                 "dev",
-                "procurement.suppliers",
+                "procurement.purchase-orders",
                 List.of("approved", "active")))
                 .thenReturn(List.of());
         when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -745,10 +745,12 @@ class DomainRuleServiceTest {
                 .satisfies(item -> {
                     assertThat(item.targetLayer()).isEqualTo("backend_validation");
                     assertThat(item.targetArtifactType()).isEqualTo("resource-validation");
-                    assertThat(item.targetArtifactKey()).isEqualTo("procurement.suppliers");
+                    assertThat(item.targetArtifactKey()).isEqualTo("procurement.purchase-orders");
                     assertThat(item.targetPointer()).isEqualTo("/validationPolicy");
                     assertThat(item.materializedRuleId()).isEqualTo("backend-validation-policy");
                     assertThat(item.status()).isEqualTo("applied");
+                    assertThat(item.sourceHash()).startsWith("derived:sha256:");
+                    assertThat(item.sourceHash()).hasSizeLessThanOrEqualTo(128);
                     assertThat(item.materializedPayload().path("kind").asText()).isEqualTo("resource_validation_policy");
                     assertThat(item.materializedPayload().path("validationPolicy").path("severity").asText())
                             .isEqualTo("error");
