@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
@@ -222,6 +223,69 @@ class DomainRuleServiceTest {
         verify(materializationRepository).save(captor.capture());
         assertThat(captor.getValue().getRuleDefinition()).isSameAs(definition);
         assertThat(captor.getValue().getMaterializedRuleId()).isEqualTo("lgpd-cpf-guidance");
+    }
+
+    @Test
+    void createsOptionSourceMaterializationFromSelectionEligibilityDefinitionWhenPayloadIsOmitted() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .resourceKey("procurement.suppliers")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\",\"validationMessageTemplate\":\"Fornecedor indisponivel\"}")
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["INACTIVE", "BLOCKED"]
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.createMaterialization(new DomainRuleMaterializationRequest(
+                definitionId,
+                "procurement.suppliers.rule.selection-eligibility:option_source:supplier",
+                "option_source",
+                "resource-option-source",
+                "supplier",
+                "/selectionPolicy",
+                null,
+                "selection-policy",
+                "pending_review",
+                null,
+                "hash-selection-eligibility",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+
+        assertThat(response.targetLayer()).isEqualTo("option_source");
+        assertThat(response.targetArtifactType()).isEqualTo("resource-option-source");
+        assertThat(response.targetArtifactKey()).isEqualTo("supplier");
+        assertThat(response.materializedPayload().path("kind").asText()).isEqualTo("lookup_selection_policy");
+        assertThat(response.materializedPayload().path("selectionPolicy").path("statusPropertyPath").asText())
+                .isEqualTo("status");
+        assertThat(response.materializedPayload().path("selectionPolicy").path("blockedStatuses"))
+                .extracting(JsonNode::asText)
+                .containsExactly("INACTIVE", "BLOCKED");
+        assertThat(response.materializedPayload().path("selectionPolicy").path("validationMessageTemplate").asText())
+                .isEqualTo("Fornecedor indisponivel");
     }
 
     @Test
@@ -458,6 +522,84 @@ class DomainRuleServiceTest {
                 .satisfies(item -> {
                     assertThat(item.status()).isEqualTo("applied");
                     assertThat(item.appliedBy()).isEqualTo("procurement-owner");
+                });
+    }
+
+    @Test
+    void publishesSelectionEligibilityRuleByAutoCreatingOptionSourceMaterialization() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["INACTIVE", "BLOCKED"]
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            if (materialization.getId() == null) {
+                materialization.setId(UUID.randomUUID());
+            }
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.materializations()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.targetLayer()).isEqualTo("option_source");
+                    assertThat(item.targetArtifactType()).isEqualTo("resource-option-source");
+                    assertThat(item.targetArtifactKey()).isEqualTo("supplier");
+                    assertThat(item.status()).isEqualTo("applied");
+                    assertThat(item.materializedPayload().path("kind").asText()).isEqualTo("lookup_selection_policy");
+                    assertThat(item.materializedPayload().path("selectionPolicy").path("blockedStatuses"))
+                            .extracting(JsonNode::asText)
+                            .containsExactly("INACTIVE", "BLOCKED");
                 });
     }
 
