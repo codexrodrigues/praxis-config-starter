@@ -17,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
+import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
@@ -29,6 +30,72 @@ import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 class DomainRuleServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void intakeCreatesDraftDefinitionAndGroundingForSimulation() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> {
+            DomainRuleDefinition definition = invocation.getArgument(0);
+            definition.onInsert();
+            return definition;
+        });
+
+        var response = service.intake(
+                new DomainRuleIntakeRequest(
+                        "Impedir seleção de fornecedores bloqueados em pedidos de compra.",
+                        "Vou abrir a trilha governada de regra compartilhada.",
+                        null,
+                        "selection_eligibility",
+                        "procurement",
+                        "procurement.suppliers",
+                        "praxis-api-quickstart",
+                        objectMapper.readTree("""
+                                {
+                                  "summary": "Impedir seleção de fornecedores bloqueados em pedidos de compra."
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "optionSourceKey": "supplier"
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "in": [
+                                    { "var": "status" },
+                                    ["INACTIVE", "BLOCKED"]
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "requiredApprovals": ["procurement-owner"]
+                                }
+                                """),
+                        "llm",
+                        "openai:gpt-5.4-mini"),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.ruleKey()).isEqualTo("procurement.suppliers.rule.selection-eligibility");
+        assertThat(response.status()).isEqualTo("draft");
+        assertThat(response.definition().definition().path("sourcePrompt").asText())
+                .isEqualTo("Impedir seleção de fornecedores bloqueados em pedidos de compra.");
+        assertThat(response.definition().definition().path("assistantMessage").asText())
+                .isEqualTo("Vou abrir a trilha governada de regra compartilhada.");
+        assertThat(response.grounding().path("nextEndpoint").asText())
+                .isEqualTo("/api/praxis/config/domain-rules/simulations");
+        assertThat(response.grounding().path("ruleDefinitionId").asText()).isEqualTo(response.definition().id().toString());
+
+        ArgumentCaptor<DomainRuleDefinition> captor = ArgumentCaptor.forClass(DomainRuleDefinition.class);
+        verify(definitionRepository).save(captor.capture());
+        assertThat(captor.getValue().getRuleType()).isEqualTo("selection_eligibility");
+        assertThat(captor.getValue().getResourceKey()).isEqualTo("procurement.suppliers");
+        assertThat(captor.getValue().getStatus()).isEqualTo("draft");
+    }
 
     @Test
     void createsSharedRuleDefinitionWithoutMaterializingFormConfig() throws Exception {
@@ -310,6 +377,14 @@ class DomainRuleServiceTest {
         assertThat(response.requiredApprovals()).hasSize(1);
         assertThat(response.requiredApprovals().get(0).asText()).isEqualTo("procurement-owner");
         assertThat(response.grounding().path("source").asText()).isEqualTo("ad_hoc_request");
+        assertThat(response.explainability().path("recommendedAction").asText()).isEqualTo("review_existing_coverage");
+        assertThat(response.explainability().path("publicationReadiness").asText()).isEqualTo("blocked_by_existing_coverage");
+        assertThat(response.explainability().path("summary").asText()).contains("Existing approved or active coverage was found");
+        assertThat(response.explainability().path("nextSteps")).hasSize(4);
+        assertThat(response.explainability().path("nextSteps").get(0).path("kind").asText()).isEqualTo("review_existing_coverage");
+        assertThat(response.explainability().path("nextSteps").get(1).path("kind").asText()).isEqualTo("request_approval");
+        assertThat(response.explainability().path("nextSteps").get(2).path("kind").asText()).isEqualTo("persist_definition");
+        assertThat(response.explainability().path("nextSteps").get(3).path("kind").asText()).isEqualTo("resolve_warnings");
     }
 
     @Test

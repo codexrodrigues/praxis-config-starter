@@ -353,9 +353,11 @@ Recommended first endpoints:
 - `POST /api/praxis/config/domain-knowledge/change-sets`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`
+- `POST /api/praxis/config/domain-rules/intake`
 - `POST /api/praxis/config/domain-rules/definitions`
 - `GET /api/praxis/config/domain-rules/definitions`
 - `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
+- `POST /api/praxis/config/domain-rules/simulations`
 - `POST /api/praxis/config/domain-rules/materializations`
 - `GET /api/praxis/config/domain-rules/materializations`
 - `PATCH /api/praxis/config/domain-rules/materializations/{materializationId}/status`
@@ -364,8 +366,11 @@ Recommended first endpoints:
 API. Internally it can delegate to the knowledge layer once v1 is ready.
 
 The `/domain-rules` endpoints are intentionally not rule executors. They are
-the persistence contract for shared rule definitions and target-specific
-materialization records. A materialization row may point to
+the persistence and authoring contract for shared rule intake, definitions,
+simulation and target-specific materialization records. Simulation is also the
+canonical explainability step: the backend should return grounding, existing
+coverage, predicted targets, required approvals, warnings and structured
+`explainability` so hosts do not need to infer decision impact locally. A materialization row may point to
 `target_layer=form_config`, but applying that payload to `FormConfig` remains a
 separate reviewed authoring operation.
 

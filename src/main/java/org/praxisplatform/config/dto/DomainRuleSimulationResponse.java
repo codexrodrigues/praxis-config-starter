@@ -21,6 +21,7 @@ public record DomainRuleSimulationResponse(
         JsonNode predictedMaterializations,
         JsonNode requiredApprovals,
         JsonNode warnings,
+        JsonNode explainability,
         Instant simulatedAt
 ) {
 }

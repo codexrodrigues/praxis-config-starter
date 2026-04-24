@@ -83,6 +83,11 @@ class AiStreamTransactionContractTest {
     void domainRuleServiceMustUseConfigTransactionManager() throws NoSuchMethodException {
         List<Method> methods = List.of(
                 DomainRuleService.class.getMethod(
+                        "intake",
+                        org.praxisplatform.config.dto.DomainRuleIntakeRequest.class,
+                        String.class,
+                        String.class),
+                DomainRuleService.class.getMethod(
                         "createDefinition",
                         org.praxisplatform.config.dto.DomainRuleDefinitionRequest.class,
                         String.class,

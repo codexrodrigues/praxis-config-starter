@@ -83,6 +83,12 @@ An LLM or agent using this envelope must:
 - route business-rule or shared-decision requests to
   `/api/praxis/config/domain-rules/**` when `recommendedAuthoringFlow` asks for
   `shared_rule_authoring`;
+- prefer `POST /api/praxis/config/domain-rules/intake` before ad hoc draft
+  construction when the host is opening a new shared-rule flow from natural
+  language;
+- treat `POST /api/praxis/config/domain-rules/simulations` as the canonical
+  backend explanation step for shared-rule impact, grounding and governance,
+  instead of rebuilding that explanation only in the frontend host;
 - only prefer `componentEditPlan` or manifest-backed edit operations when the
   request remains in component/page authoring;
 - include an explanation that references the domain concepts used;
