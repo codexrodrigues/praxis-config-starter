@@ -2625,6 +2625,47 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void contextHintRecommendedSharedRuleAuthoringReturnsRouteRequiredInsteadOfPreviewEligible() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/funcionarios");
+        ObjectNode domainCatalog = contextHints.putObject("domainCatalog");
+        domainCatalog.put("schemaVersion", "praxis.ai.context-hints.domain-catalog/v0.2");
+        domainCatalog.put("serviceKey", "praxis-service");
+        domainCatalog.put("resourceKey", "human-resources.funcionarios");
+        domainCatalog.put("type", "governance");
+        domainCatalog.put("intent", "authoring");
+        domainCatalog.put("query", "cpf lgpd funcionarios");
+        domainCatalog.put("recommendedAuthoringFlow", "shared_rule_authoring");
+        domainCatalog.put("limit", 12);
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie uma regra LGPD para CPF",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+        assertThat(result.assistantMessage())
+                .contains("/api/praxis/config/domain-rules")
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
     void metadataBackedResourceQuickReplyIdsRemainUniqueWhenResourcePathRepeats() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(

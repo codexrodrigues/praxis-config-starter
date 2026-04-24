@@ -2,26 +2,24 @@ package org.praxisplatform.config.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
-public record DomainRuleSimulationResponse(
-        UUID simulationId,
-        UUID ruleDefinitionId,
+public record DomainRulePublicationResponse(
+        UUID publicationId,
         String tenantId,
         String environment,
+        String publicationStatus,
+        String publicationReadiness,
+        UUID ruleDefinitionId,
         String ruleKey,
         Integer ruleVersion,
         String ruleType,
-        String contextKey,
         String resourceKey,
         String serviceKey,
-        String result,
-        JsonNode grounding,
-        JsonNode existingCoverage,
-        JsonNode predictedMaterializations,
-        JsonNode requiredApprovals,
-        JsonNode warnings,
+        DomainRuleDefinitionResponse definition,
+        List<DomainRuleMaterializationResponse> materializations,
         JsonNode explainability,
-        Instant simulatedAt
+        Instant processedAt
 ) {
 }

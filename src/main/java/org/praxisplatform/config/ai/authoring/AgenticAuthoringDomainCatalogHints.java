@@ -64,6 +64,10 @@ final class AgenticAuthoringDomainCatalogHints {
         String recommendedAuthoringFlow = recommendedAuthoringFlow(artifactKind, userPrompt);
         if (!recommendedAuthoringFlow.isBlank()) {
             domainCatalog.put("recommendedAuthoringFlow", recommendedAuthoringFlow);
+            String recommendedRuleType = recommendedRuleType(userPrompt);
+            if (!recommendedRuleType.isBlank()) {
+                domainCatalog.put("recommendedRuleType", recommendedRuleType);
+            }
         }
     }
 
@@ -116,8 +120,43 @@ final class AgenticAuthoringDomainCatalogHints {
                 || prompt.contains("compliance")
                 || prompt.contains("governanca")
                 || prompt.contains("privacidade")
-                || prompt.contains("orientacao visual")) {
+                || prompt.contains("orientacao visual")
+                || ((prompt.contains("impedir")
+                || prompt.contains("bloquear")
+                || prompt.contains("blocked")
+                || prompt.contains("inactive")
+                || prompt.contains("inativo"))
+                && (prompt.contains("selecao")
+                || prompt.contains("selecion")
+                || prompt.contains("fornecedor")
+                || prompt.contains("supplier")))) {
             return "shared_rule_authoring";
+        }
+        return "";
+    }
+
+    private static String recommendedRuleType(String userPrompt) {
+        String prompt = normalizeText(userPrompt);
+        if (prompt.isBlank()) {
+            return "";
+        }
+        if (prompt.contains("lgpd")
+                || prompt.contains("gdpr")
+                || prompt.contains("compliance")
+                || prompt.contains("governanca")
+                || prompt.contains("privacidade")) {
+            return "governance";
+        }
+        if ((prompt.contains("impedir")
+                || prompt.contains("bloquear")
+                || prompt.contains("blocked")
+                || prompt.contains("inativo")
+                || prompt.contains("inactive"))
+                && (prompt.contains("selecao")
+                || prompt.contains("selecion")
+                || prompt.contains("fornecedor")
+                || prompt.contains("supplier"))) {
+            return "selection_eligibility";
         }
         return "";
     }

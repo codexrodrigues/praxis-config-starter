@@ -52,6 +52,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("governance");
         assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").asText())
                 .isEqualTo("shared_rule_authoring");
+        assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").asText())
+                .isEqualTo("governance");
         assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("federated").asBoolean())
@@ -105,5 +107,33 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo(contextHints.path("domainCatalog").path("query").asText());
         assertThat(contextHints.path("domainCatalog").path("relationships").path("limit").asInt())
                 .isEqualTo(8);
+    }
+
+    @Test
+    void enrichAddsSelectionEligibilityRuleTypeForSupplierBlockingPrompts() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/procurement/suppliers",
+                "POST",
+                "/schemas/procurement/suppliers",
+                "/api/procurement/suppliers",
+                "POST",
+                0.94,
+                "Supplier form candidate",
+                java.util.List.of("metadata"));
+
+        AgenticAuthoringDomainCatalogHints.enrich(
+                contextHints,
+                candidate,
+                "form",
+                "Crie uma regra para impedir selecao de fornecedores blocked ou inactive em pedidos de compra",
+                null);
+
+        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").asText())
+                .isEqualTo("shared_rule_authoring");
+        assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").asText())
+                .isEqualTo("selection_eligibility");
+        assertThat(contextHints.path("domainCatalog").path("resourceKey").asText())
+                .isEqualTo("procurement.suppliers");
     }
 }

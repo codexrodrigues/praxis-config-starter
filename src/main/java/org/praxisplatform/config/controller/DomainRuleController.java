@@ -5,8 +5,12 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
+import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRulePublicationRequest;
+import org.praxisplatform.config.dto.DomainRulePublicationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
@@ -35,6 +39,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class DomainRuleController {
 
     private final DomainRuleService domainRuleService;
+
+    @PostMapping("/intake")
+    public ResponseEntity<DomainRuleIntakeResponse> intake(
+            @RequestBody DomainRuleIntakeRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.accepted().body(domainRuleService.intake(request, tenantId, environment));
+    }
 
     @PostMapping("/definitions")
     public ResponseEntity<DomainRuleDefinitionResponse> createDefinition(
@@ -80,6 +92,14 @@ public class DomainRuleController {
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         return ResponseEntity.ok(domainRuleService.simulate(request, tenantId, environment));
+    }
+
+    @PostMapping("/publications")
+    public ResponseEntity<DomainRulePublicationResponse> publish(
+            @RequestBody DomainRulePublicationRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainRuleService.publish(request, tenantId, environment));
     }
 
     @PostMapping("/materializations")
