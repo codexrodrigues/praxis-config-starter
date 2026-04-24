@@ -18,6 +18,8 @@ import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRulePublicationRequest;
+import org.praxisplatform.config.dto.DomainRulePublicationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
@@ -349,6 +351,102 @@ public class DomainRuleService {
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public DomainRulePublicationResponse publish(
+            DomainRulePublicationRequest request,
+            String tenantId,
+            String environment) {
+        if (request == null) {
+            throw new ConfigurationIngestionException("Domain rule publication request is required");
+        }
+        if (request.ruleDefinitionId() == null) {
+            throw new ConfigurationIngestionException("ruleDefinitionId is required");
+        }
+
+        DomainRuleDefinition definition = definitionRepository.findById(request.ruleDefinitionId())
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Rule definition not found: " + request.ruleDefinitionId()));
+        requireScope(definition.getTenantId(), tenantId, "tenantId");
+        requireScope(definition.getEnvironment(), environment, "environment");
+
+        DomainRuleSimulationResponse simulation = simulate(
+                new DomainRuleSimulationRequest(
+                        definition.getId(),
+                        definition.getRuleKey(),
+                        definition.getRuleType(),
+                        definition.getContextKey(),
+                        definition.getResourceKey(),
+                        definition.getServiceKey(),
+                        null,
+                        null,
+                        null,
+                        null),
+                tenantId,
+                environment);
+
+        String readiness = simulation.explainability() != null
+                ? normalize(simulation.explainability().path("publicationReadiness").asText(null))
+                : null;
+
+        if (!"ready_to_publish".equals(readiness)) {
+            return new DomainRulePublicationResponse(
+                    UUID.randomUUID(),
+                    definition.getTenantId(),
+                    definition.getEnvironment(),
+                    "blocked",
+                    readiness,
+                    definition.getId(),
+                    definition.getRuleKey(),
+                    definition.getVersion(),
+                    definition.getRuleType(),
+                    definition.getResourceKey(),
+                    definition.getServiceKey(),
+                    toResponse(definition),
+                    List.of(),
+                    simulation.explainability(),
+                    Instant.now());
+        }
+
+        Instant now = Instant.now();
+        if (isPublishableDefinitionStatus(definition.getStatus())) {
+            definition.setStatus("active");
+            if (!StringUtils.hasText(definition.getApprovedBy()) && StringUtils.hasText(request.publishedBy())) {
+                definition.setApprovedBy(request.publishedBy().trim());
+            }
+            if (definition.getApprovedAt() == null) {
+                definition.setApprovedAt(now);
+            }
+            if (definition.getActivatedAt() == null) {
+                definition.setActivatedAt(now);
+            }
+            definition = definitionRepository.save(definition);
+        }
+
+        List<DomainRuleMaterializationResponse> publishedMaterializations = publishMaterializations(
+                definition,
+                request,
+                tenantId,
+                environment,
+                now);
+
+        return new DomainRulePublicationResponse(
+                UUID.randomUUID(),
+                definition.getTenantId(),
+                definition.getEnvironment(),
+                "published",
+                readiness,
+                definition.getId(),
+                definition.getRuleKey(),
+                definition.getVersion(),
+                definition.getRuleType(),
+                definition.getResourceKey(),
+                definition.getServiceKey(),
+                toResponse(definition),
+                publishedMaterializations,
+                simulation.explainability(),
+                now);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleMaterializationResponse createMaterialization(
             DomainRuleMaterializationRequest request,
             String tenantId,
@@ -614,7 +712,7 @@ public class DomainRuleService {
                 buildRecommendedAction(existingCoverage, requiredApprovals, persistedDefinition));
         explainability.put(
                 "publicationReadiness",
-                buildPublicationReadiness(existingCoverage, requiredApprovals));
+                buildPublicationReadiness(existingCoverage, requiredApprovals, persistedDefinition));
 
         ArrayNode highlights = explainability.putArray("highlights");
         highlights.add("ruleKey=" + (StringUtils.hasText(ruleKey) ? ruleKey : resourceKey + ".rule.draft"));
@@ -701,14 +799,74 @@ public class DomainRuleService {
 
     private String buildPublicationReadiness(
             ArrayNode existingCoverage,
-            ArrayNode requiredApprovals) {
+            ArrayNode requiredApprovals,
+            boolean persistedDefinition) {
         if (!existingCoverage.isEmpty()) {
             return "blocked_by_existing_coverage";
         }
         if (!requiredApprovals.isEmpty()) {
             return "approval_required";
         }
-        return "ready_for_definition_review";
+        return persistedDefinition ? "ready_to_publish" : "ready_for_definition_review";
+    }
+
+    private boolean isPublishableDefinitionStatus(String status) {
+        return "draft".equals(status) || "proposed".equals(status) || "approved".equals(status) || "active".equals(status);
+    }
+
+    private List<DomainRuleMaterializationResponse> publishMaterializations(
+            DomainRuleDefinition definition,
+            DomainRulePublicationRequest request,
+            String tenantId,
+            String environment,
+            Instant now) {
+        boolean applyEligibleMaterializations = request.applyEligibleMaterializations() == null
+                || request.applyEligibleMaterializations();
+        if (!applyEligibleMaterializations && (request.materializationIds() == null || request.materializationIds().isEmpty())) {
+            return List.of();
+        }
+
+        List<DomainRuleMaterialization> candidates;
+        if (request.materializationIds() != null && !request.materializationIds().isEmpty()) {
+            candidates = request.materializationIds().stream()
+                    .map(id -> materializationRepository.findById(id)
+                            .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + id)))
+                    .toList();
+        } else {
+            candidates = materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                    normalize(tenantId),
+                    normalize(environment),
+                    definition.getId());
+        }
+
+        return candidates.stream()
+                .peek(materialization -> {
+                    requireScope(materialization.getTenantId(), tenantId, "tenantId");
+                    requireScope(materialization.getEnvironment(), environment, "environment");
+                    if (!definition.getId().equals(materialization.getRuleDefinition().getId())) {
+                        throw new ConfigurationIngestionException(
+                                "Rule materialization does not belong to definition " + definition.getId());
+                    }
+                })
+                .map(materialization -> maybeApplyMaterialization(materialization, request, now))
+                .map(this::toResponse)
+                .toList();
+    }
+
+    private DomainRuleMaterialization maybeApplyMaterialization(
+            DomainRuleMaterialization materialization,
+            DomainRulePublicationRequest request,
+            Instant now) {
+        if ("draft".equals(materialization.getStatus()) || "pending_review".equals(materialization.getStatus())) {
+            materialization.setStatus("applied");
+            materialization.setAppliedByType(normalizeOrDefault(request.publishedByType(), "human"));
+            materialization.setAppliedBy(normalize(request.publishedBy()));
+            if (materialization.getAppliedAt() == null) {
+                materialization.setAppliedAt(now);
+            }
+            return materializationRepository.save(materialization);
+        }
+        return materialization;
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)

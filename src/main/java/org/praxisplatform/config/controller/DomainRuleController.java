@@ -9,6 +9,8 @@ import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRulePublicationRequest;
+import org.praxisplatform.config.dto.DomainRulePublicationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
@@ -90,6 +92,14 @@ public class DomainRuleController {
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         return ResponseEntity.ok(domainRuleService.simulate(request, tenantId, environment));
+    }
+
+    @PostMapping("/publications")
+    public ResponseEntity<DomainRulePublicationResponse> publish(
+            @RequestBody DomainRulePublicationRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainRuleService.publish(request, tenantId, environment));
     }
 
     @PostMapping("/materializations")

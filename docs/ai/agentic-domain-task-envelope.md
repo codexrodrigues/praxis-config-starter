@@ -89,6 +89,9 @@ An LLM or agent using this envelope must:
 - treat `POST /api/praxis/config/domain-rules/simulations` as the canonical
   backend explanation step for shared-rule impact, grounding and governance,
   instead of rebuilding that explanation only in the frontend host;
+- use `POST /api/praxis/config/domain-rules/publications` as the canonical
+  promotion step once the persisted definition reports
+  `explainability.publicationReadiness=ready_to_publish`;
 - only prefer `componentEditPlan` or manifest-backed edit operations when the
   request remains in component/page authoring;
 - include an explanation that references the domain concepts used;

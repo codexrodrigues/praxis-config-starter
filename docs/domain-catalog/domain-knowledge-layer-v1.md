@@ -328,10 +328,14 @@ For today's Dynamic Form flow, the shared rule would live in
 5. Human/LLM curation creates `domain_knowledge_change_set`.
 6. Approved change sets update curated knowledge rows.
 7. Approved shared rules are stored as `domain_rule_definition` rows.
-8. Target-specific materializers create `domain_rule_materialization` rows and
+8. `POST /api/praxis/config/domain-rules/publications` promotes eligible
+   definitions through the governed lifecycle and applies eligible target
+   materializations without requiring each host to reconstruct publication
+   policy heuristics locally.
+9. Target-specific materializers create `domain_rule_materialization` rows and
    only then update `FormConfig`, backend validation, workflows or external
    policy engines.
-9. Runtime context reads the curated knowledge layer first, then falls back to
+10. Runtime context reads the curated knowledge layer first, then falls back to
    release items when curated rows are missing.
 
 The Java projection service is intentionally disabled by default until the

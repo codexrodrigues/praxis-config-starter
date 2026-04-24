@@ -19,6 +19,7 @@ import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
+import org.praxisplatform.config.dto.DomainRulePublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
@@ -385,6 +386,128 @@ class DomainRuleServiceTest {
         assertThat(response.explainability().path("nextSteps").get(1).path("kind").asText()).isEqualTo("request_approval");
         assertThat(response.explainability().path("nextSteps").get(2).path("kind").asText()).isEqualTo("persist_definition");
         assertThat(response.explainability().path("nextSteps").get(3).path("kind").asText()).isEqualTo("resolve_warnings");
+    }
+
+    @Test
+    void publishesPersistedRuleWhenSimulationReadinessIsReadyToPublish() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(2)
+                .ruleType("policy_reference")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{}")
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("supplier:selection-policy")
+                .targetLayer("backend_validation")
+                .targetArtifactType("resource-validation")
+                .targetArtifactKey("procurement.suppliers")
+                .status("pending_review")
+                .materializedPayload("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of(materialization));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.publicationReadiness()).isEqualTo("ready_to_publish");
+        assertThat(response.definition().status()).isEqualTo("active");
+        assertThat(response.definition().approvedBy()).isEqualTo("procurement-owner");
+        assertThat(response.explainability().path("recommendedAction").asText()).isEqualTo("materialize_or_activate");
+        assertThat(response.materializations()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.status()).isEqualTo("applied");
+                    assertThat(item.appliedBy()).isEqualTo("procurement-owner");
+                });
+    }
+
+    @Test
+    void blocksPublicationWhenApprovalsAreRequired() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.funcionarios.rule.lgpd-cpf-guidance")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("draft")
+                .contextKey("human-resources")
+                .resourceKey("human-resources.funcionarios")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Avisar o analista quando CPF estiver presente.\"}")
+                .parameters("{}")
+                .governance("{\"ruleAuthoring\":\"review_required\"}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "human-resources.funcionarios",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "privacy-office",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("blocked");
+        assertThat(response.publicationReadiness()).isEqualTo("approval_required");
+        assertThat(response.definition().status()).isEqualTo("draft");
+        assertThat(response.materializations()).isEmpty();
+        verify(definitionRepository, org.mockito.Mockito.times(2)).findById(definitionId);
     }
 
     @Test

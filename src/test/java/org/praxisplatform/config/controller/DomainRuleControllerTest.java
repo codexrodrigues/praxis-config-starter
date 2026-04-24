@@ -15,6 +15,8 @@ import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
+import org.praxisplatform.config.dto.DomainRulePublicationRequest;
+import org.praxisplatform.config.dto.DomainRulePublicationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
@@ -342,6 +344,42 @@ class DomainRuleControllerTest {
 
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).simulate(request, "tenant-a", "dev");
+    }
+
+    @Test
+    void publishesRuleWithTenantAndEnvironmentHeaders() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleController controller = new DomainRuleController(service);
+        UUID definitionId = UUID.randomUUID();
+        DomainRulePublicationRequest request = new DomainRulePublicationRequest(
+                definitionId,
+                List.of(),
+                true,
+                "human",
+                "procurement-owner",
+                null);
+        DomainRulePublicationResponse response = new DomainRulePublicationResponse(
+                UUID.randomUUID(),
+                "tenant-a",
+                "dev",
+                "published",
+                "ready_to_publish",
+                definitionId,
+                "procurement.suppliers.rule.selection-eligibility",
+                1,
+                "selection_eligibility",
+                "procurement.suppliers",
+                "praxis-api-quickstart",
+                null,
+                List.of(),
+                null,
+                java.time.Instant.now());
+        when(service.publish(request, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.publish(request, "tenant-a", "dev");
+
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).publish(request, "tenant-a", "dev");
     }
 
     @Test
