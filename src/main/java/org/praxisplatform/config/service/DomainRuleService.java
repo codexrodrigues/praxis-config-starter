@@ -424,6 +424,7 @@ public class DomainRuleService {
         List<DomainRuleMaterializationResponse> publishedMaterializations = publishMaterializations(
                 definition,
                 request,
+                simulation.predictedMaterializations(),
                 tenantId,
                 environment,
                 now);
@@ -476,7 +477,7 @@ public class DomainRuleService {
         materialization.setTargetReleaseKey(normalize(request.targetReleaseKey()));
         materialization.setMaterializedRuleId(normalize(request.materializedRuleId()));
         materialization.setStatus(normalizeOrDefault(request.status(), "draft"));
-        materialization.setMaterializedPayload(writeOrDefault(request.materializedPayload(), "{}"));
+        materialization.setMaterializedPayload(write(deriveMaterializedPayload(definition, request)));
         materialization.setSourceHash(normalize(request.sourceHash()));
         if (request.validationResult() != null && !request.validationResult().isNull()) {
             materialization.setValidationResult(write(request.validationResult()));
@@ -648,6 +649,124 @@ public class DomainRuleService {
         return resourceKey;
     }
 
+    private JsonNode deriveMaterializedPayload(
+            DomainRuleDefinition definition,
+            DomainRuleMaterializationRequest request) {
+        if (request.materializedPayload() != null && !request.materializedPayload().isNull()) {
+            return request.materializedPayload();
+        }
+        if ("option_source".equals(request.targetLayer())
+                && "resource-option-source".equals(request.targetArtifactType())
+                && definition != null
+                && "selection_eligibility".equals(definition.getRuleType())) {
+            return buildOptionSourceMaterializedPayload(definition, request.targetArtifactKey());
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    private ObjectNode buildOptionSourceMaterializedPayload(
+            DomainRuleDefinition definition,
+            String targetArtifactKey) {
+        JsonNode parameters = read(definition.getParameters());
+        JsonNode condition = read(definition.getCondition());
+
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("kind", "lookup_selection_policy");
+        payload.put("optionSourceKey", StringUtils.hasText(targetArtifactKey)
+                ? targetArtifactKey
+                : deriveOptionSourceKey(definition.getResourceKey(), parameters));
+
+        ObjectNode metadata = payload.putObject("metadata");
+        metadata.put("origin", "domain_rule_definition");
+        metadata.put("ruleType", normalizeOrDefault(definition.getRuleType(), "selection_eligibility"));
+        metadata.put("reviewStatus", "pending");
+
+        ObjectNode selectionPolicy = payload.putObject("selectionPolicy");
+        selectionPolicy.put("statusPropertyPath", deriveSelectionStatusPropertyPath(parameters, condition));
+        ArrayNode blockedStatuses = selectionPolicy.putArray("blockedStatuses");
+        deriveBlockedStatuses(parameters, condition).forEach(blockedStatuses::add);
+
+        boolean retainInvalidExistingValue = parameters != null
+                && parameters.isObject()
+                && parameters.path("allowRetainInvalidExistingValue").isBoolean()
+                ? parameters.path("allowRetainInvalidExistingValue").asBoolean()
+                : true;
+        selectionPolicy.put("allowRetainInvalidExistingValue", retainInvalidExistingValue);
+
+        if (parameters != null && parameters.isObject()) {
+            copyText(parameters, selectionPolicy, "validationMessageTemplate");
+            copyText(parameters, selectionPolicy, "disabledReasonTemplate");
+            JsonNode allowedStatuses = parameters.get("allowedStatuses");
+            if (allowedStatuses != null && allowedStatuses.isArray() && !allowedStatuses.isEmpty()) {
+                ArrayNode allowed = selectionPolicy.putArray("allowedStatuses");
+                allowedStatuses.forEach(item -> {
+                    if (item != null && item.isTextual() && StringUtils.hasText(item.asText())) {
+                        allowed.add(item.asText().trim());
+                    }
+                });
+            }
+        }
+        return payload;
+    }
+
+    private String deriveSelectionStatusPropertyPath(JsonNode parameters, JsonNode condition) {
+        if (parameters != null && parameters.isObject()) {
+            String explicit = normalize(parameters.path("statusPropertyPath").asText(null));
+            if (StringUtils.hasText(explicit)) {
+                return explicit;
+            }
+        }
+        if (condition != null && condition.isObject()) {
+            JsonNode inNode = condition.get("in");
+            if (inNode != null && inNode.isArray() && !inNode.isEmpty()) {
+                JsonNode candidate = inNode.get(0);
+                if (candidate != null && candidate.isObject()) {
+                    String statusVar = normalize(candidate.path("var").asText(null));
+                    if (StringUtils.hasText(statusVar)) {
+                        return statusVar;
+                    }
+                }
+            }
+        }
+        return "status";
+    }
+
+    private List<String> deriveBlockedStatuses(JsonNode parameters, JsonNode condition) {
+        if (parameters != null && parameters.isObject()) {
+            JsonNode explicit = parameters.get("blockedStatuses");
+            if (explicit != null && explicit.isArray() && !explicit.isEmpty()) {
+                return collectTextArray(explicit);
+            }
+        }
+        if (condition != null && condition.isObject()) {
+            JsonNode inNode = condition.get("in");
+            if (inNode != null && inNode.isArray() && inNode.size() >= 2) {
+                JsonNode statuses = inNode.get(1);
+                if (statuses != null && statuses.isArray() && !statuses.isEmpty()) {
+                    return collectTextArray(statuses);
+                }
+            }
+        }
+        return List.of("INACTIVE", "BLOCKED");
+    }
+
+    private List<String> collectTextArray(JsonNode arrayNode) {
+        java.util.ArrayList<String> values = new java.util.ArrayList<>();
+        arrayNode.forEach(item -> {
+            if (item != null && item.isTextual() && StringUtils.hasText(item.asText())) {
+                values.add(item.asText().trim());
+            }
+        });
+        return values;
+    }
+
+    private void copyText(JsonNode source, ObjectNode target, String fieldName) {
+        String value = normalize(source.path(fieldName).asText(null));
+        if (StringUtils.hasText(value)) {
+            target.put(fieldName, value);
+        }
+    }
+
     private String deriveRuleKey(String resourceKey, String ruleType) {
         String normalizedResource = resourceKey.trim();
         String normalizedRuleType = ruleType.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-");
@@ -817,6 +936,7 @@ public class DomainRuleService {
     private List<DomainRuleMaterializationResponse> publishMaterializations(
             DomainRuleDefinition definition,
             DomainRulePublicationRequest request,
+            JsonNode predictedMaterializations,
             String tenantId,
             String environment,
             Instant now) {
@@ -837,6 +957,13 @@ public class DomainRuleService {
                     normalize(tenantId),
                     normalize(environment),
                     definition.getId());
+            if (candidates.isEmpty()) {
+                candidates = createEligibleMaterializationsFromPredictions(
+                        definition,
+                        predictedMaterializations,
+                        tenantId,
+                        environment);
+            }
         }
 
         return candidates.stream()
@@ -851,6 +978,54 @@ public class DomainRuleService {
                 .map(materialization -> maybeApplyMaterialization(materialization, request, now))
                 .map(this::toResponse)
                 .toList();
+    }
+
+    private List<DomainRuleMaterialization> createEligibleMaterializationsFromPredictions(
+            DomainRuleDefinition definition,
+            JsonNode predictedMaterializations,
+            String tenantId,
+            String environment) {
+        if (predictedMaterializations == null || !predictedMaterializations.isArray()) {
+            return List.of();
+        }
+        return predictedMaterializations.findParents("targetLayer").stream()
+                .filter(JsonNode::isObject)
+                .map(target -> createEligibleMaterialization(definition, target, tenantId, environment))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    private DomainRuleMaterialization createEligibleMaterialization(
+            DomainRuleDefinition definition,
+            JsonNode target,
+            String tenantId,
+            String environment) {
+        String targetLayer = normalize(target.path("targetLayer").asText(null));
+        String targetArtifactType = normalize(target.path("targetArtifactType").asText(null));
+        String targetArtifactKey = normalize(target.path("targetArtifactKey").asText(null));
+        if (!"option_source".equals(targetLayer)
+                || !"resource-option-source".equals(targetArtifactType)
+                || !StringUtils.hasText(targetArtifactKey)) {
+            return null;
+        }
+
+        DomainRuleMaterialization materialization = new DomainRuleMaterialization();
+        materialization.setTenantId(normalize(tenantId));
+        materialization.setEnvironment(normalize(environment));
+        materialization.setRuleDefinition(definition);
+        materialization.setMaterializationKey(
+                definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey);
+        materialization.setTargetLayer(targetLayer);
+        materialization.setTargetArtifactType(targetArtifactType);
+        materialization.setTargetArtifactKey(targetArtifactKey);
+        materialization.setTargetPointer("/selectionPolicy");
+        materialization.setMaterializedRuleId("selection-policy");
+        materialization.setStatus("pending_review");
+        materialization.setMaterializedPayload(write(buildOptionSourceMaterializedPayload(
+                definition,
+                targetArtifactKey)));
+        materialization.setSourceHash("derived:" + definition.getRuleKey() + ":" + targetArtifactKey);
+        return materializationRepository.save(materialization);
     }
 
     private DomainRuleMaterialization maybeApplyMaterialization(

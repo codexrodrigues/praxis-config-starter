@@ -267,7 +267,7 @@ Recommended fields:
 - `version`: monotonically increasing integer per rule key
 - `rule_type`: `visual_guidance`, `form_rule`, `validation`, `visibility`,
   `calculation`, `workflow`, `compliance`, `privacy`, `ai_usage`,
-  `policy_reference`
+  `policy_reference`, `selection_eligibility`
 - `status`: `draft`, `proposed`, `approved`, `active`, `deprecated`,
   `retired`, `rejected`
 - `context_key`, `resource_key`, `service_key`
@@ -295,9 +295,10 @@ Recommended fields:
 - `id`
 - `rule_definition_id`
 - `materialization_key`: stable identity for a target projection
-- `target_layer`: `form_config`, `frontend_adapter`, `backend_validation`,
+- `target_layer`: `form_config`, `option_source`, `frontend_adapter`, `backend_validation`,
   `workflow`, `policy_engine`, `notification`, `reporting`, `external_system`
 - `target_artifact_type`: for example `praxis-dynamic-form`,
+  `resource-option-source`,
   `spring-service`, `opa-policy`, `workflow-definition`
 - `target_artifact_key`: form id, endpoint key, workflow key or policy key
 - `target_pointer`: JSON pointer/path inside the artifact
@@ -331,7 +332,9 @@ For today's Dynamic Form flow, the shared rule would live in
 8. `POST /api/praxis/config/domain-rules/publications` promotes eligible
    definitions through the governed lifecycle and applies eligible target
    materializations without requiring each host to reconstruct publication
-   policy heuristics locally.
+   policy heuristics locally. For `selection_eligibility`, this step can
+   already derive a canonical `option_source` materialization payload for the
+   predicted lookup target.
 9. Target-specific materializers create `domain_rule_materialization` rows and
    only then update `FormConfig`, backend validation, workflows or external
    policy engines.

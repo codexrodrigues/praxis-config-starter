@@ -91,7 +91,10 @@ An LLM or agent using this envelope must:
   instead of rebuilding that explanation only in the frontend host;
 - use `POST /api/praxis/config/domain-rules/publications` as the canonical
   promotion step once the persisted definition reports
-  `explainability.publicationReadiness=ready_to_publish`;
+  `explainability.publicationReadiness=ready_to_publish`; for
+  `selection_eligibility`, the publication flow may already derive the
+  canonical `option_source` materialization payload instead of forcing the host
+  to handcraft a local lookup policy patch;
 - only prefer `componentEditPlan` or manifest-backed edit operations when the
   request remains in component/page authoring;
 - include an explanation that references the domain concepts used;
