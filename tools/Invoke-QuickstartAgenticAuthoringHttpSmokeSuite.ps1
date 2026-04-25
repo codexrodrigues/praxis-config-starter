@@ -182,6 +182,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
         domainRuleTerminalPublishBlocked = [bool] $domainRuleLifecycle.terminalPublishBlocked
         domainRuleSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.semanticSourceHashesDiffer
+        domainRulePublicationCreatedDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationCreatedDiagnosticsSeen
+        domainRulePublicationSelectedExistingDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationSelectedExistingDiagnosticsSeen
         planValid = [bool] $plan.valid
         compileValid = [bool] $compile.compileValid
         previewValid = [bool] $preview.valid

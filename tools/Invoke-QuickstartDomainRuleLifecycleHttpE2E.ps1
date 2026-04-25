@@ -51,6 +51,35 @@ function Invoke-ExpectedFailure(
     throw "Expected request to fail with '$ExpectedMessage', but it succeeded: $Method $Uri"
 }
 
+function Assert-MaterializationOutcome(
+    [object] $Publication,
+    [string] $ExpectedResolution,
+    [string] $ExpectedMaterializationKey
+) {
+    $outcomes = @($Publication.explainability.publicationDiagnostics.materializationOutcomes)
+    if ($outcomes.Count -lt 1) {
+        throw "Expected publication diagnostics materializationOutcomes to contain at least one item."
+    }
+    $matched = @($outcomes | Where-Object {
+        $_.resolution -eq $ExpectedResolution -and $_.materializationKey -eq $ExpectedMaterializationKey
+    })
+    if ($matched.Count -lt 1) {
+        $actual = ($outcomes | ConvertTo-Json -Compress -Depth 12)
+        throw "Expected materialization outcome resolution='$ExpectedResolution' materializationKey='$ExpectedMaterializationKey', got: $actual"
+    }
+    $outcome = $matched[0]
+    if ([string]::IsNullOrWhiteSpace([string] $outcome.targetLayer)) {
+        throw "Expected materialization outcome to include targetLayer."
+    }
+    if ([string]::IsNullOrWhiteSpace([string] $outcome.targetArtifactType)) {
+        throw "Expected materialization outcome to include targetArtifactType."
+    }
+    if ([string]::IsNullOrWhiteSpace([string] $outcome.targetArtifactKey)) {
+        throw "Expected materialization outcome to include targetArtifactKey."
+    }
+    return $true
+}
+
 $base = $BaseUrl.TrimEnd("/")
 $headers = @{
     "Origin" = $Origin
@@ -278,6 +307,7 @@ $suspendedPublication = Invoke-JsonRequest `
 
 $inactiveHash = [string] $inactivePublication.materializations[0].sourceHash
 $suspendedHash = [string] $suspendedPublication.materializations[0].sourceHash
+$inactiveMaterializationKey = [string] $inactivePublication.materializations[0].materializationKey
 if ([string]::IsNullOrWhiteSpace($inactiveHash) -or $inactiveHash -notlike "derived:sha256:*") {
     throw "Expected inactive semantic hash to use derived:sha256 prefix, got '$inactiveHash'."
 }
@@ -286,6 +316,35 @@ if ([string]::IsNullOrWhiteSpace($suspendedHash) -or $suspendedHash -notlike "de
 }
 if ($inactiveHash -eq $suspendedHash) {
     throw "Expected semantic source hashes to differ when rule semantics differ."
+}
+
+$createdDiagnosticsSeen = Assert-MaterializationOutcome `
+    -Publication $inactivePublication `
+    -ExpectedResolution "created" `
+    -ExpectedMaterializationKey $inactiveMaterializationKey
+
+$inactiveRepublish = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/publications" `
+    -Headers $headers `
+    -Body @{
+        ruleDefinitionId = $inactiveDefinition.id
+        applyEligibleMaterializations = $true
+        publishedByType = "human"
+        publishedBy = "codex-http-smoke"
+        publicationNotes = @{
+            smoke = "domain-rule-publication-diagnostics"
+        }
+    }
+
+$selectedExistingDiagnosticsSeen = Assert-MaterializationOutcome `
+    -Publication $inactiveRepublish `
+    -ExpectedResolution "selected_existing" `
+    -ExpectedMaterializationKey $inactiveMaterializationKey
+
+$reusedHash = [string] $inactiveRepublish.materializations[0].sourceHash
+if ($reusedHash -ne $inactiveHash) {
+    throw "Expected republished materialization hash '$reusedHash' to match original '$inactiveHash'."
 }
 
 [pscustomobject]@{
@@ -301,4 +360,6 @@ if ($inactiveHash -eq $suspendedHash) {
     failedMaterializationStatus = $failedMaterialization.status
     terminalPublishBlocked = [bool] $terminalPublishBlocked
     semanticSourceHashesDiffer = $inactiveHash -ne $suspendedHash
+    publicationCreatedDiagnosticsSeen = [bool] $createdDiagnosticsSeen
+    publicationSelectedExistingDiagnosticsSeen = [bool] $selectedExistingDiagnosticsSeen
 } | ConvertTo-Json -Depth 8
