@@ -93,8 +93,9 @@ The release can move from deferred to publishable when all of these are true:
 - the latest integrated `Agentic Authoring HTTP Smoke` run passes with Page
   Builder full E2E enabled;
 - the smoke summary confirms `domainRulePublicationCreatedDiagnosticsSeen=true`,
-  `domainRulePublicationSelectedExistingDiagnosticsSeen=true` and
-  `domainRulePublicationReusedDiagnosticsSeen=true`;
+  `domainRulePublicationSelectedExistingDiagnosticsSeen=true`,
+  `domainRulePublicationReusedDiagnosticsSeen=true` and
+  `domainRulePublicationBlockedDiagnosticsSeen=true`;
 - the intended Maven version is explicit and not already tagged;
 - the downstream consumer that needs the artifact version is named;
 - no new contract change has landed after the gate without a new gate run.

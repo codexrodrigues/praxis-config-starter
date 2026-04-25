@@ -185,6 +185,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         domainRulePublicationCreatedDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationCreatedDiagnosticsSeen
         domainRulePublicationSelectedExistingDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationSelectedExistingDiagnosticsSeen
         domainRulePublicationReusedDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationReusedDiagnosticsSeen
+        domainRulePublicationBlockedDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationBlockedDiagnosticsSeen
         planValid = [bool] $plan.valid
         compileValid = [bool] $compile.compileValid
         previewValid = [bool] $preview.valid
