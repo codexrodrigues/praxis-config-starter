@@ -156,6 +156,10 @@ The current canonical behavior is:
   release gate through `domainRulePublicationBlockedDiagnosticsSeen=true`,
   preventing future regressions where blocked governance would still succeed
   but lose canonical explainability.
+- The quickstart HTTP smoke now treats canonical shared-rule routing as a
+  release gate through `domainRuleIntentRoutingSeen=true`, proving
+  `intent-resolution` returns `gate.status=route_required` and `page-preview`
+  preserves the governed route block instead of generating UI composition.
 - `praxis-ui-angular` projects this diagnostic envelope in the shared-rule
   handoff cockpit through typed `@praxisui/core` contracts, keeping Angular as
   a cockpit/runtime of governed semantic decisions rather than a source of
