@@ -43,7 +43,8 @@ function Invoke-ExpectedFailure(
         if ([string]::IsNullOrWhiteSpace($text)) {
             $text = $_.Exception.Message
         }
-        if ($text -notlike "*$ExpectedMessage*") {
+        $normalizedText = $text.Replace("\u003E", ">").Replace("\u003C", "<")
+        if ($normalizedText -notlike "*$ExpectedMessage*") {
             throw "Expected failure containing '$ExpectedMessage', got: $text"
         }
         return $true
