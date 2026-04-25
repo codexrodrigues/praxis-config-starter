@@ -849,3 +849,26 @@ explicit summary marker: `domainRuleMaterializationSourceHashDiagnosticsSeen`.
 The marker is true only when a materialization response has a root
 `sourceHash`, `decisionDiagnostics.sourceHashPresent=true` and
 `decisionDiagnostics.sourceHash` equal to the root fingerprint.
+
+`praxis-config-starter` PR #101 reached `main` at
+`37158beb9d485e0fe607ec9d1639166701adabcc`. GitHub Actions `CI and Release
+Java Starter (praxis-config-starter)` run `24934267501` passed for PR #101's
+main merge commit. Release/tag and Maven Central publication jobs remained
+skipped.
+
+The proportional `Agentic Authoring HTTP Smoke` run `24934299231` passed after
+PR #101 and confirmed the new fingerprint-specific marker:
+
+- `domainRuleMaterializationSourceHashDiagnosticsSeen=true`;
+- `domainRuleMaterializationDecisionDiagnosticsSeen=true`;
+- `domainRuleTerminalDefinitionTransitionBlocked=true`;
+- `domainRuleTerminalMaterializationTransitionBlocked=true`;
+- `domainRulePublicationCreatedDiagnosticsSeen=true`;
+- `domainRulePublicationSelectedExistingDiagnosticsSeen=true`;
+- `domainRulePublicationReusedDiagnosticsSeen=true`;
+- `domainRulePublicationBlockedDiagnosticsSeen=true`;
+- `domainRuleProcurementOptionSourcePolicySeen=true`;
+- `domainRuleProcurementBackendValidationPolicySeen=true`.
+
+This closes the proportional HTTP/SSE guardrail for materialization
+`sourceHash` diagnostics. No Maven Central or npm publication was performed.
