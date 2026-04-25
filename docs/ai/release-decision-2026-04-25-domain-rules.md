@@ -152,6 +152,17 @@ The platform has enough evidence to support a release candidate:
   `domainRuleMaterializationDecisionDiagnosticsSeen=true` together with the
   existing publication diagnostics, terminal-transition guards and procurement
   projection markers. No Maven/npm publication was performed.
+- `praxis-config-starter` PR #101 reached `main` at
+  `37158beb9d485e0fe607ec9d1639166701adabcc` and promoted materialization
+  `sourceHash` diagnostics into an explicit HTTP/SSE smoke marker. `CI and
+  Release Java Starter (praxis-config-starter)` run `24934267501` passed;
+  release/tag and Maven Central publication jobs remained skipped.
+- Proportional `Agentic Authoring HTTP Smoke` run `24934299231` passed after
+  PR #101 and confirmed
+  `domainRuleMaterializationSourceHashDiagnosticsSeen=true` together with
+  `domainRuleMaterializationDecisionDiagnosticsSeen=true`, terminal-transition
+  guards, publication diagnostics and procurement projection markers. No
+  Maven/npm publication was performed.
 
 Publication is still intentionally deferred because:
 
