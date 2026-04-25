@@ -266,12 +266,16 @@ so the platform contract could be validated before any external publication.
 
 ## Recommended Next Step
 
-Move from browser-level readiness evidence to release discipline:
+Keep the release deferred and move back to platform hardening:
 
-1. Preserve the HTTP lifecycle gate for `created`, `selected_existing` and
-   `reused` diagnostics so release readiness proves all publication/materialization
-   resolution branches over the quickstart host.
-2. Defer Maven/npm publication until a release
-   cut explicitly requires external artifact consumption.
-3. If a release is requested, publish once after confirming the external
+1. Treat run `24923468741` as the current integrated readiness checkpoint for
+   domain-rule publication diagnostics, Domain Catalog v2 and Page Builder
+   runtime projection.
+2. Defer Maven/npm publication until a named downstream consumer explicitly
+   needs external artifact resolution.
+3. Use the next implementation cycle to strengthen governed semantic decision
+   authoring itself: preserve canonical explainability in the intake,
+   simulation, publication and materialization path, and prefer backend-owned
+   diagnostics over cockpit-side inference.
+4. If a release is requested, publish once after confirming the external
    artifact version set, rather than repeatedly publishing during validation.
