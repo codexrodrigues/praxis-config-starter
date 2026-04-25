@@ -155,6 +155,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         Environment = $Environment
     }
 
+    $intentResolution = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringIntentResolutionHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $plan = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPlanHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $compile = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringCompileHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $preview = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPreviewHttpE2E.ps1") @commonArgs | ConvertFrom-Json
@@ -174,6 +175,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         quickstartRoot = $QuickstartRoot
         jarPath = $JarPath
         startedQuickstart = $startedQuickstart
+        intentRouteRequired = $intentResolution.gateStatus -eq "route_required"
+        intentSelectedResourcePath = $intentResolution.selectedResourcePath
         planValid = [bool] $plan.valid
         compileValid = [bool] $compile.compileValid
         previewValid = [bool] $preview.valid

@@ -872,6 +872,7 @@ public class AgenticAuthoringIntentResolverService {
             candidates.addAll(apiMetadataCandidateCatalog.discover(prompt, "unknown"));
             candidates.addAll(apiMetadataCandidateCatalog.discover("", "unknown"));
         }
+        candidates.addAll(discoverKnownCandidates(prompt));
         candidates.addAll(discoverBroadKnownCandidates());
         return deduplicateCandidates(candidates);
     }
