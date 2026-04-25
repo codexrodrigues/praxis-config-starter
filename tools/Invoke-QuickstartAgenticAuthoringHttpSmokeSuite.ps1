@@ -180,6 +180,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         intentSelectedResourcePath = $intentResolution.selectedResourcePath
         domainRuleAppliedCreationBlocked = [bool] $domainRuleLifecycle.appliedCreationBlocked
         domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
+        domainRuleTerminalDefinitionTransitionBlocked = [bool] $domainRuleLifecycle.terminalDefinitionTransitionBlocked
+        domainRuleTerminalMaterializationTransitionBlocked = [bool] $domainRuleLifecycle.terminalMaterializationTransitionBlocked
         domainRuleTerminalPublishBlocked = [bool] $domainRuleLifecycle.terminalPublishBlocked
         domainRuleSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.semanticSourceHashesDiffer
         domainRuleBackendValidationSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.backendValidationSemanticSourceHashesDiffer
