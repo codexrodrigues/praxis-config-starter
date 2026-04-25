@@ -1151,7 +1151,11 @@ public class DomainRuleService {
                         materializationOutcomes);
             } else {
                 candidates.forEach(materialization ->
-                        addMaterializationOutcome(materializationOutcomes, materialization, "selected_existing", null));
+                        addMaterializationOutcome(
+                                materializationOutcomes,
+                                materialization,
+                                isDerivedMaterialization(materialization) ? "reused" : "selected_existing",
+                                null));
             }
         }
 
@@ -1180,6 +1184,12 @@ public class DomainRuleService {
 
     private boolean isPublishableMaterializationStatus(String status) {
         return "draft".equals(status) || "pending_review".equals(status) || "applied".equals(status);
+    }
+
+    private boolean isDerivedMaterialization(DomainRuleMaterialization materialization) {
+        return materialization != null
+                && StringUtils.hasText(materialization.getSourceHash())
+                && materialization.getSourceHash().startsWith("derived:sha256:");
     }
 
     private List<DomainRuleMaterialization> createEligibleMaterializationsFromPredictions(

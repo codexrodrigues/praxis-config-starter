@@ -973,6 +973,82 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void reportsExistingDerivedMaterializationAsReusedDuringPublication() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(2)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{}")
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("procurement.suppliers.rule.selection-eligibility:option_source:supplier")
+                .targetLayer("option_source")
+                .targetArtifactType("resource-option-source")
+                .targetArtifactKey("supplier")
+                .status("applied")
+                .materializedPayload("{}")
+                .sourceHash("derived:sha256:previous")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of(materialization));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .singleElement()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("reused");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
+                    assertThat(outcome.path("sourceHash").asText()).isEqualTo("derived:sha256:previous");
+                    assertThat(outcome.path("statusAtResolution").asText()).isEqualTo("applied");
+                });
+    }
+
+    @Test
     void blocksPublicationWhenSelectedMaterializationStatusIsNotPublishable() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
