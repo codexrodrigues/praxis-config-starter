@@ -91,6 +91,13 @@ The platform has enough evidence to support a release candidate:
   one governed semantic decision in the shared-rule handoff cockpit.
 - `praxis-ui-angular` CI runs `24931880584` and `24931981608` passed for PR #58
   and for `main` after merge. No npm publication was performed.
+- Proportional `Agentic Authoring HTTP Smoke` run `24932150973` passed after
+  PR #58 and docs PR #88 reached `main`, with `quickstart_ref=main`,
+  `metadata_ref=main`, `ui_ref=main`, `run_quickstart_http_smoke=true`,
+  `run_domain_catalog_v2_smoke=false`, `run_page_builder_full_e2e=false` and
+  `run_llm_compliance_policy_shadow=false`. It confirmed both procurement
+  sibling projection markers and the existing publication/intake/simulation/
+  materialization diagnostics markers. No Maven/npm publication was performed.
 
 Publication is still intentionally deferred because:
 
@@ -179,6 +186,6 @@ Continue implementation without publishing.
 The next engineering work should focus on hardening the semantic decision
 platform itself: preserve backend-owned decision diagnostics in governed
 authoring explainability, keep sibling runtime materializations clearly
-projected in downstream consumers, run the smallest proportional integrated
-smoke after Angular PR #58, and only cut `0.1.0-rc.34` when a real downstream
-consumer needs Maven Central resolution.
+projected in downstream consumers, use Page Builder full E2E only when the
+next change actually needs browser/stream coverage, and only cut
+`0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.
