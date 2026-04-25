@@ -537,11 +537,12 @@ Keep the release deferred and move back to platform hardening:
    cockpit rendering now explains `option_source` and `backend_validation` as
    sibling projections of the same governed semantic decision through typed
    `@praxisui/core` contracts.
-4. Use the next implementation cycle to run the smallest proportional
-   integrated smoke that exercises config `main`, quickstart `main` and Angular
-   `main` after PR #58, without Maven/npm publication. Prefer the quickstart
-   HTTP smoke first; enable Page Builder full E2E only if the validation target
-   explicitly needs browser/stream coverage.
+4. Treat run `24932150973` as the proportional post-PR #58 smoke checkpoint
+   for config `main`, quickstart `main` and metadata `main`. It intentionally
+   kept Page Builder full E2E, Domain Catalog v2 and LLM compliance shadow
+   disabled because the target was the domain-rule lifecycle HTTP/SSE path.
+   Enable Page Builder full E2E only if the next validation target explicitly
+   needs browser/stream coverage.
 5. If a release is requested, publish once after confirming the external
    artifact version set, rather than repeatedly publishing during validation.
 
@@ -632,3 +633,38 @@ Local validation passed with:
 GitHub Actions `CI - Build Praxis Angular Libs` run `24931880584` passed for
 the PR head and run `24931981608` passed for `main` after merge. No npm
 publication was performed.
+
+## Post-Angular Proportional Smoke Checkpoint
+
+After Angular PR #58 and docs PR #88 reached `main`, GitHub Actions
+`Agentic Authoring HTTP Smoke` run `24932150973` passed for config merge commit
+`a1e7928c5fa4d12c47cb516087106c6d050c20d2`.
+
+The run used:
+
+- `provider=openai`;
+- `quickstart_ref=main`;
+- `metadata_ref=main`;
+- `ui_ref=main`;
+- `run_quickstart_http_smoke=true`;
+- `run_domain_catalog_v2_smoke=false`;
+- `run_page_builder_full_e2e=false`;
+- `run_llm_compliance_policy_shadow=false`.
+
+The log confirmed:
+
+- `domainRuleSemanticSourceHashesDiffer=true`;
+- `domainRuleBackendValidationSemanticSourceHashesDiffer=true`;
+- `domainRulePublicationCreatedDiagnosticsSeen=true`;
+- `domainRulePublicationSelectedExistingDiagnosticsSeen=true`;
+- `domainRulePublicationReusedDiagnosticsSeen=true`;
+- `domainRulePublicationBlockedDiagnosticsSeen=true`;
+- `domainRuleIntakeDecisionDiagnosticsSeen=true`;
+- `domainRuleDecisionDiagnosticsSeen=true`;
+- `domainRuleMaterializationDecisionDiagnosticsSeen=true`;
+- `domainRuleProcurementOptionSourcePolicySeen=true`;
+- `domainRuleProcurementBackendValidationPolicySeen=true`.
+
+This closes the proportional integrated smoke requested after the Angular
+sibling projection checkpoint. No Maven Central or npm publication was
+performed.
