@@ -19,7 +19,7 @@ The validated path covers:
 
 ## Version Set
 
-- `praxis-config-starter`: `main` commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6`.
+- `praxis-config-starter`: `main` commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626`.
 - `praxis-ui-angular`: `main` commit `524f6f7033885c76d29469106ab32d13f2ac923c`.
 - `praxis-api-quickstart`: `main`, packaged in GitHub Actions against the local
   `praxis-config-starter` and `praxis-metadata-starter` checkouts.
@@ -76,6 +76,10 @@ The validated path covers:
   commit `cffbac9f5942c1502273fe3b2ac4e8250268033c`.
 - PR #73, `Require domain-rule decision diagnostics for release`,
   commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6`.
+- PR #74, `Refresh domain-rules readiness checkpoint`,
+  commit `40675fd8b42d032b62c248e30cf87409512d72b5`.
+- PR #75, `Add domain-rule intake decision diagnostics`,
+  commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626`.
 - `praxis-ui-angular` PR #52, `Project domain rule publication diagnostics in cockpit`,
   commit `a754afd091125f1ab152c64e87dbd02e4654202d`.
 - `praxis-ui-angular` PR #53, `Keep page-builder resource discovery on SSE`,
@@ -175,6 +179,12 @@ GitHub Actions CI on `main`:
   for commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6`, after the release
   decision and knowledge-layer docs were aligned with
   `domainRuleDecisionDiagnosticsSeen=true`.
+- `CI and Release Java Starter (praxis-config-starter)` run `24925182860` passed
+  for commit `40675fd8b42d032b62c248e30cf87409512d72b5`, after the readiness
+  checkpoint was refreshed through PR #74.
+- `CI and Release Java Starter (praxis-config-starter)` run `24925270702` passed
+  for commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626`, after intake
+  diagnostics were added to the domain-rule contract and smoke gate.
 
 Operational smoke on `main`:
 
@@ -260,6 +270,15 @@ Operational smoke on `main`:
   `domainRuleDecisionDiagnosticsSeen=true`, Domain Catalog v2
   `catalogSchemaVersion=praxis.domain-catalog/v0.2`, Page Builder full E2E
   `2 passed` and `fullE2EPassed=true`.
+- `Agentic Authoring HTTP Smoke` run `24925298855` passed for commit
+  `64f3d41b5805915ea7d5e67dcd909e0fa39c1626` with
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=false` and
+  `run_page_builder_full_e2e=false`. This proportional run confirmed the
+  Windows HTTP lifecycle smoke after intake diagnostics entered the canonical
+  contract.
+- Smoke run `24925298855` confirmed all four publication diagnostics plus
+  `domainRuleIntakeDecisionDiagnosticsSeen=true` and
+  `domainRuleDecisionDiagnosticsSeen=true`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
@@ -337,8 +356,9 @@ Keep the release deferred and move back to platform hardening:
 1. Treat run `24924505019` as the current integrated readiness checkpoint for
    domain-rule publication diagnostics, backend-owned decision diagnostics,
    Domain Catalog v2 and Page Builder runtime projection, and treat config
-   `main` commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6` as the current
-   documented source checkpoint after the docs-only CI run `24925130100`.
+   `main` commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626` as the current
+   source checkpoint for intake plus simulation/publication diagnostics after
+   proportional HTTP smoke run `24925298855`.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Use the next implementation cycle to strengthen governed semantic decision
