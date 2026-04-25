@@ -18,6 +18,8 @@ public class AgenticAuthoringIntentResolverService {
     private static final String DEFAULT_TARGET_COMPONENT = "praxis-dynamic-page-builder";
     private static final String PAYROLL_ANALYTICS = "/api/human-resources/vw-analytics-folha-pagamento";
     private static final String PAYROLL = "/api/human-resources/folhas-pagamento";
+    private static final String PROCUREMENT_SUPPLIERS = "/api/procurement/suppliers";
+    private static final String PROCUREMENT_PURCHASE_ORDERS = "/api/procurement/purchase-orders";
 
     private final AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer;
     private final AgenticAuthoringCandidateEligibilityGate eligibilityGate;
@@ -281,7 +283,7 @@ public class AgenticAuthoringIntentResolverService {
                 selectedCandidate,
                 candidates);
         gate = withPromptSpecificGateMessages(gate, prompt, operationKind, artifactKind, selectedCandidate);
-        gate = withRequestedAuthoringFlowGate(gate, request, selectedCandidate);
+        gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate);
         List<String> questions = clarificationQuestions(gate, operationKind, artifactKind, selectedCandidate, candidates);
         questions = llmClarificationQuestions(llmIntent, gate, questions);
         boolean answeredBareDomainClarification = turn.answeredPendingClarification()
@@ -892,6 +894,22 @@ public class AgenticAuthoringIntentResolverService {
                 || (containsAny(prompt, "rh", "human resources") && !isPayrollAnalyticsPrompt(prompt))) {
             candidates.add(candidate("/api/human-resources/funcionarios", 0.90d, "prompt mentions funcionarios/colaboradores", "known-quickstart-resource"));
         }
+        if (containsAny(prompt, "fornecedor", "fornecedores", "supplier", "suppliers")) {
+            candidates.add(candidate(
+                    PROCUREMENT_SUPPLIERS,
+                    "post",
+                    0.93d,
+                    "prompt mentions procurement suppliers",
+                    "known-quickstart-procurement-resource"));
+        }
+        if (containsAny(prompt, "pedido de compra", "pedidos de compra", "purchase order", "purchase orders")) {
+            candidates.add(candidate(
+                    PROCUREMENT_PURCHASE_ORDERS,
+                    "post",
+                    0.93d,
+                    "prompt mentions procurement purchase orders",
+                    "known-quickstart-procurement-resource"));
+        }
         if (isPayrollAnalyticsPrompt(prompt) && isDashboardWidgetAdditionPrompt(prompt)) {
             candidates.add(candidate(
                     PAYROLL_ANALYTICS,
@@ -1107,16 +1125,15 @@ public class AgenticAuthoringIntentResolverService {
         return new AgenticAuthoringGateResult(gate.gateId(), status, List.copyOf(messages));
     }
 
-    private AgenticAuthoringGateResult withRequestedAuthoringFlowGate(
+    private AgenticAuthoringGateResult withSharedRuleAuthoringGate(
             AgenticAuthoringGateResult gate,
             AgenticAuthoringIntentResolutionRequest request,
+            String prompt,
             AgenticAuthoringCandidate selectedCandidate) {
         if (gate == null) {
             return null;
         }
-        String requestedFlow = requestedAuthoringFlow(request);
-        if (!"shared_rule_authoring".equals(requestedFlow)
-                || selectedCandidate == null) {
+        if (!requiresSharedRuleAuthoring(request, prompt, selectedCandidate)) {
             return gate;
         }
         List<String> messages = new ArrayList<>(gate.messages());
@@ -1127,6 +1144,41 @@ public class AgenticAuthoringIntentResolverService {
                 gate.gateId(),
                 "route_required",
                 List.copyOf(messages));
+    }
+
+    private boolean requiresSharedRuleAuthoring(
+            AgenticAuthoringIntentResolutionRequest request,
+            String prompt,
+            AgenticAuthoringCandidate selectedCandidate) {
+        String requestedFlow = requestedAuthoringFlow(request);
+        if ("shared_rule_authoring".equals(requestedFlow)) {
+            return selectedCandidate != null;
+        }
+        return selectedCandidate != null && isBusinessRuleAuthoringPrompt(prompt);
+    }
+
+    private boolean isBusinessRuleAuthoringPrompt(String prompt) {
+        String normalized = normalize(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean decisionIntent = containsAny(normalized,
+                "regra", "regras", "rule", "rules",
+                "politica", "politicas", "policy", "policies",
+                "decisao", "decisoes", "decision", "decisions",
+                "validacao", "validar", "validation", "validate",
+                "bloquear", "bloqueie", "impedir", "nao pode", "nao permitir",
+                "elegibilidade", "eligibility", "compliance", "governanca", "governance");
+        boolean businessSubject = containsAny(normalized,
+                "fornecedor", "fornecedores", "supplier", "suppliers",
+                "pedido", "pedidos", "purchase order", "purchase orders",
+                "compra", "compras",
+                "cpf", "lgpd", "gdpr",
+                "status", "bloqueado", "blocked", "inactive", "inativo");
+        boolean componentAuthoringIntent = containsAny(normalized,
+                "formulario", "form", "tabela", "table", "dashboard", "grafico", "chart",
+                "campo", "campos", "coluna", "colunas", "widget", "componente", "pagina");
+        return decisionIntent && (businessSubject || !componentAuthoringIntent);
     }
 
     private boolean requiresPayrollDashboardBreakdown(
