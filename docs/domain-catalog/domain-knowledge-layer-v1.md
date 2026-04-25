@@ -383,6 +383,7 @@ Recommended first endpoints:
 - `GET /api/praxis/config/domain-rules/definitions`
 - `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
 - `POST /api/praxis/config/domain-rules/simulations`
+- `POST /api/praxis/config/domain-rules/publications`
 - `POST /api/praxis/config/domain-rules/materializations`
 - `GET /api/praxis/config/domain-rules/materializations`
 - `PATCH /api/praxis/config/domain-rules/materializations/{materializationId}/status`
