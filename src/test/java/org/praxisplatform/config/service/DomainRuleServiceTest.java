@@ -268,6 +268,20 @@ class DomainRuleServiceTest {
         assertThat(response.targetLayer()).isEqualTo("form_config");
         assertThat(response.materializedPayload().path("metadata").path("reviewStatus").asText())
                 .isEqualTo("pending");
+        assertThat(response.decisionDiagnostics().path("decisionKind").asText())
+                .isEqualTo("semantic_domain_rule");
+        assertThat(response.decisionDiagnostics().path("decisionStage").asText())
+                .isEqualTo("materialization");
+        assertThat(response.decisionDiagnostics().path("decisionSource").asText())
+                .isEqualTo("materialization_record");
+        assertThat(response.decisionDiagnostics().path("canonicalOwner").asText())
+                .isEqualTo("praxis-config-starter");
+        assertThat(response.decisionDiagnostics().path("materializationKey").asText())
+                .isEqualTo("funcionarios-form-demo:formRules:lgpd-cpf-guidance");
+        assertThat(response.decisionDiagnostics().path("targetLayer").asText())
+                .isEqualTo("form_config");
+        assertThat(response.decisionDiagnostics().path("runtimeSurfacesAreDerived").asBoolean())
+                .isTrue();
 
         ArgumentCaptor<DomainRuleMaterialization> captor = ArgumentCaptor.forClass(DomainRuleMaterialization.class);
         verify(materializationRepository).save(captor.capture());
