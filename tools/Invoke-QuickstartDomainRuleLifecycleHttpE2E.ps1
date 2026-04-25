@@ -165,6 +165,15 @@ function Assert-MaterializationDecisionDiagnostics(
     if ($diagnostics.targetLayer -ne $ExpectedTargetLayer) {
         throw "Expected materialization decisionDiagnostics.targetLayer=$ExpectedTargetLayer, got '$($diagnostics.targetLayer)'."
     }
+    $sourceHash = [string] $Materialization.sourceHash
+    if (-not [string]::IsNullOrWhiteSpace($sourceHash)) {
+        if ($diagnostics.sourceHashPresent -ne $true) {
+            throw "Expected materialization decisionDiagnostics.sourceHashPresent=true when sourceHash is present, got '$($diagnostics.sourceHashPresent)'."
+        }
+        if ([string] $diagnostics.sourceHash -ne $sourceHash) {
+            throw "Expected materialization decisionDiagnostics.sourceHash to match materialization sourceHash '$sourceHash', got '$($diagnostics.sourceHash)'."
+        }
+    }
     return $true
 }
 
@@ -446,6 +455,9 @@ $materializationDecisionDiagnosticsSeen = Assert-MaterializationDecisionDiagnost
     -Materialization $appliedMaterialization `
     -ExpectedMaterializationKey $materializationBody.materializationKey `
     -ExpectedTargetLayer "option_source"
+$materializationSourceHashDiagnosticsSeen = -not [string]::IsNullOrWhiteSpace([string] $appliedMaterialization.sourceHash) `
+    -and $appliedMaterialization.decisionDiagnostics.sourceHashPresent -eq $true `
+    -and [string] $appliedMaterialization.decisionDiagnostics.sourceHash -eq [string] $appliedMaterialization.sourceHash
 
 $manualSelectedExistingPublication = Invoke-JsonRequest `
     -Method Post `
@@ -774,6 +786,7 @@ if ($reusedHash -ne $inactiveHash) {
     intakeDecisionDiagnosticsSeen = [bool] $intakeDecisionDiagnosticsSeen
     decisionDiagnosticsSeen = [bool] $decisionDiagnosticsSeen
     materializationDecisionDiagnosticsSeen = [bool] $materializationDecisionDiagnosticsSeen
+    materializationSourceHashDiagnosticsSeen = [bool] $materializationSourceHashDiagnosticsSeen
     procurementOptionSourcePolicySeen = [bool] $procurementOptionSourcePolicySeen
     procurementBackendValidationPolicySeen = [bool] $procurementBackendValidationPolicySeen
 } | ConvertTo-Json -Depth 8

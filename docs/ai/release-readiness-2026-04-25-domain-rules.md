@@ -843,3 +843,9 @@ The log confirmed:
 This closes the proportional HTTP/SSE proof after materialization
 `decisionDiagnostics` began exposing `sourceHash` when available. No Maven
 Central or npm publication was performed.
+
+The next smoke hardening step promotes that fingerprint evidence into an
+explicit summary marker: `domainRuleMaterializationSourceHashDiagnosticsSeen`.
+The marker is true only when a materialization response has a root
+`sourceHash`, `decisionDiagnostics.sourceHashPresent=true` and
+`decisionDiagnostics.sourceHash` equal to the root fingerprint.
