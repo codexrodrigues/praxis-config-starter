@@ -353,6 +353,23 @@ Operational smoke on `main`:
   `domainRuleIntakeDecisionDiagnosticsSeen=true`,
   `domainRuleDecisionDiagnosticsSeen=true` and
   `domainRuleMaterializationDecisionDiagnosticsSeen=true`.
+- `Agentic Authoring HTTP Smoke` run `24926394899` passed for commit
+  `81a08495d067241b843034fff72f644c1cb5bdc4` with
+  `quickstart_ref=main`, `metadata_ref=main`, `ui_ref=main`,
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=true`,
+  `run_page_builder_full_e2e=true` and
+  `run_llm_compliance_policy_shadow=false`. This full integrated gate
+  revalidated the latest config readiness documentation together with
+  quickstart `main` at `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` and
+  Angular `main` at `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
+- Smoke run `24926394899` confirmed all four publication diagnostics plus
+  `domainRuleIntakeDecisionDiagnosticsSeen=true`,
+  `domainRuleDecisionDiagnosticsSeen=true`,
+  `domainRuleMaterializationDecisionDiagnosticsSeen=true`, Domain Catalog v2
+  `catalogSchemaVersion=praxis.domain-catalog/v0.2`,
+  `semanticPayloadSeen=true`, `aliasPayloadSeen=true`,
+  `explicitRelationshipSeen=true`, Page Builder full E2E `3 passed` and
+  `fullE2EPassed=true`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
@@ -445,14 +462,15 @@ so the platform contract could be validated before any external publication.
 
 Keep the release deferred and move back to platform hardening:
 
-1. Treat run `24924505019` as the current integrated readiness checkpoint for
-   domain-rule publication diagnostics, backend-owned simulation diagnostics,
-   Domain Catalog v2 and Page Builder runtime projection, and treat config
-   contract source commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`,
-   quickstart `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` and
-   Angular `main` commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b` as the current
-   source checkpoint for intake, simulation, publication and materialization
-   diagnostics after proportional HTTP smoke run `24925700913`.
+1. Treat run `24926394899` as the current integrated readiness checkpoint for
+   domain-rule publication diagnostics, backend-owned intake/simulation
+   diagnostics, materialization diagnostics, Domain Catalog v2 and Page Builder
+   runtime projection, and treat config `main` commit
+   `81a08495d067241b843034fff72f644c1cb5bdc4`, config contract source commit
+   `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`, quickstart `main` commit
+   `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` and Angular `main` commit
+   `aa80680373973a0532f73d7bc3d6bdd3df5b641b` as the current source
+   checkpoint.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Use the next implementation cycle to strengthen governed semantic decision

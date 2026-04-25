@@ -36,6 +36,13 @@ The platform has enough evidence to support a release candidate:
   proportional quickstart HTTP lifecycle gate and confirmed
   `domainRuleMaterializationDecisionDiagnosticsSeen=true` after
   materialization diagnostics entered the backend public contract.
+- `Agentic Authoring HTTP Smoke` run `24926394899` then passed the full
+  integrated gate with `quickstart_ref=main`, `metadata_ref=main`,
+  `ui_ref=main`, `run_quickstart_http_smoke=true`,
+  `run_domain_catalog_v2_smoke=true` and `run_page_builder_full_e2e=true`.
+  It confirmed all publication diagnostics, intake/simulation/materialization
+  decision diagnostics, Domain Catalog v2 semantic/alias/relationship payloads
+  and Page Builder full E2E `3 passed`.
 - `praxis-ui-angular` CI runs `24926048274` and `24926222174` passed after the
   Angular diagnostics projection and README alignment reached `main`; both kept
   release/tag publication skipped.
@@ -89,7 +96,7 @@ The release workflow should then create tag:
 Do not publish `@praxisui/*` packages as part of this decision by default.
 
 The Angular changes have already been validated as source-level runtime/cockpit
-projection in CI, and the earlier integrated gate remains the latest Page
+projection in CI, and integrated smoke run `24926394899` is the latest Page
 Builder full E2E checkpoint. Publish npm only if an external Angular consumer
 must install the new handoff/materialization diagnostics contract from the
 public registry.
