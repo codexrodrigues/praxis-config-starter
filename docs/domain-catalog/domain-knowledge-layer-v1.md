@@ -464,7 +464,8 @@ publication stops before target projection resolution.
 Materialization responses include additive `decisionDiagnostics` with
 `decisionStage=materialization`, `decisionSource=materialization_record`,
 `materializationModel=derived_projection`, the source rule identity, stable
-`materializationKey`, target coordinates and `runtimeSurfacesAreDerived=true`.
+`materializationKey`, target coordinates, `sourceHashPresent`, `sourceHash`
+when available and `runtimeSurfacesAreDerived=true`.
 Hosts should render these diagnostics as an explanation of a derived governed
 projection, not as a second source of business-rule truth.
 

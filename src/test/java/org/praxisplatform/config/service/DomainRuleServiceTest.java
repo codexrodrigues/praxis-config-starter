@@ -472,6 +472,10 @@ class DomainRuleServiceTest {
                 .isEqualTo("form_config");
         assertThat(response.decisionDiagnostics().path("runtimeSurfacesAreDerived").asBoolean())
                 .isTrue();
+        assertThat(response.decisionDiagnostics().path("sourceHashPresent").asBoolean())
+                .isTrue();
+        assertThat(response.decisionDiagnostics().path("sourceHash").asText())
+                .isEqualTo("hash-123");
 
         ArgumentCaptor<DomainRuleMaterialization> captor = ArgumentCaptor.forClass(DomainRuleMaterialization.class);
         verify(materializationRepository).save(captor.capture());
@@ -541,6 +545,7 @@ class DomainRuleServiceTest {
 
         assertThat(response.id()).isEqualTo(materializationId);
         assertThat(response.sourceHash()).isEqualTo("hash-123");
+        assertThat(response.decisionDiagnostics().path("sourceHash").asText()).isEqualTo("hash-123");
         assertThat(response.status()).isEqualTo("pending_review");
         verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
