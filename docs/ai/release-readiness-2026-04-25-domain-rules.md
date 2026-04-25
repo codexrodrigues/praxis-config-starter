@@ -529,10 +529,13 @@ Keep the release deferred and move back to platform hardening:
    HTTP/SSE checkpoint for sibling procurement projections, and treat the
    OpenAPI/derived-surface sync below as the current contract-documentation
    checkpoint after the `/api/praxis/config/domain-rules/**` paths were added
-   to the canonical AI contract. Treat PR #93 and PR #94 as the current
-   governed lifecycle-transition checkpoint: runtime service guards now block
-   terminal definition/materialization reactivation and the HTTP smoke records
-   those guards as release evidence.
+   to the canonical AI contract. Treat run `24933671435`, documented by PR
+   #97 after the smoke escape-normalization fix in PR #96, as the current
+   governed lifecycle-transition checkpoint: runtime service guards block
+   terminal definition/materialization reactivation, the HTTP smoke records
+   both guards as release evidence and the readiness docs preserve the failed
+   run `24933502269` as the regression that proved the backend guard before
+   the smoke assertion was normalized.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Treat Angular PR #58 as the consumer projection checkpoint: downstream
