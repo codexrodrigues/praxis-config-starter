@@ -522,15 +522,14 @@ so the platform contract could be validated before any external publication.
 
 Keep the release deferred and move back to platform hardening:
 
-1. Treat run `24930631085` as the current integrated readiness checkpoint for
-   domain-rule publication diagnostics, backend-owned intake/simulation
+1. Treat run `24930631085` as the latest full integrated readiness checkpoint
+   for domain-rule publication diagnostics, backend-owned intake/simulation
    diagnostics, materialization diagnostics, Domain Catalog v2 and Page Builder
-   runtime projection, and treat config `main` commit
-   `6ec6d6d49895c9a463bdbf0c6684fdad3dd7f7e9`, config contract source commit
-   `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`, quickstart `main` commit
-   `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` and Angular `main` commit
-   `e8e0e295893acda5c60955c87ecc8ff88f90ec31` as the current source
-   checkpoint.
+   runtime projection. Treat run `24932150973` as the proportional post-Angular
+   HTTP/SSE checkpoint for sibling procurement projections, and treat the
+   OpenAPI/derived-surface sync below as the current contract-documentation
+   checkpoint after the `/api/praxis/config/domain-rules/**` paths were added
+   to the canonical AI contract.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Treat Angular PR #58 as the consumer projection checkpoint: downstream
@@ -668,3 +667,39 @@ The log confirmed:
 This closes the proportional integrated smoke requested after the Angular
 sibling projection checkpoint. No Maven Central or npm publication was
 performed.
+
+## OpenAPI and Derived Surface Sync Checkpoint
+
+The domain-rule authoring surface is now represented in the canonical AI
+contract and in the available derived documentation surfaces.
+
+`praxis-config-starter` PR #90 reached `main` and added the governed
+`/api/praxis/config/domain-rules/**` endpoints to OpenAPI v1.1, refreshed the
+generated Java AI contract binding and preserved
+`contextHints.domainCatalog.recommendedRuleType` in generated TypeScript
+bindings. The main push CI run `24932490337` passed for merge commit
+`bc29b0f260955f48153ac31d089d0eaaaf2dd3f8`; release/tag and Maven Central
+publication jobs remained skipped.
+
+The follow-up derived-surface sync then completed without publishing artifacts:
+
+- `praxis-config-starter` PR #91 documented
+  `POST /api/praxis/config/domain-rules/publications` in the Domain Knowledge
+  Layer endpoint list. Main CI run `24932792373` passed for commit
+  `ddb30f3eca4f1c58ff30905b42f441373d4ab8b3`.
+- `praxis-api-quickstart` PR #26 documented the domain-rule definition and
+  materialization status endpoints in the reference semantic-domain contract.
+  Main CI run `24932854070` passed for commit
+  `1a28e05`.
+- `praxis-ui-angular` PR #60 fixed the published dynamic-form JSON API
+  documentation so materialization points at
+  `/api/praxis/config/domain-rules/materializations`. Main CI run
+  `24932869130` passed for commit `3abcc564`.
+- `praxis-ui-landing-page` PR #16 synced vendored Angular docs into the public
+  documentation site and updated the generated sitemap. Main CI run
+  `24933064414` passed for commit `bedd86e`.
+
+This checkpoint was documentation, generated-contract and published-doc sync
+only. It did not introduce a new runtime behavior after the proportional
+HTTP/SSE smoke run `24932150973`, so no additional LLM smoke was triggered. No
+Maven Central or npm publication was performed.

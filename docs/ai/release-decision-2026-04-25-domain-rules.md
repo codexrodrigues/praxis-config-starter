@@ -98,6 +98,21 @@ The platform has enough evidence to support a release candidate:
   `run_llm_compliance_policy_shadow=false`. It confirmed both procurement
   sibling projection markers and the existing publication/intake/simulation/
   materialization diagnostics markers. No Maven/npm publication was performed.
+- `praxis-config-starter` PR #90 reached `main` at
+  `bc29b0f260955f48153ac31d089d0eaaaf2dd3f8` and promoted
+  `/api/praxis/config/domain-rules/**` into the canonical OpenAPI v1.1 AI
+  contract, refreshed the generated Java contract binding and preserved
+  `contextHints.domainCatalog.recommendedRuleType` in generated TypeScript
+  bindings. `CI and Release Java Starter (praxis-config-starter)` run
+  `24932490337` passed; release/tag and Maven Central publication jobs remained
+  skipped.
+- The derived-surface sync after PR #90 also reached `main` without
+  publication: `praxis-config-starter` PR #91 documented the publication
+  endpoint and passed CI run `24932792373`; `praxis-api-quickstart` PR #26
+  documented the status endpoints and passed CI run `24932854070`;
+  `praxis-ui-angular` PR #60 fixed the published dynamic-form materialization
+  path and passed CI run `24932869130`; `praxis-ui-landing-page` PR #16 synced
+  the public vendored docs and sitemap and passed CI run `24933064414`.
 
 Publication is still intentionally deferred because:
 
@@ -186,6 +201,7 @@ Continue implementation without publishing.
 The next engineering work should focus on hardening the semantic decision
 platform itself: preserve backend-owned decision diagnostics in governed
 authoring explainability, keep sibling runtime materializations clearly
-projected in downstream consumers, use Page Builder full E2E only when the
-next change actually needs browser/stream coverage, and only cut
+projected in downstream consumers, keep OpenAPI and derived documentation
+surfaces synchronized after public-contract edits, use Page Builder full E2E
+only when the next change actually needs browser/stream coverage, and only cut
 `0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.
