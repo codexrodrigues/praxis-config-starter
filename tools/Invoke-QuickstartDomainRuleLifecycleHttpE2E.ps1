@@ -367,6 +367,68 @@ if ($definition.status -ne "active") {
     throw "Expected definition status=active, got '$($definition.status)'."
 }
 
+$definition = Invoke-JsonRequest `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
+    -Headers $headers `
+    -Body @{
+        status = "retired"
+        decidedByType = "human"
+        decidedBy = "codex-http-smoke"
+        validationResult = @{
+            checks = @("http-lifecycle-terminal-definition")
+        }
+    }
+
+if ($definition.status -ne "retired") {
+    throw "Expected definition status=retired, got '$($definition.status)'."
+}
+
+$terminalDefinitionTransitionBlocked = Invoke-ExpectedFailure `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
+    -Headers $headers `
+    -Body @{
+        status = "active"
+        decidedByType = "human"
+        decidedBy = "codex-http-smoke"
+        validationResult = @{
+            checks = @("http-lifecycle-terminal-definition")
+        }
+    } `
+    -ExpectedMessage "Rule definition status transition is not allowed: retired -> active"
+
+$activeRuleKey = "procurement.suppliers.rule.lifecycle-active-$unique"
+$activeResourceKey = "procurement.lifecycle-active-$unique"
+$activeDefinitionBody = $definitionBody.Clone()
+$activeDefinitionBody.ruleKey = $activeRuleKey
+$activeDefinitionBody.resourceKey = $activeResourceKey
+$activeDefinition = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/definitions" `
+    -Headers $headers `
+    -Body $activeDefinitionBody
+
+$activeDefinition = Invoke-JsonRequest `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/definitions/$($activeDefinition.id)/status" `
+    -Headers $headers `
+    -Body @{
+        status = "active"
+        decidedByType = "human"
+        decidedBy = "codex-http-smoke"
+        validationResult = @{
+            checks = @("http-lifecycle-smoke")
+        }
+    }
+
+if ($activeDefinition.status -ne "active") {
+    throw "Expected active definition status=active, got '$($activeDefinition.status)'."
+}
+
+$materializationBody.ruleDefinitionId = $activeDefinition.id
+$materializationBody.materializationKey = "${activeRuleKey}:option_source:supplier"
+
 $appliedMaterialization = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/materializations" `
@@ -389,7 +451,7 @@ $manualSelectedExistingPublication = Invoke-JsonRequest `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
     -Headers $headers `
     -Body @{
-        ruleDefinitionId = $definition.id
+        ruleDefinitionId = $activeDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
         publishedBy = "codex-http-smoke"
@@ -406,7 +468,7 @@ $selectedExistingDiagnosticsSeen = Assert-MaterializationOutcome `
 $decisionDiagnosticsSeen = Assert-DecisionDiagnostics `
     -Response $manualSelectedExistingPublication `
     -ExpectedDecisionSource "persisted_definition" `
-    -ExpectedResourceKey $resourceKey `
+    -ExpectedResourceKey $activeResourceKey `
     -ExpectedRuleType "selection_eligibility"
 
 $failedMaterialization = Invoke-JsonRequest `
@@ -414,8 +476,8 @@ $failedMaterialization = Invoke-JsonRequest `
     -Uri "$base/api/praxis/config/domain-rules/materializations" `
     -Headers $headers `
     -Body @{
-        ruleDefinitionId = $definition.id
-        materializationKey = "${ruleKey}:option_source:supplier-failed"
+        ruleDefinitionId = $activeDefinition.id
+        materializationKey = "${activeRuleKey}:option_source:supplier-failed"
         targetLayer = "option_source"
         targetArtifactType = "resource-option-source"
         targetArtifactKey = "supplier"
@@ -431,12 +493,26 @@ if ($failedMaterialization.status -ne "failed") {
     throw "Expected failed materialization, got '$($failedMaterialization.status)'."
 }
 
+$terminalMaterializationTransitionBlocked = Invoke-ExpectedFailure `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/materializations/$($failedMaterialization.id)/status" `
+    -Headers $headers `
+    -Body @{
+        status = "applied"
+        decidedByType = "human"
+        decidedBy = "codex-http-smoke"
+        validationResult = @{
+            checks = @("http-lifecycle-terminal-materialization")
+        }
+    } `
+    -ExpectedMessage "Rule materialization status transition is not allowed: failed -> applied"
+
 $terminalPublishBlocked = Invoke-ExpectedFailure `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
     -Headers $headers `
     -Body @{
-        ruleDefinitionId = $definition.id
+        ruleDefinitionId = $activeDefinition.id
         materializationIds = @($failedMaterialization.id)
         applyEligibleMaterializations = $true
         publishedByType = "human"
@@ -679,12 +755,14 @@ if ($reusedHash -ne $inactiveHash) {
     baseUrl = $base
     tenantId = $TenantId
     environment = $Environment
-    ruleDefinitionId = $definition.id
-    definitionStatus = $definition.status
+    ruleDefinitionId = $activeDefinition.id
+    definitionStatus = $activeDefinition.status
     appliedCreationBlocked = [bool] $appliedCreationBlocked
     appliedMaterializationStatus = $appliedMaterialization.status
     appliedMaterializationHasAppliedAt = -not [string]::IsNullOrWhiteSpace([string] $appliedMaterialization.appliedAt)
     failedMaterializationStatus = $failedMaterialization.status
+    terminalDefinitionTransitionBlocked = [bool] $terminalDefinitionTransitionBlocked
+    terminalMaterializationTransitionBlocked = [bool] $terminalMaterializationTransitionBlocked
     terminalPublishBlocked = [bool] $terminalPublishBlocked
     semanticSourceHashesDiffer = $inactiveHash -ne $suspendedHash
     backendValidationSemanticSourceHashesDiffer = $inactiveBackendValidationHash -ne $suspendedBackendValidationHash
