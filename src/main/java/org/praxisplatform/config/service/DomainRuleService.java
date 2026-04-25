@@ -1110,6 +1110,9 @@ public class DomainRuleService {
             String targetArtifactKey,
             String tenantId,
             String environment) {
+        ObjectNode payload = buildOptionSourceMaterializedPayload(
+                definition,
+                targetArtifactKey);
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
         materialization.setTenantId(normalize(tenantId));
         materialization.setEnvironment(normalize(environment));
@@ -1122,10 +1125,15 @@ public class DomainRuleService {
         materialization.setTargetPointer("/selectionPolicy");
         materialization.setMaterializedRuleId("selection-policy");
         materialization.setStatus("pending_review");
-        materialization.setMaterializedPayload(write(buildOptionSourceMaterializedPayload(
+        materialization.setMaterializedPayload(write(payload));
+        materialization.setSourceHash(derivedSourceHash(
                 definition,
-                targetArtifactKey)));
-        materialization.setSourceHash(derivedSourceHash(definition, targetLayer, targetArtifactKey));
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                "/selectionPolicy",
+                "selection-policy",
+                payload));
         return materializationRepository.save(materialization);
     }
 
@@ -1136,6 +1144,9 @@ public class DomainRuleService {
             String targetArtifactKey,
             String tenantId,
             String environment) {
+        ObjectNode payload = buildBackendValidationMaterializedPayload(
+                definition,
+                targetArtifactKey);
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
         materialization.setTenantId(normalize(tenantId));
         materialization.setEnvironment(normalize(environment));
@@ -1148,18 +1159,44 @@ public class DomainRuleService {
         materialization.setTargetPointer("/validationPolicy");
         materialization.setMaterializedRuleId("backend-validation-policy");
         materialization.setStatus("pending_review");
-        materialization.setMaterializedPayload(write(buildBackendValidationMaterializedPayload(
+        materialization.setMaterializedPayload(write(payload));
+        materialization.setSourceHash(derivedSourceHash(
                 definition,
-                targetArtifactKey)));
-        materialization.setSourceHash(derivedSourceHash(definition, targetLayer, targetArtifactKey));
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                "/validationPolicy",
+                "backend-validation-policy",
+                payload));
         return materializationRepository.save(materialization);
     }
 
     private static String derivedSourceHash(
             DomainRuleDefinition definition,
             String targetLayer,
-            String targetArtifactKey) {
-        String source = definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey;
+            String targetArtifactType,
+            String targetArtifactKey,
+            String targetPointer,
+            String materializedRuleId,
+            JsonNode materializedPayload) {
+        String source = String.join(
+                "\n",
+                nullToEmpty(definition.getRuleKey()),
+                nullToEmpty(definition.getVersion()),
+                nullToEmpty(definition.getRuleType()),
+                nullToEmpty(definition.getContextKey()),
+                nullToEmpty(definition.getResourceKey()),
+                nullToEmpty(definition.getServiceKey()),
+                nullToEmpty(definition.getDefinition()),
+                nullToEmpty(definition.getParameters()),
+                nullToEmpty(definition.getCondition()),
+                nullToEmpty(definition.getGovernance()),
+                nullToEmpty(targetLayer),
+                nullToEmpty(targetArtifactType),
+                nullToEmpty(targetArtifactKey),
+                nullToEmpty(targetPointer),
+                nullToEmpty(materializedRuleId),
+                materializedPayload != null ? materializedPayload.toString() : "");
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(source.getBytes(StandardCharsets.UTF_8));
@@ -1167,6 +1204,10 @@ public class DomainRuleService {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 digest is not available", ex);
         }
+    }
+
+    private static String nullToEmpty(Object value) {
+        return value != null ? value.toString() : "";
     }
 
     private boolean isBackendValidationRuleType(String ruleType) {
