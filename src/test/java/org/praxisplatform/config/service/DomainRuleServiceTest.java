@@ -306,6 +306,100 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksAppliedMaterializationCreationWhenDefinitionIsNotActive() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .resourceKey("procurement.suppliers")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.createMaterialization(new DomainRuleMaterializationRequest(
+                definitionId,
+                "procurement.suppliers.rule.selection-eligibility:option_source:supplier",
+                "option_source",
+                "resource-option-source",
+                "supplier",
+                "/selectionPolicy",
+                null,
+                "selection-policy",
+                "applied",
+                null,
+                "hash-selection-eligibility",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-a", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Rule materialization can only be applied when its definition is active");
+
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
+    void createsAppliedMaterializationWhenDefinitionIsActive() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("active")
+                .resourceKey("procurement.suppliers")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.createMaterialization(new DomainRuleMaterializationRequest(
+                definitionId,
+                "procurement.suppliers.rule.selection-eligibility:option_source:supplier",
+                "option_source",
+                "resource-option-source",
+                "supplier",
+                "/selectionPolicy",
+                null,
+                "selection-policy",
+                "applied",
+                null,
+                "hash-selection-eligibility",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+
+        assertThat(response.status()).isEqualTo("applied");
+        assertThat(response.appliedAt()).isNotNull();
+        assertThat(response.appliedByType()).isEqualTo("llm");
+        assertThat(response.appliedBy()).isEqualTo("openai:gpt-5.4-mini");
+    }
+
+    @Test
     void createsOptionSourceMaterializationFromSelectionEligibilityDefinitionWhenPayloadIsOmitted() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

@@ -477,6 +477,13 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + request.ruleDefinitionId()));
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
+        String status = requireAllowedStatus(
+                normalizeOrDefault(request.status(), "draft"),
+                "status",
+                MATERIALIZATION_STATUSES);
+        if ("applied".equals(status) && !"active".equals(definition.getStatus())) {
+            throw new ConfigurationIngestionException("Rule materialization can only be applied when its definition is active");
+        }
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
         materialization.setTenantId(normalize(tenantId));
         materialization.setEnvironment(normalize(environment));
@@ -488,10 +495,7 @@ public class DomainRuleService {
         materialization.setTargetPointer(normalize(request.targetPointer()));
         materialization.setTargetReleaseKey(normalize(request.targetReleaseKey()));
         materialization.setMaterializedRuleId(normalize(request.materializedRuleId()));
-        materialization.setStatus(requireAllowedStatus(
-                normalizeOrDefault(request.status(), "draft"),
-                "status",
-                MATERIALIZATION_STATUSES));
+        materialization.setStatus(status);
         materialization.setMaterializedPayload(write(deriveMaterializedPayload(definition, request)));
         materialization.setSourceHash(normalize(request.sourceHash()));
         if (request.validationResult() != null && !request.validationResult().isNull()) {
@@ -499,6 +503,9 @@ public class DomainRuleService {
         }
         materialization.setAppliedByType(normalize(request.appliedByType()));
         materialization.setAppliedBy(normalize(request.appliedBy()));
+        if ("applied".equals(status)) {
+            materialization.setAppliedAt(Instant.now());
+        }
         return toResponse(materializationRepository.save(materialization));
     }
 
