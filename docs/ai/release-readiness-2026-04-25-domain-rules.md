@@ -19,7 +19,8 @@ The validated path covers:
 
 ## Version Set
 
-- `praxis-config-starter`: `main` commit `512242772a3714fa22bc5270bdb485dbe9da8d7d`.
+- `praxis-config-starter`: `main` commit `d96ff02f965b2e4d27b9c8800a601df2a52a673e`.
+- `praxis-ui-angular`: `main` commit `a754afd091125f1ab152c64e87dbd02e4654202d`.
 - `praxis-api-quickstart`: `main`, packaged in GitHub Actions against the local
   `praxis-config-starter` and `praxis-metadata-starter` checkouts.
 - `praxis-metadata-starter`: `main`, installed locally by the smoke workflow.
@@ -35,6 +36,14 @@ The validated path covers:
   commit `6a143ce71e741fe4f7d74e206325a6696a3b8d7b`.
 - PR #50, `Require source hash for derived materialization reuse`,
   commit `512242772a3714fa22bc5270bdb485dbe9da8d7d`.
+- PR #52, `Add domain rule publication diagnostics`,
+  commit `c24de432983966526cdfcdf3e06d878b942572aa`.
+- PR #53, `Assert domain rule publication diagnostics in HTTP smoke`,
+  commit `2056bc06094b7200ef7cfb7a7169aaf52df512f9`.
+- PR #54, `Fix publication diagnostics JSON object creation`,
+  commit `d96ff02f965b2e4d27b9c8800a601df2a52a673e`.
+- `praxis-ui-angular` PR #52, `Project domain rule publication diagnostics in cockpit`,
+  commit `a754afd091125f1ab152c64e87dbd02e4654202d`.
 
 ## Contract State
 
@@ -55,6 +64,15 @@ The current canonical behavior is:
   duplicate runtime projections can be inserted.
 - Terminal materializations such as `failed`, `superseded` and `reverted` remain
   non-publishable until moved through governance.
+- Publication responses include additive
+  `explainability.publicationDiagnostics.materializationOutcomes[]` so clients
+  can explain whether each projection was `created`, `reused`,
+  `selected_existing`, `selected_explicit`, `skipped` or `blocked` without
+  reconstructing publication heuristics locally.
+- `praxis-ui-angular` projects this diagnostic envelope in the shared-rule
+  handoff cockpit through typed `@praxisui/core` contracts, keeping Angular as
+  a cockpit/runtime of governed semantic decisions rather than a source of
+  business-rule truth.
 
 ## Validation
 
@@ -75,15 +93,35 @@ GitHub Actions CI on `main`:
   for commit `6a143ce71e741fe4f7d74e206325a6696a3b8d7b`.
 - `CI and Release Java Starter (praxis-config-starter)` run `24919594531` passed
   for commit `512242772a3714fa22bc5270bdb485dbe9da8d7d`.
+- `CI and Release Java Starter (praxis-config-starter)` run `24919874591` passed
+  for commit `c24de432983966526cdfcdf3e06d878b942572aa`.
+- `CI and Release Java Starter (praxis-config-starter)` run `24919943378` passed
+  for commit `2056bc06094b7200ef7cfb7a7169aaf52df512f9`.
 
 Operational smoke on `main`:
 
 - `Agentic Authoring HTTP Smoke` run `24919631736` passed for commit
   `512242772a3714fa22bc5270bdb485dbe9da8d7d`.
+- `Agentic Authoring HTTP Smoke` run `24920194633` passed for commit
+  `d96ff02f965b2e4d27b9c8800a601df2a52a673e`.
 - The smoke packaged `praxis-api-quickstart` against local starter checkouts.
 - `Run quickstart authoring HTTP/SSE smoke suite`: passed.
 - `Run quickstart Domain Catalog v2 HTTP smoke`: passed.
 - Artifact uploaded: `agentic-authoring-smoke-artifacts`.
+- The latest smoke confirmed
+  `domainRulePublicationCreatedDiagnosticsSeen=true` and
+  `domainRulePublicationSelectedExistingDiagnosticsSeen=true`.
+
+Angular cockpit/runtime projection:
+
+- `praxis-ui-angular` PR #52 merged to `main` at
+  `a754afd091125f1ab152c64e87dbd02e4654202d`.
+- Local focal validation passed:
+  - `npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include='projects/praxis-core/src/lib/services/domain-rule.service.spec.ts'`
+  - `npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
+  - `npm run build:praxis-core`
+- GitHub Actions `CI - Build Praxis Angular Libs` run `24920424506` passed for
+  head SHA `3c45fee91f580ec9148f373b4b4333e7dd8deb4b`.
 
 Domain Catalog v2 smoke summary:
 
@@ -113,19 +151,26 @@ so the platform contract could be validated before any external publication.
 
 ## Not Validated In This Checkpoint
 
-- Page Builder full browser E2E was intentionally skipped.
+- Page Builder full browser E2E was intentionally skipped after the cockpit
+  projection because the change was limited to typed diagnostics and focused
+  shared-rule handoff rendering.
 - LLM compliance-policy shadow was intentionally skipped.
 - Maven Central consumption of these latest commits was not validated because
   no release artifact was published.
+- npm package consumption of the latest Angular projection was not validated
+  because no npm artifact was published.
 
 ## Recommended Next Step
 
-Move from backend publication diagnostics to broader UI/runtime projection:
+Move from typed cockpit projection to full browser-level evidence:
 
-1. Project `explainability.publicationDiagnostics.materializationOutcomes[]`
-   into cockpit/runtime UI so hosts can explain backend publication decisions
-   without local heuristics.
-2. Keep browser E2E out until the UI projection is intentionally designed.
-3. Preserve HTTP lifecycle coverage for `created` and `selected_existing`
-   diagnostics; `reused` remains covered by focal backend tests because normal
-   HTTP republication selects the existing materialization by definition.
+1. Run the manual `Agentic Authoring HTTP Smoke` with `ui_ref=main` and
+   `run_page_builder_full_e2e=true` once provider timing risk is acceptable,
+   proving the cockpit/runtime projection in a browser against the real
+   quickstart and provider stream.
+2. Preserve the existing HTTP lifecycle gate for `created` and
+   `selected_existing` diagnostics; `reused` remains covered by focal backend
+   tests because normal HTTP republication selects the existing materialization
+   by definition.
+3. Defer Maven/npm publication until the browser gate is green or a release
+   cut explicitly requires external artifact consumption.
