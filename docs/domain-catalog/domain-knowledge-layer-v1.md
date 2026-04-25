@@ -294,7 +294,11 @@ Recommended fields:
 
 - `id`
 - `rule_definition_id`
-- `materialization_key`: stable identity for a target projection
+- `materialization_key`: stable identity for a target projection. Within the
+  same tenant and environment, retries with the same key and compatible
+  definition/target should reuse the existing materialization, while attempts
+  to bind the same key to another definition or incompatible target must be
+  rejected before creating duplicate runtime projections.
 - `target_layer`: `form_config`, `option_source`, `frontend_adapter`, `backend_validation`,
   `workflow`, `policy_engine`, `notification`, `reporting`, `external_system`
 - `target_artifact_type`: for example `praxis-dynamic-form`,

@@ -262,6 +262,146 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void reusesExistingMaterializationForSameStableKeyAndDefinition() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        UUID materializationId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.funcionarios.rule.lgpd-cpf-guidance")
+                .version(2)
+                .ruleType("visual_guidance")
+                .status("active")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        DomainRuleMaterialization existing = DomainRuleMaterialization.builder()
+                .id(materializationId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("funcionarios-form-demo:formRules:lgpd-cpf-guidance")
+                .targetLayer("form_config")
+                .targetArtifactType("praxis-dynamic-form")
+                .targetArtifactKey("funcionarios-form-demo")
+                .targetPointer("/formRules/-")
+                .targetReleaseKey("page-builder-demo@local")
+                .materializedRuleId("lgpd-cpf-guidance")
+                .status("pending_review")
+                .materializedPayload("{\"id\":\"lgpd-cpf-guidance\"}")
+                .sourceHash("hash-123")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "funcionarios-form-demo:formRules:lgpd-cpf-guidance"))
+                .thenReturn(Optional.of(existing));
+
+        var response = service.createMaterialization(new DomainRuleMaterializationRequest(
+                definitionId,
+                "funcionarios-form-demo:formRules:lgpd-cpf-guidance",
+                "form_config",
+                "praxis-dynamic-form",
+                "funcionarios-form-demo",
+                "/formRules/-",
+                "page-builder-demo@local",
+                "lgpd-cpf-guidance",
+                "pending_review",
+                objectMapper.readTree("{\"id\":\"lgpd-cpf-guidance\"}"),
+                "hash-123",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+
+        assertThat(response.id()).isEqualTo(materializationId);
+        assertThat(response.sourceHash()).isEqualTo("hash-123");
+        assertThat(response.status()).isEqualTo("pending_review");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
+    void blocksMaterializationCreationWhenStableKeyBelongsToAnotherDefinition() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID requestedDefinitionId = UUID.randomUUID();
+        UUID existingDefinitionId = UUID.randomUUID();
+        DomainRuleDefinition requestedDefinition = DomainRuleDefinition.builder()
+                .id(requestedDefinitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.funcionarios.rule.lgpd-cpf-guidance")
+                .version(2)
+                .ruleType("visual_guidance")
+                .status("active")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        DomainRuleDefinition existingDefinition = DomainRuleDefinition.builder()
+                .id(existingDefinitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.funcionarios.rule.previous-guidance")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("active")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        DomainRuleMaterialization existing = DomainRuleMaterialization.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(existingDefinition)
+                .materializationKey("funcionarios-form-demo:formRules:lgpd-cpf-guidance")
+                .targetLayer("form_config")
+                .targetArtifactType("praxis-dynamic-form")
+                .targetArtifactKey("funcionarios-form-demo")
+                .status("pending_review")
+                .materializedPayload("{}")
+                .sourceHash("hash-previous")
+                .build();
+
+        when(definitionRepository.findById(requestedDefinitionId)).thenReturn(Optional.of(requestedDefinition));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "funcionarios-form-demo:formRules:lgpd-cpf-guidance"))
+                .thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.createMaterialization(new DomainRuleMaterializationRequest(
+                requestedDefinitionId,
+                "funcionarios-form-demo:formRules:lgpd-cpf-guidance",
+                "form_config",
+                "praxis-dynamic-form",
+                "funcionarios-form-demo",
+                "/formRules/-",
+                "page-builder-demo@local",
+                "lgpd-cpf-guidance",
+                "pending_review",
+                objectMapper.readTree("{\"id\":\"lgpd-cpf-guidance\"}"),
+                "hash-123",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-a", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Rule materialization key already belongs to another definition");
+
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
     void blocksMaterializationCreationWithNonCanonicalStatus() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

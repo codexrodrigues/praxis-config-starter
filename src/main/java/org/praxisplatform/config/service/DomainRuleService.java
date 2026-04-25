@@ -484,11 +484,22 @@ public class DomainRuleService {
         if ("applied".equals(status) && !"active".equals(definition.getStatus())) {
             throw new ConfigurationIngestionException("Rule materialization can only be applied when its definition is active");
         }
+        String materializationKey = request.materializationKey().trim();
+        DomainRuleMaterialization existing = materializationRepository
+                .findByTenantIdAndEnvironmentAndMaterializationKey(
+                        normalize(tenantId),
+                        normalize(environment),
+                        materializationKey)
+                .orElse(null);
+        if (existing != null) {
+            requireReusableMaterialization(existing, definition, request);
+            return toResponse(existing);
+        }
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
         materialization.setTenantId(normalize(tenantId));
         materialization.setEnvironment(normalize(environment));
         materialization.setRuleDefinition(definition);
-        materialization.setMaterializationKey(request.materializationKey().trim());
+        materialization.setMaterializationKey(materializationKey);
         materialization.setTargetLayer(request.targetLayer().trim());
         materialization.setTargetArtifactType(request.targetArtifactType().trim());
         materialization.setTargetArtifactKey(request.targetArtifactKey().trim());
@@ -507,6 +518,35 @@ public class DomainRuleService {
             materialization.setAppliedAt(Instant.now());
         }
         return toResponse(materializationRepository.save(materialization));
+    }
+
+    private void requireReusableMaterialization(
+            DomainRuleMaterialization existing,
+            DomainRuleDefinition requestedDefinition,
+            DomainRuleMaterializationRequest request) {
+        DomainRuleDefinition existingDefinition = existing.getRuleDefinition();
+        if (existingDefinition == null || !requestedDefinition.getId().equals(existingDefinition.getId())) {
+            throw new ConfigurationIngestionException(
+                    "Rule materialization key already belongs to another definition: "
+                            + existing.getMaterializationKey());
+        }
+        requireSameMaterializationField(existing.getTargetLayer(), request.targetLayer(), "targetLayer");
+        requireSameMaterializationField(existing.getTargetArtifactType(), request.targetArtifactType(), "targetArtifactType");
+        requireSameMaterializationField(existing.getTargetArtifactKey(), request.targetArtifactKey(), "targetArtifactKey");
+        if (StringUtils.hasText(request.sourceHash())
+                && StringUtils.hasText(existing.getSourceHash())
+                && !request.sourceHash().trim().equals(existing.getSourceHash())) {
+            throw new ConfigurationIngestionException(
+                    "Rule materialization key already exists with a different sourceHash: "
+                            + existing.getMaterializationKey());
+        }
+    }
+
+    private void requireSameMaterializationField(String existingValue, String requestedValue, String field) {
+        if (!normalizeOrDefault(existingValue, "").equals(normalizeOrDefault(requestedValue, ""))) {
+            throw new ConfigurationIngestionException(
+                    "Rule materialization key already exists with a different " + field);
+        }
     }
 
     private DomainRuleDefinition resolveDefinitionForSimulation(
