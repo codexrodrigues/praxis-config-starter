@@ -176,6 +176,21 @@ The platform has enough evidence to support a release candidate:
   `domainRulePagePreviewRouteBlocked=true`, proving shared-rule prompts remain
   on the governed domain-rule authoring route and `page-preview` does not
   generate UI composition for that route.
+- `praxis-ui-angular` PR #62 reached `main` at
+  `3d2cb1888fc7a8e58209ec655f8dd6acbaf668bb`, preserving backend-owned routing
+  evidence in the Page Builder shared-rule handoff:
+  `routeGateStatus`, `routeFailureCode`, `routeDecisionSource` and
+  `previewDisposition`.
+- `praxis-ui-angular` PR #63 reached `main` at
+  `d37012ba635baf29bbf5c2c852569b018f2c9935`, documenting those handoff fields
+  in the canonical Page Builder README. CI run `24941616056` passed production
+  library build and tarball dry-run. No npm publication was performed.
+- `praxis-ui-landing-page` PR #18 reached `main` at
+  `46f0adb61772f9194763d5dc2ca8b08367d24e99`, syncing the public vendored docs.
+  PR CI run `24941746060` and main CI run `24941828253` passed published
+  package verification, dynamic page catalog validation, vendored docs
+  validation, sitemap validation, quickstart domain catalog validation,
+  production build and smoke E2E. No npm publication was performed.
 
 Publication is still intentionally deferred because:
 
@@ -253,6 +268,8 @@ The release can move from deferred to publishable when all of these are true:
 - the smoke summary confirms `domainRuleIntentRoutingSeen=true`, proving
   shared-rule prompts are routed to governed domain-rule authoring and
   `page-preview` does not generate UI composition for that route;
+- Angular main and landing main have passed their latest CI gates after the
+  routing handoff fields and public vendored docs reached `main`;
 - the smoke summary confirms
   `domainRuleProcurementOptionSourcePolicySeen=true`;
 - the smoke summary confirms

@@ -19,9 +19,10 @@ The validated path covers:
 
 ## Version Set
 
-- `praxis-config-starter`: `main` commit `bffbd3e59405d1efbdb86ba17c893d7e8c8024f0`,
+- `praxis-config-starter`: `main` commit `7323304dcfc3356608819aaed3ec996759c4bd44`,
   with contract source commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`.
-- `praxis-ui-angular`: `main` commit `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
+- `praxis-ui-angular`: `main` commit `d37012ba635baf29bbf5c2c852569b018f2c9935`.
+- `praxis-ui-landing-page`: `main` commit `46f0adb61772f9194763d5dc2ca8b08367d24e99`.
 - `praxis-api-quickstart`: `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`,
   packaged in GitHub Actions against the local `praxis-config-starter` and
   `praxis-metadata-starter` checkouts.
@@ -104,6 +105,19 @@ The validated path covers:
 - `praxis-ui-angular` PR #57,
   `Surface shared-rule decision diagnostics`,
   commit `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
+- PR #106, `Add domain rule routing smoke marker`,
+  commit `194190b0b94b41863d3acc071d09fe9caaa0f333`.
+- PR #107, `Record canonical routing smoke checkpoint`,
+  commit `7323304dcfc3356608819aaed3ec996759c4bd44`.
+- `praxis-ui-angular` PR #62,
+  `Surface canonical routing in shared-rule handoff`,
+  commit `3d2cb1888fc7a8e58209ec655f8dd6acbaf668bb`.
+- `praxis-ui-angular` PR #63,
+  `docs(page-builder): document routing handoff fields`,
+  commit `d37012ba635baf29bbf5c2c852569b018f2c9935`.
+- `praxis-ui-landing-page` PR #18,
+  `docs: sync Praxis UI vendor docs`,
+  commit `46f0adb61772f9194763d5dc2ca8b08367d24e99`.
 
 ## Contract State
 
@@ -184,6 +198,10 @@ The current canonical behavior is:
   `/api/praxis/config/domain-rules/simulations`. Angular exposes these as
   context for the AI-authored decision flow, without making the cockpit a
   parallel source of route truth.
+- Shared-rule handoff now also carries backend-owned routing evidence:
+  `routeGateStatus`, `routeFailureCode`, `routeDecisionSource` and
+  `previewDisposition`. Angular and the public docs present these fields as
+  canonical routing context, not as a local UI classifier.
 
 ## Validation
 
@@ -252,6 +270,21 @@ GitHub Actions CI on `main`:
   for main commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b`, validating
   production Angular library build, tarball dry-run and artifact upload after
   the documentation alignment reached `main`.
+- `praxis-ui-angular` `CI - Build Praxis Angular Libs` run `24941390304`
+  passed for PR #62, validating production Angular library build, tarball
+  dry-run and artifact upload for the canonical routing handoff fields.
+- `praxis-ui-angular` `CI - Build Praxis Angular Libs` run `24941482401`
+  passed for main commit `3d2cb1888fc7a8e58209ec655f8dd6acbaf668bb`,
+  validating the same handoff after merge.
+- `praxis-ui-angular` `CI - Build Praxis Angular Libs` run `24941616056`
+  passed for PR #63, validating the Page Builder documentation alignment with
+  production library build and tarball dry-run before public doc sync.
+- `praxis-ui-landing-page` CI run `24941746060` passed for PR #18, including
+  dynamic page catalog validation, vendored docs validation, sitemap validation,
+  quickstart domain catalog validation, production build and smoke E2E.
+- `praxis-ui-landing-page` CI run `24941828253` passed on `main` for commit
+  `46f0adb61772f9194763d5dc2ca8b08367d24e99`, validating the public docs after
+  merge.
 
 Operational smoke on `main`:
 
