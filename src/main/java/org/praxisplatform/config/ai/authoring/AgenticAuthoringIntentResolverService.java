@@ -1415,10 +1415,14 @@ public class AgenticAuthoringIntentResolverService {
         if (!resourcePath.isBlank()) {
             return "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, "
                     + "e nao pelo preview de formulario/pagina. "
-                    + "Use o recurso " + resourcePath + " como grounding canônico para intake e simulacao.";
+                    + "Use POST /api/praxis/config/domain-rules/intake com o recurso " + resourcePath
+                    + " como grounding canônico, depois POST /api/praxis/config/domain-rules/simulations para validar cobertura, "
+                    + "aprovações e materializações antes de publicar.";
         }
         return "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, "
-                + "e nao pelo preview de formulario/pagina.";
+                + "e nao pelo preview de formulario/pagina. "
+                + "Use POST /api/praxis/config/domain-rules/intake, depois POST /api/praxis/config/domain-rules/simulations "
+                + "antes de publicar.";
     }
 
     private JsonNode apiCatalogAnswer(

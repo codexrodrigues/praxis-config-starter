@@ -2744,6 +2744,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.assistantMessage())
                 .contains("/api/praxis/config/domain-rules")
+                .contains("/api/praxis/config/domain-rules/intake")
+                .contains("/api/praxis/config/domain-rules/simulations")
                 .contains("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
@@ -2767,6 +2769,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.assistantMessage())
                 .contains("/api/praxis/config/domain-rules")
+                .contains("/api/praxis/config/domain-rules/intake")
+                .contains("/api/praxis/config/domain-rules/simulations")
                 .contains("/api/procurement/suppliers");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
