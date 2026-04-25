@@ -520,13 +520,12 @@ Keep the release deferred and move back to platform hardening:
    checkpoint.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
-3. Use the next implementation cycle to strengthen governed semantic decision
-   authoring beyond the procurement `option_source` happy path. The current
-   strong checkpoint proves intake, simulation, publication and derived
-   `lookup_selection_policy` materialization for blocked suppliers; the next
-   recommended hardening target is backend validation/materialization parity
-   for the same decision class, so runtimes do not depend only on lookup
-   disabling.
+3. Use the next implementation cycle to extend consumer projection checks. The
+   current strong checkpoint proves intake, simulation, publication and derived
+   `lookup_selection_policy` plus `resource_validation_policy`
+   materializations for blocked suppliers. The next recommended hardening
+   target is making downstream consumers and docs render/explain both
+   projections as siblings of the same governed semantic decision.
 4. If a release is requested, publish once after confirming the external
    artifact version set, rather than repeatedly publishing during validation.
 
@@ -554,3 +553,40 @@ This checkpoint proves that the runtime projection is not a frontend-local
 rule: the backend publication path creates a derived `option_source`
 `lookup_selection_policy` materialization for `supplier` and the HTTP smoke
 requires the policy to block both `INACTIVE` and `BLOCKED` suppliers.
+
+## Procurement Backend Validation Checkpoint
+
+`praxis-config-starter` PR #86 merged at
+`184903e7ab80218393b8f7da4446be42df1e0884` and promoted
+`selection_eligibility` from lookup-only projection to dual derived
+materialization:
+
+- `option_source` with `kind=lookup_selection_policy`;
+- `backend_validation` with `kind=resource_validation_policy`.
+
+Local validation passed with:
+
+- `mvn -Dtest=DomainRuleServiceTest test -q`;
+- `git diff --check -- src/main/java/org/praxisplatform/config/service/DomainRuleService.java src/test/java/org/praxisplatform/config/service/DomainRuleServiceTest.java tools/Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1 tools/Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 docs/ai/contracts/README.md docs/domain-catalog/domain-knowledge-layer-v1.md`.
+
+GitHub Actions `CI and Release Java Starter (praxis-config-starter)` run
+`24931556695` passed for merge commit
+`184903e7ab80218393b8f7da4446be42df1e0884`; release/tag and Maven Central jobs
+remained skipped.
+
+The proportional GitHub Actions smoke run `24931585519` passed with:
+
+- `provider=openai`;
+- `quickstart_ref=main`;
+- `metadata_ref=main`;
+- `run_quickstart_http_smoke=true`;
+- `run_domain_catalog_v2_smoke=false`;
+- `run_page_builder_full_e2e=false`;
+- `run_llm_compliance_policy_shadow=false`;
+- `domainRuleProcurementOptionSourcePolicySeen=true`;
+- `domainRuleProcurementBackendValidationPolicySeen=true`;
+- `domainRuleBackendValidationSemanticSourceHashesDiffer=true`.
+
+This checkpoint proves that `selection_eligibility` decisions now publish both
+lookup UX guidance and backend validation enforcement as derived projections of
+one canonical semantic decision.
