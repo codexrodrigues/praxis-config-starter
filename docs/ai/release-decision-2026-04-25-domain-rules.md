@@ -69,6 +69,16 @@ The platform has enough evidence to support a release candidate:
   `run_llm_compliance_policy_shadow=false`. This was intentionally smaller
   than a full integrated gate because the change only hardened the
   domain-rule lifecycle HTTP smoke.
+- `praxis-config-starter` PR #86 reached `main` at
+  `184903e7ab80218393b8f7da4446be42df1e0884` and promoted
+  `selection_eligibility` publication from lookup-only projection to dual
+  derived materialization: `option_source` plus `backend_validation`.
+- `CI and Release Java Starter (praxis-config-starter)` run `24931556695`
+  passed for PR #86. Release/tag and Maven Central jobs remained skipped.
+- Proportional `Agentic Authoring HTTP Smoke` run `24931585519` passed on
+  `main` and confirmed `domainRuleProcurementOptionSourcePolicySeen=true`,
+  `domainRuleProcurementBackendValidationPolicySeen=true` and
+  `domainRuleBackendValidationSemanticSourceHashesDiffer=true`.
 - `praxis-ui-angular` CI runs `24926048274` and `24926222174` passed after the
   Angular diagnostics projection and README alignment reached `main`; both kept
   release/tag publication skipped. PR #57 then passed focal local validation
@@ -149,6 +159,8 @@ The release can move from deferred to publishable when all of these are true:
   `domainRuleDecisionDiagnosticsSeen=true`;
 - the smoke summary confirms
   `domainRuleProcurementOptionSourcePolicySeen=true`;
+- the smoke summary confirms
+  `domainRuleProcurementBackendValidationPolicySeen=true`;
 - the intended Maven version is explicit and not already tagged;
 - the downstream consumer that needs the artifact version is named;
 - no new contract change has landed after the gate without a new gate run.
@@ -159,7 +171,6 @@ Continue implementation without publishing.
 
 The next engineering work should focus on hardening the semantic decision
 platform itself: preserve backend-owned decision diagnostics in governed
-authoring explainability, extend enforcement beyond lookup projection where the
-decision class requires backend validation parity, keep the HTTP/SSE lifecycle
-gate green, and only cut `0.1.0-rc.34` when a real downstream consumer needs
-Maven Central resolution.
+authoring explainability, project sibling runtime materializations clearly in
+downstream consumers, keep the HTTP/SSE lifecycle gate green, and only cut
+`0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.
