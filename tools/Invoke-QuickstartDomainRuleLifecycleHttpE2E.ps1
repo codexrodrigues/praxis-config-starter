@@ -184,6 +184,109 @@ $terminalPublishBlocked = Invoke-ExpectedFailure `
     } `
     -ExpectedMessage "Rule materialization status is not publishable: failed"
 
+$inactiveRuleKey = "procurement.suppliers.rule.semantic-hash-inactive-$unique"
+$suspendedRuleKey = "procurement.suppliers.rule.semantic-hash-suspended-$unique"
+
+$inactiveDefinition = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/definitions" `
+    -Headers $headers `
+    -Body @{
+        ruleKey = $inactiveRuleKey
+        ruleType = "selection_eligibility"
+        status = "approved"
+        contextKey = "procurement"
+        resourceKey = "procurement.semantic-hash-inactive-$unique"
+        serviceKey = "praxis-api-quickstart"
+        definition = @{
+            summary = "Impedir selecao de fornecedores inativos no smoke HTTP."
+        }
+        parameters = @{
+            optionSourceKey = "supplier"
+        }
+        condition = @{
+            "in" = @(
+                @{
+                    var = "status"
+                },
+                @("INACTIVE")
+            )
+        }
+        governance = @{}
+        createdByType = "llm"
+        createdBy = "codex-http-smoke"
+    }
+
+$suspendedDefinition = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/definitions" `
+    -Headers $headers `
+    -Body @{
+        ruleKey = $suspendedRuleKey
+        ruleType = "selection_eligibility"
+        status = "approved"
+        contextKey = "procurement"
+        resourceKey = "procurement.semantic-hash-suspended-$unique"
+        serviceKey = "praxis-api-quickstart"
+        definition = @{
+            summary = "Impedir selecao de fornecedores suspensos no smoke HTTP."
+        }
+        parameters = @{
+            optionSourceKey = "supplier"
+        }
+        condition = @{
+            "in" = @(
+                @{
+                    var = "status"
+                },
+                @("SUSPENDED")
+            )
+        }
+        governance = @{}
+        createdByType = "llm"
+        createdBy = "codex-http-smoke"
+    }
+
+$inactivePublication = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/publications" `
+    -Headers $headers `
+    -Body @{
+        ruleDefinitionId = $inactiveDefinition.id
+        applyEligibleMaterializations = $true
+        publishedByType = "human"
+        publishedBy = "codex-http-smoke"
+        publicationNotes = @{
+            smoke = "domain-rule-semantic-source-hash"
+        }
+    }
+
+$suspendedPublication = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/publications" `
+    -Headers $headers `
+    -Body @{
+        ruleDefinitionId = $suspendedDefinition.id
+        applyEligibleMaterializations = $true
+        publishedByType = "human"
+        publishedBy = "codex-http-smoke"
+        publicationNotes = @{
+            smoke = "domain-rule-semantic-source-hash"
+        }
+    }
+
+$inactiveHash = [string] $inactivePublication.materializations[0].sourceHash
+$suspendedHash = [string] $suspendedPublication.materializations[0].sourceHash
+if ([string]::IsNullOrWhiteSpace($inactiveHash) -or $inactiveHash -notlike "derived:sha256:*") {
+    throw "Expected inactive semantic hash to use derived:sha256 prefix, got '$inactiveHash'."
+}
+if ([string]::IsNullOrWhiteSpace($suspendedHash) -or $suspendedHash -notlike "derived:sha256:*") {
+    throw "Expected suspended semantic hash to use derived:sha256 prefix, got '$suspendedHash'."
+}
+if ($inactiveHash -eq $suspendedHash) {
+    throw "Expected semantic source hashes to differ when rule semantics differ."
+}
+
 [pscustomobject]@{
     health = $health.status
     baseUrl = $base
@@ -196,4 +299,5 @@ $terminalPublishBlocked = Invoke-ExpectedFailure `
     appliedMaterializationHasAppliedAt = -not [string]::IsNullOrWhiteSpace([string] $appliedMaterialization.appliedAt)
     failedMaterializationStatus = $failedMaterialization.status
     terminalPublishBlocked = [bool] $terminalPublishBlocked
+    semanticSourceHashesDiffer = $inactiveHash -ne $suspendedHash
 } | ConvertTo-Json -Depth 8
