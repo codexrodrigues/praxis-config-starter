@@ -2829,6 +2829,58 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void deterministicGuardrailRoutesGovernancePromptsWithResolvedResourceToSharedRules() {
+        List<RoutingCase> cases = List.of(
+                new RoutingCase(
+                        "Dados sensiveis exigem revisao antes de aprovar",
+                        "/api/human-resources/funcionarios"),
+                new RoutingCase(
+                        "Mascare CPF por LGPD antes de qualquer uso por IA",
+                        "/api/human-resources/funcionarios"),
+                new RoutingCase(
+                        "Pedidos de compra precisam de aprovacao obrigatoria antes de seguir",
+                        "/api/procurement/purchase-orders"));
+
+        for (RoutingCase routingCase : cases) {
+            ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("resourcePath", routingCase.resourcePath());
+
+            AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                    routingCase.prompt(),
+                    "praxis-ui-angular",
+                    "praxis-dynamic-page-builder",
+                    "/page-builder-ia",
+                    objectMapper.createObjectNode(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    contextHints));
+
+            assertThat(result.valid())
+                    .as(routingCase.prompt())
+                    .isFalse();
+            assertThat(result.gate().status())
+                    .as(routingCase.prompt())
+                    .isEqualTo("route_required");
+            assertThat(result.failureCodes())
+                    .as(routingCase.prompt())
+                    .contains("shared-rule-authoring-required");
+            assertThat(result.selectedCandidate())
+                    .as(routingCase.prompt())
+                    .isNotNull();
+            assertThat(result.selectedCandidate().resourcePath())
+                    .as(routingCase.prompt())
+                    .isEqualTo(routingCase.resourcePath());
+        }
+    }
+
+    @Test
     void canonicalRoutingMatrixKeepsVisualAuthoringEligibleForPreview() {
         List<RoutingCase> cases = List.of(
                 new RoutingCase(

@@ -131,6 +131,10 @@ The resolver may use `recommendedAuthoringFlow=shared_rule_authoring` as a
 strong host hint, but it must not depend exclusively on that hint. Older
 clients that only send a prompt and a resolved business resource must still be
 protected from routing governed business decisions into `componentEditPlan`.
+The deterministic guardrail must therefore recognize governance language such
+as approval, review, masking, privacy, sensitive data and backend validation
+when a business resource is already resolved, even if the frontend has not sent
+the explicit recommended flow hint.
 
 ## Safe Output Shape
 
