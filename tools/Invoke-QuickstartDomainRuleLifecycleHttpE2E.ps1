@@ -176,6 +176,25 @@ if ([string]::IsNullOrWhiteSpace([string] $appliedMaterialization.appliedAt)) {
     throw "Expected applied materialization to include appliedAt."
 }
 
+$manualSelectedExistingPublication = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/publications" `
+    -Headers $headers `
+    -Body @{
+        ruleDefinitionId = $definition.id
+        applyEligibleMaterializations = $true
+        publishedByType = "human"
+        publishedBy = "codex-http-smoke"
+        publicationNotes = @{
+            smoke = "domain-rule-selected-existing-diagnostics"
+        }
+    }
+
+$selectedExistingDiagnosticsSeen = Assert-MaterializationOutcome `
+    -Publication $manualSelectedExistingPublication `
+    -ExpectedResolution "selected_existing" `
+    -ExpectedMaterializationKey $materializationBody.materializationKey
+
 $failedMaterialization = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/materializations" `
@@ -337,9 +356,9 @@ $inactiveRepublish = Invoke-JsonRequest `
         }
     }
 
-$selectedExistingDiagnosticsSeen = Assert-MaterializationOutcome `
+$reusedDiagnosticsSeen = Assert-MaterializationOutcome `
     -Publication $inactiveRepublish `
-    -ExpectedResolution "selected_existing" `
+    -ExpectedResolution "reused" `
     -ExpectedMaterializationKey $inactiveMaterializationKey
 
 $reusedHash = [string] $inactiveRepublish.materializations[0].sourceHash
@@ -362,4 +381,5 @@ if ($reusedHash -ne $inactiveHash) {
     semanticSourceHashesDiffer = $inactiveHash -ne $suspendedHash
     publicationCreatedDiagnosticsSeen = [bool] $createdDiagnosticsSeen
     publicationSelectedExistingDiagnosticsSeen = [bool] $selectedExistingDiagnosticsSeen
+    publicationReusedDiagnosticsSeen = [bool] $reusedDiagnosticsSeen
 } | ConvertTo-Json -Depth 8

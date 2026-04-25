@@ -150,6 +150,9 @@ Operational smoke on `main`:
 - Smoke run `24921897738` confirmed
   `domainRulePublicationCreatedDiagnosticsSeen=true` and
   `domainRulePublicationSelectedExistingDiagnosticsSeen=true`.
+- The HTTP lifecycle smoke now also asserts
+  `domainRulePublicationReusedDiagnosticsSeen=true` for a derived
+  materialization that is republished by stable semantic `sourceHash`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
@@ -224,10 +227,9 @@ so the platform contract could be validated before any external publication.
 
 Move from browser-level readiness evidence to release discipline:
 
-1. Preserve the existing HTTP lifecycle gate for `created` and
-   `selected_existing` diagnostics; `reused` remains covered by focal backend
-   tests because normal HTTP republication selects the existing materialization
-   by definition.
+1. Preserve the HTTP lifecycle gate for `created`, `selected_existing` and
+   `reused` diagnostics so release readiness proves all publication/materialization
+   resolution branches over the quickstart host.
 2. Defer Maven/npm publication until a release
    cut explicitly requires external artifact consumption.
 3. If a release is requested, publish once after confirming the external
