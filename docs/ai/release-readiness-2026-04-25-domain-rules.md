@@ -120,12 +120,12 @@ so the platform contract could be validated before any external publication.
 
 ## Recommended Next Step
 
-Move from backend publication diagnostics to operational HTTP proof:
+Move from backend publication diagnostics to broader UI/runtime projection:
 
-1. Extend the domain-rule lifecycle HTTP smoke to assert
-   `explainability.publicationDiagnostics.materializationOutcomes[]` for
-   created and reused derived materializations.
-2. Keep the smoke scoped to quickstart/domain-rules first; do not add
-   page-builder browser E2E until the HTTP diagnostics contract is stable.
-3. After HTTP proof, project the diagnostics into cockpit/runtime UI so hosts
-   can explain backend publication decisions without local heuristics.
+1. Project `explainability.publicationDiagnostics.materializationOutcomes[]`
+   into cockpit/runtime UI so hosts can explain backend publication decisions
+   without local heuristics.
+2. Keep browser E2E out until the UI projection is intentionally designed.
+3. Preserve HTTP lifecycle coverage for `created` and `selected_existing`
+   diagnostics; `reused` remains covered by focal backend tests because normal
+   HTTP republication selects the existing materialization by definition.
