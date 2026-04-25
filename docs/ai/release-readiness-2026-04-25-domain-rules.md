@@ -178,7 +178,10 @@ Operational smoke on `main`:
 - Smoke run `24922877907` confirmed the same three publication diagnostics,
   Domain Catalog v2 `catalogSchemaVersion=praxis.domain-catalog/v0.2`, Page
   Builder full E2E `3 passed` and `fullE2EPassed=true`.
-- A subsequent smoke must confirm
+- `Agentic Authoring HTTP Smoke` run `24923319803` passed for commit
+  `020f882e61b7d4031bbc2d155cb755b2320e865f` with
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=false` and
+  `run_page_builder_full_e2e=false`. This proportional run confirmed
   `domainRulePublicationBlockedDiagnosticsSeen=true` after the blocked
   publication diagnostics contract was promoted into the HTTP gate.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
