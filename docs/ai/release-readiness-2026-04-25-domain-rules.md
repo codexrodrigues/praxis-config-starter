@@ -146,6 +146,12 @@ Operational smoke on `main`:
   `run_page_builder_full_e2e=false`. This proportional run validated the
   hardened domain-rule lifecycle smoke on the Windows runner after `reused`
   diagnostics were promoted into the HTTP gate.
+- `Agentic Authoring HTTP Smoke` run `24922877907` passed for commit
+  `4a1acc8bfaabdeaeea4f619579cd1c7687cd11d3` with
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=true` and
+  `run_page_builder_full_e2e=true`. This full integrated gate revalidated the
+  current `main` after the reused diagnostics hardening and readiness
+  documentation update.
 - The smoke packaged `praxis-api-quickstart` against local starter checkouts.
 - `Run quickstart authoring HTTP/SSE smoke suite`: passed.
 - `Run quickstart Domain Catalog v2 HTTP smoke`: passed.
@@ -160,6 +166,9 @@ Operational smoke on `main`:
   `domainRulePublicationCreatedDiagnosticsSeen=true`,
   `domainRulePublicationSelectedExistingDiagnosticsSeen=true` and
   `domainRulePublicationReusedDiagnosticsSeen=true`.
+- Smoke run `24922877907` confirmed the same three publication diagnostics,
+  Domain Catalog v2 `catalogSchemaVersion=praxis.domain-catalog/v0.2`, Page
+  Builder full E2E `3 passed` and `fullE2EPassed=true`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
