@@ -727,6 +727,60 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksPublicationWhenDefinitionStatusIsNotPublishable() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(2)
+                .ruleType("policy_reference")
+                .status("rejected")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("blocked");
+        assertThat(response.publicationReadiness()).isEqualTo("blocked_by_definition_status");
+        assertThat(response.definition().status()).isEqualTo("rejected");
+        assertThat(response.materializations()).isEmpty();
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+        verify(materializationRepository, org.mockito.Mockito.never()).findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                any(),
+                any(),
+                any());
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
     void publishesSelectionEligibilityRuleByAutoCreatingOptionSourceMaterialization() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
