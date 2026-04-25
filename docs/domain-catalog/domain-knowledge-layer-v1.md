@@ -428,6 +428,11 @@ coordinates, `statusAtResolution` and `sourceHash` when available. Hosts should
 render this explanation instead of reconstructing publication heuristics
 locally.
 
+Blocked publication responses include the same canonical diagnostics envelope
+with `publicationStatus=blocked`, `publicationReadiness`, `blockedReason`,
+`definitionStatusAtResolution` and an empty `materializationOutcomes[]` when
+publication stops before target projection resolution.
+
 ## LLM Runtime Contract
 
 LLMs should request knowledge with a compact envelope:

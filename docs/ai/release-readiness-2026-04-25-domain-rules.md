@@ -77,6 +77,11 @@ The current canonical behavior is:
   can explain whether each projection was `created`, `reused`,
   `selected_existing`, `selected_explicit`, `skipped` or `blocked` without
   reconstructing publication heuristics locally.
+- Blocked publication responses also include
+  `explainability.publicationDiagnostics` with `publicationStatus=blocked`,
+  `publicationReadiness`, `blockedReason`, `definitionStatusAtResolution` and
+  an empty `materializationOutcomes[]`, so governance explanations remain
+  canonical even before any target projection is resolved.
 - `praxis-ui-angular` projects this diagnostic envelope in the shared-rule
   handoff cockpit through typed `@praxisui/core` contracts, keeping Angular as
   a cockpit/runtime of governed semantic decisions rather than a source of
