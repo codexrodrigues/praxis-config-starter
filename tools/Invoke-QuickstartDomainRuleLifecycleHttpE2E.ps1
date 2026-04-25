@@ -80,6 +80,43 @@ function Assert-MaterializationOutcome(
     return $true
 }
 
+function Assert-DecisionDiagnostics(
+    [object] $Response,
+    [string] $ExpectedDecisionSource,
+    [string] $ExpectedResourceKey,
+    [string] $ExpectedRuleType
+) {
+    $diagnostics = $Response.explainability.decisionDiagnostics
+    if ($diagnostics.decisionKind -ne "semantic_domain_rule") {
+        throw "Expected decisionDiagnostics.decisionKind=semantic_domain_rule, got '$($diagnostics.decisionKind)'."
+    }
+    if ($diagnostics.authoringMode -ne "governed") {
+        throw "Expected decisionDiagnostics.authoringMode=governed, got '$($diagnostics.authoringMode)'."
+    }
+    if ($diagnostics.decisionSource -ne $ExpectedDecisionSource) {
+        throw "Expected decisionDiagnostics.decisionSource=$ExpectedDecisionSource, got '$($diagnostics.decisionSource)'."
+    }
+    if ($diagnostics.resourceKey -ne $ExpectedResourceKey) {
+        throw "Expected decisionDiagnostics.resourceKey=$ExpectedResourceKey, got '$($diagnostics.resourceKey)'."
+    }
+    if ($diagnostics.ruleType -ne $ExpectedRuleType) {
+        throw "Expected decisionDiagnostics.ruleType=$ExpectedRuleType, got '$($diagnostics.ruleType)'."
+    }
+    if ($diagnostics.canonicalOwner -ne "praxis-config-starter") {
+        throw "Expected decisionDiagnostics.canonicalOwner=praxis-config-starter, got '$($diagnostics.canonicalOwner)'."
+    }
+    if ($diagnostics.materializationModel -ne "derived_projection") {
+        throw "Expected decisionDiagnostics.materializationModel=derived_projection, got '$($diagnostics.materializationModel)'."
+    }
+    if ($diagnostics.runtimeSurfacesAreDerived -ne $true) {
+        throw "Expected decisionDiagnostics.runtimeSurfacesAreDerived=true, got '$($diagnostics.runtimeSurfacesAreDerived)'."
+    }
+    if ($null -eq $diagnostics.predictedMaterializationCount -or [int] $diagnostics.predictedMaterializationCount -lt 1) {
+        throw "Expected decisionDiagnostics.predictedMaterializationCount to be at least 1."
+    }
+    return $true
+}
+
 $base = $BaseUrl.TrimEnd("/")
 $headers = @{
     "Origin" = $Origin
@@ -194,6 +231,12 @@ $selectedExistingDiagnosticsSeen = Assert-MaterializationOutcome `
     -Publication $manualSelectedExistingPublication `
     -ExpectedResolution "selected_existing" `
     -ExpectedMaterializationKey $materializationBody.materializationKey
+
+$decisionDiagnosticsSeen = Assert-DecisionDiagnostics `
+    -Response $manualSelectedExistingPublication `
+    -ExpectedDecisionSource "persisted_definition" `
+    -ExpectedResourceKey $resourceKey `
+    -ExpectedRuleType "selection_eligibility"
 
 $failedMaterialization = Invoke-JsonRequest `
     -Method Post `
@@ -445,4 +488,5 @@ if ($reusedHash -ne $inactiveHash) {
     publicationSelectedExistingDiagnosticsSeen = [bool] $selectedExistingDiagnosticsSeen
     publicationReusedDiagnosticsSeen = [bool] $reusedDiagnosticsSeen
     publicationBlockedDiagnosticsSeen = [bool] $blockedDiagnosticsSeen
+    decisionDiagnosticsSeen = [bool] $decisionDiagnosticsSeen
 } | ConvertTo-Json -Depth 8
