@@ -733,6 +733,49 @@ class AgenticAuthoringPagePreviewHttpTest {
     }
 
     @Test
+    void pagePreviewRejectsSharedRuleRouteOverHttp() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Crie uma regra LGPD para CPF");
+        request.set("intentResolution", sharedRuleRouteIntent());
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isFalse();
+        assertThat(body.path("failureCodes")).extracting(JsonNode::asText)
+                .containsExactly("intent-resolution-shared-rule-route-required");
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains("preview-skipped-invalid-intent-resolution");
+        assertThat(body.path("compiledFormPatch").isMissingNode() || body.path("compiledFormPatch").isNull()
+                || body.path("compiledFormPatch").isEmpty()).isTrue();
+        assertThat(body.path("uiCompositionPlan").isMissingNode() || body.path("uiCompositionPlan").isNull()).isTrue();
+    }
+
+    @Test
     void pagePreviewCanReturnUiCompositionPlanWithoutMinimalFormPipeline() throws Exception {
         AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
         AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
@@ -894,6 +937,39 @@ class AgenticAuthoringPagePreviewHttpTest {
         intent.putArray("clarificationQuestions");
         intent.putArray("warnings");
         intent.putArray("failureCodes");
+        intent.putObject("currentPageSummary");
+        return intent;
+    }
+
+    private ObjectNode sharedRuleRouteIntent() {
+        ObjectNode intent = objectMapper.createObjectNode();
+        intent.put("valid", false);
+        intent.put("operationKind", "create");
+        intent.put("artifactKind", "form");
+        intent.put("changeKind", "create_artifact");
+        intent.put("authoringProfile", "create-minimal-form");
+        intent.put("targetApp", "praxis-ui-angular");
+        intent.put("targetComponentId", "praxis-dynamic-page-builder");
+        ObjectNode candidate = intent.putObject("selectedCandidate");
+        candidate.put("resourcePath", "/api/human-resources/funcionarios");
+        candidate.put("operation", "post");
+        candidate.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        candidate.put("submitUrl", "/api/human-resources/funcionarios");
+        candidate.put("submitMethod", "POST");
+        candidate.put("score", 0.99d);
+        candidate.put("reason", "selected resource for shared rule grounding");
+        candidate.putArray("evidence").add("quick-reply-context");
+        intent.putArray("candidates").add(candidate.deepCopy());
+        ObjectNode gate = intent.putObject("gate");
+        gate.put("gateId", "candidate-eligibility@0.1.0");
+        gate.put("status", "route_required");
+        gate.putArray("messages").add("shared-rule-authoring-required");
+        intent.put("effectivePrompt", "Crie uma regra LGPD para CPF");
+        intent.put("assistantMessage", "Esse pedido deve seguir pela trilha governada de regra compartilhada.");
+        intent.putArray("quickReplies");
+        intent.putArray("clarificationQuestions");
+        intent.putArray("warnings").add("keyword-fallback-applied");
+        intent.putArray("failureCodes").add("shared-rule-authoring-required");
         intent.putObject("currentPageSummary");
         return intent;
     }

@@ -302,6 +302,45 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.compiledFormPatch().isMissingNode()).isTrue();
     }
 
+    @Test
+    void previewRejectsSharedRuleRouteBeforeUiCompositionProviders() throws Exception {
+        AtomicReference<Boolean> providerCalled = new AtomicReference<>(false);
+        AgenticAuthoringUiCompositionPlanProvider provider = request -> {
+            providerCalled.set(true);
+            ObjectNode uiCompositionPlan = objectMapper.createObjectNode();
+            uiCompositionPlan.put("kind", "praxis.ui-composition-plan");
+            ObjectNode compiledPatch = objectMapper.createObjectNode();
+            compiledPatch.put("kind", "compiled-form-patch");
+            return java.util.Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    List.of("provider-should-not-run"),
+                    uiCompositionPlan,
+                    compiledPatch));
+        };
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma regra LGPD para CPF",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                sharedRuleRouteIntent());
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(providerCalled.get()).isFalse();
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).containsExactly("intent-resolution-shared-rule-route-required");
+        assertThat(result.warnings()).contains("preview-skipped-invalid-intent-resolution");
+        assertThat(result.uiCompositionPlan()).isNull();
+        assertThat(result.compiledFormPatch().isMissingNode()).isTrue();
+    }
+
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
     }
