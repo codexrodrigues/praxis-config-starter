@@ -13,6 +13,7 @@ tags:
   - name: ai-patch
   - name: ai-stream
   - name: ai-authoring
+  - name: domain-rules
 
 paths:
   /api/praxis/config/ai/patch:
@@ -706,6 +707,304 @@ paths:
               schema:
                 type: string
 
+  /api/praxis/config/domain-rules/intake:
+    post:
+      tags: [domain-rules]
+      operationId: intakeDomainRule
+      summary: Persiste um draft governado de decisao semantica a partir do prompt
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainRuleIntakeRequest'
+      responses:
+        '202':
+          description: Intake aceito com grounding e definicao persistida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleIntakeResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-rules/definitions:
+    post:
+      tags: [domain-rules]
+      operationId: createDomainRuleDefinition
+      summary: Cria uma definicao versionada de decisao semantica governada
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainRuleDefinitionRequest'
+      responses:
+        '202':
+          description: Definicao aceita
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleDefinitionResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+    get:
+      tags: [domain-rules]
+      operationId: listDomainRuleDefinitions
+      summary: Lista definicoes governadas por tenant, ambiente e filtros semanticos
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: resourceKey
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: ruleType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: ruleKey
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Definicoes encontradas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DomainRuleDefinitionResponse'
+
+  /api/praxis/config/domain-rules/definitions/{definitionId}/status:
+    patch:
+      tags: [domain-rules]
+      operationId: transitionDomainRuleDefinitionStatus
+      summary: Transiciona status de definicao governada
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: definitionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainRuleStatusTransitionRequest'
+      responses:
+        '200':
+          description: Definicao atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleDefinitionResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Definicao nao encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-rules/simulations:
+    post:
+      tags: [domain-rules]
+      operationId: simulateDomainRule
+      summary: Simula cobertura, materializacoes previstas e readiness de publicacao
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainRuleSimulationRequest'
+      responses:
+        '200':
+          description: Simulacao processada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleSimulationResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-rules/publications:
+    post:
+      tags: [domain-rules]
+      operationId: publishDomainRule
+      summary: Publica definicao governada e materializa projecoes elegiveis
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainRulePublicationRequest'
+      responses:
+        '200':
+          description: Publicacao processada ou bloqueada com diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRulePublicationResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-rules/materializations:
+    post:
+      tags: [domain-rules]
+      operationId: createDomainRuleMaterialization
+      summary: Registra uma materializacao derivada da decisao governada
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainRuleMaterializationRequest'
+      responses:
+        '202':
+          description: Materializacao aceita
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleMaterializationResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+    get:
+      tags: [domain-rules]
+      operationId: listDomainRuleMaterializations
+      summary: Lista materializacoes derivadas por coordenadas semanticas/runtime
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: ruleDefinitionId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: targetLayer
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: targetArtifactType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: targetArtifactKey
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Materializacoes encontradas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DomainRuleMaterializationResponse'
+
+  /api/praxis/config/domain-rules/materializations/{materializationId}/status:
+    patch:
+      tags: [domain-rules]
+      operationId: transitionDomainRuleMaterializationStatus
+      summary: Transiciona status de materializacao derivada
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: materializationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainRuleStatusTransitionRequest'
+      responses:
+        '200':
+          description: Materializacao atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleMaterializationResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Materializacao nao encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
 components:
   parameters:
     StreamIdPath:
@@ -758,7 +1057,7 @@ components:
       required: false
       schema:
         type: string
-        default: d8bff560e890c2692a55f17d0694702c167076c6e34417d621d6d76bb8680bd5
+        default: acaa7e13b1bff39de4f313f882fd8114017c495f3f5802afcd131619a229a6ad
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -788,7 +1087,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: d8bff560e890c2692a55f17d0694702c167076c6e34417d621d6d76bb8680bd5
+        example: acaa7e13b1bff39de4f313f882fd8114017c495f3f5802afcd131619a229a6ad
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2112,6 +2411,544 @@ components:
           type: object
           additionalProperties: true
       additionalProperties: false
+
+    DomainRuleJsonObject:
+      type: object
+      nullable: true
+      additionalProperties: true
+
+    DomainRuleDefinitionStatus:
+      type: string
+      enum: [draft, proposed, approved, active, deprecated, retired, rejected]
+
+    DomainRuleMaterializationStatus:
+      type: string
+      enum: [draft, pending_review, applied, failed, superseded, reverted]
+
+    DomainRuleTargetLayer:
+      type: string
+      description: Camada runtime derivada. A regra de negocio permanece na definicao governada.
+      enum: [option_source, backend_validation, workflow, form_config, shared_rule_review]
+
+    DomainRuleActorType:
+      type: string
+      enum: [ai, llm, human, system]
+
+    DomainRuleDefinitionRequest:
+      type: object
+      properties:
+        ruleKey:
+          type: string
+        version:
+          type: integer
+        ruleType:
+          type: string
+          example: selection_eligibility
+        status:
+          $ref: '#/components/schemas/DomainRuleDefinitionStatus'
+        contextKey:
+          type: string
+          nullable: true
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        semanticOwner:
+          type: string
+          nullable: true
+        steward:
+          type: string
+          nullable: true
+        sourceReleaseId:
+          type: string
+          format: uuid
+          nullable: true
+        sourceChangeSetId:
+          type: string
+          format: uuid
+          nullable: true
+        definition:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        parameters:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        condition:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        governance:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        validationResult:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        createdByType:
+          $ref: '#/components/schemas/DomainRuleActorType'
+        createdBy:
+          type: string
+          nullable: true
+        approvedBy:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    DomainRuleDefinitionResponse:
+      allOf:
+        - $ref: '#/components/schemas/DomainRuleDefinitionRequest'
+        - type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            tenantId:
+              type: string
+            environment:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+              nullable: true
+            updatedAt:
+              type: string
+              format: date-time
+              nullable: true
+            approvedAt:
+              type: string
+              format: date-time
+              nullable: true
+            activatedAt:
+              type: string
+              format: date-time
+              nullable: true
+          additionalProperties: false
+
+    DomainRuleIntakeRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+        assistantMessage:
+          type: string
+          nullable: true
+        ruleKey:
+          type: string
+          nullable: true
+        ruleType:
+          type: string
+          example: selection_eligibility
+        contextKey:
+          type: string
+          nullable: true
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        definition:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        parameters:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        condition:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        governance:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        createdByType:
+          $ref: '#/components/schemas/DomainRuleActorType'
+        createdBy:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    DomainRuleIntakeResponse:
+      type: object
+      properties:
+        intakeId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        environment:
+          type: string
+        ruleKey:
+          type: string
+        ruleType:
+          type: string
+        contextKey:
+          type: string
+          nullable: true
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/DomainRuleDefinitionStatus'
+        grounding:
+          $ref: '#/components/schemas/DomainRuleDecisionDiagnostics'
+        definition:
+          $ref: '#/components/schemas/DomainRuleDefinitionResponse'
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    DomainRuleSimulationRequest:
+      type: object
+      properties:
+        ruleDefinitionId:
+          type: string
+          format: uuid
+          nullable: true
+        ruleKey:
+          type: string
+          nullable: true
+        ruleType:
+          type: string
+          example: selection_eligibility
+        contextKey:
+          type: string
+          nullable: true
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        definition:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        parameters:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        condition:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        governance:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+      additionalProperties: false
+
+    DomainRuleSimulationResponse:
+      type: object
+      properties:
+        simulationId:
+          type: string
+          format: uuid
+        ruleDefinitionId:
+          type: string
+          format: uuid
+          nullable: true
+        tenantId:
+          type: string
+        environment:
+          type: string
+        ruleKey:
+          type: string
+        ruleVersion:
+          type: integer
+          nullable: true
+        ruleType:
+          type: string
+        contextKey:
+          type: string
+          nullable: true
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        result:
+          type: string
+          enum: [ready, needs_review, blocked]
+        grounding:
+          $ref: '#/components/schemas/DomainRuleDecisionDiagnostics'
+        existingCoverage:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        predictedMaterializations:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        requiredApprovals:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        warnings:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        explainability:
+          $ref: '#/components/schemas/DomainRuleDecisionExplainability'
+        simulatedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    DomainRulePublicationRequest:
+      type: object
+      properties:
+        ruleDefinitionId:
+          type: string
+          format: uuid
+        materializationIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        applyEligibleMaterializations:
+          type: boolean
+          default: true
+        publishedByType:
+          $ref: '#/components/schemas/DomainRuleActorType'
+        publishedBy:
+          type: string
+          nullable: true
+        publicationNotes:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+      additionalProperties: false
+
+    DomainRulePublicationResponse:
+      type: object
+      properties:
+        publicationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        environment:
+          type: string
+        publicationStatus:
+          type: string
+          enum: [published, blocked]
+        publicationReadiness:
+          type: string
+          example: ready_to_publish
+        ruleDefinitionId:
+          type: string
+          format: uuid
+        ruleKey:
+          type: string
+        ruleVersion:
+          type: integer
+        ruleType:
+          type: string
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        definition:
+          $ref: '#/components/schemas/DomainRuleDefinitionResponse'
+        materializations:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainRuleMaterializationResponse'
+        explainability:
+          $ref: '#/components/schemas/DomainRuleDecisionExplainability'
+        processedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    DomainRuleMaterializationRequest:
+      type: object
+      properties:
+        ruleDefinitionId:
+          type: string
+          format: uuid
+        materializationKey:
+          type: string
+        targetLayer:
+          $ref: '#/components/schemas/DomainRuleTargetLayer'
+        targetArtifactType:
+          type: string
+        targetArtifactKey:
+          type: string
+        targetPointer:
+          type: string
+          nullable: true
+        targetReleaseKey:
+          type: string
+          nullable: true
+        materializedRuleId:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/DomainRuleMaterializationStatus'
+        materializedPayload:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        sourceHash:
+          type: string
+          nullable: true
+        validationResult:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+        appliedByType:
+          $ref: '#/components/schemas/DomainRuleActorType'
+        appliedBy:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    DomainRuleMaterializationResponse:
+      allOf:
+        - $ref: '#/components/schemas/DomainRuleMaterializationRequest'
+        - type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            tenantId:
+              type: string
+            environment:
+              type: string
+            ruleKey:
+              type: string
+            ruleVersion:
+              type: integer
+              nullable: true
+            decisionDiagnostics:
+              $ref: '#/components/schemas/DomainRuleDecisionDiagnostics'
+            createdAt:
+              type: string
+              format: date-time
+              nullable: true
+            updatedAt:
+              type: string
+              format: date-time
+              nullable: true
+            appliedAt:
+              type: string
+              format: date-time
+              nullable: true
+          additionalProperties: false
+
+    DomainRuleStatusTransitionRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          description: Status alvo da definicao ou materializacao.
+        decidedByType:
+          $ref: '#/components/schemas/DomainRuleActorType'
+        decidedBy:
+          type: string
+          nullable: true
+        validationResult:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+      additionalProperties: false
+
+    DomainRuleDecisionDiagnostics:
+      type: object
+      description: Diagnostics canonicos que explicam a decisao semantica e suas projecoes derivadas.
+      properties:
+        decisionKind:
+          type: string
+          example: semantic_domain_rule
+        authoringMode:
+          type: string
+          example: governed
+        decisionStage:
+          type: string
+          example: materialization
+        decisionSource:
+          type: string
+          example: materialization_record
+        canonicalOwner:
+          type: string
+          example: praxis-config-starter
+        materializationModel:
+          type: string
+          example: derived_projection
+        runtimeSurfacesAreDerived:
+          type: boolean
+          example: true
+        ruleKey:
+          type: string
+          nullable: true
+        ruleType:
+          type: string
+          nullable: true
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        materializationKey:
+          type: string
+          nullable: true
+        targetLayer:
+          $ref: '#/components/schemas/DomainRuleTargetLayer'
+        targetArtifactType:
+          type: string
+          nullable: true
+        targetArtifactKey:
+          type: string
+          nullable: true
+        coverageCount:
+          type: integer
+          nullable: true
+        predictedMaterializationCount:
+          type: integer
+          nullable: true
+        requiredApprovalCount:
+          type: integer
+          nullable: true
+        warningCount:
+          type: integer
+          nullable: true
+      additionalProperties: true
+
+    DomainRuleDecisionExplainability:
+      type: object
+      properties:
+        decisionDiagnostics:
+          $ref: '#/components/schemas/DomainRuleDecisionDiagnostics'
+        publicationReadiness:
+          type: string
+          nullable: true
+        publicationDiagnostics:
+          $ref: '#/components/schemas/DomainRulePublicationDiagnostics'
+      additionalProperties: true
+
+    DomainRulePublicationDiagnostics:
+      type: object
+      properties:
+        publicationStatus:
+          type: string
+          enum: [published, blocked]
+        publicationReadiness:
+          type: string
+          nullable: true
+        blockedReason:
+          type: string
+          nullable: true
+        definitionStatusAtResolution:
+          type: string
+          nullable: true
+        materializationOutcomes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainRulePublicationMaterializationOutcome'
+      additionalProperties: true
+
+    DomainRulePublicationMaterializationOutcome:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum: [created, reused, selected_existing, selected_explicit, skipped, blocked]
+        materializationKey:
+          type: string
+          nullable: true
+        targetLayer:
+          $ref: '#/components/schemas/DomainRuleTargetLayer'
+        targetArtifactType:
+          type: string
+          nullable: true
+        targetArtifactKey:
+          type: string
+          nullable: true
+        statusAtResolution:
+          type: string
+          nullable: true
+        sourceHash:
+          type: string
+          nullable: true
+      additionalProperties: true
 
     ProblemResponse:
       type: object

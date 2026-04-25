@@ -190,6 +190,11 @@ export type AiDomainCatalogRecommendedAuthoringFlow =
   | 'component_authoring'
   | 'ui_composition_authoring';
 
+export type AiDomainCatalogRecommendedRuleType =
+  | 'governance'
+  | 'selection_eligibility'
+  | string;
+
 export interface AiDomainCatalogRelationshipHintContract {
   enabled?: boolean;
   federated?: boolean;
@@ -214,6 +219,7 @@ export interface AiDomainCatalogContextHintContract {
   contextKey?: string | null;
   nodeType?: string | null;
   recommendedAuthoringFlow?: AiDomainCatalogRecommendedAuthoringFlow | null;
+  recommendedRuleType?: AiDomainCatalogRecommendedRuleType | null;
   limit?: number;
   relationships?: AiDomainCatalogRelationshipHintContract | null;
 }
