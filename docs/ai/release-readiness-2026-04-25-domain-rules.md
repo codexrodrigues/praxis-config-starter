@@ -201,6 +201,12 @@ Operational smoke on `main`:
   (`created`, `selected_existing`, `reused` and `blocked`), Domain Catalog v2
   `catalogSchemaVersion=praxis.domain-catalog/v0.2`, Page Builder full E2E
   `2 passed` and `fullE2EPassed=true`.
+- `Agentic Authoring HTTP Smoke` run `24924233544` passed for commit
+  `45486a085d0b02e03ca87f5174f91331908ff648` with
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=false` and
+  `run_page_builder_full_e2e=false`. This proportional run confirmed
+  `domainRuleDecisionDiagnosticsSeen=true` after backend-owned semantic
+  decision diagnostics were promoted into the HTTP gate.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
