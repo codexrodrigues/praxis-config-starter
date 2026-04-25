@@ -1694,11 +1694,50 @@ public class DomainRuleService {
                 read(materialization.getMaterializedPayload()),
                 materialization.getSourceHash(),
                 read(materialization.getValidationResult()),
+                buildMaterializationDecisionDiagnostics(materialization, definition),
                 materialization.getAppliedByType(),
                 materialization.getAppliedBy(),
                 materialization.getCreatedAt(),
                 materialization.getUpdatedAt(),
                 materialization.getAppliedAt());
+    }
+
+    private ObjectNode buildMaterializationDecisionDiagnostics(
+            DomainRuleMaterialization materialization,
+            DomainRuleDefinition definition) {
+        ObjectNode diagnostics = objectMapper.createObjectNode();
+        diagnostics.put("decisionKind", "semantic_domain_rule");
+        diagnostics.put("authoringMode", "governed");
+        diagnostics.put("decisionStage", "materialization");
+        diagnostics.put("decisionSource", "materialization_record");
+        diagnostics.put("canonicalOwner", "praxis-config-starter");
+        diagnostics.put("materializationModel", "derived_projection");
+        diagnostics.put("runtimeSurfacesAreDerived", true);
+        if (definition != null) {
+            diagnostics.put("ruleKey", definition.getRuleKey());
+            diagnostics.put("ruleVersion", definition.getVersion());
+            diagnostics.put("ruleType", definition.getRuleType());
+            diagnostics.put("resourceKey", definition.getResourceKey());
+            if (StringUtils.hasText(definition.getContextKey())) {
+                diagnostics.put("contextKey", definition.getContextKey());
+            }
+            if (StringUtils.hasText(definition.getServiceKey())) {
+                diagnostics.put("serviceKey", definition.getServiceKey());
+            }
+        }
+        diagnostics.put("materializationKey", materialization.getMaterializationKey());
+        diagnostics.put("targetLayer", materialization.getTargetLayer());
+        diagnostics.put("targetArtifactType", materialization.getTargetArtifactType());
+        diagnostics.put("targetArtifactKey", materialization.getTargetArtifactKey());
+        if (StringUtils.hasText(materialization.getTargetPointer())) {
+            diagnostics.put("targetPointer", materialization.getTargetPointer());
+        }
+        if (StringUtils.hasText(materialization.getMaterializedRuleId())) {
+            diagnostics.put("materializedRuleId", materialization.getMaterializedRuleId());
+        }
+        diagnostics.put("status", materialization.getStatus());
+        diagnostics.put("sourceHashPresent", StringUtils.hasText(materialization.getSourceHash()));
+        return diagnostics;
     }
 
     private void requireText(String value, String field) {

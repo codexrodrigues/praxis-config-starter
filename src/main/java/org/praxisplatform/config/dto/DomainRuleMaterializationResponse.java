@@ -22,6 +22,7 @@ public record DomainRuleMaterializationResponse(
         JsonNode materializedPayload,
         String sourceHash,
         JsonNode validationResult,
+        JsonNode decisionDiagnostics,
         String appliedByType,
         String appliedBy,
         Instant createdAt,

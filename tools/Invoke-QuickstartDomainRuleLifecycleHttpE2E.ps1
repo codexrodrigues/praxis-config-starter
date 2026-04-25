@@ -134,6 +134,39 @@ function Assert-DecisionDiagnosticsNode(
     return $true
 }
 
+function Assert-MaterializationDecisionDiagnostics(
+    [object] $Materialization,
+    [string] $ExpectedMaterializationKey,
+    [string] $ExpectedTargetLayer
+) {
+    $diagnostics = $Materialization.decisionDiagnostics
+    if ($diagnostics.decisionKind -ne "semantic_domain_rule") {
+        throw "Expected materialization decisionDiagnostics.decisionKind=semantic_domain_rule, got '$($diagnostics.decisionKind)'."
+    }
+    if ($diagnostics.decisionStage -ne "materialization") {
+        throw "Expected materialization decisionDiagnostics.decisionStage=materialization, got '$($diagnostics.decisionStage)'."
+    }
+    if ($diagnostics.decisionSource -ne "materialization_record") {
+        throw "Expected materialization decisionDiagnostics.decisionSource=materialization_record, got '$($diagnostics.decisionSource)'."
+    }
+    if ($diagnostics.canonicalOwner -ne "praxis-config-starter") {
+        throw "Expected materialization decisionDiagnostics.canonicalOwner=praxis-config-starter, got '$($diagnostics.canonicalOwner)'."
+    }
+    if ($diagnostics.materializationModel -ne "derived_projection") {
+        throw "Expected materialization decisionDiagnostics.materializationModel=derived_projection, got '$($diagnostics.materializationModel)'."
+    }
+    if ($diagnostics.runtimeSurfacesAreDerived -ne $true) {
+        throw "Expected materialization decisionDiagnostics.runtimeSurfacesAreDerived=true, got '$($diagnostics.runtimeSurfacesAreDerived)'."
+    }
+    if ($diagnostics.materializationKey -ne $ExpectedMaterializationKey) {
+        throw "Expected materialization decisionDiagnostics.materializationKey=$ExpectedMaterializationKey, got '$($diagnostics.materializationKey)'."
+    }
+    if ($diagnostics.targetLayer -ne $ExpectedTargetLayer) {
+        throw "Expected materialization decisionDiagnostics.targetLayer=$ExpectedTargetLayer, got '$($diagnostics.targetLayer)'."
+    }
+    return $true
+}
+
 $base = $BaseUrl.TrimEnd("/")
 $headers = @{
     "Origin" = $Origin
@@ -267,6 +300,10 @@ if ($appliedMaterialization.status -ne "applied") {
 if ([string]::IsNullOrWhiteSpace([string] $appliedMaterialization.appliedAt)) {
     throw "Expected applied materialization to include appliedAt."
 }
+$materializationDecisionDiagnosticsSeen = Assert-MaterializationDecisionDiagnostics `
+    -Materialization $appliedMaterialization `
+    -ExpectedMaterializationKey $materializationBody.materializationKey `
+    -ExpectedTargetLayer "option_source"
 
 $manualSelectedExistingPublication = Invoke-JsonRequest `
     -Method Post `
@@ -545,4 +582,5 @@ if ($reusedHash -ne $inactiveHash) {
     publicationBlockedDiagnosticsSeen = [bool] $blockedDiagnosticsSeen
     intakeDecisionDiagnosticsSeen = [bool] $intakeDecisionDiagnosticsSeen
     decisionDiagnosticsSeen = [bool] $decisionDiagnosticsSeen
+    materializationDecisionDiagnosticsSeen = [bool] $materializationDecisionDiagnosticsSeen
 } | ConvertTo-Json -Depth 8
