@@ -1046,10 +1046,18 @@ public class DomainRuleService {
                         throw new ConfigurationIngestionException(
                                 "Rule materialization does not belong to definition " + definition.getId());
                     }
+                    if (!isPublishableMaterializationStatus(materialization.getStatus())) {
+                        throw new ConfigurationIngestionException(
+                                "Rule materialization status is not publishable: " + materialization.getStatus());
+                    }
                 })
                 .map(materialization -> maybeApplyMaterialization(materialization, request, now))
                 .map(this::toResponse)
                 .toList();
+    }
+
+    private boolean isPublishableMaterializationStatus(String status) {
+        return "draft".equals(status) || "pending_review".equals(status) || "applied".equals(status);
     }
 
     private List<DomainRuleMaterialization> createEligibleMaterializationsFromPredictions(

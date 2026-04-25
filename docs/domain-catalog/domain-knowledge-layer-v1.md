@@ -403,6 +403,11 @@ or transitioning to `applied` sets `applied_at` when missing and is only valid
 when the linked definition is already `active`. These endpoints are for
 lifecycle governance; they still do not execute rules.
 
+Publication may only apply materializations in `draft`, `pending_review` or
+already `applied` status. Terminal materializations such as `failed`,
+`superseded` or `reverted` must be reviewed, replaced or explicitly moved back
+through governance before they can participate in a publication.
+
 ## LLM Runtime Contract
 
 LLMs should request knowledge with a compact envelope:
