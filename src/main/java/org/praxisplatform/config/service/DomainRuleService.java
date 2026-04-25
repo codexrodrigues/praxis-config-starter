@@ -1241,7 +1241,7 @@ public class DomainRuleService {
                 normalize(environment),
                 materializationKey);
         if (existing.isPresent()) {
-            requireReusableMaterialization(
+            requireReusableDerivedMaterialization(
                     existing.get(),
                     definition,
                     targetLayer,
@@ -1264,6 +1264,27 @@ public class DomainRuleService {
         materialization.setMaterializedPayload(write(payload));
         materialization.setSourceHash(sourceHash);
         return materializationRepository.save(materialization);
+    }
+
+    private void requireReusableDerivedMaterialization(
+            DomainRuleMaterialization existing,
+            DomainRuleDefinition requestedDefinition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String sourceHash) {
+        requireReusableMaterialization(
+                existing,
+                requestedDefinition,
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                sourceHash);
+        if (!StringUtils.hasText(existing.getSourceHash())) {
+            throw new ConfigurationIngestionException(
+                    "Derived rule materialization key already exists without a sourceHash: "
+                            + existing.getMaterializationKey());
+        }
     }
 
     private static String derivedSourceHash(

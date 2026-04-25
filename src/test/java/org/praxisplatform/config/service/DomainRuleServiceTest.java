@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -1158,7 +1160,106 @@ class DomainRuleServiceTest {
     }
 
     @Test
-    void publicationReusesExistingDerivedMaterializationForStableKey() {
+    void publicationReusesExistingDerivedMaterializationForStableKeyAndSourceHash() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["INACTIVE", "BLOCKED"]
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+        AtomicInteger keyLookups = new AtomicInteger();
+        AtomicReference<DomainRuleMaterialization> savedMaterialization = new AtomicReference<>();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers.rule.selection-eligibility:option_source:supplier"))
+                .thenAnswer(invocation -> keyLookups.getAndIncrement() == 0
+                        ? Optional.empty()
+                        : Optional.ofNullable(savedMaterialization.get()));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            if (materialization.getId() == null) {
+                materialization.setId(UUID.randomUUID());
+            }
+            materialization.onInsert();
+            savedMaterialization.set(materialization);
+            return materialization;
+        });
+
+        var firstResponse = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+        var secondResponse = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(firstResponse.publicationStatus()).isEqualTo("published");
+        assertThat(firstResponse.materializations()).singleElement()
+                .satisfies(item -> assertThat(item.sourceHash()).startsWith("derived:sha256:"));
+        assertThat(secondResponse.publicationStatus()).isEqualTo("published");
+        assertThat(secondResponse.materializations()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.id()).isEqualTo(firstResponse.materializations().get(0).id());
+                    assertThat(item.materializationKey())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
+                    assertThat(item.status()).isEqualTo("applied");
+                    assertThat(item.sourceHash()).isEqualTo(firstResponse.materializations().get(0).sourceHash());
+                });
+        verify(materializationRepository, org.mockito.Mockito.times(2)).save(savedMaterialization.get());
+    }
+
+    @Test
+    void publicationBlocksDerivedMaterializationWhenStableKeyHasNoSourceHash() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
         DomainRuleService service = service(definitionRepository, materializationRepository);
@@ -1220,9 +1321,8 @@ class DomainRuleServiceTest {
                 "dev",
                 "procurement.suppliers.rule.selection-eligibility:option_source:supplier"))
                 .thenReturn(Optional.of(existing));
-        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        var response = service.publish(
+        assertThatThrownBy(() -> service.publish(
                 new DomainRulePublicationRequest(
                         definitionId,
                         null,
@@ -1231,17 +1331,11 @@ class DomainRuleServiceTest {
                         "procurement-owner",
                         null),
                 "tenant-a",
-                "dev");
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Derived rule materialization key already exists without a sourceHash");
 
-        assertThat(response.publicationStatus()).isEqualTo("published");
-        assertThat(response.materializations()).singleElement()
-                .satisfies(item -> {
-                    assertThat(item.id()).isEqualTo(existing.getId());
-                    assertThat(item.materializationKey())
-                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
-                    assertThat(item.status()).isEqualTo("applied");
-                });
-        verify(materializationRepository).save(existing);
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
     @Test
