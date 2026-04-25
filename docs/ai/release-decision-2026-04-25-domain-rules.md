@@ -230,8 +230,9 @@ Continue implementation without publishing.
 The next engineering work should focus on hardening the semantic decision
 platform itself: preserve backend-owned decision diagnostics in governed
 authoring explainability, keep sibling runtime materializations clearly
-projected in downstream consumers, keep OpenAPI and derived documentation
-surfaces synchronized after public-contract edits, keep status-transition
-governance visible in HTTP smoke markers, use Page Builder full E2E only when
-the next change actually needs browser/stream coverage, and only cut
-`0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.
+projected in downstream consumers, keep `sourceHash` fingerprints visible in
+materialization diagnostics, keep OpenAPI and derived documentation surfaces
+synchronized after public-contract edits, keep status-transition governance
+visible in HTTP smoke markers, use Page Builder full E2E only when the next
+change actually needs browser/stream coverage, and only cut `0.1.0-rc.34` when
+a real downstream consumer needs Maven Central resolution.

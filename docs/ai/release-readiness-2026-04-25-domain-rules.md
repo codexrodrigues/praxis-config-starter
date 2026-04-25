@@ -786,3 +786,24 @@ The log confirmed:
 
 This closes the proportional HTTP/SSE proof for governed terminal-transition
 blocking. No Maven Central or npm publication was performed.
+
+## Materialization SourceHash Diagnostics Addendum
+
+After the terminal-transition checkpoint, materialization
+`decisionDiagnostics` became more explicit by carrying `sourceHash` when a
+fingerprint exists, while preserving `sourceHashPresent`. This keeps isolated
+materialization responses aligned with publication diagnostics: both now expose
+the semantic fingerprint that proves the runtime projection was derived from
+the governed canonical decision.
+
+Local focal validation passed with:
+
+```bash
+mvn -Dtest=DomainRuleServiceTest test -q
+git diff --check
+```
+
+Before any Maven Central release based on this additive public-contract change,
+rerun a proportional `Agentic Authoring HTTP Smoke` against the resulting
+`main` and confirm that materialization decision diagnostics still appear in
+the smoke summary.

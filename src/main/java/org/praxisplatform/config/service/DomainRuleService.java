@@ -1740,6 +1740,9 @@ public class DomainRuleService {
         }
         diagnostics.put("status", materialization.getStatus());
         diagnostics.put("sourceHashPresent", StringUtils.hasText(materialization.getSourceHash()));
+        if (StringUtils.hasText(materialization.getSourceHash())) {
+            diagnostics.put("sourceHash", materialization.getSourceHash());
+        }
         return diagnostics;
     }
 
