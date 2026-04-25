@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -23,6 +24,7 @@ import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRulePublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
+import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
@@ -171,6 +173,8 @@ class DomainRuleServiceTest {
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
                 .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
                 .ruleKey("human-resources.funcionarios.rule.lgpd-cpf-guidance")
                 .version(2)
                 .ruleType("visual_guidance")
@@ -234,6 +238,8 @@ class DomainRuleServiceTest {
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
                 .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
                 .ruleKey("procurement.suppliers.rule.selection-eligibility")
                 .version(1)
                 .ruleType("selection_eligibility")
@@ -297,6 +303,8 @@ class DomainRuleServiceTest {
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
                 .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
                 .ruleKey("procurement.suppliers.rule.status-validation")
                 .version(1)
                 .ruleType("validation")
@@ -359,6 +367,50 @@ class DomainRuleServiceTest {
                 .isEqualTo("error");
         assertThat(response.materializedPayload().path("validationPolicy").path("validationMessageTemplate").asText())
                 .isEqualTo("Fornecedor indisponivel");
+    }
+
+    @Test
+    void blocksMaterializationWhenDefinitionScopeDoesNotMatchRequestScope() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .resourceKey("procurement.suppliers")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.createMaterialization(new DomainRuleMaterializationRequest(
+                definitionId,
+                "procurement.suppliers.rule.selection-eligibility:option_source:supplier",
+                "option_source",
+                "resource-option-source",
+                "supplier",
+                "/selectionPolicy",
+                null,
+                "selection-policy",
+                "pending_review",
+                null,
+                "hash-selection-eligibility",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-b", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Rule tenantId does not match request scope");
+
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
     @Test
