@@ -398,10 +398,10 @@ Status transition endpoints accept a compact governance decision payload:
 ```
 
 For definitions, `approved` sets `approved_at` and `active` sets both
-`approved_at` and `activated_at` when missing. For materializations, `applied`
-sets `applied_at` when missing and is only valid when the linked definition is
-already `active`. These endpoints are for lifecycle governance; they still do
-not execute rules.
+`approved_at` and `activated_at` when missing. For materializations, creating
+or transitioning to `applied` sets `applied_at` when missing and is only valid
+when the linked definition is already `active`. These endpoints are for
+lifecycle governance; they still do not execute rules.
 
 ## LLM Runtime Contract
 
