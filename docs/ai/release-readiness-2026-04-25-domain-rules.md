@@ -19,7 +19,7 @@ The validated path covers:
 
 ## Version Set
 
-- `praxis-config-starter`: `main` commit `fc7478d998366f0c2452022f15926e485f41551e`.
+- `praxis-config-starter`: `main` commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6`.
 - `praxis-ui-angular`: `main` commit `524f6f7033885c76d29469106ab32d13f2ac923c`.
 - `praxis-api-quickstart`: `main`, packaged in GitHub Actions against the local
   `praxis-config-starter` and `praxis-metadata-starter` checkouts.
@@ -46,6 +46,36 @@ The validated path covers:
   commit `d8d4d7b1788b71cc8707c6301c222eb05d888a6c`.
 - PR #58, `Document domain rule route smoke`,
   commit `fc7478d998366f0c2452022f15926e485f41551e`.
+- PR #59, `Document integrated page-builder smoke readiness`,
+  commit `d79c3850f0bc9d4b62dd98965be62a3fa989c10c`.
+- PR #60, `Document domain rules release decision`,
+  commit `3d07080c04327d05bef5bd7b97b1d250d9816014`.
+- PR #61, `Harden domain rule reuse diagnostics gate`,
+  commit `27dc980c58613b25ebe09894c7044f13326b5fb1`.
+- PR #62, `Document reused diagnostics smoke run`,
+  commit `4a1acc8bfaabdeaeea4f619579cd1c7687cd11d3`.
+- PR #63, `Document full gate after reuse diagnostics`,
+  commit `4db6c7e9afb9578ba0b3c1c69dc5a089ffde82ce`.
+- PR #64, `Add blocked publication diagnostics`,
+  commit `e0772cac10d3769640a546fb6d96c596009aeef0`.
+- PR #65, `Gate blocked publication diagnostics in smoke`,
+  commit `020f882e61b7d4031bbc2d155cb755b2320e865f`.
+- PR #66, `Document blocked diagnostics smoke run`,
+  commit `0a5723f4b8fc96a6f6efdb4d60b5f65e04fe2281`.
+- PR #67, `Document full gate with blocked diagnostics`,
+  commit `3b828e9878f8dbf4b15a924f232636e7b5af727b`.
+- PR #68, `Update domain rules recommended next step`,
+  commit `8a6b670291ec06587572c0887c0c4139675995f1`.
+- PR #69, `Add domain rule decision diagnostics`,
+  commit `621ed8c9c64740f081206cc6d0bc99aa1ae360d4`.
+- PR #70, `Gate domain rule decision diagnostics in smoke`,
+  commit `45486a085d0b02e03ca87f5174f91331908ff648`.
+- PR #71, `Document decision diagnostics smoke run`,
+  commit `24fe78bf088f025363594f259eee02ff844cf729`.
+- PR #72, `Document full gate with decision diagnostics`,
+  commit `cffbac9f5942c1502273fe3b2ac4e8250268033c`.
+- PR #73, `Require domain-rule decision diagnostics for release`,
+  commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6`.
 - `praxis-ui-angular` PR #52, `Project domain rule publication diagnostics in cockpit`,
   commit `a754afd091125f1ab152c64e87dbd02e4654202d`.
 - `praxis-ui-angular` PR #53, `Keep page-builder resource discovery on SSE`,
@@ -118,7 +148,7 @@ Focal local validation after each code change:
 
 Latest focal result:
 
-- `DomainRuleServiceTest`: 27 tests, 0 failures, 0 errors, 0 skipped.
+- `DomainRuleServiceTest`: 28 tests, 0 failures, 0 errors, 0 skipped.
 
 GitHub Actions CI on `main`:
 
@@ -132,6 +162,13 @@ GitHub Actions CI on `main`:
   for commit `c24de432983966526cdfcdf3e06d878b942572aa`.
 - `CI and Release Java Starter (praxis-config-starter)` run `24919943378` passed
   for commit `2056bc06094b7200ef7cfb7a7169aaf52df512f9`.
+- `CI and Release Java Starter (praxis-config-starter)` run `24925065297` passed
+  for commit `cffbac9f5942c1502273fe3b2ac4e8250268033c`, after the full
+  integrated decision diagnostics gate was documented.
+- `CI and Release Java Starter (praxis-config-starter)` run `24925130100` passed
+  for commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6`, after the release
+  decision and knowledge-layer docs were aligned with
+  `domainRuleDecisionDiagnosticsSeen=true`.
 
 Operational smoke on `main`:
 
@@ -293,7 +330,9 @@ Keep the release deferred and move back to platform hardening:
 
 1. Treat run `24924505019` as the current integrated readiness checkpoint for
    domain-rule publication diagnostics, backend-owned decision diagnostics,
-   Domain Catalog v2 and Page Builder runtime projection.
+   Domain Catalog v2 and Page Builder runtime projection, and treat config
+   `main` commit `42bcfb270a83e11ee6ea4a2e48a04ceefa222cc6` as the current
+   documented source checkpoint after the docs-only CI run `24925130100`.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Use the next implementation cycle to strengthen governed semantic decision
