@@ -94,8 +94,9 @@ The release can move from deferred to publishable when all of these are true:
   Builder full E2E enabled;
 - the smoke summary confirms `domainRulePublicationCreatedDiagnosticsSeen=true`,
   `domainRulePublicationSelectedExistingDiagnosticsSeen=true`,
-  `domainRulePublicationReusedDiagnosticsSeen=true` and
-  `domainRulePublicationBlockedDiagnosticsSeen=true`;
+  `domainRulePublicationReusedDiagnosticsSeen=true`,
+  `domainRulePublicationBlockedDiagnosticsSeen=true` and
+  `domainRuleDecisionDiagnosticsSeen=true`;
 - the intended Maven version is explicit and not already tagged;
 - the downstream consumer that needs the artifact version is named;
 - no new contract change has landed after the gate without a new gate run.
@@ -105,6 +106,6 @@ The release can move from deferred to publishable when all of these are true:
 Continue implementation without publishing.
 
 The next engineering work should focus on hardening the semantic decision
-platform itself: strengthen governed authoring explainability, preserve the
-HTTP/SSE lifecycle gate, and only cut `0.1.0-rc.34` when a real downstream
-consumer needs Maven Central resolution.
+platform itself: preserve backend-owned decision diagnostics in governed
+authoring explainability, keep the HTTP/SSE lifecycle gate green, and only cut
+`0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.
