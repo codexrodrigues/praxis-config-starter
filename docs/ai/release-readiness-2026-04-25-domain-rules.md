@@ -438,6 +438,17 @@ Angular cockpit/runtime projection:
 - Local focal validation for PR #57 passed:
   - `git diff --check -- src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.ts src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts`
   - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
+- Local focal validation for `praxis-config-starter` PR #83 passed:
+  - `mvn -Dtest=DomainRuleServiceTest test -q`
+  - This added the service-level proof that an AI-authored procurement supplier
+    eligibility decision can move through intake, simulation and publication
+    into an applied derived `option_source` materialization.
+- Local focal validation for `praxis-config-starter` PR #84 passed:
+  - `git diff --check -- tools/Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1 tools/Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1`
+  - `mvn -Dtest=DomainRuleServiceTest test -q`
+  - This hardened the quickstart HTTP smoke to require the real
+    `lookup_selection_policy` projection for procurement supplier selection,
+    including `INACTIVE` and `BLOCKED` blocked statuses.
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24920424506` passed for
   head SHA `3c45fee91f580ec9148f373b4b4333e7dd8deb4b`.
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24921204229` passed for
@@ -451,6 +462,14 @@ Angular cockpit/runtime projection:
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24926222174` passed for
   head SHA `aa80680373973a0532f73d7bc3d6bdd3df5b641b`; release/tag job
   skipped.
+- GitHub Actions `CI and Release Java Starter (praxis-config-starter)` run
+  `24931194317` passed for merge commit
+  `3557d51beacca456e05a18acfae5dc19335c0dbb`; release/tag and Maven Central
+  jobs skipped.
+- GitHub Actions `CI and Release Java Starter (praxis-config-starter)` run
+  `24931255327` passed for merge commit
+  `eba8575791ecec71c3e4f6eedbb2c038b58ad848`; release/tag and Maven Central
+  jobs skipped.
 
 Domain Catalog v2 smoke summary:
 
@@ -502,8 +521,36 @@ Keep the release deferred and move back to platform hardening:
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Use the next implementation cycle to strengthen governed semantic decision
-   authoring itself: preserve canonical explainability in the intake,
-   simulation, publication and materialization path, and prefer backend-owned
-   diagnostics over cockpit-side inference.
+   authoring beyond the procurement `option_source` happy path. The current
+   strong checkpoint proves intake, simulation, publication and derived
+   `lookup_selection_policy` materialization for blocked suppliers; the next
+   recommended hardening target is backend validation/materialization parity
+   for the same decision class, so runtimes do not depend only on lookup
+   disabling.
 4. If a release is requested, publish once after confirming the external
    artifact version set, rather than repeatedly publishing during validation.
+
+## Procurement Option Source Checkpoint
+
+`praxis-config-starter` PR #83 merged at
+`3557d51beacca456e05a18acfae5dc19335c0dbb` and introduced the service-level
+proof for the procurement supplier eligibility decision lifecycle.
+
+`praxis-config-starter` PR #84 merged at
+`eba8575791ecec71c3e4f6eedbb2c038b58ad848` and promoted that proof into the
+quickstart HTTP/SSE smoke. The proportional GitHub Actions smoke run
+`24931281838` passed with:
+
+- `provider=openai`;
+- `quickstart_ref=main`;
+- `metadata_ref=main`;
+- `run_quickstart_http_smoke=true`;
+- `run_domain_catalog_v2_smoke=false`;
+- `run_page_builder_full_e2e=false`;
+- `run_llm_compliance_policy_shadow=false`;
+- `domainRuleProcurementOptionSourcePolicySeen=true`.
+
+This checkpoint proves that the runtime projection is not a frontend-local
+rule: the backend publication path creates a derived `option_source`
+`lookup_selection_policy` materialization for `supplier` and the HTTP smoke
+requires the policy to block both `INACTIVE` and `BLOCKED` suppliers.

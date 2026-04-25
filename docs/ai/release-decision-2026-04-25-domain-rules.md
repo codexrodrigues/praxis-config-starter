@@ -50,6 +50,25 @@ The platform has enough evidence to support a release candidate:
   `run_domain_catalog_v2_smoke=true` and `run_page_builder_full_e2e=true`. It
   confirmed the same diagnostics gate, Domain Catalog v2 semantic/alias/
   relationship payloads and Page Builder full E2E `3 passed`.
+- `praxis-config-starter` PR #83 reached `main` at
+  `3557d51beacca456e05a18acfae5dc19335c0dbb` with a service-level proof that
+  an AI-authored procurement supplier eligibility decision can be intaken,
+  simulated, published and materialized as a derived `option_source`
+  `lookup_selection_policy`.
+- `praxis-config-starter` PR #84 reached `main` at
+  `eba8575791ecec71c3e4f6eedbb2c038b58ad848` and hardened the quickstart HTTP
+  smoke to require `domainRuleProcurementOptionSourcePolicySeen=true`, proving
+  over HTTP that the derived supplier option-source policy blocks both
+  `INACTIVE` and `BLOCKED` suppliers.
+- `CI and Release Java Starter (praxis-config-starter)` runs `24931194317` and
+  `24931255327` passed for those commits. The release/tag and Maven Central
+  jobs remained skipped.
+- Proportional `Agentic Authoring HTTP Smoke` run `24931281838` passed on
+  `main` with `run_quickstart_http_smoke=true`,
+  `run_domain_catalog_v2_smoke=false`, `run_page_builder_full_e2e=false` and
+  `run_llm_compliance_policy_shadow=false`. This was intentionally smaller
+  than a full integrated gate because the change only hardened the
+  domain-rule lifecycle HTTP smoke.
 - `praxis-ui-angular` CI runs `24926048274` and `24926222174` passed after the
   Angular diagnostics projection and README alignment reached `main`; both kept
   release/tag publication skipped. PR #57 then passed focal local validation
@@ -128,6 +147,8 @@ The release can move from deferred to publishable when all of these are true:
   `domainRuleIntakeDecisionDiagnosticsSeen=true`,
   `domainRuleMaterializationDecisionDiagnosticsSeen=true` and
   `domainRuleDecisionDiagnosticsSeen=true`;
+- the smoke summary confirms
+  `domainRuleProcurementOptionSourcePolicySeen=true`;
 - the intended Maven version is explicit and not already tagged;
 - the downstream consumer that needs the artifact version is named;
 - no new contract change has landed after the gate without a new gate run.
@@ -138,5 +159,7 @@ Continue implementation without publishing.
 
 The next engineering work should focus on hardening the semantic decision
 platform itself: preserve backend-owned decision diagnostics in governed
-authoring explainability, keep the HTTP/SSE lifecycle gate green, and only cut
-`0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.
+authoring explainability, extend enforcement beyond lookup projection where the
+decision class requires backend validation parity, keep the HTTP/SSE lifecycle
+gate green, and only cut `0.1.0-rc.34` when a real downstream consumer needs
+Maven Central resolution.
