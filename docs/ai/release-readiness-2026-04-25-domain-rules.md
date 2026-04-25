@@ -82,6 +82,11 @@ The current canonical behavior is:
   `publicationReadiness`, `blockedReason`, `definitionStatusAtResolution` and
   an empty `materializationOutcomes[]`, so governance explanations remain
   canonical even before any target projection is resolved.
+- Simulation explainability now includes additive
+  `explainability.decisionDiagnostics` with the canonical semantic decision
+  kind, governed authoring mode, source, owner, diagnostic counts and
+  `runtimeSurfacesAreDerived=true`, so hosts can present the backend-owned
+  decision explanation without inferring platform semantics locally.
 - The quickstart HTTP smoke now treats this blocked diagnostic envelope as a
   release gate through `domainRulePublicationBlockedDiagnosticsSeen=true`,
   preventing future regressions where blocked governance would still succeed

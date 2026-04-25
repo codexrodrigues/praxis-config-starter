@@ -316,7 +316,9 @@ public class DomainRuleService {
         ObjectNode explainability = buildExplainability(
                 ruleKey,
                 ruleType,
+                contextKey,
                 resourceKey,
+                serviceKey,
                 existingCoverage,
                 predictedMaterializations,
                 requiredApprovals,
@@ -960,7 +962,9 @@ public class DomainRuleService {
     private ObjectNode buildExplainability(
             String ruleKey,
             String ruleType,
+            String contextKey,
             String resourceKey,
+            String serviceKey,
             ArrayNode existingCoverage,
             ArrayNode predictedMaterializations,
             ArrayNode requiredApprovals,
@@ -976,6 +980,17 @@ public class DomainRuleService {
         explainability.put(
                 "publicationReadiness",
                 buildPublicationReadiness(existingCoverage, requiredApprovals, persistedDefinition));
+        explainability.set("decisionDiagnostics", buildDecisionDiagnostics(
+                ruleKey,
+                ruleType,
+                contextKey,
+                resourceKey,
+                serviceKey,
+                existingCoverage,
+                predictedMaterializations,
+                requiredApprovals,
+                warnings,
+                persistedDefinition));
 
         ArrayNode highlights = explainability.putArray("highlights");
         highlights.add("ruleKey=" + (StringUtils.hasText(ruleKey) ? ruleKey : resourceKey + ".rule.draft"));
@@ -1020,6 +1035,40 @@ public class DomainRuleService {
             step.set("warnings", warnings.deepCopy());
         }
         return explainability;
+    }
+
+    private ObjectNode buildDecisionDiagnostics(
+            String ruleKey,
+            String ruleType,
+            String contextKey,
+            String resourceKey,
+            String serviceKey,
+            ArrayNode existingCoverage,
+            ArrayNode predictedMaterializations,
+            ArrayNode requiredApprovals,
+            ArrayNode warnings,
+            boolean persistedDefinition) {
+        ObjectNode diagnostics = objectMapper.createObjectNode();
+        diagnostics.put("decisionKind", "semantic_domain_rule");
+        diagnostics.put("authoringMode", "governed");
+        diagnostics.put("decisionSource", persistedDefinition ? "persisted_definition" : "ad_hoc_request");
+        diagnostics.put("ruleKey", StringUtils.hasText(ruleKey) ? ruleKey : resourceKey + ".rule.draft");
+        diagnostics.put("ruleType", ruleType);
+        diagnostics.put("resourceKey", resourceKey);
+        if (StringUtils.hasText(contextKey)) {
+            diagnostics.put("contextKey", contextKey);
+        }
+        if (StringUtils.hasText(serviceKey)) {
+            diagnostics.put("serviceKey", serviceKey);
+        }
+        diagnostics.put("existingCoverageCount", existingCoverage.size());
+        diagnostics.put("predictedMaterializationCount", predictedMaterializations.size());
+        diagnostics.put("requiredApprovalCount", requiredApprovals.size());
+        diagnostics.put("warningCount", warnings.size());
+        diagnostics.put("canonicalOwner", "praxis-config-starter");
+        diagnostics.put("materializationModel", "derived_projection");
+        diagnostics.put("runtimeSurfacesAreDerived", true);
+        return diagnostics;
     }
 
     private String buildExplainabilitySummary(

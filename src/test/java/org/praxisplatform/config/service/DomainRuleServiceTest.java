@@ -881,6 +881,22 @@ class DomainRuleServiceTest {
         assertThat(response.grounding().path("source").asText()).isEqualTo("ad_hoc_request");
         assertThat(response.explainability().path("recommendedAction").asText()).isEqualTo("review_existing_coverage");
         assertThat(response.explainability().path("publicationReadiness").asText()).isEqualTo("blocked_by_existing_coverage");
+        assertThat(response.explainability().path("decisionDiagnostics").path("decisionKind").asText())
+                .isEqualTo("semantic_domain_rule");
+        assertThat(response.explainability().path("decisionDiagnostics").path("authoringMode").asText())
+                .isEqualTo("governed");
+        assertThat(response.explainability().path("decisionDiagnostics").path("decisionSource").asText())
+                .isEqualTo("ad_hoc_request");
+        assertThat(response.explainability().path("decisionDiagnostics").path("canonicalOwner").asText())
+                .isEqualTo("praxis-config-starter");
+        assertThat(response.explainability().path("decisionDiagnostics").path("runtimeSurfacesAreDerived").asBoolean())
+                .isTrue();
+        assertThat(response.explainability().path("decisionDiagnostics").path("existingCoverageCount").asInt())
+                .isEqualTo(1);
+        assertThat(response.explainability().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
+                .isEqualTo(1);
+        assertThat(response.explainability().path("decisionDiagnostics").path("requiredApprovalCount").asInt())
+                .isEqualTo(1);
         assertThat(response.explainability().path("summary").asText()).contains("Existing approved or active coverage was found");
         assertThat(response.explainability().path("nextSteps")).hasSize(4);
         assertThat(response.explainability().path("nextSteps").get(0).path("kind").asText()).isEqualTo("review_existing_coverage");
@@ -1261,6 +1277,12 @@ class DomainRuleServiceTest {
                             .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
                     assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
                 });
+        assertThat(response.explainability().path("decisionDiagnostics").path("decisionSource").asText())
+                .isEqualTo("persisted_definition");
+        assertThat(response.explainability().path("decisionDiagnostics").path("materializationModel").asText())
+                .isEqualTo("derived_projection");
+        assertThat(response.explainability().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
+                .isEqualTo(1);
         assertThat(response.materializations()).singleElement()
                 .satisfies(item -> {
                     assertThat(item.targetLayer()).isEqualTo("option_source");
@@ -1824,6 +1846,12 @@ class DomainRuleServiceTest {
                 .path("definitionStatusAtResolution")
                 .asText())
                 .isEqualTo("draft");
+        assertThat(response.explainability().path("decisionDiagnostics").path("decisionSource").asText())
+                .isEqualTo("persisted_definition");
+        assertThat(response.explainability().path("decisionDiagnostics").path("requiredApprovalCount").asInt())
+                .isEqualTo(1);
+        assertThat(response.explainability().path("decisionDiagnostics").path("runtimeSurfacesAreDerived").asBoolean())
+                .isTrue();
         verify(definitionRepository, org.mockito.Mockito.times(2)).findById(definitionId);
     }
 
