@@ -389,16 +389,19 @@ API. Internally it can delegate to the knowledge layer once v1 is ready.
 
 The `/domain-rules` endpoints are intentionally not rule executors. They are
 the persistence and authoring contract for shared rule intake, definitions,
-simulation and target-specific materialization records. Simulation is also the
-canonical explainability step: the backend should return grounding, existing
-coverage, predicted targets, required approvals, warnings, structured
-`explainability` and additive `explainability.decisionDiagnostics` so hosts do
-not need to infer decision impact locally. `decisionDiagnostics` identifies the
-decision as governed semantic authoring owned by `praxis-config-starter`,
-records whether the source is persisted or ad hoc, and summarizes coverage,
-predicted materializations, required approvals and warnings. A materialization
-row may point to `target_layer=form_config`, but applying that payload to
-`FormConfig` remains a separate reviewed authoring operation.
+simulation and target-specific materialization records. Intake returns
+`grounding.decisionDiagnostics` with `decisionStage=intake` so the first
+backend-owned handoff already identifies the request as governed semantic
+authoring. Simulation is also the canonical explainability step: the backend
+should return grounding, existing coverage, predicted targets, required
+approvals, warnings, structured `explainability` and additive
+`explainability.decisionDiagnostics` so hosts do not need to infer decision
+impact locally. `decisionDiagnostics` identifies the decision as governed
+semantic authoring owned by `praxis-config-starter`, records whether the source
+is persisted or ad hoc, and summarizes coverage, predicted materializations,
+required approvals and warnings. A materialization row may point to
+`target_layer=form_config`, but applying that payload to `FormConfig` remains a
+separate reviewed authoring operation.
 
 Status transition endpoints accept a compact governance decision payload:
 

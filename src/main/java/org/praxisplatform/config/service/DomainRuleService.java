@@ -117,6 +117,37 @@ public class DomainRuleService {
         if (StringUtils.hasText(persisted.serviceKey())) {
             grounding.put("serviceKey", persisted.serviceKey());
         }
+        ArrayNode existingCoverage = buildExistingCoverage(
+                persisted.tenantId(),
+                persisted.environment(),
+                persisted.resourceKey(),
+                persisted.ruleType(),
+                persisted.id(),
+                persisted.ruleKey());
+        ArrayNode predictedMaterializations = buildPredictedMaterializations(
+                persisted.resourceKey(),
+                persisted.ruleType(),
+                persisted.definition(),
+                persisted.parameters());
+        ArrayNode requiredApprovals = buildRequiredApprovals(persisted.governance());
+        ArrayNode warnings = buildWarnings(
+                persisted.ruleType(),
+                predictedMaterializations,
+                existingCoverage,
+                persisted.governance());
+        ObjectNode decisionDiagnostics = buildDecisionDiagnostics(
+                persisted.ruleKey(),
+                persisted.ruleType(),
+                persisted.contextKey(),
+                persisted.resourceKey(),
+                persisted.serviceKey(),
+                existingCoverage,
+                predictedMaterializations,
+                requiredApprovals,
+                warnings,
+                true);
+        decisionDiagnostics.put("decisionStage", "intake");
+        grounding.set("decisionDiagnostics", decisionDiagnostics);
 
         return new DomainRuleIntakeResponse(
                 UUID.randomUUID(),
