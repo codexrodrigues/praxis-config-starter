@@ -82,6 +82,10 @@ The current canonical behavior is:
   `publicationReadiness`, `blockedReason`, `definitionStatusAtResolution` and
   an empty `materializationOutcomes[]`, so governance explanations remain
   canonical even before any target projection is resolved.
+- The quickstart HTTP smoke now treats this blocked diagnostic envelope as a
+  release gate through `domainRulePublicationBlockedDiagnosticsSeen=true`,
+  preventing future regressions where blocked governance would still succeed
+  but lose canonical explainability.
 - `praxis-ui-angular` projects this diagnostic envelope in the shared-rule
   handoff cockpit through typed `@praxisui/core` contracts, keeping Angular as
   a cockpit/runtime of governed semantic decisions rather than a source of
@@ -174,6 +178,9 @@ Operational smoke on `main`:
 - Smoke run `24922877907` confirmed the same three publication diagnostics,
   Domain Catalog v2 `catalogSchemaVersion=praxis.domain-catalog/v0.2`, Page
   Builder full E2E `3 passed` and `fullE2EPassed=true`.
+- A subsequent smoke must confirm
+  `domainRulePublicationBlockedDiagnosticsSeen=true` after the blocked
+  publication diagnostics contract was promoted into the HTTP gate.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.

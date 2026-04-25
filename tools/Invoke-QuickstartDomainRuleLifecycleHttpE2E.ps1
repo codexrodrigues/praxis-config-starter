@@ -233,6 +233,68 @@ $terminalPublishBlocked = Invoke-ExpectedFailure `
     } `
     -ExpectedMessage "Rule materialization status is not publishable: failed"
 
+$reviewRequiredRuleKey = "procurement.suppliers.rule.review-required-$unique"
+$reviewRequiredDefinition = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/definitions" `
+    -Headers $headers `
+    -Body @{
+        ruleKey = $reviewRequiredRuleKey
+        ruleType = "visual_guidance"
+        status = "draft"
+        contextKey = "procurement"
+        resourceKey = "procurement.review-required-$unique"
+        serviceKey = "praxis-api-quickstart"
+        definition = @{
+            summary = "Avisar analista sobre revisao humana obrigatoria no smoke HTTP."
+        }
+        parameters = @{}
+        governance = @{
+            ruleAuthoring = "review_required"
+        }
+        createdByType = "llm"
+        createdBy = "codex-http-smoke"
+    }
+
+$blockedPublication = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/publications" `
+    -Headers $headers `
+    -Body @{
+        ruleDefinitionId = $reviewRequiredDefinition.id
+        applyEligibleMaterializations = $true
+        publishedByType = "human"
+        publishedBy = "codex-http-smoke"
+        publicationNotes = @{
+            smoke = "domain-rule-blocked-diagnostics"
+        }
+    }
+
+if ($blockedPublication.publicationStatus -ne "blocked") {
+    throw "Expected blocked publication status, got '$($blockedPublication.publicationStatus)'."
+}
+if ($blockedPublication.publicationReadiness -ne "approval_required") {
+    throw "Expected blocked publication readiness approval_required, got '$($blockedPublication.publicationReadiness)'."
+}
+
+$blockedDiagnostics = $blockedPublication.explainability.publicationDiagnostics
+if ($blockedDiagnostics.publicationStatus -ne "blocked") {
+    throw "Expected blocked publication diagnostics status=blocked, got '$($blockedDiagnostics.publicationStatus)'."
+}
+if ($blockedDiagnostics.publicationReadiness -ne "approval_required") {
+    throw "Expected blocked publication diagnostics readiness approval_required, got '$($blockedDiagnostics.publicationReadiness)'."
+}
+if ($blockedDiagnostics.blockedReason -ne "approval_required") {
+    throw "Expected blocked publication diagnostics blockedReason approval_required, got '$($blockedDiagnostics.blockedReason)'."
+}
+if ($blockedDiagnostics.definitionStatusAtResolution -ne "draft") {
+    throw "Expected blocked publication diagnostics definitionStatusAtResolution draft, got '$($blockedDiagnostics.definitionStatusAtResolution)'."
+}
+if (@($blockedDiagnostics.materializationOutcomes).Count -ne 0) {
+    throw "Expected blocked publication diagnostics materializationOutcomes to be empty."
+}
+$blockedDiagnosticsSeen = $true
+
 $inactiveRuleKey = "procurement.suppliers.rule.semantic-hash-inactive-$unique"
 $suspendedRuleKey = "procurement.suppliers.rule.semantic-hash-suspended-$unique"
 
@@ -382,4 +444,5 @@ if ($reusedHash -ne $inactiveHash) {
     publicationCreatedDiagnosticsSeen = [bool] $createdDiagnosticsSeen
     publicationSelectedExistingDiagnosticsSeen = [bool] $selectedExistingDiagnosticsSeen
     publicationReusedDiagnosticsSeen = [bool] $reusedDiagnosticsSeen
+    publicationBlockedDiagnosticsSeen = [bool] $blockedDiagnosticsSeen
 } | ConvertTo-Json -Depth 8
