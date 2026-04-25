@@ -150,7 +150,7 @@ not a page preview:
       "messages": ["shared-rule-authoring-required"]
     }
   },
-  "assistantMessage": "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, e nao pelo preview de formulario/pagina.",
+  "assistantMessage": "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, e nao pelo preview de formulario/pagina. Use POST /api/praxis/config/domain-rules/intake com o recurso /api/human-resources/funcionarios como grounding canonico, depois POST /api/praxis/config/domain-rules/simulations para validar cobertura, aprovacoes e materializacoes antes de publicar.",
   "canApply": false
 }
 ```

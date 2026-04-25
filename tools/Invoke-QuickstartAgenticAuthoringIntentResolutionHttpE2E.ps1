@@ -74,6 +74,12 @@ if ($result.selectedResourcePath -ne "/api/procurement/suppliers") {
 if ($result.assistantMessage -notlike "*/api/praxis/config/domain-rules*") {
     throw "Assistant message did not route to /api/praxis/config/domain-rules."
 }
+if ($result.assistantMessage -notlike "*/api/praxis/config/domain-rules/intake*") {
+    throw "Assistant message did not name the canonical domain-rules intake endpoint."
+}
+if ($result.assistantMessage -notlike "*/api/praxis/config/domain-rules/simulations*") {
+    throw "Assistant message did not name the canonical domain-rules simulations endpoint."
+}
 if ($result.componentEditPlanPresent) {
     throw "Intent resolution returned componentEditPlan for a governed business-rule route."
 }
