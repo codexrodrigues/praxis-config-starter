@@ -167,6 +167,41 @@ function Assert-MaterializationDecisionDiagnostics(
     return $true
 }
 
+function Assert-OptionSourceSelectionPolicy(
+    [object] $Materialization,
+    [string[]] $ExpectedBlockedStatuses
+) {
+    if ($Materialization.targetLayer -ne "option_source") {
+        throw "Expected materialization targetLayer=option_source, got '$($Materialization.targetLayer)'."
+    }
+    if ($Materialization.targetArtifactType -ne "resource-option-source") {
+        throw "Expected materialization targetArtifactType=resource-option-source, got '$($Materialization.targetArtifactType)'."
+    }
+    if ($Materialization.targetArtifactKey -ne "supplier") {
+        throw "Expected materialization targetArtifactKey=supplier, got '$($Materialization.targetArtifactKey)'."
+    }
+
+    $payload = $Materialization.materializedPayload
+    if ($payload.kind -ne "lookup_selection_policy") {
+        throw "Expected materializedPayload.kind=lookup_selection_policy, got '$($payload.kind)'."
+    }
+    if ($payload.optionSourceKey -ne "supplier") {
+        throw "Expected materializedPayload.optionSourceKey=supplier, got '$($payload.optionSourceKey)'."
+    }
+    if ($payload.selectionPolicy.statusPropertyPath -ne "status") {
+        throw "Expected selectionPolicy.statusPropertyPath=status, got '$($payload.selectionPolicy.statusPropertyPath)'."
+    }
+
+    $actualBlockedStatuses = @($payload.selectionPolicy.blockedStatuses)
+    foreach ($status in $ExpectedBlockedStatuses) {
+        if ($actualBlockedStatuses -notcontains $status) {
+            $actual = ($actualBlockedStatuses -join ",")
+            throw "Expected selectionPolicy.blockedStatuses to contain '$status', got '$actual'."
+        }
+    }
+    return $true
+}
+
 $base = $BaseUrl.TrimEnd("/")
 $headers = @{
     "Origin" = $Origin
@@ -455,7 +490,7 @@ $inactiveDefinition = Invoke-JsonRequest `
                 @{
                     var = "status"
                 },
-                @("INACTIVE")
+                @("INACTIVE", "BLOCKED")
             )
         }
         governance = @{}
@@ -534,6 +569,10 @@ if ($inactiveHash -eq $suspendedHash) {
     throw "Expected semantic source hashes to differ when rule semantics differ."
 }
 
+$procurementOptionSourcePolicySeen = Assert-OptionSourceSelectionPolicy `
+    -Materialization $inactivePublication.materializations[0] `
+    -ExpectedBlockedStatuses @("INACTIVE", "BLOCKED")
+
 $createdDiagnosticsSeen = Assert-MaterializationOutcome `
     -Publication $inactivePublication `
     -ExpectedResolution "created" `
@@ -583,4 +622,5 @@ if ($reusedHash -ne $inactiveHash) {
     intakeDecisionDiagnosticsSeen = [bool] $intakeDecisionDiagnosticsSeen
     decisionDiagnosticsSeen = [bool] $decisionDiagnosticsSeen
     materializationDecisionDiagnosticsSeen = [bool] $materializationDecisionDiagnosticsSeen
+    procurementOptionSourcePolicySeen = [bool] $procurementOptionSourcePolicySeen
 } | ConvertTo-Json -Depth 8
