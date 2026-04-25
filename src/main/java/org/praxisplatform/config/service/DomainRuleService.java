@@ -431,13 +431,15 @@ public class DomainRuleService {
             definition = definitionRepository.save(definition);
         }
 
+        ArrayNode materializationOutcomes = objectMapper.createArrayNode();
         List<DomainRuleMaterializationResponse> publishedMaterializations = publishMaterializations(
                 definition,
                 request,
                 simulation.predictedMaterializations(),
                 tenantId,
                 environment,
-                now);
+                now,
+                materializationOutcomes);
 
         return new DomainRulePublicationResponse(
                 UUID.randomUUID(),
@@ -453,7 +455,7 @@ public class DomainRuleService {
                 definition.getServiceKey(),
                 toResponse(definition),
                 publishedMaterializations,
-                simulation.explainability(),
+                withPublicationDiagnostics(simulation.explainability(), materializationOutcomes),
                 now);
     }
 
@@ -1075,16 +1077,52 @@ public class DomainRuleService {
         return "draft".equals(status) || "proposed".equals(status) || "approved".equals(status) || "active".equals(status);
     }
 
+    private JsonNode withPublicationDiagnostics(JsonNode explainability, ArrayNode materializationOutcomes) {
+        ObjectNode copy = explainability != null && explainability.isObject()
+                ? ((ObjectNode) explainability).deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode diagnostics = copy.withObject("publicationDiagnostics");
+        diagnostics.set("materializationOutcomes", materializationOutcomes.deepCopy());
+        return copy;
+    }
+
+    private void addMaterializationOutcome(
+            ArrayNode materializationOutcomes,
+            DomainRuleMaterialization materialization,
+            String resolution,
+            String reason) {
+        ObjectNode outcome = materializationOutcomes.addObject();
+        outcome.put("resolution", resolution);
+        if (StringUtils.hasText(reason)) {
+            outcome.put("reason", reason);
+        }
+        if (materialization.getId() != null) {
+            outcome.put("materializationId", materialization.getId().toString());
+        }
+        outcome.put("materializationKey", materialization.getMaterializationKey());
+        outcome.put("targetLayer", materialization.getTargetLayer());
+        outcome.put("targetArtifactType", materialization.getTargetArtifactType());
+        outcome.put("targetArtifactKey", materialization.getTargetArtifactKey());
+        outcome.put("statusAtResolution", materialization.getStatus());
+        if (StringUtils.hasText(materialization.getSourceHash())) {
+            outcome.put("sourceHash", materialization.getSourceHash());
+        }
+    }
+
     private List<DomainRuleMaterializationResponse> publishMaterializations(
             DomainRuleDefinition definition,
             DomainRulePublicationRequest request,
             JsonNode predictedMaterializations,
             String tenantId,
             String environment,
-            Instant now) {
+            Instant now,
+            ArrayNode materializationOutcomes) {
         boolean applyEligibleMaterializations = request.applyEligibleMaterializations() == null
                 || request.applyEligibleMaterializations();
         if (!applyEligibleMaterializations && (request.materializationIds() == null || request.materializationIds().isEmpty())) {
+            ObjectNode outcome = materializationOutcomes.addObject();
+            outcome.put("resolution", "skipped");
+            outcome.put("reason", "applyEligibleMaterializations=false");
             return List.of();
         }
 
@@ -1094,6 +1132,8 @@ public class DomainRuleService {
                     .map(id -> materializationRepository.findById(id)
                             .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + id)))
                     .toList();
+            candidates.forEach(materialization ->
+                    addMaterializationOutcome(materializationOutcomes, materialization, "selected_explicit", null));
         } else {
             candidates = materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
                     normalize(tenantId),
@@ -1104,7 +1144,11 @@ public class DomainRuleService {
                         definition,
                         predictedMaterializations,
                         tenantId,
-                        environment);
+                        environment,
+                        materializationOutcomes);
+            } else {
+                candidates.forEach(materialization ->
+                        addMaterializationOutcome(materializationOutcomes, materialization, "selected_existing", null));
             }
         }
 
@@ -1117,6 +1161,11 @@ public class DomainRuleService {
                                 "Rule materialization does not belong to definition " + definition.getId());
                     }
                     if (!isPublishableMaterializationStatus(materialization.getStatus())) {
+                        addMaterializationOutcome(
+                                materializationOutcomes,
+                                materialization,
+                                "blocked",
+                                "status_not_publishable:" + materialization.getStatus());
                         throw new ConfigurationIngestionException(
                                 "Rule materialization status is not publishable: " + materialization.getStatus());
                     }
@@ -1134,13 +1183,14 @@ public class DomainRuleService {
             DomainRuleDefinition definition,
             JsonNode predictedMaterializations,
             String tenantId,
-            String environment) {
+            String environment,
+            ArrayNode materializationOutcomes) {
         if (predictedMaterializations == null || !predictedMaterializations.isArray()) {
             return List.of();
         }
         return predictedMaterializations.findParents("targetLayer").stream()
                 .filter(JsonNode::isObject)
-                .map(target -> createEligibleMaterialization(definition, target, tenantId, environment))
+                .map(target -> createEligibleMaterialization(definition, target, tenantId, environment, materializationOutcomes))
                 .filter(java.util.Objects::nonNull)
                 .toList();
     }
@@ -1149,7 +1199,8 @@ public class DomainRuleService {
             DomainRuleDefinition definition,
             JsonNode target,
             String tenantId,
-            String environment) {
+            String environment,
+            ArrayNode materializationOutcomes) {
         String targetLayer = normalize(target.path("targetLayer").asText(null));
         String targetArtifactType = normalize(target.path("targetArtifactType").asText(null));
         String targetArtifactKey = normalize(target.path("targetArtifactKey").asText(null));
@@ -1157,7 +1208,14 @@ public class DomainRuleService {
             return null;
         }
         if ("option_source".equals(targetLayer) && "resource-option-source".equals(targetArtifactType)) {
-            return createOptionSourceMaterialization(definition, targetLayer, targetArtifactType, targetArtifactKey, tenantId, environment);
+            return createOptionSourceMaterialization(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    tenantId,
+                    environment,
+                    materializationOutcomes);
         }
         if ("backend_validation".equals(targetLayer)
                 && "resource-validation".equals(targetArtifactType)
@@ -1168,7 +1226,8 @@ public class DomainRuleService {
                     targetArtifactType,
                     targetArtifactKey,
                     tenantId,
-                    environment);
+                    environment,
+                    materializationOutcomes);
         }
         return null;
     }
@@ -1179,7 +1238,8 @@ public class DomainRuleService {
             String targetArtifactType,
             String targetArtifactKey,
             String tenantId,
-            String environment) {
+            String environment,
+            ArrayNode materializationOutcomes) {
         ObjectNode payload = buildOptionSourceMaterializedPayload(
                 definition,
                 targetArtifactKey);
@@ -1192,7 +1252,8 @@ public class DomainRuleService {
                 "selection-policy",
                 payload,
                 tenantId,
-                environment);
+                environment,
+                materializationOutcomes);
     }
 
     private DomainRuleMaterialization createBackendValidationMaterialization(
@@ -1201,7 +1262,8 @@ public class DomainRuleService {
             String targetArtifactType,
             String targetArtifactKey,
             String tenantId,
-            String environment) {
+            String environment,
+            ArrayNode materializationOutcomes) {
         ObjectNode payload = buildBackendValidationMaterializedPayload(
                 definition,
                 targetArtifactKey);
@@ -1214,7 +1276,8 @@ public class DomainRuleService {
                 "backend-validation-policy",
                 payload,
                 tenantId,
-                environment);
+                environment,
+                materializationOutcomes);
     }
 
     private DomainRuleMaterialization createOrReuseDerivedMaterialization(
@@ -1226,7 +1289,8 @@ public class DomainRuleService {
             String materializedRuleId,
             JsonNode payload,
             String tenantId,
-            String environment) {
+            String environment,
+            ArrayNode materializationOutcomes) {
         String materializationKey = definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey;
         String sourceHash = derivedSourceHash(
                 definition,
@@ -1248,6 +1312,7 @@ public class DomainRuleService {
                     targetArtifactType,
                     targetArtifactKey,
                     sourceHash);
+            addMaterializationOutcome(materializationOutcomes, existing.get(), "reused", null);
             return existing.get();
         }
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
@@ -1263,7 +1328,9 @@ public class DomainRuleService {
         materialization.setStatus("pending_review");
         materialization.setMaterializedPayload(write(payload));
         materialization.setSourceHash(sourceHash);
-        return materializationRepository.save(materialization);
+        DomainRuleMaterialization saved = materializationRepository.save(materialization);
+        addMaterializationOutcome(materializationOutcomes, saved, "created", null);
+        return saved;
     }
 
     private void requireReusableDerivedMaterialization(

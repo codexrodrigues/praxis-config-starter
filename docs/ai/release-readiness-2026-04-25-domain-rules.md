@@ -120,12 +120,12 @@ so the platform contract could be validated before any external publication.
 
 ## Recommended Next Step
 
-Move from materialization identity hardening to a richer publication
-explainability checkpoint:
+Move from backend publication diagnostics to operational HTTP proof:
 
-1. Expose stable-key reuse/collision outcomes in publication `explainability`
-   diagnostics so cockpit/runtime hosts can explain why a materialization was
-   reused, blocked or newly derived.
-2. Add focal tests for the diagnostics contract.
-3. Extend the HTTP lifecycle smoke only after the diagnostics shape is stable.
-
+1. Extend the domain-rule lifecycle HTTP smoke to assert
+   `explainability.publicationDiagnostics.materializationOutcomes[]` for
+   created and reused derived materializations.
+2. Keep the smoke scoped to quickstart/domain-rules first; do not add
+   page-builder browser E2E until the HTTP diagnostics contract is stable.
+3. After HTTP proof, project the diagnostics into cockpit/runtime UI so hosts
+   can explain backend publication decisions without local heuristics.
