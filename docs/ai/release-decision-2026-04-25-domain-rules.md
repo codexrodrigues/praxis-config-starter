@@ -95,7 +95,8 @@ The release can move from deferred to publishable when all of these are true:
 - the smoke summary confirms `domainRulePublicationCreatedDiagnosticsSeen=true`,
   `domainRulePublicationSelectedExistingDiagnosticsSeen=true`,
   `domainRulePublicationReusedDiagnosticsSeen=true`,
-  `domainRulePublicationBlockedDiagnosticsSeen=true` and
+  `domainRulePublicationBlockedDiagnosticsSeen=true`,
+  `domainRuleIntakeDecisionDiagnosticsSeen=true` and
   `domainRuleDecisionDiagnosticsSeen=true`;
 - the intended Maven version is explicit and not already tagged;
 - the downstream consumer that needs the artifact version is named;

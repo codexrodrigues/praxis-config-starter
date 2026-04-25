@@ -117,8 +117,14 @@ The current canonical behavior is:
   kind, governed authoring mode, source, owner, diagnostic counts and
   `runtimeSurfacesAreDerived=true`, so hosts can present the backend-owned
   decision explanation without inferring platform semantics locally.
+- Intake grounding now includes additive `grounding.decisionDiagnostics` with
+  `decisionStage=intake`, so the first persisted draft handoff already tells
+  hosts that the request is governed semantic authoring and that runtime
+  surfaces are derived projections.
 - The quickstart HTTP smoke treats this decision diagnostics envelope as a
   release gate through `domainRuleDecisionDiagnosticsSeen=true`.
+- The quickstart HTTP smoke treats the intake diagnostics envelope as a release
+  gate through `domainRuleIntakeDecisionDiagnosticsSeen=true`.
 - The quickstart HTTP smoke now treats this blocked diagnostic envelope as a
   release gate through `domainRulePublicationBlockedDiagnosticsSeen=true`,
   preventing future regressions where blocked governance would still succeed

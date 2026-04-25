@@ -95,6 +95,18 @@ class DomainRuleServiceTest {
         assertThat(response.grounding().path("nextEndpoint").asText())
                 .isEqualTo("/api/praxis/config/domain-rules/simulations");
         assertThat(response.grounding().path("ruleDefinitionId").asText()).isEqualTo(response.definition().id().toString());
+        assertThat(response.grounding().path("decisionDiagnostics").path("decisionKind").asText())
+                .isEqualTo("semantic_domain_rule");
+        assertThat(response.grounding().path("decisionDiagnostics").path("decisionStage").asText())
+                .isEqualTo("intake");
+        assertThat(response.grounding().path("decisionDiagnostics").path("decisionSource").asText())
+                .isEqualTo("persisted_definition");
+        assertThat(response.grounding().path("decisionDiagnostics").path("canonicalOwner").asText())
+                .isEqualTo("praxis-config-starter");
+        assertThat(response.grounding().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
+                .isEqualTo(1);
+        assertThat(response.grounding().path("decisionDiagnostics").path("runtimeSurfacesAreDerived").asBoolean())
+                .isTrue();
 
         ArgumentCaptor<DomainRuleDefinition> captor = ArgumentCaptor.forClass(DomainRuleDefinition.class);
         verify(definitionRepository).save(captor.capture());

@@ -86,7 +86,21 @@ function Assert-DecisionDiagnostics(
     [string] $ExpectedResourceKey,
     [string] $ExpectedRuleType
 ) {
-    $diagnostics = $Response.explainability.decisionDiagnostics
+    return Assert-DecisionDiagnosticsNode `
+        -Diagnostics $Response.explainability.decisionDiagnostics `
+        -ExpectedDecisionSource $ExpectedDecisionSource `
+        -ExpectedResourceKey $ExpectedResourceKey `
+        -ExpectedRuleType $ExpectedRuleType
+}
+
+function Assert-DecisionDiagnosticsNode(
+    [object] $Diagnostics,
+    [string] $ExpectedDecisionSource,
+    [string] $ExpectedResourceKey,
+    [string] $ExpectedRuleType,
+    [string] $ExpectedDecisionStage = $null
+) {
+    $diagnostics = $Diagnostics
     if ($diagnostics.decisionKind -ne "semantic_domain_rule") {
         throw "Expected decisionDiagnostics.decisionKind=semantic_domain_rule, got '$($diagnostics.decisionKind)'."
     }
@@ -114,6 +128,9 @@ function Assert-DecisionDiagnostics(
     if ($null -eq $diagnostics.predictedMaterializationCount -or [int] $diagnostics.predictedMaterializationCount -lt 1) {
         throw "Expected decisionDiagnostics.predictedMaterializationCount to be at least 1."
     }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDecisionStage) -and $diagnostics.decisionStage -ne $ExpectedDecisionStage) {
+        throw "Expected decisionDiagnostics.decisionStage=$ExpectedDecisionStage, got '$($diagnostics.decisionStage)'."
+    }
     return $true
 }
 
@@ -132,6 +149,44 @@ if ($health.status -ne "UP") {
 }
 
 $unique = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$intakeRuleKey = "procurement.suppliers.rule.intake-smoke-$unique"
+$intakeResourceKey = "procurement.intake-smoke-$unique"
+$intake = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/intake" `
+    -Headers $headers `
+    -Body @{
+        prompt = "Impedir selecao de fornecedores bloqueados no intake HTTP."
+        assistantMessage = "Vou abrir a trilha governada de regra compartilhada."
+        ruleKey = $intakeRuleKey
+        ruleType = "selection_eligibility"
+        contextKey = "procurement"
+        resourceKey = $intakeResourceKey
+        serviceKey = "praxis-api-quickstart"
+        definition = @{
+            summary = "Impedir selecao de fornecedores bloqueados no intake HTTP."
+        }
+        parameters = @{
+            optionSourceKey = "supplier"
+        }
+        governance = @{}
+        createdByType = "llm"
+        createdBy = "codex-http-smoke"
+    }
+
+if ($intake.status -ne "draft") {
+    throw "Expected intake definition status=draft, got '$($intake.status)'."
+}
+if ($intake.grounding.nextEndpoint -ne "/api/praxis/config/domain-rules/simulations") {
+    throw "Expected intake grounding nextEndpoint to point to simulations, got '$($intake.grounding.nextEndpoint)'."
+}
+$intakeDecisionDiagnosticsSeen = Assert-DecisionDiagnosticsNode `
+    -Diagnostics $intake.grounding.decisionDiagnostics `
+    -ExpectedDecisionSource "persisted_definition" `
+    -ExpectedResourceKey $intakeResourceKey `
+    -ExpectedRuleType "selection_eligibility" `
+    -ExpectedDecisionStage "intake"
+
 $ruleKey = "procurement.suppliers.rule.lifecycle-smoke-$unique"
 $resourceKey = "procurement.lifecycle-smoke-$unique"
 $definitionBody = @{
@@ -488,5 +543,6 @@ if ($reusedHash -ne $inactiveHash) {
     publicationSelectedExistingDiagnosticsSeen = [bool] $selectedExistingDiagnosticsSeen
     publicationReusedDiagnosticsSeen = [bool] $reusedDiagnosticsSeen
     publicationBlockedDiagnosticsSeen = [bool] $blockedDiagnosticsSeen
+    intakeDecisionDiagnosticsSeen = [bool] $intakeDecisionDiagnosticsSeen
     decisionDiagnosticsSeen = [bool] $decisionDiagnosticsSeen
 } | ConvertTo-Json -Depth 8
