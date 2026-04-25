@@ -21,7 +21,7 @@ The validated path covers:
 
 - `praxis-config-starter`: `main` commit `bffbd3e59405d1efbdb86ba17c893d7e8c8024f0`,
   with contract source commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`.
-- `praxis-ui-angular`: `main` commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
+- `praxis-ui-angular`: `main` commit `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
 - `praxis-api-quickstart`: `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`,
   packaged in GitHub Actions against the local `praxis-config-starter` and
   `praxis-metadata-starter` checkouts.
@@ -101,6 +101,9 @@ The validated path covers:
 - `praxis-ui-angular` PR #56,
   `Document dynamic form materialization diagnostics`,
   commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
+- `praxis-ui-angular` PR #57,
+  `Surface shared-rule decision diagnostics`,
+  commit `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
 
 ## Contract State
 
@@ -157,6 +160,10 @@ The current canonical behavior is:
   handoff cockpit through typed `@praxisui/core` contracts, keeping Angular as
   a cockpit/runtime of governed semantic decisions rather than a source of
   business-rule truth.
+- `praxis-ui-angular` now renders backend-owned `decisionDiagnostics` in the
+  shared-rule handoff simulation and publication surfaces, so the cockpit
+  exposes canonical governance/explainability instead of recreating decision
+  provenance locally.
 - `praxis-ui-angular` now also types the backend-owned
   `DomainRuleDecisionDiagnostics` contract and preserves materialization
   diagnostics in `@praxisui/dynamic-form` as
@@ -391,6 +398,8 @@ Angular cockpit/runtime projection:
   `2182f8d806520f9b1628a1789fab3ecd5dcb7d54`.
 - `praxis-ui-angular` PR #56 merged to `main` at
   `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
+- `praxis-ui-angular` PR #57 merged to `main` at
+  `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
 - Local focal validation passed:
   - `npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include='projects/praxis-core/src/lib/services/domain-rule.service.spec.ts'`
   - `npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
@@ -410,6 +419,9 @@ Angular cockpit/runtime projection:
   - `npm run build:praxis-dynamic-form`
 - Local focal validation for PR #56 passed:
   - `git diff --check -- projects/praxis-dynamic-form/README.md`
+- Local focal validation for PR #57 passed:
+  - `git diff --check -- src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.ts src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts`
+  - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24920424506` passed for
   head SHA `3c45fee91f580ec9148f373b4b4333e7dd8deb4b`.
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24921204229` passed for
@@ -469,7 +481,7 @@ Keep the release deferred and move back to platform hardening:
    `81a08495d067241b843034fff72f644c1cb5bdc4`, config contract source commit
    `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`, quickstart `main` commit
    `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` and Angular `main` commit
-   `aa80680373973a0532f73d7bc3d6bdd3df5b641b` as the current source
+   `e8e0e295893acda5c60955c87ecc8ff88f90ec31` as the current source
    checkpoint.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
