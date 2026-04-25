@@ -237,6 +237,9 @@ The release can move from deferred to publishable when all of these are true:
   `domainRuleMaterializationDecisionDiagnosticsSeen=true`,
   `domainRuleMaterializationSourceHashDiagnosticsSeen=true` and
   `domainRuleDecisionDiagnosticsSeen=true`;
+- the smoke summary confirms `domainRuleIntentRoutingSeen=true`, proving
+  shared-rule prompts are routed to governed domain-rule authoring and
+  `page-preview` does not generate UI composition for that route;
 - the smoke summary confirms
   `domainRuleProcurementOptionSourcePolicySeen=true`;
 - the smoke summary confirms

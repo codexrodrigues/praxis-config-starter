@@ -168,6 +168,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         -UserId $UserId `
         -Environment $Environment `
         -Provider $Provider | ConvertFrom-Json
+    $domainRuleIntentRoutingSeen = (
+        $intentResolution.gateStatus -eq "route_required" -and
+        -not [bool] $intentResolution.componentEditPlanPresent -and
+        [bool] $intentResolution.pagePreviewSharedRuleRouteBlocked
+    )
 
     [pscustomobject]@{
         health = $health.status
@@ -178,6 +183,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         startedQuickstart = $startedQuickstart
         intentRouteRequired = $intentResolution.gateStatus -eq "route_required"
         intentSelectedResourcePath = $intentResolution.selectedResourcePath
+        domainRuleIntentRoutingSeen = $domainRuleIntentRoutingSeen
+        domainRulePagePreviewRouteBlocked = [bool] $intentResolution.pagePreviewSharedRuleRouteBlocked
         domainRuleAppliedCreationBlocked = [bool] $domainRuleLifecycle.appliedCreationBlocked
         domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
         domainRuleTerminalDefinitionTransitionBlocked = [bool] $domainRuleLifecycle.terminalDefinitionTransitionBlocked

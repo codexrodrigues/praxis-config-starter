@@ -39,11 +39,49 @@ $intent = Invoke-RestMethod `
     -Body $body `
     -TimeoutSec 60
 
+$previewBody = @{
+    userPrompt = $UserPrompt
+    targetApp = "praxis-ui-angular"
+    targetComponentId = "praxis-dynamic-page-builder"
+    currentRoute = "/page-builder-ia"
+    currentPage = @{}
+    provider = "deterministic-smoke-disabled"
+    intentResolution = $intent
+} | ConvertTo-Json -Compress -Depth 16
+
+$preview = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$base/api/praxis/config/ai/authoring/page-preview" `
+    -Headers $headers `
+    -Body $previewBody `
+    -TimeoutSec 60
+
 $failureCodes = @($intent.failureCodes)
 $assistantMessage = [string] $intent.assistantMessage
 $selectedResourcePath = [string] $intent.selectedCandidate.resourcePath
 $gateStatus = [string] $intent.gate.status
 $componentEditPlan = $intent.PSObject.Properties["componentEditPlan"]
+$previewFailureCodes = @($preview.failureCodes)
+$previewWarnings = @($preview.warnings)
+$previewUiCompositionPlan = $preview.PSObject.Properties["uiCompositionPlan"]
+$previewCompiledFormPatch = $preview.PSObject.Properties["compiledFormPatch"]
+$previewUiCompositionPlanPresent = $null -ne $previewUiCompositionPlan -and $null -ne $previewUiCompositionPlan.Value
+$previewCompiledFormPatchPresent = $false
+if ($null -ne $previewCompiledFormPatch -and $null -ne $previewCompiledFormPatch.Value) {
+    $compiledFormPatchJson = $previewCompiledFormPatch.Value | ConvertTo-Json -Compress -Depth 16
+    $previewCompiledFormPatchPresent = (
+        -not [string]::IsNullOrWhiteSpace($compiledFormPatchJson) -and
+        $compiledFormPatchJson -ne "{}" -and
+        $compiledFormPatchJson -ne "null"
+    )
+}
+$pagePreviewSharedRuleRouteBlocked = (
+    -not [bool] $preview.valid -and
+    $previewFailureCodes -contains "intent-resolution-shared-rule-route-required" -and
+    $previewWarnings -contains "preview-skipped-invalid-intent-resolution" -and
+    -not $previewUiCompositionPlanPresent -and
+    -not $previewCompiledFormPatchPresent
+)
 
 $result = [pscustomobject]@{
     health = $health.status
@@ -54,6 +92,12 @@ $result = [pscustomobject]@{
     selectedResourcePath = $selectedResourcePath
     assistantMessage = $assistantMessage
     componentEditPlanPresent = $null -ne $componentEditPlan -and $null -ne $componentEditPlan.Value
+    pagePreviewValid = [bool] $preview.valid
+    pagePreviewFailureCodes = $previewFailureCodes
+    pagePreviewWarnings = $previewWarnings
+    pagePreviewSharedRuleRouteBlocked = $pagePreviewSharedRuleRouteBlocked
+    pagePreviewUiCompositionPlanPresent = $previewUiCompositionPlanPresent
+    pagePreviewCompiledFormPatchPresent = $previewCompiledFormPatchPresent
 }
 
 if ($result.health -ne "UP") {
@@ -82,6 +126,24 @@ if ($result.assistantMessage -notlike "*/api/praxis/config/domain-rules/simulati
 }
 if ($result.componentEditPlanPresent) {
     throw "Intent resolution returned componentEditPlan for a governed business-rule route."
+}
+if ($result.pagePreviewValid) {
+    throw "Page preview should not be valid for governed shared-rule authoring route."
+}
+if ($result.pagePreviewFailureCodes -notcontains "intent-resolution-shared-rule-route-required") {
+    throw "Page preview did not report intent-resolution-shared-rule-route-required."
+}
+if ($result.pagePreviewWarnings -notcontains "preview-skipped-invalid-intent-resolution") {
+    throw "Page preview did not report preview-skipped-invalid-intent-resolution."
+}
+if ($result.pagePreviewUiCompositionPlanPresent) {
+    throw "Page preview returned uiCompositionPlan for a governed business-rule route."
+}
+if ($result.pagePreviewCompiledFormPatchPresent) {
+    throw "Page preview returned compiledFormPatch for a governed business-rule route."
+}
+if (-not $result.pagePreviewSharedRuleRouteBlocked) {
+    throw "Page preview did not preserve the canonical shared-rule routing block."
 }
 
 $result | ConvertTo-Json -Depth 6
