@@ -26,6 +26,15 @@ Escopo coberto:
 - `POST /api/praxis/config/ai/authoring/intent-resolution`
 - `POST /api/praxis/config/ai/authoring/page-preview`
 - `POST /api/praxis/config/ai/authoring/page-apply`
+- `POST /api/praxis/config/domain-rules/intake`
+- `POST /api/praxis/config/domain-rules/definitions`
+- `GET /api/praxis/config/domain-rules/definitions`
+- `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
+- `POST /api/praxis/config/domain-rules/simulations`
+- `POST /api/praxis/config/domain-rules/publications`
+- `POST /api/praxis/config/domain-rules/materializations`
+- `GET /api/praxis/config/domain-rules/materializations`
+- `PATCH /api/praxis/config/domain-rules/materializations/{materializationId}/status`
 
 Importante:
 
@@ -102,7 +111,7 @@ Validacao automatizada no backend:
 Comando recomendado para gate de contrato `v1.1`:
 
 ```bash
-/opt/maven/bin/mvn -Dtest=AiApiContractOpenApiTest,AiContractSpecConsistencyTest,AiContractV11RetroCompatibilityTest test -q
+mvn -Dtest=AiApiContractOpenApiTest,AiContractSpecConsistencyTest,AiContractV11RetroCompatibilityTest test -q
 ```
 
 Geracao de bindings (A-02) a partir da mesma fonte:

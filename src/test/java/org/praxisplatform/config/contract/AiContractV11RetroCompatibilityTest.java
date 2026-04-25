@@ -26,6 +26,7 @@ import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.dto.AiPatchStreamStartResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.service.AiOrchestratorService;
+import org.praxisplatform.config.service.DomainFederationQueryService;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
@@ -108,6 +109,9 @@ class AiContractV11RetroCompatibilityTest {
 
     @MockBean
     private AiOrchestratorService orchestratorService;
+
+    @MockBean
+    private DomainFederationQueryService domainFederationQueryService;
 
     @BeforeEach
     void setUp() {
