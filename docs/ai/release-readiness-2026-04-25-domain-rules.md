@@ -115,6 +115,13 @@ Operational smoke on `main`:
   `1115f49a5475b8486a335550d69a787f0a01a668` with `ui_ref=main` at
   `04020a2ee43323f0d5473387bc83ca838b4aa757` and
   `run_page_builder_full_e2e=true`.
+- `Agentic Authoring HTTP Smoke` run `24921897738` passed for commit
+  `d8d4d7b1788b71cc8707c6301c222eb05d888a6c` after PR #57 clarified the
+  governed shared-rule route to name the canonical
+  `/api/praxis/config/domain-rules/intake` and
+  `/api/praxis/config/domain-rules/simulations` endpoints. This run kept
+  `run_page_builder_full_e2e=false` and validated the proportional backend
+  surface: quickstart HTTP/SSE smoke plus Domain Catalog v2 smoke.
 - The smoke packaged `praxis-api-quickstart` against local starter checkouts.
 - `Run quickstart authoring HTTP/SSE smoke suite`: passed.
 - `Run quickstart Domain Catalog v2 HTTP smoke`: passed.
