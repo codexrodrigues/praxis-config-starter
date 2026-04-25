@@ -377,6 +377,22 @@ Operational smoke on `main`:
   `semanticPayloadSeen=true`, `aliasPayloadSeen=true`,
   `explicitRelationshipSeen=true`, Page Builder full E2E `3 passed` and
   `fullE2EPassed=true`.
+- `Agentic Authoring HTTP Smoke` run `24930631085` passed for commit
+  `6ec6d6d49895c9a463bdbf0c6684fdad3dd7f7e9` with
+  `quickstart_ref=main`, `metadata_ref=main`, `ui_ref=main`,
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=true`,
+  `run_page_builder_full_e2e=true` and
+  `run_llm_compliance_policy_shadow=false`. This full integrated gate
+  revalidated the latest readiness documentation after Angular PR #57 reached
+  `main` at `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
+- Smoke run `24930631085` confirmed all four publication diagnostics plus
+  `domainRuleIntakeDecisionDiagnosticsSeen=true`,
+  `domainRuleDecisionDiagnosticsSeen=true`,
+  `domainRuleMaterializationDecisionDiagnosticsSeen=true`, Domain Catalog v2
+  `catalogSchemaVersion=praxis.domain-catalog/v0.2`,
+  `semanticPayloadSeen=true`, `aliasPayloadSeen=true`,
+  `explicitRelationshipSeen=true`, Page Builder full E2E `3 passed` and
+  `fullE2EPassed=true`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
@@ -474,11 +490,11 @@ so the platform contract could be validated before any external publication.
 
 Keep the release deferred and move back to platform hardening:
 
-1. Treat run `24926394899` as the current integrated readiness checkpoint for
+1. Treat run `24930631085` as the current integrated readiness checkpoint for
    domain-rule publication diagnostics, backend-owned intake/simulation
    diagnostics, materialization diagnostics, Domain Catalog v2 and Page Builder
    runtime projection, and treat config `main` commit
-   `81a08495d067241b843034fff72f644c1cb5bdc4`, config contract source commit
+   `6ec6d6d49895c9a463bdbf0c6684fdad3dd7f7e9`, config contract source commit
    `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`, quickstart `main` commit
    `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` and Angular `main` commit
    `e8e0e295893acda5c60955c87ecc8ff88f90ec31` as the current source

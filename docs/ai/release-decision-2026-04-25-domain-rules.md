@@ -44,6 +44,12 @@ The platform has enough evidence to support a release candidate:
   It confirmed all publication diagnostics, intake/simulation/materialization
   decision diagnostics, Domain Catalog v2 semantic/alias/relationship payloads
   and Page Builder full E2E `3 passed`.
+- `Agentic Authoring HTTP Smoke` run `24930631085` passed the full integrated
+  gate again after Angular PR #57 reached `main`, with `quickstart_ref=main`,
+  `metadata_ref=main`, `ui_ref=main`, `run_quickstart_http_smoke=true`,
+  `run_domain_catalog_v2_smoke=true` and `run_page_builder_full_e2e=true`. It
+  confirmed the same diagnostics gate, Domain Catalog v2 semantic/alias/
+  relationship payloads and Page Builder full E2E `3 passed`.
 - `praxis-ui-angular` CI runs `24926048274` and `24926222174` passed after the
   Angular diagnostics projection and README alignment reached `main`; both kept
   release/tag publication skipped. PR #57 then passed focal local validation
