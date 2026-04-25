@@ -84,6 +84,13 @@ The platform has enough evidence to support a release candidate:
   release/tag publication skipped. PR #57 then passed focal local validation
   for the host handoff projection and merged to `main` at
   `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
+- `praxis-ui-angular` PR #58 then reached `main` at
+  `8e4ccba4ed6262679e79b51ae0acf230ea4c709e`, declaring `option_source` and
+  `backend_validation` as explicit `DomainRuleTargetLayer` values and rendering
+  both predicted/published materialization outcomes as sibling projections of
+  one governed semantic decision in the shared-rule handoff cockpit.
+- `praxis-ui-angular` CI runs `24931880584` and `24931981608` passed for PR #58
+  and for `main` after merge. No npm publication was performed.
 
 Publication is still intentionally deferred because:
 
@@ -134,10 +141,10 @@ The release workflow should then create tag:
 Do not publish `@praxisui/*` packages as part of this decision by default.
 
 The Angular changes have already been validated as source-level runtime/cockpit
-projection in CI, and integrated smoke run `24926394899` is the latest Page
-Builder full E2E checkpoint. Publish npm only if an external Angular consumer
-must install the new handoff/materialization diagnostics contract from the
-public registry.
+projection in CI, including PR #58's sibling projection checkpoint. Integrated
+smoke run `24930631085` remains the latest full Page Builder E2E checkpoint.
+Publish npm only if an external Angular consumer must install the new handoff/
+materialization diagnostics contract from the public registry.
 
 If npm publication is requested, treat it as a separate coordinated release
 decision for `praxis-ui-angular`, with its own package version set, tarball
@@ -171,6 +178,7 @@ Continue implementation without publishing.
 
 The next engineering work should focus on hardening the semantic decision
 platform itself: preserve backend-owned decision diagnostics in governed
-authoring explainability, project sibling runtime materializations clearly in
-downstream consumers, keep the HTTP/SSE lifecycle gate green, and only cut
-`0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.
+authoring explainability, keep sibling runtime materializations clearly
+projected in downstream consumers, run the smallest proportional integrated
+smoke after Angular PR #58, and only cut `0.1.0-rc.34` when a real downstream
+consumer needs Maven Central resolution.
