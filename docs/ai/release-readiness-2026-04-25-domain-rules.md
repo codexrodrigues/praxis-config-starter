@@ -207,6 +207,16 @@ Operational smoke on `main`:
   `run_page_builder_full_e2e=false`. This proportional run confirmed
   `domainRuleDecisionDiagnosticsSeen=true` after backend-owned semantic
   decision diagnostics were promoted into the HTTP gate.
+- `Agentic Authoring HTTP Smoke` run `24924505019` passed for commit
+  `24fe78bf088f025363594f259eee02ff844cf729` with
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=true` and
+  `run_page_builder_full_e2e=true`. This full integrated gate revalidated the
+  current `main` after backend-owned semantic decision diagnostics entered the
+  HTTP gate and readiness documentation recorded the proportional proof.
+- Smoke run `24924505019` confirmed all four publication diagnostics plus
+  `domainRuleDecisionDiagnosticsSeen=true`, Domain Catalog v2
+  `catalogSchemaVersion=praxis.domain-catalog/v0.2`, Page Builder full E2E
+  `2 passed` and `fullE2EPassed=true`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
@@ -281,9 +291,9 @@ so the platform contract could be validated before any external publication.
 
 Keep the release deferred and move back to platform hardening:
 
-1. Treat run `24923468741` as the current integrated readiness checkpoint for
-   domain-rule publication diagnostics, Domain Catalog v2 and Page Builder
-   runtime projection.
+1. Treat run `24924505019` as the current integrated readiness checkpoint for
+   domain-rule publication diagnostics, backend-owned decision diagnostics,
+   Domain Catalog v2 and Page Builder runtime projection.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Use the next implementation cycle to strengthen governed semantic decision
