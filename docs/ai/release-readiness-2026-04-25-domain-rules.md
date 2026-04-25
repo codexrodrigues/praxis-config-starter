@@ -19,10 +19,11 @@ The validated path covers:
 
 ## Version Set
 
-- `praxis-config-starter`: `main` commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626`.
+- `praxis-config-starter`: `main` commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`.
 - `praxis-ui-angular`: `main` commit `524f6f7033885c76d29469106ab32d13f2ac923c`.
-- `praxis-api-quickstart`: `main`, packaged in GitHub Actions against the local
-  `praxis-config-starter` and `praxis-metadata-starter` checkouts.
+- `praxis-api-quickstart`: `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`,
+  packaged in GitHub Actions against the local `praxis-config-starter` and
+  `praxis-metadata-starter` checkouts.
 - `praxis-metadata-starter`: `main`, installed locally by the smoke workflow.
 - Quickstart runtime jar in the smoke:
   `praxis-api-quickstart-2.0.0-rc.9.jar`.
@@ -80,6 +81,13 @@ The validated path covers:
   commit `40675fd8b42d032b62c248e30cf87409512d72b5`.
 - PR #75, `Add domain-rule intake decision diagnostics`,
   commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626`.
+- PR #76, `Document domain-rule intake diagnostics smoke`,
+  commit `106074ef1d41d09b0bf2c3efb70e1aa1b81a7f55`.
+- PR #77, `Add domain-rule materialization decision diagnostics`,
+  commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`.
+- `praxis-api-quickstart` PR #25,
+  `Adapt materialization response tests for diagnostics field`,
+  commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`.
 - `praxis-ui-angular` PR #52, `Project domain rule publication diagnostics in cockpit`,
   commit `a754afd091125f1ab152c64e87dbd02e4654202d`.
 - `praxis-ui-angular` PR #53, `Keep page-builder resource discovery on SSE`,
@@ -163,7 +171,13 @@ Focal local validation after each code change:
 
 Latest focal result:
 
-- `DomainRuleServiceTest`: 28 tests, 0 failures, 0 errors, 0 skipped.
+- `DomainRuleServiceTest` and `DomainRuleControllerTest`: 36 tests,
+  0 failures, 0 errors, 0 skipped.
+- `praxis-api-quickstart`
+  `DomainRuleOptionSourcePolicyResolverTest` and
+  `DomainRuleBackendValidationPolicyResolverTest`: 7 tests, 0 failures,
+  0 errors, 0 skipped, after installing the current starter locally as
+  `0.1.0-rc.33` for compatibility validation only.
 
 GitHub Actions CI on `main`:
 
@@ -190,6 +204,17 @@ GitHub Actions CI on `main`:
 - `CI and Release Java Starter (praxis-config-starter)` run `24925270702` passed
   for commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626`, after intake
   diagnostics were added to the domain-rule contract and smoke gate.
+- `CI and Release Java Starter (praxis-config-starter)` run `24925401016` passed
+  for commit `106074ef1d41d09b0bf2c3efb70e1aa1b81a7f55`, after the intake
+  diagnostics smoke checkpoint was documented.
+- `CI and Release Java Starter (praxis-config-starter)` run `24925493269` passed
+  for commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`, after materialization
+  decision diagnostics were added to the public response contract and smoke
+  gate.
+- `praxis-api-quickstart` `build-test` run `24925649471` passed for commit
+  `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`, after quickstart tests were made
+  compatible with both the published materialization response constructor and
+  the new local starter constructor with `decisionDiagnostics`.
 
 Operational smoke on `main`:
 
@@ -284,6 +309,24 @@ Operational smoke on `main`:
 - Smoke run `24925298855` confirmed all four publication diagnostics plus
   `domainRuleIntakeDecisionDiagnosticsSeen=true` and
   `domainRuleDecisionDiagnosticsSeen=true`.
+- `Agentic Authoring HTTP Smoke` run `24925520881` failed before executing the
+  HTTP lifecycle because quickstart test packaging still called the old
+  `DomainRuleMaterializationResponse` constructor while the smoke had installed
+  the new local starter contract.
+- `praxis-api-quickstart` PR #25 resolved that packaging compatibility gap with
+  a reflection-based test fixture factory, keeping quickstart tests compatible
+  with both the published starter artifact and the local starter checkout used
+  by smoke validation.
+- `Agentic Authoring HTTP Smoke` run `24925700913` passed for commit
+  `529cd0b06ef25ec5a26a9c84c900e33c841bcf77` with
+  `quickstart_ref=main` at
+  `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`,
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=false` and
+  `run_page_builder_full_e2e=false`.
+- Smoke run `24925700913` confirmed all four publication diagnostics plus
+  `domainRuleIntakeDecisionDiagnosticsSeen=true`,
+  `domainRuleDecisionDiagnosticsSeen=true` and
+  `domainRuleMaterializationDecisionDiagnosticsSeen=true`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
@@ -359,11 +402,12 @@ so the platform contract could be validated before any external publication.
 Keep the release deferred and move back to platform hardening:
 
 1. Treat run `24924505019` as the current integrated readiness checkpoint for
-   domain-rule publication diagnostics, backend-owned decision diagnostics,
+   domain-rule publication diagnostics, backend-owned simulation diagnostics,
    Domain Catalog v2 and Page Builder runtime projection, and treat config
-   `main` commit `64f3d41b5805915ea7d5e67dcd909e0fa39c1626` as the current
-   source checkpoint for intake plus simulation/publication diagnostics after
-   proportional HTTP smoke run `24925298855`.
+   `main` commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77` plus quickstart
+   `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` as the current
+   source checkpoint for intake, simulation, publication and materialization
+   diagnostics after proportional HTTP smoke run `24925700913`.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Use the next implementation cycle to strengthen governed semantic decision
