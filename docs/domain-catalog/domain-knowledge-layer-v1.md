@@ -420,6 +420,14 @@ already `applied` status. Terminal materializations such as `failed`,
 `superseded` or `reverted` must be reviewed, replaced or explicitly moved back
 through governance before they can participate in a publication.
 
+Published responses include additive `explainability.publicationDiagnostics`
+metadata. Its `materializationOutcomes[]` entries explain whether a target
+projection was `created`, `reused`, `selected_existing`, `selected_explicit`,
+`skipped` or `blocked`, together with the stable `materializationKey`, target
+coordinates, `statusAtResolution` and `sourceHash` when available. Hosts should
+render this explanation instead of reconstructing publication heuristics
+locally.
+
 ## LLM Runtime Contract
 
 LLMs should request knowledge with a compact envelope:

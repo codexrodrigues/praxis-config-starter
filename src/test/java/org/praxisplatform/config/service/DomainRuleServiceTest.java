@@ -955,6 +955,16 @@ class DomainRuleServiceTest {
         assertThat(response.definition().status()).isEqualTo("active");
         assertThat(response.definition().approvedBy()).isEqualTo("procurement-owner");
         assertThat(response.explainability().path("recommendedAction").asText()).isEqualTo("materialize_or_activate");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .singleElement()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("selected_existing");
+                    assertThat(outcome.path("materializationKey").asText()).isEqualTo("supplier:selection-policy");
+                    assertThat(outcome.path("targetLayer").asText()).isEqualTo("backend_validation");
+                    assertThat(outcome.path("statusAtResolution").asText()).isEqualTo("pending_review");
+                });
         assertThat(response.materializations()).singleElement()
                 .satisfies(item -> {
                     assertThat(item.status()).isEqualTo("applied");
@@ -1146,6 +1156,16 @@ class DomainRuleServiceTest {
                 "dev");
 
         assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .singleElement()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("created");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
+                    assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
+                });
         assertThat(response.materializations()).singleElement()
                 .satisfies(item -> {
                     assertThat(item.targetLayer()).isEqualTo("option_source");
@@ -1247,6 +1267,17 @@ class DomainRuleServiceTest {
         assertThat(firstResponse.materializations()).singleElement()
                 .satisfies(item -> assertThat(item.sourceHash()).startsWith("derived:sha256:"));
         assertThat(secondResponse.publicationStatus()).isEqualTo("published");
+        assertThat(secondResponse.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .singleElement()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("reused");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
+                    assertThat(outcome.path("sourceHash").asText())
+                            .isEqualTo(firstResponse.materializations().get(0).sourceHash());
+                });
         assertThat(secondResponse.materializations()).singleElement()
                 .satisfies(item -> {
                     assertThat(item.id()).isEqualTo(firstResponse.materializations().get(0).id());
