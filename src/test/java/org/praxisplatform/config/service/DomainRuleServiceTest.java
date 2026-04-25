@@ -116,6 +116,159 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void intakesAndPublishesProcurementSupplierEligibilityDecisionAsOptionSourceProjection() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        AtomicReference<DomainRuleDefinition> persistedDefinition = new AtomicReference<>();
+
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> {
+            DomainRuleDefinition definition = invocation.getArgument(0);
+            if (definition.getId() == null) {
+                definition.onInsert();
+            }
+            persistedDefinition.set(definition);
+            return definition;
+        });
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                eq("tenant-a"),
+                eq("dev"),
+                any(UUID.class)))
+                .thenReturn(List.of());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers.rule.selection-eligibility:option_source:supplier"))
+                .thenReturn(Optional.empty());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var intake = service.intake(
+                new DomainRuleIntakeRequest(
+                        "Impedir seleção de fornecedores inativos ou bloqueados em pedidos de compra.",
+                        "A decisão deve ser governada no Praxis e materializada como option_source.",
+                        null,
+                        "selection_eligibility",
+                        "procurement",
+                        "procurement.suppliers",
+                        "praxis-api-quickstart",
+                        objectMapper.readTree("""
+                                {
+                                  "summary": "Impedir seleção de fornecedores inativos ou bloqueados em pedidos de compra."
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "optionSourceKey": "supplier",
+                                  "validationMessageTemplate": "Fornecedor indisponivel para novos pedidos",
+                                  "disabledReasonTemplate": "Fornecedor com status indisponivel"
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "in": [
+                                    { "var": "status" },
+                                    ["INACTIVE", "BLOCKED"]
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "ruleAuthoring": "governed"
+                                }
+                                """),
+                        "llm",
+                        "openai:gpt-5.4-mini"),
+                "tenant-a",
+                "dev");
+
+        DomainRuleDefinition approvedDefinition = persistedDefinition.get();
+        approvedDefinition.setStatus("approved");
+        when(definitionRepository.findById(intake.definition().id())).thenReturn(Optional.of(approvedDefinition));
+
+        var simulation = service.simulate(
+                new DomainRuleSimulationRequest(
+                        intake.definition().id(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                "tenant-a",
+                "dev");
+        var publication = service.publish(
+                new DomainRulePublicationRequest(
+                        intake.definition().id(),
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(intake.grounding().path("decisionDiagnostics").path("decisionStage").asText())
+                .isEqualTo("intake");
+        assertThat(simulation.predictedMaterializations()).singleElement()
+                .satisfies(target -> {
+                    assertThat(target.path("targetLayer").asText()).isEqualTo("option_source");
+                    assertThat(target.path("targetArtifactType").asText()).isEqualTo("resource-option-source");
+                    assertThat(target.path("targetArtifactKey").asText()).isEqualTo("supplier");
+                });
+        assertThat(simulation.explainability().path("decisionDiagnostics").path("decisionSource").asText())
+                .isEqualTo("persisted_definition");
+        assertThat(publication.publicationStatus()).isEqualTo("published");
+        assertThat(publication.definition().status()).isEqualTo("active");
+        assertThat(publication.explainability().path("decisionDiagnostics").path("canonicalOwner").asText())
+                .isEqualTo("praxis-config-starter");
+        assertThat(publication.explainability().path("decisionDiagnostics").path("runtimeSurfacesAreDerived").asBoolean())
+                .isTrue();
+        assertThat(publication.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .singleElement()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("created");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
+                    assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
+                });
+        assertThat(publication.materializations()).singleElement()
+                .satisfies(materialization -> {
+                    JsonNode selectionPolicy = materialization.materializedPayload().path("selectionPolicy");
+                    assertThat(materialization.status()).isEqualTo("applied");
+                    assertThat(materialization.targetLayer()).isEqualTo("option_source");
+                    assertThat(materialization.targetArtifactType()).isEqualTo("resource-option-source");
+                    assertThat(materialization.targetArtifactKey()).isEqualTo("supplier");
+                    assertThat(materialization.decisionDiagnostics().path("decisionStage").asText())
+                            .isEqualTo("materialization");
+                    assertThat(materialization.decisionDiagnostics().path("runtimeSurfacesAreDerived").asBoolean())
+                            .isTrue();
+                    assertThat(selectionPolicy.path("statusPropertyPath").asText()).isEqualTo("status");
+                    assertThat(selectionPolicy.path("blockedStatuses"))
+                            .extracting(JsonNode::asText)
+                            .containsExactly("INACTIVE", "BLOCKED");
+                    assertThat(selectionPolicy.path("validationMessageTemplate").asText())
+                            .isEqualTo("Fornecedor indisponivel para novos pedidos");
+                    assertThat(selectionPolicy.path("disabledReasonTemplate").asText())
+                            .isEqualTo("Fornecedor com status indisponivel");
+                });
+    }
+
+    @Test
     void createsSharedRuleDefinitionWithoutMaterializingFormConfig() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
