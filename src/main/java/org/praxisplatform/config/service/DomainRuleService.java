@@ -469,6 +469,8 @@ public class DomainRuleService {
 
         DomainRuleDefinition definition = definitionRepository.findById(request.ruleDefinitionId())
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + request.ruleDefinitionId()));
+        requireScope(definition.getTenantId(), tenantId, "tenantId");
+        requireScope(definition.getEnvironment(), environment, "environment");
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
         materialization.setTenantId(normalize(tenantId));
         materialization.setEnvironment(normalize(environment));
