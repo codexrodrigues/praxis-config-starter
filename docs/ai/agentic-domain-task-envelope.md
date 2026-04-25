@@ -62,6 +62,11 @@ The same shape is valid for:
   routed to the shared rule/decision flow under
   `/api/praxis/config/domain-rules/**`, instead of being materialized first as
   a page/component preview.
+- Even when the frontend has not sent `recommendedAuthoringFlow`, intent
+  resolution may infer the same governed route from prompts that ask for a
+  business rule, validation, policy, eligibility, compliance or decision over a
+  resolved resource. This keeps older clients from accidentally pushing
+  business-rule authoring into `componentEditPlan`.
 - `recommendedRuleType` seeds the canonical shared-rule type when the request
   is routed to `shared_rule_authoring`, so hosts can open `simulation` without
   inventing a local rule taxonomy.
