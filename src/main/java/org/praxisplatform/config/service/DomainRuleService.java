@@ -1081,7 +1081,10 @@ public class DomainRuleService {
         ObjectNode copy = explainability != null && explainability.isObject()
                 ? ((ObjectNode) explainability).deepCopy()
                 : objectMapper.createObjectNode();
-        ObjectNode diagnostics = copy.withObject("publicationDiagnostics");
+        JsonNode existingDiagnostics = copy.get("publicationDiagnostics");
+        ObjectNode diagnostics = existingDiagnostics != null && existingDiagnostics.isObject()
+                ? (ObjectNode) existingDiagnostics
+                : copy.putObject("publicationDiagnostics");
         diagnostics.set("materializationOutcomes", materializationOutcomes.deepCopy());
         return copy;
     }
