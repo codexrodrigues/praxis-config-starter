@@ -393,6 +393,9 @@ public class DomainRuleService {
         String readiness = simulation.explainability() != null
                 ? normalize(simulation.explainability().path("publicationReadiness").asText(null))
                 : null;
+        if ("ready_to_publish".equals(readiness) && !isPublishableDefinitionStatus(definition.getStatus())) {
+            readiness = "blocked_by_definition_status";
+        }
 
         if (!"ready_to_publish".equals(readiness)) {
             return new DomainRulePublicationResponse(
