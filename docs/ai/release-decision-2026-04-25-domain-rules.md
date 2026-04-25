@@ -23,10 +23,11 @@ The platform has enough evidence to support a release candidate:
   decision diagnostics and readiness documentation updated after the smoke
   retry.
 - `praxis-ui-angular` `main` reached commit
-  `aa80680373973a0532f73d7bc3d6bdd3df5b641b` with the cockpit projecting the
-  governed shared-rule intake endpoint and `@praxisui/dynamic-form`
-  preserving backend-owned materialization diagnostics in
-  `metadata.domainRule.decisionDiagnostics`.
+  `e8e0e295893acda5c60955c87ecc8ff88f90ec31` with the cockpit projecting the
+  governed shared-rule intake endpoint, rendering backend-owned
+  simulation/publication `decisionDiagnostics` in the shared-rule handoff
+  surface, and `@praxisui/dynamic-form` preserving backend-owned
+  materialization diagnostics in `metadata.domainRule.decisionDiagnostics`.
 - `Agentic Authoring HTTP Smoke` run `24922256769` passed with
   `run_page_builder_full_e2e=true`, `provider=openai`, `quickstart_ref=main`,
   `metadata_ref=main` and `ui_ref=main`.
@@ -45,7 +46,9 @@ The platform has enough evidence to support a release candidate:
   and Page Builder full E2E `3 passed`.
 - `praxis-ui-angular` CI runs `24926048274` and `24926222174` passed after the
   Angular diagnostics projection and README alignment reached `main`; both kept
-  release/tag publication skipped.
+  release/tag publication skipped. PR #57 then passed focal local validation
+  for the host handoff projection and merged to `main` at
+  `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
 
 Publication is still intentionally deferred because:
 
