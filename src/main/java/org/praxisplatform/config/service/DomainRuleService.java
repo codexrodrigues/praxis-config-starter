@@ -412,7 +412,7 @@ public class DomainRuleService {
                     definition.getServiceKey(),
                     toResponse(definition),
                     List.of(),
-                    simulation.explainability(),
+                    withBlockedPublicationDiagnostics(simulation.explainability(), readiness, definition),
                     Instant.now());
         }
 
@@ -1087,6 +1087,39 @@ public class DomainRuleService {
                 : copy.putObject("publicationDiagnostics");
         diagnostics.set("materializationOutcomes", materializationOutcomes.deepCopy());
         return copy;
+    }
+
+    private JsonNode withBlockedPublicationDiagnostics(
+            JsonNode explainability,
+            String publicationReadiness,
+            DomainRuleDefinition definition) {
+        ObjectNode copy = explainability != null && explainability.isObject()
+                ? ((ObjectNode) explainability).deepCopy()
+                : objectMapper.createObjectNode();
+        JsonNode existingDiagnostics = copy.get("publicationDiagnostics");
+        ObjectNode diagnostics = existingDiagnostics != null && existingDiagnostics.isObject()
+                ? (ObjectNode) existingDiagnostics
+                : copy.putObject("publicationDiagnostics");
+        diagnostics.put("publicationStatus", "blocked");
+        if (StringUtils.hasText(publicationReadiness)) {
+            diagnostics.put("publicationReadiness", publicationReadiness);
+            diagnostics.put("blockedReason", blockedPublicationReason(publicationReadiness));
+        }
+        if (definition != null && StringUtils.hasText(definition.getStatus())) {
+            diagnostics.put("definitionStatusAtResolution", definition.getStatus());
+        }
+        diagnostics.set("materializationOutcomes", objectMapper.createArrayNode());
+        return copy;
+    }
+
+    private String blockedPublicationReason(String publicationReadiness) {
+        return switch (publicationReadiness) {
+            case "blocked_by_definition_status" -> "definition_status_not_publishable";
+            case "blocked_by_existing_coverage" -> "existing_coverage";
+            case "approval_required" -> "approval_required";
+            case "ready_for_definition_review" -> "definition_not_persisted";
+            default -> publicationReadiness;
+        };
     }
 
     private void addMaterializationOutcome(

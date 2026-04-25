@@ -1157,6 +1157,25 @@ class DomainRuleServiceTest {
         assertThat(response.publicationReadiness()).isEqualTo("blocked_by_definition_status");
         assertThat(response.definition().status()).isEqualTo("rejected");
         assertThat(response.materializations()).isEmpty();
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("publicationStatus")
+                .asText())
+                .isEqualTo("blocked");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("blockedReason")
+                .asText())
+                .isEqualTo("definition_status_not_publishable");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("definitionStatusAtResolution")
+                .asText())
+                .isEqualTo("rejected");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .isEmpty();
         verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
         verify(materializationRepository, org.mockito.Mockito.never()).findByTenantIdAndEnvironmentAndRuleDefinition_Id(
                 any(),
@@ -1785,6 +1804,26 @@ class DomainRuleServiceTest {
         assertThat(response.publicationReadiness()).isEqualTo("approval_required");
         assertThat(response.definition().status()).isEqualTo("draft");
         assertThat(response.materializations()).isEmpty();
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("publicationStatus")
+                .asText())
+                .isEqualTo("blocked");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("publicationReadiness")
+                .asText())
+                .isEqualTo("approval_required");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("blockedReason")
+                .asText())
+                .isEqualTo("approval_required");
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("definitionStatusAtResolution")
+                .asText())
+                .isEqualTo("draft");
         verify(definitionRepository, org.mockito.Mockito.times(2)).findById(definitionId);
     }
 
