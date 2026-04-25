@@ -113,6 +113,18 @@ The platform has enough evidence to support a release candidate:
   `praxis-ui-angular` PR #60 fixed the published dynamic-form materialization
   path and passed CI run `24932869130`; `praxis-ui-landing-page` PR #16 synced
   the public vendored docs and sitemap and passed CI run `24933064414`.
+- `praxis-config-starter` PR #93 reached `main` at
+  `0a8fc1c094524ad85a6feeadc2e2d0060f95d813` and made domain-rule definition
+  and materialization status transitions directional, blocking terminal
+  definition reactivation and direct reapply of terminal materializations.
+  `CI and Release Java Starter (praxis-config-starter)` run `24933320331`
+  passed; release/tag and Maven Central publication jobs remained skipped.
+- `praxis-config-starter` PR #94 reached `main` at
+  `f1e1921b121e32779765dd34877dfbdb7d368898` and added HTTP smoke markers
+  `domainRuleTerminalDefinitionTransitionBlocked=true` and
+  `domainRuleTerminalMaterializationTransitionBlocked=true`. `CI and Release
+  Java Starter (praxis-config-starter)` run `24933396751` passed; release/tag
+  and Maven Central publication jobs remained skipped.
 
 Publication is still intentionally deferred because:
 
@@ -190,6 +202,10 @@ The release can move from deferred to publishable when all of these are true:
   `domainRuleProcurementOptionSourcePolicySeen=true`;
 - the smoke summary confirms
   `domainRuleProcurementBackendValidationPolicySeen=true`;
+- the smoke summary confirms
+  `domainRuleTerminalDefinitionTransitionBlocked=true`;
+- the smoke summary confirms
+  `domainRuleTerminalMaterializationTransitionBlocked=true`;
 - the intended Maven version is explicit and not already tagged;
 - the downstream consumer that needs the artifact version is named;
 - no new contract change has landed after the gate without a new gate run.
@@ -202,6 +218,7 @@ The next engineering work should focus on hardening the semantic decision
 platform itself: preserve backend-owned decision diagnostics in governed
 authoring explainability, keep sibling runtime materializations clearly
 projected in downstream consumers, keep OpenAPI and derived documentation
-surfaces synchronized after public-contract edits, use Page Builder full E2E
-only when the next change actually needs browser/stream coverage, and only cut
+surfaces synchronized after public-contract edits, keep status-transition
+governance visible in HTTP smoke markers, use Page Builder full E2E only when
+the next change actually needs browser/stream coverage, and only cut
 `0.1.0-rc.34` when a real downstream consumer needs Maven Central resolution.

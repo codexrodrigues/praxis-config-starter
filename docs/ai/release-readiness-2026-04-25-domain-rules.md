@@ -529,7 +529,10 @@ Keep the release deferred and move back to platform hardening:
    HTTP/SSE checkpoint for sibling procurement projections, and treat the
    OpenAPI/derived-surface sync below as the current contract-documentation
    checkpoint after the `/api/praxis/config/domain-rules/**` paths were added
-   to the canonical AI contract.
+   to the canonical AI contract. Treat PR #93 and PR #94 as the current
+   governed lifecycle-transition checkpoint: runtime service guards now block
+   terminal definition/materialization reactivation and the HTTP smoke records
+   those guards as release evidence.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
 3. Treat Angular PR #58 as the consumer projection checkpoint: downstream
@@ -703,3 +706,42 @@ This checkpoint was documentation, generated-contract and published-doc sync
 only. It did not introduce a new runtime behavior after the proportional
 HTTP/SSE smoke run `24932150973`, so no additional LLM smoke was triggered. No
 Maven Central or npm publication was performed.
+
+## Governed Status Transition Checkpoint
+
+`praxis-config-starter` PR #93 reached `main` at
+`0a8fc1c094524ad85a6feeadc2e2d0060f95d813` and made the
+`/api/praxis/config/domain-rules/**` status transition endpoints directional.
+
+Definition transitions now block terminal reactivation, for example
+`retired -> active`. Materialization transitions now require terminal
+projections such as `failed`, `superseded` or `reverted` to move back through
+`draft` or `pending_review` before another apply attempt. This keeps governed
+semantic decisions and their derived runtime projections from being silently
+reactivated by a host.
+
+Local validation passed with:
+
+- `mvn -Dtest=DomainRuleServiceTest test -q`;
+- `git diff --check -- src/main/java/org/praxisplatform/config/service/DomainRuleService.java src/test/java/org/praxisplatform/config/service/DomainRuleServiceTest.java docs/domain-catalog/domain-knowledge-layer-v1.md docs/ai/contracts/README.md`.
+
+GitHub Actions `CI and Release Java Starter (praxis-config-starter)` run
+`24933320331` passed for PR #93's main merge commit. Release/tag and Maven
+Central publication jobs remained skipped.
+
+`praxis-config-starter` PR #94 then reached `main` at
+`f1e1921b121e32779765dd34877dfbdb7d368898` and promoted the same lifecycle
+guards into the operational HTTP smoke corpus. The aggregate smoke summary now
+exposes:
+
+- `domainRuleTerminalDefinitionTransitionBlocked=true`;
+- `domainRuleTerminalMaterializationTransitionBlocked=true`.
+
+Local validation for PR #94 was limited to:
+
+- `git diff --check HEAD~1..HEAD -- tools/Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1 tools/Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1`.
+
+PowerShell parser and HTTP smoke were not run locally because `pwsh`/PowerShell
+was not installed in the macOS workspace. GitHub Actions `CI and Release Java
+Starter (praxis-config-starter)` run `24933396751` passed for PR #94's main
+merge commit. Release/tag and Maven Central publication jobs remained skipped.
