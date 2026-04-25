@@ -67,12 +67,13 @@ if ($health.status -ne "UP") {
 
 $unique = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $ruleKey = "procurement.suppliers.rule.lifecycle-smoke-$unique"
+$resourceKey = "procurement.lifecycle-smoke-$unique"
 $definitionBody = @{
     ruleKey = $ruleKey
     ruleType = "selection_eligibility"
     status = "approved"
     contextKey = "procurement"
-    resourceKey = "procurement.suppliers"
+    resourceKey = $resourceKey
     serviceKey = "praxis-api-quickstart"
     definition = @{
         summary = "Impedir selecao de fornecedores bloqueados no smoke HTTP."
