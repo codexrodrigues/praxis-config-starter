@@ -344,7 +344,11 @@ For today's Dynamic Form flow, the shared rule would live in
    predicted lookup target. For `validation`, `compliance` and `privacy`, it
    can also derive a canonical `backend_validation` payload with
    `kind=resource_validation_policy` for the predicted resource-validation
-   target.
+   target. Derived publication materializations use the same
+   `materialization_key` contract as explicit materialization creation:
+   compatible retries reuse the existing row, while collisions against another
+   definition or incompatible target are rejected before inserting duplicate
+   runtime projections.
 9. Target-specific materializers create `domain_rule_materialization` rows and
    only then update `FormConfig`, backend validation, workflows or external
    policy engines.

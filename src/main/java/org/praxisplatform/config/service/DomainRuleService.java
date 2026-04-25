@@ -530,12 +530,42 @@ public class DomainRuleService {
                     "Rule materialization key already belongs to another definition: "
                             + existing.getMaterializationKey());
         }
-        requireSameMaterializationField(existing.getTargetLayer(), request.targetLayer(), "targetLayer");
-        requireSameMaterializationField(existing.getTargetArtifactType(), request.targetArtifactType(), "targetArtifactType");
-        requireSameMaterializationField(existing.getTargetArtifactKey(), request.targetArtifactKey(), "targetArtifactKey");
-        if (StringUtils.hasText(request.sourceHash())
+        requireReusableMaterializationTarget(
+                existing,
+                request.targetLayer(),
+                request.targetArtifactType(),
+                request.targetArtifactKey(),
+                request.sourceHash());
+    }
+
+    private void requireReusableMaterialization(
+            DomainRuleMaterialization existing,
+            DomainRuleDefinition requestedDefinition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String sourceHash) {
+        DomainRuleDefinition existingDefinition = existing.getRuleDefinition();
+        if (existingDefinition == null || !requestedDefinition.getId().equals(existingDefinition.getId())) {
+            throw new ConfigurationIngestionException(
+                    "Rule materialization key already belongs to another definition: "
+                            + existing.getMaterializationKey());
+        }
+        requireReusableMaterializationTarget(existing, targetLayer, targetArtifactType, targetArtifactKey, sourceHash);
+    }
+
+    private void requireReusableMaterializationTarget(
+            DomainRuleMaterialization existing,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String sourceHash) {
+        requireSameMaterializationField(existing.getTargetLayer(), targetLayer, "targetLayer");
+        requireSameMaterializationField(existing.getTargetArtifactType(), targetArtifactType, "targetArtifactType");
+        requireSameMaterializationField(existing.getTargetArtifactKey(), targetArtifactKey, "targetArtifactKey");
+        if (StringUtils.hasText(sourceHash)
                 && StringUtils.hasText(existing.getSourceHash())
-                && !request.sourceHash().trim().equals(existing.getSourceHash())) {
+                && !sourceHash.trim().equals(existing.getSourceHash())) {
             throw new ConfigurationIngestionException(
                     "Rule materialization key already exists with a different sourceHash: "
                             + existing.getMaterializationKey());
@@ -1153,28 +1183,16 @@ public class DomainRuleService {
         ObjectNode payload = buildOptionSourceMaterializedPayload(
                 definition,
                 targetArtifactKey);
-        DomainRuleMaterialization materialization = new DomainRuleMaterialization();
-        materialization.setTenantId(normalize(tenantId));
-        materialization.setEnvironment(normalize(environment));
-        materialization.setRuleDefinition(definition);
-        materialization.setMaterializationKey(
-                definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey);
-        materialization.setTargetLayer(targetLayer);
-        materialization.setTargetArtifactType(targetArtifactType);
-        materialization.setTargetArtifactKey(targetArtifactKey);
-        materialization.setTargetPointer("/selectionPolicy");
-        materialization.setMaterializedRuleId("selection-policy");
-        materialization.setStatus("pending_review");
-        materialization.setMaterializedPayload(write(payload));
-        materialization.setSourceHash(derivedSourceHash(
+        return createOrReuseDerivedMaterialization(
                 definition,
                 targetLayer,
                 targetArtifactType,
                 targetArtifactKey,
                 "/selectionPolicy",
                 "selection-policy",
-                payload));
-        return materializationRepository.save(materialization);
+                payload,
+                tenantId,
+                environment);
     }
 
     private DomainRuleMaterialization createBackendValidationMaterialization(
@@ -1187,27 +1205,64 @@ public class DomainRuleService {
         ObjectNode payload = buildBackendValidationMaterializedPayload(
                 definition,
                 targetArtifactKey);
-        DomainRuleMaterialization materialization = new DomainRuleMaterialization();
-        materialization.setTenantId(normalize(tenantId));
-        materialization.setEnvironment(normalize(environment));
-        materialization.setRuleDefinition(definition);
-        materialization.setMaterializationKey(
-                definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey);
-        materialization.setTargetLayer(targetLayer);
-        materialization.setTargetArtifactType(targetArtifactType);
-        materialization.setTargetArtifactKey(targetArtifactKey);
-        materialization.setTargetPointer("/validationPolicy");
-        materialization.setMaterializedRuleId("backend-validation-policy");
-        materialization.setStatus("pending_review");
-        materialization.setMaterializedPayload(write(payload));
-        materialization.setSourceHash(derivedSourceHash(
+        return createOrReuseDerivedMaterialization(
                 definition,
                 targetLayer,
                 targetArtifactType,
                 targetArtifactKey,
                 "/validationPolicy",
                 "backend-validation-policy",
-                payload));
+                payload,
+                tenantId,
+                environment);
+    }
+
+    private DomainRuleMaterialization createOrReuseDerivedMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String targetPointer,
+            String materializedRuleId,
+            JsonNode payload,
+            String tenantId,
+            String environment) {
+        String materializationKey = definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey;
+        String sourceHash = derivedSourceHash(
+                definition,
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                targetPointer,
+                materializedRuleId,
+                payload);
+        var existing = materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                normalize(tenantId),
+                normalize(environment),
+                materializationKey);
+        if (existing.isPresent()) {
+            requireReusableMaterialization(
+                    existing.get(),
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    sourceHash);
+            return existing.get();
+        }
+        DomainRuleMaterialization materialization = new DomainRuleMaterialization();
+        materialization.setTenantId(normalize(tenantId));
+        materialization.setEnvironment(normalize(environment));
+        materialization.setRuleDefinition(definition);
+        materialization.setMaterializationKey(materializationKey);
+        materialization.setTargetLayer(targetLayer);
+        materialization.setTargetArtifactType(targetArtifactType);
+        materialization.setTargetArtifactKey(targetArtifactKey);
+        materialization.setTargetPointer(targetPointer);
+        materialization.setMaterializedRuleId(materializedRuleId);
+        materialization.setStatus("pending_review");
+        materialization.setMaterializedPayload(write(payload));
+        materialization.setSourceHash(sourceHash);
         return materializationRepository.save(materialization);
     }
 
