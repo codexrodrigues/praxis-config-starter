@@ -184,6 +184,16 @@ Operational smoke on `main`:
   `run_page_builder_full_e2e=false`. This proportional run confirmed
   `domainRulePublicationBlockedDiagnosticsSeen=true` after the blocked
   publication diagnostics contract was promoted into the HTTP gate.
+- `Agentic Authoring HTTP Smoke` run `24923468741` passed for commit
+  `0a5723f4b8fc96a6f6efdb4d60b5f65e04fe2281` with
+  `run_quickstart_http_smoke=true`, `run_domain_catalog_v2_smoke=true` and
+  `run_page_builder_full_e2e=true`. This full integrated gate revalidated the
+  current `main` after blocked publication diagnostics entered the HTTP gate
+  and the readiness documentation recorded the proportional proof.
+- Smoke run `24923468741` confirmed all four publication diagnostics
+  (`created`, `selected_existing`, `reused` and `blocked`), Domain Catalog v2
+  `catalogSchemaVersion=praxis.domain-catalog/v0.2`, Page Builder full E2E
+  `2 passed` and `fullE2EPassed=true`.
 - Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
