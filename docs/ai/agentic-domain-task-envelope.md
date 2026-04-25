@@ -107,6 +107,31 @@ An LLM or agent using this envelope must:
 - include an explanation that references the domain concepts used;
 - leave review-required items as proposals, not direct approvals.
 
+## Canonical Intent Routing Matrix
+
+The intent resolver must classify the user's request before any preview or
+patch is produced. This matrix is the canonical routing baseline for the first
+semantic-decision platform cut:
+
+| User intent | Typical prompts | Canonical route | Expected result |
+| --- | --- | --- | --- |
+| Shared business rule | "fornecedor bloqueado nao pode ser selecionado", "crie uma politica de elegibilidade para fornecedores inativos" | `/api/praxis/config/domain-rules/**` | `gate.status=route_required`, `failureCodes=["shared-rule-authoring-required"]` |
+| Compliance or privacy decision | "crie uma regra LGPD para CPF", "dados sensiveis exigem revisao antes de aprovar" | `/api/praxis/config/domain-rules/**` | governed intake/simulation handoff, not component preview |
+| Backend validation policy | "validar que pedido de compra sem aprovacao nao pode seguir", "bloquear status invalido no backend" | `/api/praxis/config/domain-rules/**` | semantic rule proposal with derived `backend_validation` target when publishable |
+| Option-source eligibility | "fornecedor inactive ou blocked nao pode aparecer como selecionavel" | `/api/praxis/config/domain-rules/**` | semantic rule proposal with derived `option_source` target when publishable |
+| Component/page authoring | "crie um formulario de funcionarios", "adicione campo salario no formulario", "monte um dashboard de folha" | `/api/praxis/config/ai/authoring/**` | eligible page/component preview with `componentEditPlan` or `uiCompositionPlan` |
+| API catalog Q&A | "quais endpoints existem para funcionarios?", "qual schema devo usar para folha?" | `/api/praxis/config/ai/authoring/**` as API catalog answer | informative answer; no domain-rule draft and no page preview unless the next turn asks for creation |
+
+When a prompt contains both business-rule and component words, the decision
+semantics wins unless the request is clearly visual/editorial. For example,
+"crie uma regra para CPF no formulario" is shared-rule authoring; "adicione o
+campo CPF no formulario" is component/page authoring.
+
+The resolver may use `recommendedAuthoringFlow=shared_rule_authoring` as a
+strong host hint, but it must not depend exclusively on that hint. Older
+clients that only send a prompt and a resolved business resource must still be
+protected from routing governed business decisions into `componentEditPlan`.
+
 ## Safe Output Shape
 
 For component/page authoring, the terminal result should preserve the existing

@@ -2778,6 +2778,97 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void canonicalRoutingMatrixRoutesBusinessRulesToSharedRuleAuthoring() {
+        List<RoutingCase> cases = List.of(
+                new RoutingCase(
+                        "Crie uma politica de elegibilidade para fornecedores inativos",
+                        "/api/procurement/suppliers"),
+                new RoutingCase(
+                        "Fornecedor inactive ou blocked nao pode aparecer como selecionavel",
+                        "/api/procurement/suppliers"),
+                new RoutingCase(
+                        "Crie uma regra LGPD para CPF no formulario de funcionarios",
+                        "/api/human-resources/funcionarios"),
+                new RoutingCase(
+                        "Validar que pedido de compra sem aprovacao nao pode seguir",
+                        "/api/procurement/purchase-orders"));
+
+        for (RoutingCase routingCase : cases) {
+            AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                    routingCase.prompt(),
+                    "praxis-ui-angular",
+                    "praxis-dynamic-page-builder",
+                    "/page-builder-ia",
+                    objectMapper.createObjectNode(),
+                    null,
+                    null,
+                    null,
+                    null));
+
+            assertThat(result.valid())
+                    .as(routingCase.prompt())
+                    .isFalse();
+            assertThat(result.gate().status())
+                    .as(routingCase.prompt())
+                    .isEqualTo("route_required");
+            assertThat(result.failureCodes())
+                    .as(routingCase.prompt())
+                    .contains("shared-rule-authoring-required");
+            assertThat(result.assistantMessage())
+                    .as(routingCase.prompt())
+                    .contains("/api/praxis/config/domain-rules")
+                    .contains("/api/praxis/config/domain-rules/intake")
+                    .contains("/api/praxis/config/domain-rules/simulations");
+            assertThat(result.selectedCandidate())
+                    .as(routingCase.prompt())
+                    .isNotNull();
+            assertThat(result.selectedCandidate().resourcePath())
+                    .as(routingCase.prompt())
+                    .isEqualTo(routingCase.resourcePath());
+        }
+    }
+
+    @Test
+    void canonicalRoutingMatrixKeepsVisualAuthoringEligibleForPreview() {
+        List<RoutingCase> cases = List.of(
+                new RoutingCase(
+                        "Crie um formulario de funcionarios",
+                        "/api/human-resources/funcionarios"),
+                new RoutingCase(
+                        "Adicione o campo salario no formulario de funcionarios",
+                        "/api/human-resources/funcionarios"),
+                new RoutingCase(
+                        "Monte um dashboard de folha de pagamento por departamento",
+                        "/api/human-resources/vw-analytics-folha-pagamento"));
+
+        for (RoutingCase routingCase : cases) {
+            AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                    routingCase.prompt(),
+                    "praxis-ui-angular",
+                    "praxis-dynamic-page-builder",
+                    "/page-builder-ia",
+                    objectMapper.createObjectNode(),
+                    null,
+                    null,
+                    null,
+                    null));
+
+            assertThat(result.gate().status())
+                    .as(routingCase.prompt())
+                    .isNotEqualTo("route_required");
+            assertThat(result.failureCodes())
+                    .as(routingCase.prompt())
+                    .doesNotContain("shared-rule-authoring-required");
+            assertThat(result.selectedCandidate())
+                    .as(routingCase.prompt())
+                    .isNotNull();
+            assertThat(result.selectedCandidate().resourcePath())
+                    .as(routingCase.prompt())
+                    .isEqualTo(routingCase.resourcePath());
+        }
+    }
+
+    @Test
     void businessRulePromptKeepsKnownResourceCandidateWhenLlmIntentIsUnavailable() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -2926,6 +3017,9 @@ class AgenticAuthoringIntentResolverServiceTest {
         inputs.put("tableId", "payroll-table");
         inputs.put("title", "Folhas de pagamento");
         return page;
+    }
+
+    private record RoutingCase(String prompt, String resourcePath) {
     }
 
     private ObjectNode payrollChartPage() {
