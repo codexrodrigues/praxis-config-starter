@@ -63,13 +63,29 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment) throws IOException {
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
+        AgenticAuthoringIntentResolutionResult intentResolution =
+                effectiveRequest == null ? null : effectiveRequest.intentResolution();
+        List<String> routeFailures = validateSharedRuleRoute(intentResolution);
+        if (!routeFailures.isEmpty()) {
+            List<String> warnings = new ArrayList<>();
+            if (intentResolution != null) {
+                warnings.addAll(intentResolution.warnings());
+            }
+            warnings.add("preview-skipped-invalid-intent-resolution");
+            return new AgenticAuthoringPreviewResult(
+                    false,
+                    List.copyOf(routeFailures),
+                    List.copyOf(warnings),
+                    MissingNode.getInstance(),
+                    MissingNode.getInstance(),
+                    diagnostics(intentResolution, List.copyOf(routeFailures), List.copyOf(warnings))
+            );
+        }
         Optional<AgenticAuthoringPreviewResult> uiCompositionPreview =
                 previewUiCompositionPlan(effectiveRequest, tenantId, userId, environment);
         if (uiCompositionPreview.isPresent()) {
             return uiCompositionPreview.get();
         }
-        AgenticAuthoringIntentResolutionResult intentResolution =
-                effectiveRequest == null ? null : effectiveRequest.intentResolution();
         List<String> intentFailures = validateIntentResolution(intentResolution);
         if (!intentFailures.isEmpty()) {
             List<String> warnings = new ArrayList<>();
@@ -410,5 +426,16 @@ public class AgenticAuthoringPreviewService {
             failures.add("intent-resolution-artifact-must-be-form");
         }
         return List.copyOf(failures);
+    }
+
+    private List<String> validateSharedRuleRoute(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.gate() == null) {
+            return List.of();
+        }
+        if ("route_required".equals(intentResolution.gate().status())
+                && intentResolution.gate().messages().contains("shared-rule-authoring-required")) {
+            return List.of("intent-resolution-shared-rule-route-required");
+        }
+        return List.of();
     }
 }
