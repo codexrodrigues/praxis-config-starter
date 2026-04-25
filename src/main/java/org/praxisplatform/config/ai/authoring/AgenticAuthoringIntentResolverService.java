@@ -1168,14 +1168,22 @@ public class AgenticAuthoringIntentResolverService {
                 "politica", "politicas", "policy", "policies",
                 "decisao", "decisoes", "decision", "decisions",
                 "validacao", "validar", "validation", "validate",
+                "aprovacao", "aprovacoes", "aprovar", "approval", "approvals", "approve",
+                "revisao", "revisar", "review", "review_required",
+                "mascarar", "mascare", "mask", "masking",
+                "privacidade", "privacy",
                 "bloquear", "bloqueie", "impedir", "nao pode", "nao permitir",
+                "exigir", "exige", "exigem", "obrigatorio", "obrigatoria",
                 "elegibilidade", "eligibility", "compliance", "governanca", "governance");
         boolean businessSubject = containsAny(normalized,
                 "fornecedor", "fornecedores", "supplier", "suppliers",
                 "pedido", "pedidos", "purchase order", "purchase orders",
                 "compra", "compras",
                 "cpf", "lgpd", "gdpr",
-                "status", "bloqueado", "blocked", "inactive", "inativo");
+                "dados sensiveis", "dado sensivel", "sensitive data", "personal data",
+                "privacidade", "privacy",
+                "aprovacao", "aprovacoes", "approval", "approvals",
+                "status", "bloqueado", "blocked", "inactive", "inativo", "invalido", "invalid");
         boolean componentAuthoringIntent = containsAny(normalized,
                 "formulario", "form", "tabela", "table", "dashboard", "grafico", "chart",
                 "campo", "campos", "coluna", "colunas", "widget", "componente", "pagina");
