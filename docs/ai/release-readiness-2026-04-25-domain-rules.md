@@ -416,6 +416,8 @@ Angular cockpit/runtime projection:
   `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
 - `praxis-ui-angular` PR #57 merged to `main` at
   `e8e0e295893acda5c60955c87ecc8ff88f90ec31`.
+- `praxis-ui-angular` PR #58 merged to `main` at
+  `8e4ccba4ed6262679e79b51ae0acf230ea4c709e`.
 - Local focal validation passed:
   - `npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include='projects/praxis-core/src/lib/services/domain-rule.service.spec.ts'`
   - `npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
@@ -438,6 +440,11 @@ Angular cockpit/runtime projection:
 - Local focal validation for PR #57 passed:
   - `git diff --check -- src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.ts src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts`
   - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
+- Local focal validation for PR #58 passed:
+  - `git diff --check -- projects/praxis-core/src/lib/models/domain-rule.model.ts projects/praxis-core/src/lib/services/domain-rule.service.spec.ts src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.ts src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts`
+  - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include=projects/praxis-core/src/lib/services/domain-rule.service.spec.ts`
+  - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include=src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts`
+  - `npm run build:praxis-core`
 - Local focal validation for `praxis-config-starter` PR #83 passed:
   - `mvn -Dtest=DomainRuleServiceTest test -q`
   - This added the service-level proof that an AI-authored procurement supplier
@@ -462,6 +469,12 @@ Angular cockpit/runtime projection:
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24926222174` passed for
   head SHA `aa80680373973a0532f73d7bc3d6bdd3df5b641b`; release/tag job
   skipped.
+- GitHub Actions `CI - Build Praxis Angular Libs` run `24931880584` passed for
+  `praxis-ui-angular` PR #58 head SHA
+  `c706a170545236008d7949c4acb41fcb45a92602`.
+- GitHub Actions `CI - Build Praxis Angular Libs` run `24931981608` passed for
+  `praxis-ui-angular` `main` merge commit
+  `8e4ccba4ed6262679e79b51ae0acf230ea4c709e`; release/tag job skipped.
 - GitHub Actions `CI and Release Java Starter (praxis-config-starter)` run
   `24931194317` passed for merge commit
   `3557d51beacca456e05a18acfae5dc19335c0dbb`; release/tag and Maven Central
@@ -520,13 +533,16 @@ Keep the release deferred and move back to platform hardening:
    checkpoint.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
    needs external artifact resolution.
-3. Use the next implementation cycle to extend consumer projection checks. The
-   current strong checkpoint proves intake, simulation, publication and derived
-   `lookup_selection_policy` plus `resource_validation_policy`
-   materializations for blocked suppliers. The next recommended hardening
-   target is making downstream consumers and docs render/explain both
-   projections as siblings of the same governed semantic decision.
-4. If a release is requested, publish once after confirming the external
+3. Treat Angular PR #58 as the consumer projection checkpoint: downstream
+   cockpit rendering now explains `option_source` and `backend_validation` as
+   sibling projections of the same governed semantic decision through typed
+   `@praxisui/core` contracts.
+4. Use the next implementation cycle to run the smallest proportional
+   integrated smoke that exercises config `main`, quickstart `main` and Angular
+   `main` after PR #58, without Maven/npm publication. Prefer the quickstart
+   HTTP smoke first; enable Page Builder full E2E only if the validation target
+   explicitly needs browser/stream coverage.
+5. If a release is requested, publish once after confirming the external
    artifact version set, rather than repeatedly publishing during validation.
 
 ## Procurement Option Source Checkpoint
@@ -590,3 +606,29 @@ The proportional GitHub Actions smoke run `24931585519` passed with:
 This checkpoint proves that `selection_eligibility` decisions now publish both
 lookup UX guidance and backend validation enforcement as derived projections of
 one canonical semantic decision.
+
+## Angular Sibling Projection Checkpoint
+
+`praxis-ui-angular` PR #58 merged at
+`8e4ccba4ed6262679e79b51ae0acf230ea4c709e` and closed the consumer projection
+gap left after backend PR #86.
+
+The Angular cockpit/runtime now:
+
+- declares `option_source` and `backend_validation` as explicit
+  `DomainRuleTargetLayer` values in `@praxisui/core`;
+- renders predicted and published materialization outcomes as sibling
+  projections of one governed semantic decision;
+- keeps the shared-rule handoff as a cockpit/runtime projection instead of a
+  source of business-rule truth.
+
+Local validation passed with:
+
+- `git diff --check -- projects/praxis-core/src/lib/models/domain-rule.model.ts projects/praxis-core/src/lib/services/domain-rule.service.spec.ts src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.ts src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts`;
+- `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include=projects/praxis-core/src/lib/services/domain-rule.service.spec.ts`;
+- `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include=src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts`;
+- `npm run build:praxis-core`.
+
+GitHub Actions `CI - Build Praxis Angular Libs` run `24931880584` passed for
+the PR head and run `24931981608` passed for `main` after merge. No npm
+publication was performed.
