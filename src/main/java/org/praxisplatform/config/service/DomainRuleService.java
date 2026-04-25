@@ -275,6 +275,7 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + definitionId));
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
+        requireAllowedDefinitionTransition(definition.getStatus(), status);
 
         definition.setStatus(status);
         if (request.validationResult() != null && !request.validationResult().isNull()) {
@@ -1606,6 +1607,7 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + materializationId));
         requireScope(materialization.getTenantId(), tenantId, "tenantId");
         requireScope(materialization.getEnvironment(), environment, "environment");
+        requireAllowedMaterializationTransition(materialization.getStatus(), status);
         if ("applied".equals(status) && !hasActiveDefinition(materialization)) {
             throw new ConfigurationIngestionException("Rule materialization can only be applied when its definition is active");
         }
@@ -1754,6 +1756,53 @@ public class DomainRuleService {
             throw new ConfigurationIngestionException(field + " must be one of " + allowedStatuses);
         }
         return status;
+    }
+
+    private void requireAllowedDefinitionTransition(String currentStatus, String requestedStatus) {
+        if (isSameStatus(currentStatus, requestedStatus) || isAllowedDefinitionTransition(currentStatus, requestedStatus)) {
+            return;
+        }
+        throw new ConfigurationIngestionException(
+                "Rule definition status transition is not allowed: "
+                        + nullToEmpty(currentStatus)
+                        + " -> "
+                        + requestedStatus);
+    }
+
+    private boolean isAllowedDefinitionTransition(String currentStatus, String requestedStatus) {
+        return switch (nullToEmpty(currentStatus)) {
+            case "draft" -> List.of("proposed", "approved", "rejected", "retired").contains(requestedStatus);
+            case "proposed" -> List.of("draft", "approved", "rejected", "retired").contains(requestedStatus);
+            case "approved" -> List.of("active", "rejected", "deprecated", "retired").contains(requestedStatus);
+            case "active" -> List.of("deprecated", "retired").contains(requestedStatus);
+            case "deprecated" -> List.of("active", "retired").contains(requestedStatus);
+            default -> false;
+        };
+    }
+
+    private void requireAllowedMaterializationTransition(String currentStatus, String requestedStatus) {
+        if (isSameStatus(currentStatus, requestedStatus) || isAllowedMaterializationTransition(currentStatus, requestedStatus)) {
+            return;
+        }
+        throw new ConfigurationIngestionException(
+                "Rule materialization status transition is not allowed: "
+                        + nullToEmpty(currentStatus)
+                        + " -> "
+                        + requestedStatus);
+    }
+
+    private boolean isAllowedMaterializationTransition(String currentStatus, String requestedStatus) {
+        return switch (nullToEmpty(currentStatus)) {
+            case "draft" -> List.of("pending_review", "applied", "failed", "reverted").contains(requestedStatus);
+            case "pending_review" -> List.of("draft", "applied", "failed", "reverted").contains(requestedStatus);
+            case "applied" -> List.of("superseded", "reverted").contains(requestedStatus);
+            case "failed", "superseded", "reverted" -> List.of("draft", "pending_review").contains(requestedStatus);
+            default -> false;
+        };
+    }
+
+    private boolean isSameStatus(String currentStatus, String requestedStatus) {
+        return nullToEmpty(currentStatus).equals(requestedStatus);
     }
 
     private void requireScope(String actual, String expected, String field) {

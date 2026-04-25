@@ -1014,6 +1014,42 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksDefinitionTransitionFromRetiredBackToActive() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("rule-a")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("retired")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.transitionDefinitionStatus(
+                definitionId,
+                new DomainRuleStatusTransitionRequest(
+                        "active",
+                        "human",
+                        "privacy-office",
+                        objectMapper.readTree("{\"review\":\"approved\"}")),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Rule definition status transition is not allowed: retired -> active");
+
+        assertThat(definition.getStatus()).isEqualTo("retired");
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
     void simulatesProcurementRuleAndDetectsExistingCoverage() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -2164,6 +2200,52 @@ class DomainRuleServiceTest {
         assertThat(response.appliedAt()).isNotNull();
         assertThat(response.validationResult().path("checks").get(0).asText()).isEqualTo("schema-compatible");
         verify(materializationRepository).save(materialization);
+    }
+
+    @Test
+    void blocksMaterializationTransitionFromRevertedDirectlyToApplied() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID materializationId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .ruleKey("rule-a")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("active")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(materializationId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("form:rule-a")
+                .targetLayer("form_config")
+                .targetArtifactType("praxis-dynamic-form")
+                .targetArtifactKey("funcionarios-form-demo")
+                .status("reverted")
+                .materializedPayload("{}")
+                .build();
+        when(materializationRepository.findById(materializationId)).thenReturn(Optional.of(materialization));
+
+        assertThatThrownBy(() -> service.transitionMaterializationStatus(
+                materializationId,
+                new DomainRuleStatusTransitionRequest(
+                        "applied",
+                        "llm",
+                        "openai:gpt-5.4-mini",
+                        objectMapper.readTree("{\"checks\":[\"schema-compatible\"]}")),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Rule materialization status transition is not allowed: reverted -> applied");
+
+        assertThat(materialization.getStatus()).isEqualTo("reverted");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
     @Test

@@ -426,6 +426,23 @@ or transitioning to `applied` sets `applied_at` when missing and is only valid
 when the linked definition is already `active`. These endpoints are for
 lifecycle governance; they still do not execute rules.
 
+Definition status transitions are deliberately directional:
+
+- `draft` -> `proposed`, `approved`, `rejected`, `retired`
+- `proposed` -> `draft`, `approved`, `rejected`, `retired`
+- `approved` -> `active`, `rejected`, `deprecated`, `retired`
+- `active` -> `deprecated`, `retired`
+- `deprecated` -> `active`, `retired`
+- `rejected` and `retired` are terminal; create a new version instead of
+  reactivating the same semantic decision row.
+
+Materialization status transitions are also directional:
+
+- `draft` -> `pending_review`, `applied`, `failed`, `reverted`
+- `pending_review` -> `draft`, `applied`, `failed`, `reverted`
+- `applied` -> `superseded`, `reverted`
+- `failed`, `superseded` and `reverted` -> `draft`, `pending_review`
+
 Publication may only apply materializations in `draft`, `pending_review` or
 already `applied` status. Terminal materializations such as `failed`,
 `superseded` or `reverted` must be reviewed, replaced or explicitly moved back
