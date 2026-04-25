@@ -1037,6 +1037,52 @@ class DomainRuleServiceTest {
         verify(materializationRepository).save(materialization);
     }
 
+    @Test
+    void blocksApplyingMaterializationWhenDefinitionIsNotActive() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID materializationId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .ruleKey("rule-a")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("approved")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(materializationId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("form:rule-a")
+                .targetLayer("form_config")
+                .targetArtifactType("praxis-dynamic-form")
+                .targetArtifactKey("funcionarios-form-demo")
+                .status("pending_review")
+                .materializedPayload("{}")
+                .build();
+        when(materializationRepository.findById(materializationId)).thenReturn(Optional.of(materialization));
+
+        assertThatThrownBy(() -> service.transitionMaterializationStatus(
+                materializationId,
+                new DomainRuleStatusTransitionRequest(
+                        "applied",
+                        "llm",
+                        "openai:gpt-5.4-mini",
+                        objectMapper.readTree("{\"checks\":[\"schema-compatible\"]}")),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Rule materialization can only be applied when its definition is active");
+
+        assertThat(materialization.getStatus()).isEqualTo("pending_review");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
     private DomainRuleService service(
             DomainRuleDefinitionRepository definitionRepository,
             DomainRuleMaterializationRepository materializationRepository) {

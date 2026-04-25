@@ -1240,6 +1240,9 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + materializationId));
         requireScope(materialization.getTenantId(), tenantId, "tenantId");
         requireScope(materialization.getEnvironment(), environment, "environment");
+        if ("applied".equals(status) && !hasActiveDefinition(materialization)) {
+            throw new ConfigurationIngestionException("Rule materialization can only be applied when its definition is active");
+        }
 
         materialization.setStatus(status);
         materialization.setValidationResult(writeNullable(request.validationResult()));
@@ -1253,6 +1256,11 @@ public class DomainRuleService {
             materialization.setAppliedAt(Instant.now());
         }
         return toResponse(materializationRepository.save(materialization));
+    }
+
+    private boolean hasActiveDefinition(DomainRuleMaterialization materialization) {
+        DomainRuleDefinition definition = materialization.getRuleDefinition();
+        return definition != null && "active".equals(definition.getStatus());
     }
 
     private DomainCatalogRelease resolveRelease(UUID releaseId) {
