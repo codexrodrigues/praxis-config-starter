@@ -192,6 +192,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         domainRuleIntakeDecisionDiagnosticsSeen = [bool] $domainRuleLifecycle.intakeDecisionDiagnosticsSeen
         domainRuleDecisionDiagnosticsSeen = [bool] $domainRuleLifecycle.decisionDiagnosticsSeen
         domainRuleMaterializationDecisionDiagnosticsSeen = [bool] $domainRuleLifecycle.materializationDecisionDiagnosticsSeen
+        domainRuleMaterializationSourceHashDiagnosticsSeen = [bool] $domainRuleLifecycle.materializationSourceHashDiagnosticsSeen
         domainRuleProcurementOptionSourcePolicySeen = [bool] $domainRuleLifecycle.procurementOptionSourcePolicySeen
         domainRuleProcurementBackendValidationPolicySeen = [bool] $domainRuleLifecycle.procurementBackendValidationPolicySeen
         planValid = [bool] $plan.valid

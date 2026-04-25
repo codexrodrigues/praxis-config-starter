@@ -223,7 +223,8 @@ The release can move from deferred to publishable when all of these are true:
   `domainRulePublicationReusedDiagnosticsSeen=true`,
   `domainRulePublicationBlockedDiagnosticsSeen=true`,
   `domainRuleIntakeDecisionDiagnosticsSeen=true`,
-  `domainRuleMaterializationDecisionDiagnosticsSeen=true` and
+  `domainRuleMaterializationDecisionDiagnosticsSeen=true`,
+  `domainRuleMaterializationSourceHashDiagnosticsSeen=true` and
   `domainRuleDecisionDiagnosticsSeen=true`;
 - the smoke summary confirms
   `domainRuleProcurementOptionSourcePolicySeen=true`;
