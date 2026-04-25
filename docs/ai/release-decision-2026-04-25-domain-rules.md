@@ -18,16 +18,27 @@ on external registries during implementation.
 The platform has enough evidence to support a release candidate:
 
 - `praxis-config-starter` `main` reached commit
-  `d79c3850f0bc9d4b62dd98965be62a3fa989c10c` with readiness documentation
-  updated after the integrated gate.
+  `bffbd3e59405d1efbdb86ba17c893d7e8c8024f0`, with contract source commit
+  `529cd0b06ef25ec5a26a9c84c900e33c841bcf77` carrying materialization
+  decision diagnostics and readiness documentation updated after the smoke
+  retry.
 - `praxis-ui-angular` `main` reached commit
-  `524f6f7033885c76d29469106ab32d13f2ac923c` with the cockpit projecting the
-  governed shared-rule intake endpoint.
+  `aa80680373973a0532f73d7bc3d6bdd3df5b641b` with the cockpit projecting the
+  governed shared-rule intake endpoint and `@praxisui/dynamic-form`
+  preserving backend-owned materialization diagnostics in
+  `metadata.domainRule.decisionDiagnostics`.
 - `Agentic Authoring HTTP Smoke` run `24922256769` passed with
   `run_page_builder_full_e2e=true`, `provider=openai`, `quickstart_ref=main`,
   `metadata_ref=main` and `ui_ref=main`.
 - The same run validated quickstart HTTP/SSE smoke, Domain Catalog v2 smoke and
   the Page Builder full browser E2E gate against a real LLM-backed flow.
+- `Agentic Authoring HTTP Smoke` run `24925700913` later passed the
+  proportional quickstart HTTP lifecycle gate and confirmed
+  `domainRuleMaterializationDecisionDiagnosticsSeen=true` after
+  materialization diagnostics entered the backend public contract.
+- `praxis-ui-angular` CI runs `24926048274` and `24926222174` passed after the
+  Angular diagnostics projection and README alignment reached `main`; both kept
+  release/tag publication skipped.
 
 Publication is still intentionally deferred because:
 
@@ -78,8 +89,10 @@ The release workflow should then create tag:
 Do not publish `@praxisui/*` packages as part of this decision by default.
 
 The Angular changes have already been validated as source-level runtime/cockpit
-projection in the integrated gate. Publish npm only if an external Angular
-consumer must install the new handoff contract from the public registry.
+projection in CI, and the earlier integrated gate remains the latest Page
+Builder full E2E checkpoint. Publish npm only if an external Angular consumer
+must install the new handoff/materialization diagnostics contract from the
+public registry.
 
 If npm publication is requested, treat it as a separate coordinated release
 decision for `praxis-ui-angular`, with its own package version set, tarball

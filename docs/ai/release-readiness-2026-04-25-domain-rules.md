@@ -19,8 +19,9 @@ The validated path covers:
 
 ## Version Set
 
-- `praxis-config-starter`: `main` commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`.
-- `praxis-ui-angular`: `main` commit `524f6f7033885c76d29469106ab32d13f2ac923c`.
+- `praxis-config-starter`: `main` commit `bffbd3e59405d1efbdb86ba17c893d7e8c8024f0`,
+  with contract source commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`.
+- `praxis-ui-angular`: `main` commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
 - `praxis-api-quickstart`: `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`,
   packaged in GitHub Actions against the local `praxis-config-starter` and
   `praxis-metadata-starter` checkouts.
@@ -94,6 +95,12 @@ The validated path covers:
   commit `04020a2ee43323f0d5473387bc83ca838b4aa757`.
 - `praxis-ui-angular` PR #54, `Expose shared rule intake handoff`,
   commit `524f6f7033885c76d29469106ab32d13f2ac923c`.
+- `praxis-ui-angular` PR #55,
+  `Project domain rule materialization diagnostics`,
+  commit `2182f8d806520f9b1628a1789fab3ecd5dcb7d54`.
+- `praxis-ui-angular` PR #56,
+  `Document dynamic form materialization diagnostics`,
+  commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
 
 ## Contract State
 
@@ -150,6 +157,11 @@ The current canonical behavior is:
   handoff cockpit through typed `@praxisui/core` contracts, keeping Angular as
   a cockpit/runtime of governed semantic decisions rather than a source of
   business-rule truth.
+- `praxis-ui-angular` now also types the backend-owned
+  `DomainRuleDecisionDiagnostics` contract and preserves materialization
+  diagnostics in `@praxisui/dynamic-form` as
+  `metadata.domainRule.decisionDiagnostics`, keeping form rules as derived
+  runtime projections rather than a parallel source of business-rule truth.
 - Page Builder agentic resource-discovery turns remain on the canonical SSE
   turn contract when streaming is enabled. The local resource-candidate fallback
   remains available only for non-stream mode or unavailable stream endpoint
@@ -215,6 +227,20 @@ GitHub Actions CI on `main`:
   `8e67215cc0a8a8d1b9ac6ff07843cede056d5223`, after quickstart tests were made
   compatible with both the published materialization response constructor and
   the new local starter constructor with `decisionDiagnostics`.
+- `praxis-ui-angular` `CI - Build Praxis Angular Libs` run `24925972239` passed
+  for PR #55 head commit `0fdcdd132f09fcff12dde8f158acbbcc4368fe5c`,
+  validating the Angular source-level diagnostics projection before merge.
+- `praxis-ui-angular` `CI - Build Praxis Angular Libs` run `24926048274` passed
+  for main commit `2182f8d806520f9b1628a1789fab3ecd5dcb7d54`, validating
+  production Angular library build, tarball dry-run and artifact upload after
+  materialization diagnostics projection reached `main`.
+- `praxis-ui-angular` `CI - Build Praxis Angular Libs` run `24926151061` passed
+  for PR #56 head commit `638ce7aab083eb76f512d9498ada6b545e0ba10a`,
+  validating the dynamic-form README alignment before merge.
+- `praxis-ui-angular` `CI - Build Praxis Angular Libs` run `24926222174` passed
+  for main commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b`, validating
+  production Angular library build, tarball dry-run and artifact upload after
+  the documentation alignment reached `main`.
 
 Operational smoke on `main`:
 
@@ -344,6 +370,10 @@ Angular cockpit/runtime projection:
   `04020a2ee43323f0d5473387bc83ca838b4aa757`.
 - `praxis-ui-angular` PR #54 merged to `main` at
   `524f6f7033885c76d29469106ab32d13f2ac923c`.
+- `praxis-ui-angular` PR #55 merged to `main` at
+  `2182f8d806520f9b1628a1789fab3ecd5dcb7d54`.
+- `praxis-ui-angular` PR #56 merged to `main` at
+  `aa80680373973a0532f73d7bc3d6bdd3df5b641b`.
 - Local focal validation passed:
   - `npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include='projects/praxis-core/src/lib/services/domain-rule.service.spec.ts'`
   - `npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
@@ -355,12 +385,26 @@ Angular cockpit/runtime projection:
   - `npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts' --include='src/app/features/llm-tests/llm-tests.page.spec.ts' --include='src/app/features/dynamic-page-lab/dynamic-page-lab.page.spec.ts' --include='src/app/features/page-builder-json-logic-lab/page-builder-json-logic-lab.page.spec.ts'`
   - `npx ng build praxis-page-builder`
   - `npx ng build praxis-ui-workspace --configuration development`
+- Local focal validation for PR #55 passed:
+  - `npx -y @angular/cli mcp --help`
+  - `npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include='projects/praxis-core/src/lib/services/domain-rule.service.spec.ts'`
+  - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-dynamic-form --watch=false --browsers=ChromeHeadless --include='projects/praxis-dynamic-form/src/lib/services/domain-rule-form-rules.service.spec.ts'`
+  - `npm run build:praxis-core`
+  - `npm run build:praxis-dynamic-form`
+- Local focal validation for PR #56 passed:
+  - `git diff --check -- projects/praxis-dynamic-form/README.md`
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24920424506` passed for
   head SHA `3c45fee91f580ec9148f373b4b4333e7dd8deb4b`.
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24921204229` passed for
   head SHA `e92f3a1414f7e48580904da2206d8b0d2f5d3157`; release/tag job skipped.
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24922169138` passed for
   head SHA `d5fbd97623f8f5b34f6e8c558c0abfb342da395c`; release/tag job
+  skipped.
+- GitHub Actions `CI - Build Praxis Angular Libs` run `24926048274` passed for
+  head SHA `2182f8d806520f9b1628a1789fab3ecd5dcb7d54`; release/tag job
+  skipped.
+- GitHub Actions `CI - Build Praxis Angular Libs` run `24926222174` passed for
+  head SHA `aa80680373973a0532f73d7bc3d6bdd3df5b641b`; release/tag job
   skipped.
 
 Domain Catalog v2 smoke summary:
@@ -404,8 +448,9 @@ Keep the release deferred and move back to platform hardening:
 1. Treat run `24924505019` as the current integrated readiness checkpoint for
    domain-rule publication diagnostics, backend-owned simulation diagnostics,
    Domain Catalog v2 and Page Builder runtime projection, and treat config
-   `main` commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77` plus quickstart
-   `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` as the current
+   contract source commit `529cd0b06ef25ec5a26a9c84c900e33c841bcf77`,
+   quickstart `main` commit `8e67215cc0a8a8d1b9ac6ff07843cede056d5223` and
+   Angular `main` commit `aa80680373973a0532f73d7bc3d6bdd3df5b641b` as the current
    source checkpoint for intake, simulation, publication and materialization
    diagnostics after proportional HTTP smoke run `24925700913`.
 2. Defer Maven/npm publication until a named downstream consumer explicitly
