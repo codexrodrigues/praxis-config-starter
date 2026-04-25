@@ -163,6 +163,19 @@ The platform has enough evidence to support a release candidate:
   `domainRuleMaterializationDecisionDiagnosticsSeen=true`, terminal-transition
   guards, publication diagnostics and procurement projection markers. No
   Maven/npm publication was performed.
+- `praxis-config-starter` PR #106 reached `main` at
+  `194190b0b94b41863d3acc071d09fe9caaa0f333`, adding
+  `domainRuleIntentRoutingSeen` and `domainRulePagePreviewRouteBlocked` to the
+  quickstart HTTP smoke summary.
+- `CI and Release Java Starter (praxis-config-starter)` run `24940955717`
+  passed for PR #106's main merge commit, with release/tag and Maven Central
+  publication jobs skipped.
+- Proportional `Agentic Authoring HTTP Smoke` run `24940990721` passed after
+  PR #106 and confirmed `intentRouteRequired=true`,
+  `domainRuleIntentRoutingSeen=true` and
+  `domainRulePagePreviewRouteBlocked=true`, proving shared-rule prompts remain
+  on the governed domain-rule authoring route and `page-preview` does not
+  generate UI composition for that route.
 
 Publication is still intentionally deferred because:
 
@@ -261,7 +274,8 @@ platform itself: preserve backend-owned decision diagnostics in governed
 authoring explainability, keep sibling runtime materializations clearly
 projected in downstream consumers, keep `sourceHash` fingerprints visible in
 materialization diagnostics, keep OpenAPI and derived documentation surfaces
-synchronized after public-contract edits, keep status-transition governance
-visible in HTTP smoke markers, use Page Builder full E2E only when the next
-change actually needs browser/stream coverage, and only cut `0.1.0-rc.34` when
-a real downstream consumer needs Maven Central resolution.
+synchronized after public-contract edits, keep status-transition governance and
+canonical intent routing visible in HTTP smoke markers, use Page Builder full
+E2E only when the next change actually needs browser/stream coverage, and only
+cut `0.1.0-rc.34` when a real downstream consumer needs Maven Central
+resolution.

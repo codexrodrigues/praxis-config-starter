@@ -876,3 +876,36 @@ PR #101 and confirmed the new fingerprint-specific marker:
 
 This closes the proportional HTTP/SSE guardrail for materialization
 `sourceHash` diagnostics. No Maven Central or npm publication was performed.
+
+## Canonical Intent Routing Smoke Checkpoint
+
+`praxis-config-starter` PR #106 reached `main` at
+`194190b0b94b41863d3acc071d09fe9caaa0f333`. GitHub Actions `CI and Release
+Java Starter (praxis-config-starter)` run `24940955717` passed for PR #106's
+main merge commit. Release/tag and Maven Central publication jobs remained
+skipped.
+
+The proportional `Agentic Authoring HTTP Smoke` run `24940990721` passed after
+PR #106 with:
+
+- `provider=openai`;
+- `quickstart_ref=main`;
+- `metadata_ref=main`;
+- `ui_ref=main`;
+- `run_quickstart_http_smoke=true`;
+- `run_domain_catalog_v2_smoke=false`;
+- `run_page_builder_full_e2e=false`;
+- `run_llm_compliance_policy_shadow=false`.
+
+The log confirmed:
+
+- `intentRouteRequired=true`;
+- `domainRuleIntentRoutingSeen=true`;
+- `domainRulePagePreviewRouteBlocked=true`;
+- `domainRuleProcurementBackendValidationPolicySeen=true`.
+
+This closes the proportional HTTP/SSE guardrail proving that AI-authored
+shared-rule prompts are routed to governed domain-rule authoring and that
+`page-preview` preserves the canonical route block instead of generating UI
+composition or form patches. No Maven Central or npm publication was
+performed.
