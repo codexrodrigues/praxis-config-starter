@@ -150,7 +150,10 @@ public class DomainRuleService {
         definition.setRuleKey(request.ruleKey().trim());
         definition.setVersion(request.version());
         definition.setRuleType(request.ruleType().trim());
-        definition.setStatus(normalizeOrDefault(request.status(), "draft"));
+        definition.setStatus(requireAllowedStatus(
+                normalizeOrDefault(request.status(), "draft"),
+                "status",
+                DEFINITION_STATUSES));
         definition.setContextKey(normalize(request.contextKey()));
         definition.setResourceKey(normalize(request.resourceKey()));
         definition.setServiceKey(normalize(request.serviceKey()));
@@ -482,7 +485,10 @@ public class DomainRuleService {
         materialization.setTargetPointer(normalize(request.targetPointer()));
         materialization.setTargetReleaseKey(normalize(request.targetReleaseKey()));
         materialization.setMaterializedRuleId(normalize(request.materializedRuleId()));
-        materialization.setStatus(normalizeOrDefault(request.status(), "draft"));
+        materialization.setStatus(requireAllowedStatus(
+                normalizeOrDefault(request.status(), "draft"),
+                "status",
+                MATERIALIZATION_STATUSES));
         materialization.setMaterializedPayload(write(deriveMaterializedPayload(definition, request)));
         materialization.setSourceHash(normalize(request.sourceHash()));
         if (request.validationResult() != null && !request.validationResult().isNull()) {

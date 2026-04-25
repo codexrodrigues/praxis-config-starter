@@ -165,6 +165,38 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksDefinitionCreationWithNonCanonicalStatus() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        assertThatThrownBy(() -> service.createDefinition(new DomainRuleDefinitionRequest(
+                "human-resources.funcionarios.rule.lgpd-cpf-guidance",
+                null,
+                "visual_guidance",
+                "ready",
+                "human-resources",
+                "human-resources.funcionarios",
+                "praxis-api-quickstart",
+                "data-owner",
+                "privacy-office",
+                null,
+                null,
+                objectMapper.readTree("{\"summary\":\"Orientar analistas sobre CPF como dado pessoal.\"}"),
+                objectMapper.readTree("{}"),
+                null,
+                objectMapper.readTree("{}"),
+                null,
+                "llm",
+                "openai:gpt-5.4-mini",
+                null), "tenant-a", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("status must be one of [draft, proposed, approved, active, deprecated, retired, rejected]");
+
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
     void createsFormConfigMaterializationForSharedRuleDefinition() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -227,6 +259,50 @@ class DomainRuleServiceTest {
         verify(materializationRepository).save(captor.capture());
         assertThat(captor.getValue().getRuleDefinition()).isSameAs(definition);
         assertThat(captor.getValue().getMaterializedRuleId()).isEqualTo("lgpd-cpf-guidance");
+    }
+
+    @Test
+    void blocksMaterializationCreationWithNonCanonicalStatus() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .resourceKey("procurement.suppliers")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.createMaterialization(new DomainRuleMaterializationRequest(
+                definitionId,
+                "procurement.suppliers.rule.selection-eligibility:option_source:supplier",
+                "option_source",
+                "resource-option-source",
+                "supplier",
+                "/selectionPolicy",
+                null,
+                "selection-policy",
+                "ready",
+                null,
+                "hash-selection-eligibility",
+                null,
+                "llm",
+                "openai:gpt-5.4-mini"), "tenant-a", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("status must be one of [draft, pending_review, applied, failed, superseded, reverted]");
+
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
     @Test
