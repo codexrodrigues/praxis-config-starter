@@ -156,6 +156,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     }
 
     $intentResolution = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringIntentResolutionHttpE2E.ps1") @commonArgs | ConvertFrom-Json
+    $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $plan = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPlanHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $compile = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringCompileHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $preview = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPreviewHttpE2E.ps1") @commonArgs | ConvertFrom-Json
@@ -177,6 +178,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         startedQuickstart = $startedQuickstart
         intentRouteRequired = $intentResolution.gateStatus -eq "route_required"
         intentSelectedResourcePath = $intentResolution.selectedResourcePath
+        domainRuleAppliedCreationBlocked = [bool] $domainRuleLifecycle.appliedCreationBlocked
+        domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
+        domainRuleTerminalPublishBlocked = [bool] $domainRuleLifecycle.terminalPublishBlocked
         planValid = [bool] $plan.valid
         compileValid = [bool] $compile.compileValid
         previewValid = [bool] $preview.valid
