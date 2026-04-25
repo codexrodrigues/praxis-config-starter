@@ -706,7 +706,7 @@ public class DomainRuleService {
             target.put("operation", "selection_policy.review");
         }
 
-        if ("validation".equals(ruleType) || "compliance".equals(ruleType) || "privacy".equals(ruleType)) {
+        if (isBackendValidationRuleType(ruleType)) {
             ObjectNode target = targets.addObject();
             target.put("targetLayer", "backend_validation");
             target.put("targetArtifactType", "resource-validation");
@@ -1522,7 +1522,8 @@ public class DomainRuleService {
     private boolean isBackendValidationRuleType(String ruleType) {
         return "validation".equals(ruleType)
                 || "compliance".equals(ruleType)
-                || "privacy".equals(ruleType);
+                || "privacy".equals(ruleType)
+                || "selection_eligibility".equals(ruleType);
     }
 
     private DomainRuleMaterialization maybeApplyMaterialization(

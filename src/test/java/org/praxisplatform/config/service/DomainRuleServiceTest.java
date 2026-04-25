@@ -104,7 +104,7 @@ class DomainRuleServiceTest {
         assertThat(response.grounding().path("decisionDiagnostics").path("canonicalOwner").asText())
                 .isEqualTo("praxis-config-starter");
         assertThat(response.grounding().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
-                .isEqualTo(1);
+                .isEqualTo(2);
         assertThat(response.grounding().path("decisionDiagnostics").path("runtimeSurfacesAreDerived").asBoolean())
                 .isTrue();
 
@@ -145,6 +145,11 @@ class DomainRuleServiceTest {
                 "tenant-a",
                 "dev",
                 "procurement.suppliers.rule.selection-eligibility:option_source:supplier"))
+                .thenReturn(Optional.empty());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers.rule.selection-eligibility:backend_validation:procurement.suppliers"))
                 .thenReturn(Optional.empty());
         when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
             DomainRuleMaterialization materialization = invocation.getArgument(0);
@@ -222,11 +227,17 @@ class DomainRuleServiceTest {
 
         assertThat(intake.grounding().path("decisionDiagnostics").path("decisionStage").asText())
                 .isEqualTo("intake");
-        assertThat(simulation.predictedMaterializations()).singleElement()
-                .satisfies(target -> {
+        assertThat(simulation.predictedMaterializations()).hasSize(2);
+        assertThat(simulation.predictedMaterializations())
+                .anySatisfy(target -> {
                     assertThat(target.path("targetLayer").asText()).isEqualTo("option_source");
                     assertThat(target.path("targetArtifactType").asText()).isEqualTo("resource-option-source");
                     assertThat(target.path("targetArtifactKey").asText()).isEqualTo("supplier");
+                })
+                .anySatisfy(target -> {
+                    assertThat(target.path("targetLayer").asText()).isEqualTo("backend_validation");
+                    assertThat(target.path("targetArtifactType").asText()).isEqualTo("resource-validation");
+                    assertThat(target.path("targetArtifactKey").asText()).isEqualTo("procurement.suppliers");
                 });
         assertThat(simulation.explainability().path("decisionDiagnostics").path("decisionSource").asText())
                 .isEqualTo("persisted_definition");
@@ -239,15 +250,25 @@ class DomainRuleServiceTest {
         assertThat(publication.explainability()
                 .path("publicationDiagnostics")
                 .path("materializationOutcomes"))
-                .singleElement()
-                .satisfies(outcome -> {
+                .hasSize(2);
+        assertThat(publication.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .anySatisfy(outcome -> {
                     assertThat(outcome.path("resolution").asText()).isEqualTo("created");
                     assertThat(outcome.path("materializationKey").asText())
                             .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
                     assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
+                })
+                .anySatisfy(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("created");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:backend_validation:procurement.suppliers");
+                    assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
                 });
-        assertThat(publication.materializations()).singleElement()
-                .satisfies(materialization -> {
+        assertThat(publication.materializations()).hasSize(2);
+        assertThat(publication.materializations())
+                .anySatisfy(materialization -> {
                     JsonNode selectionPolicy = materialization.materializedPayload().path("selectionPolicy");
                     assertThat(materialization.status()).isEqualTo("applied");
                     assertThat(materialization.targetLayer()).isEqualTo("option_source");
@@ -265,6 +286,22 @@ class DomainRuleServiceTest {
                             .isEqualTo("Fornecedor indisponivel para novos pedidos");
                     assertThat(selectionPolicy.path("disabledReasonTemplate").asText())
                             .isEqualTo("Fornecedor com status indisponivel");
+                })
+                .anySatisfy(materialization -> {
+                    JsonNode validationPolicy = materialization.materializedPayload().path("validationPolicy");
+                    assertThat(materialization.status()).isEqualTo("applied");
+                    assertThat(materialization.targetLayer()).isEqualTo("backend_validation");
+                    assertThat(materialization.targetArtifactType()).isEqualTo("resource-validation");
+                    assertThat(materialization.targetArtifactKey()).isEqualTo("procurement.suppliers");
+                    assertThat(materialization.decisionDiagnostics().path("decisionStage").asText())
+                            .isEqualTo("materialization");
+                    assertThat(materialization.decisionDiagnostics().path("runtimeSurfacesAreDerived").asBoolean())
+                            .isTrue();
+                    assertThat(materialization.materializedPayload().path("kind").asText())
+                            .isEqualTo("resource_validation_policy");
+                    assertThat(validationPolicy.path("condition").path("in")).hasSize(2);
+                    assertThat(validationPolicy.path("parameters").path("validationMessageTemplate").asText())
+                            .isEqualTo("Fornecedor indisponivel para novos pedidos");
                 });
     }
 
@@ -1449,11 +1486,20 @@ class DomainRuleServiceTest {
         assertThat(response.explainability()
                 .path("publicationDiagnostics")
                 .path("materializationOutcomes"))
-                .singleElement()
-                .satisfies(outcome -> {
+                .hasSize(2);
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .anySatisfy(outcome -> {
                     assertThat(outcome.path("resolution").asText()).isEqualTo("created");
                     assertThat(outcome.path("materializationKey").asText())
                             .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
+                    assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
+                })
+                .anySatisfy(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("created");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:backend_validation:procurement.suppliers");
                     assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
                 });
         assertThat(response.explainability().path("decisionDiagnostics").path("decisionSource").asText())
@@ -1461,9 +1507,10 @@ class DomainRuleServiceTest {
         assertThat(response.explainability().path("decisionDiagnostics").path("materializationModel").asText())
                 .isEqualTo("derived_projection");
         assertThat(response.explainability().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
-                .isEqualTo(1);
-        assertThat(response.materializations()).singleElement()
-                .satisfies(item -> {
+                .isEqualTo(2);
+        assertThat(response.materializations()).hasSize(2);
+        assertThat(response.materializations())
+                .anySatisfy(item -> {
                     assertThat(item.targetLayer()).isEqualTo("option_source");
                     assertThat(item.targetArtifactType()).isEqualTo("resource-option-source");
                     assertThat(item.targetArtifactKey()).isEqualTo("supplier");
@@ -1472,6 +1519,15 @@ class DomainRuleServiceTest {
                     assertThat(item.materializedPayload().path("selectionPolicy").path("blockedStatuses"))
                             .extracting(JsonNode::asText)
                             .containsExactly("INACTIVE", "BLOCKED");
+                })
+                .anySatisfy(item -> {
+                    assertThat(item.targetLayer()).isEqualTo("backend_validation");
+                    assertThat(item.targetArtifactType()).isEqualTo("resource-validation");
+                    assertThat(item.targetArtifactKey()).isEqualTo("procurement.suppliers");
+                    assertThat(item.status()).isEqualTo("applied");
+                    assertThat(item.materializedPayload().path("kind").asText()).isEqualTo("resource_validation_policy");
+                    assertThat(item.materializedPayload().path("validationPolicy").path("condition").path("in"))
+                            .hasSize(2);
                 });
     }
 
@@ -1505,8 +1561,8 @@ class DomainRuleServiceTest {
                         """)
                 .governance("{}")
                 .build();
-        AtomicInteger keyLookups = new AtomicInteger();
-        AtomicReference<DomainRuleMaterialization> savedMaterialization = new AtomicReference<>();
+        java.util.Map<String, AtomicInteger> keyLookups = new java.util.HashMap<>();
+        java.util.Map<String, DomainRuleMaterialization> savedMaterializations = new java.util.HashMap<>();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
         when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
@@ -1521,20 +1577,21 @@ class DomainRuleServiceTest {
                 "dev",
                 definitionId))
                 .thenReturn(List.of());
-        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
-                "tenant-a",
-                "dev",
-                "procurement.suppliers.rule.selection-eligibility:option_source:supplier"))
-                .thenAnswer(invocation -> keyLookups.getAndIncrement() == 0
-                        ? Optional.empty()
-                        : Optional.ofNullable(savedMaterialization.get()));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    String materializationKey = invocation.getArgument(2);
+                    AtomicInteger lookupCount = keyLookups.computeIfAbsent(materializationKey, ignored -> new AtomicInteger());
+                    return lookupCount.getAndIncrement() == 0
+                            ? Optional.empty()
+                            : Optional.ofNullable(savedMaterializations.get(materializationKey));
+                });
         when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
             DomainRuleMaterialization materialization = invocation.getArgument(0);
             if (materialization.getId() == null) {
                 materialization.setId(UUID.randomUUID());
             }
             materialization.onInsert();
-            savedMaterialization.set(materialization);
+            savedMaterializations.put(materialization.getMaterializationKey(), materialization);
             return materialization;
         });
 
@@ -1560,29 +1617,47 @@ class DomainRuleServiceTest {
                 "dev");
 
         assertThat(firstResponse.publicationStatus()).isEqualTo("published");
-        assertThat(firstResponse.materializations()).singleElement()
-                .satisfies(item -> assertThat(item.sourceHash()).startsWith("derived:sha256:"));
+        assertThat(firstResponse.materializations()).hasSize(2)
+                .allSatisfy(item -> assertThat(item.sourceHash()).startsWith("derived:sha256:"));
         assertThat(secondResponse.publicationStatus()).isEqualTo("published");
         assertThat(secondResponse.explainability()
                 .path("publicationDiagnostics")
                 .path("materializationOutcomes"))
-                .singleElement()
-                .satisfies(outcome -> {
+                .hasSize(2);
+        assertThat(secondResponse.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .anySatisfy(outcome -> {
                     assertThat(outcome.path("resolution").asText()).isEqualTo("reused");
                     assertThat(outcome.path("materializationKey").asText())
                             .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
                     assertThat(outcome.path("sourceHash").asText())
-                            .isEqualTo(firstResponse.materializations().get(0).sourceHash());
+                            .isEqualTo(sourceHashFor(firstResponse, "option_source"));
+                })
+                .anySatisfy(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("reused");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:backend_validation:procurement.suppliers");
+                    assertThat(outcome.path("sourceHash").asText())
+                            .isEqualTo(sourceHashFor(firstResponse, "backend_validation"));
                 });
-        assertThat(secondResponse.materializations()).singleElement()
-                .satisfies(item -> {
-                    assertThat(item.id()).isEqualTo(firstResponse.materializations().get(0).id());
+        assertThat(secondResponse.materializations()).hasSize(2);
+        assertThat(secondResponse.materializations())
+                .anySatisfy(item -> {
+                    assertThat(item.id()).isEqualTo(materializationFor(firstResponse, "option_source").id());
                     assertThat(item.materializationKey())
                             .isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
                     assertThat(item.status()).isEqualTo("applied");
-                    assertThat(item.sourceHash()).isEqualTo(firstResponse.materializations().get(0).sourceHash());
+                    assertThat(item.sourceHash()).isEqualTo(sourceHashFor(firstResponse, "option_source"));
+                })
+                .anySatisfy(item -> {
+                    assertThat(item.id()).isEqualTo(materializationFor(firstResponse, "backend_validation").id());
+                    assertThat(item.materializationKey())
+                            .isEqualTo("procurement.suppliers.rule.selection-eligibility:backend_validation:procurement.suppliers");
+                    assertThat(item.status()).isEqualTo("applied");
+                    assertThat(item.sourceHash()).isEqualTo(sourceHashFor(firstResponse, "backend_validation"));
                 });
-        verify(materializationRepository, org.mockito.Mockito.times(2)).save(savedMaterialization.get());
+        verify(materializationRepository, org.mockito.Mockito.times(4)).save(any(DomainRuleMaterialization.class));
     }
 
     @Test
@@ -1862,18 +1937,26 @@ class DomainRuleServiceTest {
                 "tenant-a",
                 "dev");
 
-        assertThat(inactiveResponse.materializations()).singleElement()
-                .satisfies(item -> {
+        assertThat(inactiveResponse.materializations()).hasSize(2);
+        assertThat(inactiveResponse.materializations())
+                .anySatisfy(item -> {
+                    assertThat(item.targetLayer()).isEqualTo("option_source");
                     assertThat(item.targetArtifactKey()).isEqualTo("supplier");
                     assertThat(item.sourceHash()).startsWith("derived:sha256:");
-                });
-        assertThat(suspendedResponse.materializations()).singleElement()
-                .satisfies(item -> {
-                    assertThat(item.targetArtifactKey()).isEqualTo("supplier");
+                })
+                .anySatisfy(item -> {
+                    assertThat(item.targetLayer()).isEqualTo("backend_validation");
+                    assertThat(item.targetArtifactKey()).isEqualTo("procurement.suppliers");
                     assertThat(item.sourceHash()).startsWith("derived:sha256:");
                 });
-        assertThat(inactiveResponse.materializations().get(0).sourceHash())
-                .isNotEqualTo(suspendedResponse.materializations().get(0).sourceHash());
+        assertThat(suspendedResponse.materializations()).hasSize(2);
+        assertThat(suspendedResponse.materializations())
+                .allSatisfy(materialization ->
+                        assertThat(materialization.sourceHash()).startsWith("derived:sha256:"));
+        assertThat(sourceHashFor(inactiveResponse, "option_source"))
+                .isNotEqualTo(sourceHashFor(suspendedResponse, "option_source"));
+        assertThat(sourceHashFor(inactiveResponse, "backend_validation"))
+                .isNotEqualTo(sourceHashFor(suspendedResponse, "backend_validation"));
     }
 
     @Test
@@ -2127,6 +2210,21 @@ class DomainRuleServiceTest {
 
         assertThat(materialization.getStatus()).isEqualTo("pending_review");
         verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    private String sourceHashFor(
+            org.praxisplatform.config.dto.DomainRulePublicationResponse response,
+            String targetLayer) {
+        return materializationFor(response, targetLayer).sourceHash();
+    }
+
+    private org.praxisplatform.config.dto.DomainRuleMaterializationResponse materializationFor(
+            org.praxisplatform.config.dto.DomainRulePublicationResponse response,
+            String targetLayer) {
+        return response.materializations().stream()
+                .filter(materialization -> targetLayer.equals(materialization.targetLayer()))
+                .findFirst()
+                .orElseThrow();
     }
 
     private DomainRuleService service(

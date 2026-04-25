@@ -202,6 +202,50 @@ function Assert-OptionSourceSelectionPolicy(
     return $true
 }
 
+function Find-MaterializationByLayer(
+    [object] $Publication,
+    [string] $TargetLayer
+) {
+    $matches = @($Publication.materializations | Where-Object { $_.targetLayer -eq $TargetLayer })
+    if ($matches.Count -ne 1) {
+        $actual = ($Publication.materializations | ConvertTo-Json -Compress -Depth 12)
+        throw "Expected exactly one materialization with targetLayer='$TargetLayer', got $($matches.Count): $actual"
+    }
+    return $matches[0]
+}
+
+function Assert-BackendValidationPolicy(
+    [object] $Materialization,
+    [string] $ExpectedResourceKey,
+    [string[]] $ExpectedBlockedStatuses
+) {
+    if ($Materialization.targetLayer -ne "backend_validation") {
+        throw "Expected materialization targetLayer=backend_validation, got '$($Materialization.targetLayer)'."
+    }
+    if ($Materialization.targetArtifactType -ne "resource-validation") {
+        throw "Expected materialization targetArtifactType=resource-validation, got '$($Materialization.targetArtifactType)'."
+    }
+    if ($Materialization.targetArtifactKey -ne $ExpectedResourceKey) {
+        throw "Expected materialization targetArtifactKey=$ExpectedResourceKey, got '$($Materialization.targetArtifactKey)'."
+    }
+
+    $payload = $Materialization.materializedPayload
+    if ($payload.kind -ne "resource_validation_policy") {
+        throw "Expected materializedPayload.kind=resource_validation_policy, got '$($payload.kind)'."
+    }
+    if ($payload.validationPolicy.resourceKey -ne $ExpectedResourceKey) {
+        throw "Expected validationPolicy.resourceKey=$ExpectedResourceKey, got '$($payload.validationPolicy.resourceKey)'."
+    }
+    $conditionStatuses = @($payload.validationPolicy.condition.'in'[1])
+    foreach ($status in $ExpectedBlockedStatuses) {
+        if ($conditionStatuses -notcontains $status) {
+            $actual = ($conditionStatuses -join ",")
+            throw "Expected validationPolicy.condition.in[1] to contain '$status', got '$actual'."
+        }
+    }
+    return $true
+}
+
 $base = $BaseUrl.TrimEnd("/")
 $headers = @{
     "Origin" = $Origin
@@ -556,21 +600,49 @@ $suspendedPublication = Invoke-JsonRequest `
         }
     }
 
-$inactiveHash = [string] $inactivePublication.materializations[0].sourceHash
-$suspendedHash = [string] $suspendedPublication.materializations[0].sourceHash
-$inactiveMaterializationKey = [string] $inactivePublication.materializations[0].materializationKey
+$inactiveOptionSourceMaterialization = Find-MaterializationByLayer `
+    -Publication $inactivePublication `
+    -TargetLayer "option_source"
+$inactiveBackendValidationMaterialization = Find-MaterializationByLayer `
+    -Publication $inactivePublication `
+    -TargetLayer "backend_validation"
+$suspendedOptionSourceMaterialization = Find-MaterializationByLayer `
+    -Publication $suspendedPublication `
+    -TargetLayer "option_source"
+$suspendedBackendValidationMaterialization = Find-MaterializationByLayer `
+    -Publication $suspendedPublication `
+    -TargetLayer "backend_validation"
+$inactiveHash = [string] $inactiveOptionSourceMaterialization.sourceHash
+$suspendedHash = [string] $suspendedOptionSourceMaterialization.sourceHash
+$inactiveBackendValidationHash = [string] $inactiveBackendValidationMaterialization.sourceHash
+$suspendedBackendValidationHash = [string] $suspendedBackendValidationMaterialization.sourceHash
+$inactiveMaterializationKey = [string] $inactiveOptionSourceMaterialization.materializationKey
 if ([string]::IsNullOrWhiteSpace($inactiveHash) -or $inactiveHash -notlike "derived:sha256:*") {
     throw "Expected inactive semantic hash to use derived:sha256 prefix, got '$inactiveHash'."
 }
 if ([string]::IsNullOrWhiteSpace($suspendedHash) -or $suspendedHash -notlike "derived:sha256:*") {
     throw "Expected suspended semantic hash to use derived:sha256 prefix, got '$suspendedHash'."
 }
+if ([string]::IsNullOrWhiteSpace($inactiveBackendValidationHash) -or $inactiveBackendValidationHash -notlike "derived:sha256:*") {
+    throw "Expected inactive backend validation hash to use derived:sha256 prefix, got '$inactiveBackendValidationHash'."
+}
+if ([string]::IsNullOrWhiteSpace($suspendedBackendValidationHash) -or $suspendedBackendValidationHash -notlike "derived:sha256:*") {
+    throw "Expected suspended backend validation hash to use derived:sha256 prefix, got '$suspendedBackendValidationHash'."
+}
 if ($inactiveHash -eq $suspendedHash) {
     throw "Expected semantic source hashes to differ when rule semantics differ."
 }
+if ($inactiveBackendValidationHash -eq $suspendedBackendValidationHash) {
+    throw "Expected backend validation semantic source hashes to differ when rule semantics differ."
+}
 
 $procurementOptionSourcePolicySeen = Assert-OptionSourceSelectionPolicy `
-    -Materialization $inactivePublication.materializations[0] `
+    -Materialization $inactiveOptionSourceMaterialization `
+    -ExpectedBlockedStatuses @("INACTIVE", "BLOCKED")
+
+$procurementBackendValidationPolicySeen = Assert-BackendValidationPolicy `
+    -Materialization $inactiveBackendValidationMaterialization `
+    -ExpectedResourceKey "procurement.semantic-hash-inactive-$unique" `
     -ExpectedBlockedStatuses @("INACTIVE", "BLOCKED")
 
 $createdDiagnosticsSeen = Assert-MaterializationOutcome `
@@ -615,6 +687,7 @@ if ($reusedHash -ne $inactiveHash) {
     failedMaterializationStatus = $failedMaterialization.status
     terminalPublishBlocked = [bool] $terminalPublishBlocked
     semanticSourceHashesDiffer = $inactiveHash -ne $suspendedHash
+    backendValidationSemanticSourceHashesDiffer = $inactiveBackendValidationHash -ne $suspendedBackendValidationHash
     publicationCreatedDiagnosticsSeen = [bool] $createdDiagnosticsSeen
     publicationSelectedExistingDiagnosticsSeen = [bool] $selectedExistingDiagnosticsSeen
     publicationReusedDiagnosticsSeen = [bool] $reusedDiagnosticsSeen
@@ -623,4 +696,5 @@ if ($reusedHash -ne $inactiveHash) {
     decisionDiagnosticsSeen = [bool] $decisionDiagnosticsSeen
     materializationDecisionDiagnosticsSeen = [bool] $materializationDecisionDiagnosticsSeen
     procurementOptionSourcePolicySeen = [bool] $procurementOptionSourcePolicySeen
+    procurementBackendValidationPolicySeen = [bool] $procurementBackendValidationPolicySeen
 } | ConvertTo-Json -Depth 8

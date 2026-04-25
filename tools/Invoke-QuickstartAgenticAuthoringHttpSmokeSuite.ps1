@@ -182,6 +182,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
         domainRuleTerminalPublishBlocked = [bool] $domainRuleLifecycle.terminalPublishBlocked
         domainRuleSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.semanticSourceHashesDiffer
+        domainRuleBackendValidationSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.backendValidationSemanticSourceHashesDiffer
         domainRulePublicationCreatedDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationCreatedDiagnosticsSeen
         domainRulePublicationSelectedExistingDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationSelectedExistingDiagnosticsSeen
         domainRulePublicationReusedDiagnosticsSeen = [bool] $domainRuleLifecycle.publicationReusedDiagnosticsSeen
@@ -190,6 +191,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         domainRuleDecisionDiagnosticsSeen = [bool] $domainRuleLifecycle.decisionDiagnosticsSeen
         domainRuleMaterializationDecisionDiagnosticsSeen = [bool] $domainRuleLifecycle.materializationDecisionDiagnosticsSeen
         domainRuleProcurementOptionSourcePolicySeen = [bool] $domainRuleLifecycle.procurementOptionSourcePolicySeen
+        domainRuleProcurementBackendValidationPolicySeen = [bool] $domainRuleLifecycle.procurementBackendValidationPolicySeen
         planValid = [bool] $plan.valid
         compileValid = [bool] $compile.compileValid
         previewValid = [bool] $preview.valid
