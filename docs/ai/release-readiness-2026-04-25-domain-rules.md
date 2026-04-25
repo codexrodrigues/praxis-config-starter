@@ -19,8 +19,8 @@ The validated path covers:
 
 ## Version Set
 
-- `praxis-config-starter`: `main` commit `d96ff02f965b2e4d27b9c8800a601df2a52a673e`.
-- `praxis-ui-angular`: `main` commit `04020a2ee43323f0d5473387bc83ca838b4aa757`.
+- `praxis-config-starter`: `main` commit `fc7478d998366f0c2452022f15926e485f41551e`.
+- `praxis-ui-angular`: `main` commit `524f6f7033885c76d29469106ab32d13f2ac923c`.
 - `praxis-api-quickstart`: `main`, packaged in GitHub Actions against the local
   `praxis-config-starter` and `praxis-metadata-starter` checkouts.
 - `praxis-metadata-starter`: `main`, installed locally by the smoke workflow.
@@ -42,10 +42,16 @@ The validated path covers:
   commit `2056bc06094b7200ef7cfb7a7169aaf52df512f9`.
 - PR #54, `Fix publication diagnostics JSON object creation`,
   commit `d96ff02f965b2e4d27b9c8800a601df2a52a673e`.
+- PR #57, `Clarify domain rule route endpoints`,
+  commit `d8d4d7b1788b71cc8707c6301c222eb05d888a6c`.
+- PR #58, `Document domain rule route smoke`,
+  commit `fc7478d998366f0c2452022f15926e485f41551e`.
 - `praxis-ui-angular` PR #52, `Project domain rule publication diagnostics in cockpit`,
   commit `a754afd091125f1ab152c64e87dbd02e4654202d`.
 - `praxis-ui-angular` PR #53, `Keep page-builder resource discovery on SSE`,
   commit `04020a2ee43323f0d5473387bc83ca838b4aa757`.
+- `praxis-ui-angular` PR #54, `Expose shared rule intake handoff`,
+  commit `524f6f7033885c76d29469106ab32d13f2ac923c`.
 
 ## Contract State
 
@@ -80,6 +86,12 @@ The current canonical behavior is:
   remains available only for non-stream mode or unavailable stream endpoint
   fallback, preventing browser E2E turns from silently falling back to legacy
   intent-resolution/page-preview calls.
+- Shared-rule handoff now carries both canonical governed route endpoints:
+  `endpoint` and `intakeEndpoint` point to
+  `/api/praxis/config/domain-rules/intake`, while `nextEndpoint` points to
+  `/api/praxis/config/domain-rules/simulations`. Angular exposes these as
+  context for the AI-authored decision flow, without making the cockpit a
+  parallel source of route truth.
 
 ## Validation
 
@@ -122,21 +134,30 @@ Operational smoke on `main`:
   `/api/praxis/config/domain-rules/simulations` endpoints. This run kept
   `run_page_builder_full_e2e=false` and validated the proportional backend
   surface: quickstart HTTP/SSE smoke plus Domain Catalog v2 smoke.
+- `Agentic Authoring HTTP Smoke` run `24922256769` passed for commit
+  `fc7478d998366f0c2452022f15926e485f41551e` with `ui_ref=main` at
+  `524f6f7033885c76d29469106ab32d13f2ac923c` and
+  `run_page_builder_full_e2e=true`. This run validated the integrated
+  backend-to-Angular handoff after the cockpit started projecting the canonical
+  shared-rule intake endpoint.
 - The smoke packaged `praxis-api-quickstart` against local starter checkouts.
 - `Run quickstart authoring HTTP/SSE smoke suite`: passed.
 - `Run quickstart Domain Catalog v2 HTTP smoke`: passed.
 - `Run page-builder agentic full E2E gate`: passed.
 - Artifact uploaded: `agentic-authoring-smoke-artifacts`.
-- The latest smoke confirmed
+- Smoke run `24922256769` confirmed SSE health `UP`, `eventCount=6`,
+  `terminalSeen=true`, `replayChecked=true` and `cancelStatus=200`.
+- Smoke run `24921897738` confirmed
   `domainRulePublicationCreatedDiagnosticsSeen=true` and
   `domainRulePublicationSelectedExistingDiagnosticsSeen=true`.
-- Page Builder full E2E in the latest smoke ran 3 tests and passed:
+- Page Builder full E2E in smoke run `24922256769` ran 3 tests and passed:
   - Flow 1: payroll dashboard with imperfect language, backend-driven contract.
   - Flow 2: employee form with imperfect language, backend-driven contract.
   - Code audit: `praxis-ai.service.ts` contains neither `getMockPatch` nor
     `extractUserIntent`.
-- The latest smoke recorded `fullE2EPassed=true` and uploaded artifact
-  `6637137679`.
+- Smoke run `24921488946` recorded `fullE2EPassed=true` and uploaded artifact
+  `6637137679`; run `24922256769` preserved the same full E2E gate on the
+  newer Angular handoff commit.
 
 Angular cockpit/runtime projection:
 
@@ -144,16 +165,26 @@ Angular cockpit/runtime projection:
   `a754afd091125f1ab152c64e87dbd02e4654202d`.
 - `praxis-ui-angular` PR #53 merged to `main` at
   `04020a2ee43323f0d5473387bc83ca838b4aa757`.
+- `praxis-ui-angular` PR #54 merged to `main` at
+  `524f6f7033885c76d29469106ab32d13f2ac923c`.
 - Local focal validation passed:
   - `npx ng test praxis-core --watch=false --browsers=ChromeHeadless --include='projects/praxis-core/src/lib/services/domain-rule.service.spec.ts'`
   - `npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts'`
   - `npm run build:praxis-core`
   - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-page-builder --watch=false --browsers=ChromeHeadless --include='projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring-turn-flow.spec.ts'`
   - `npx ng build praxis-page-builder`
+- Additional local focal validation for PR #54 passed:
+  - `CHROME_BIN="$HOME/Library/Caches/ms-playwright/chromium-1181/chrome-mac/Chromium.app/Contents/MacOS/Chromium" npx ng test praxis-page-builder --watch=false --browsers=ChromeHeadless --include='projects/praxis-page-builder/src/lib/dynamic-page-builder.component.spec.ts' --include='projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring-turn-flow.spec.ts'`
+  - `npx ng test praxis-ui-workspace --watch=false --browsers=ChromeHeadless --include='src/app/features/shared-rule-handoff/shared-rule-handoff-surface.component.spec.ts' --include='src/app/features/llm-tests/llm-tests.page.spec.ts' --include='src/app/features/dynamic-page-lab/dynamic-page-lab.page.spec.ts' --include='src/app/features/page-builder-json-logic-lab/page-builder-json-logic-lab.page.spec.ts'`
+  - `npx ng build praxis-page-builder`
+  - `npx ng build praxis-ui-workspace --configuration development`
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24920424506` passed for
   head SHA `3c45fee91f580ec9148f373b4b4333e7dd8deb4b`.
 - GitHub Actions `CI - Build Praxis Angular Libs` run `24921204229` passed for
   head SHA `e92f3a1414f7e48580904da2206d8b0d2f5d3157`; release/tag job skipped.
+- GitHub Actions `CI - Build Praxis Angular Libs` run `24922169138` passed for
+  head SHA `d5fbd97623f8f5b34f6e8c558c0abfb342da395c`; release/tag job
+  skipped.
 
 Domain Catalog v2 smoke summary:
 
