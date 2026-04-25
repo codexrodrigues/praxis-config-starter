@@ -125,6 +125,19 @@ The platform has enough evidence to support a release candidate:
   `domainRuleTerminalMaterializationTransitionBlocked=true`. `CI and Release
   Java Starter (praxis-config-starter)` run `24933396751` passed; release/tag
   and Maven Central publication jobs remained skipped.
+- `praxis-config-starter` PR #96 reached `main` at
+  `ad386cfaf18e2d4e7f3a8fb3dcc2adc7bc5a809a` after proportional smoke run
+  `24933502269` exposed a strict assertion issue around JSON escaping of `>`.
+  `CI and Release Java Starter (praxis-config-starter)` run `24933645532`
+  passed; release/tag and Maven Central publication jobs remained skipped.
+- Proportional `Agentic Authoring HTTP Smoke` run `24933671435` passed on
+  `main` with `run_quickstart_http_smoke=true`,
+  `run_domain_catalog_v2_smoke=false`, `run_page_builder_full_e2e=false` and
+  `run_llm_compliance_policy_shadow=false`. It confirmed
+  `domainRuleTerminalDefinitionTransitionBlocked=true`,
+  `domainRuleTerminalMaterializationTransitionBlocked=true` and the existing
+  publication/intake/simulation/materialization diagnostics and procurement
+  projection markers. No Maven/npm publication was performed.
 
 Publication is still intentionally deferred because:
 

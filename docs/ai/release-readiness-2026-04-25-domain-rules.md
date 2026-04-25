@@ -745,3 +745,41 @@ PowerShell parser and HTTP smoke were not run locally because `pwsh`/PowerShell
 was not installed in the macOS workspace. GitHub Actions `CI and Release Java
 Starter (praxis-config-starter)` run `24933396751` passed for PR #94's main
 merge commit. Release/tag and Maven Central publication jobs remained skipped.
+
+The first proportional `Agentic Authoring HTTP Smoke` attempt after PR #94,
+run `24933502269`, failed for the intended guard path but not because the
+backend allowed the invalid transition. The backend returned the expected 422
+for `retired -> active`; the smoke assertion compared against the raw JSON
+error body, where `>` was escaped as `\u003E`.
+
+`praxis-config-starter` PR #96 reached `main` at
+`ad386cfaf18e2d4e7f3a8fb3dcc2adc7bc5a809a` and normalized JSON-escaped
+comparison operators in `Invoke-ExpectedFailure`. GitHub Actions `CI and
+Release Java Starter (praxis-config-starter)` run `24933645532` passed for PR
+#96's main merge commit. Release/tag and Maven Central publication jobs
+remained skipped.
+
+The proportional `Agentic Authoring HTTP Smoke` rerun `24933671435` then passed
+with:
+
+- `provider=openai`;
+- `quickstart_ref=main`;
+- `metadata_ref=main`;
+- `run_quickstart_http_smoke=true`;
+- `run_domain_catalog_v2_smoke=false`;
+- `run_page_builder_full_e2e=false`;
+- `run_llm_compliance_policy_shadow=false`.
+
+The log confirmed:
+
+- `domainRuleTerminalDefinitionTransitionBlocked=true`;
+- `domainRuleTerminalMaterializationTransitionBlocked=true`;
+- `domainRulePublicationBlockedDiagnosticsSeen=true`;
+- `domainRuleIntakeDecisionDiagnosticsSeen=true`;
+- `domainRuleDecisionDiagnosticsSeen=true`;
+- `domainRuleMaterializationDecisionDiagnosticsSeen=true`;
+- `domainRuleProcurementOptionSourcePolicySeen=true`;
+- `domainRuleProcurementBackendValidationPolicySeen=true`.
+
+This closes the proportional HTTP/SSE proof for governed terminal-transition
+blocking. No Maven Central or npm publication was performed.
