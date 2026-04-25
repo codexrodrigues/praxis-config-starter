@@ -807,3 +807,39 @@ Before any Maven Central release based on this additive public-contract change,
 rerun a proportional `Agentic Authoring HTTP Smoke` against the resulting
 `main` and confirm that materialization decision diagnostics still appear in
 the smoke summary.
+
+`praxis-config-starter` PR #99 reached `main` at
+`9739610ccea5398f16532df9b4adfcc40d10c33b`. GitHub Actions `CI and Release
+Java Starter (praxis-config-starter)` run `24933981328` passed for PR #99's
+main merge commit. Release/tag and Maven Central publication jobs remained
+skipped.
+
+The proportional `Agentic Authoring HTTP Smoke` run `24934023025` passed after
+PR #99 with:
+
+- `provider=openai`;
+- `quickstart_ref=main`;
+- `metadata_ref=main`;
+- `ui_ref=main`;
+- `run_quickstart_http_smoke=true`;
+- `run_domain_catalog_v2_smoke=false`;
+- `run_page_builder_full_e2e=false`;
+- `run_llm_compliance_policy_shadow=false`.
+
+The log confirmed:
+
+- `domainRuleTerminalDefinitionTransitionBlocked=true`;
+- `domainRuleTerminalMaterializationTransitionBlocked=true`;
+- `domainRulePublicationCreatedDiagnosticsSeen=true`;
+- `domainRulePublicationSelectedExistingDiagnosticsSeen=true`;
+- `domainRulePublicationReusedDiagnosticsSeen=true`;
+- `domainRulePublicationBlockedDiagnosticsSeen=true`;
+- `domainRuleIntakeDecisionDiagnosticsSeen=true`;
+- `domainRuleDecisionDiagnosticsSeen=true`;
+- `domainRuleMaterializationDecisionDiagnosticsSeen=true`;
+- `domainRuleProcurementOptionSourcePolicySeen=true`;
+- `domainRuleProcurementBackendValidationPolicySeen=true`.
+
+This closes the proportional HTTP/SSE proof after materialization
+`decisionDiagnostics` began exposing `sourceHash` when available. No Maven
+Central or npm publication was performed.
