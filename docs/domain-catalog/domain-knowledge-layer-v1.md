@@ -308,7 +308,10 @@ Recommended fields:
 - `status`: `draft`, `pending_review`, `applied`, `failed`, `superseded`,
   `reverted`
 - `materialized_payload`: JSONB copied into or sent to the target layer
-- `source_hash`: hash of the definition/materializer inputs
+- `source_hash`: semantic fingerprint of the canonical decision and derived
+  materialization payload. For derived materializations, the hash must change
+  when the rule definition, parameters, condition, governance or projected
+  runtime payload changes, even if the target artifact key remains stable.
 - `validation_result`
 - `applied_by_type`, `applied_by`
 - `created_at`, `updated_at`, `applied_at`

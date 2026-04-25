@@ -1016,6 +1016,119 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void derivedMaterializationSourceHashChangesWhenRuleSemanticsChange() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID inactiveDefinitionId = UUID.randomUUID();
+        UUID suspendedDefinitionId = UUID.randomUUID();
+        DomainRuleDefinition inactiveDefinition = DomainRuleDefinition.builder()
+                .id(inactiveDefinitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores inativos.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["INACTIVE"]
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+        DomainRuleDefinition suspendedDefinition = DomainRuleDefinition.builder()
+                .id(suspendedDefinitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir selecao de fornecedores suspensos.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["SUSPENDED"]
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(inactiveDefinitionId)).thenReturn(Optional.of(inactiveDefinition));
+        when(definitionRepository.findById(suspendedDefinitionId)).thenReturn(Optional.of(suspendedDefinition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("procurement.suppliers"),
+                eq(List.of("approved", "active"))))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                eq("tenant-a"),
+                eq("dev"),
+                any(UUID.class)))
+                .thenReturn(List.of());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            if (materialization.getId() == null) {
+                materialization.setId(UUID.randomUUID());
+            }
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var inactiveResponse = service.publish(
+                new DomainRulePublicationRequest(
+                        inactiveDefinitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+        var suspendedResponse = service.publish(
+                new DomainRulePublicationRequest(
+                        suspendedDefinitionId,
+                        null,
+                        true,
+                        "human",
+                        "procurement-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(inactiveResponse.materializations()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.targetArtifactKey()).isEqualTo("supplier");
+                    assertThat(item.sourceHash()).startsWith("derived:sha256:");
+                });
+        assertThat(suspendedResponse.materializations()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.targetArtifactKey()).isEqualTo("supplier");
+                    assertThat(item.sourceHash()).startsWith("derived:sha256:");
+                });
+        assertThat(inactiveResponse.materializations().get(0).sourceHash())
+                .isNotEqualTo(suspendedResponse.materializations().get(0).sourceHash());
+    }
+
+    @Test
     void publishesValidationRuleByAutoCreatingBackendValidationMaterialization() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
