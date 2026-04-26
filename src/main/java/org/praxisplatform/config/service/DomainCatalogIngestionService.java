@@ -456,7 +456,8 @@ public class DomainCatalogIngestionService {
     }
 
     private List<DomainCatalogItem> extractItems(JsonNode payload, DomainCatalogRelease release) {
-        List<DomainCatalogItem> items = new ArrayList<>();
+        Map<String, DomainCatalogItem> itemsByCanonicalKey = new LinkedHashMap<>();
+        int duplicateCount = 0;
         for (String arrayName : ITEM_ARRAYS) {
             JsonNode array = payload.path(arrayName);
             if (!array.isArray()) {
@@ -471,7 +472,8 @@ public class DomainCatalogIngestionService {
                 if (!StringUtils.hasText(itemKey)) {
                     continue;
                 }
-                items.add(DomainCatalogItem.builder()
+                String canonicalKey = itemType + "\u0000" + itemKey;
+                DomainCatalogItem item = DomainCatalogItem.builder()
                         .release(release)
                         .itemType(itemType)
                         .itemKey(itemKey)
@@ -481,10 +483,20 @@ public class DomainCatalogIngestionService {
                         .edgeType(text(itemPayload, "edgeType"))
                         .payload(write(itemPayload))
                         .searchableText(searchableText(itemType, itemPayload))
-                        .build());
+                        .build();
+                if (itemsByCanonicalKey.putIfAbsent(canonicalKey, item) != null) {
+                    duplicateCount++;
+                }
             }
         }
-        return items;
+        if (duplicateCount > 0) {
+            log.warn(
+                    "Ignored {} duplicate domain catalog item(s) for release {} using canonical itemType/itemKey identity",
+                    duplicateCount,
+                    release.getReleaseKey()
+            );
+        }
+        return new ArrayList<>(itemsByCanonicalKey.values());
     }
 
     private void publishRagDocuments(DomainCatalogRelease release, List<DomainCatalogItem> items) {
