@@ -81,7 +81,9 @@ final class AgenticAuthoringContextBundle {
         context.put("source", "domain-catalog/context");
         context.put("policyProfile", policyProfile(request));
         context.put("available", !value.isBlank());
-        context.set("requested", requestedDomainCatalogContext(objectMapper, request));
+        ObjectNode requested = requestedDomainCatalogContext(objectMapper, request);
+        context.put("resolutionStatus", resolutionStatus(requested, value));
+        context.set("requested", requested);
         context.put("usageRule", "Treat this block as governed semantic grounding for decision authoring; do not expose masked or denied source payloads, and do not use UI surfaces as the primary business rule source.");
         context.put("promptBlock", value);
         return context;
@@ -104,6 +106,15 @@ final class AgenticAuthoringContextBundle {
         copyText(requested, "nodeType", domainCatalog, "nodeType");
         copyText(requested, "query", domainCatalog, "query");
         return requested;
+    }
+
+    private static String resolutionStatus(ObjectNode requested, String promptBlock) {
+        if (StringUtils.hasText(promptBlock)) {
+            return "resolved";
+        }
+        return requested != null && requested.path("present").asBoolean(false)
+                ? "requested_but_unavailable"
+                : "not_requested";
     }
 
     private static ObjectNode componentContext(

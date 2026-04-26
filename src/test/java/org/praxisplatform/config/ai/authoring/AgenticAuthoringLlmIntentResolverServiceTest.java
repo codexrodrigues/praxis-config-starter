@@ -198,6 +198,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("\"schemaVersion\" : \"praxis-agentic-authoring-governed-domain-context.v1\"");
         assertThat(prompt).contains("\"policyProfile\" : \"authoring\"");
         assertThat(prompt).contains("\"available\" : true");
+        assertThat(prompt).contains("\"resolutionStatus\" : \"resolved\"");
         assertThat(prompt).contains("\"requested\"");
         assertThat(prompt).contains("\"resourceKey\" : \"finance.reimbursements\"");
         assertThat(prompt).contains("\"intent\" : \"authoring\"");
@@ -236,6 +237,12 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(diagnostics.path("prompt").asText()).contains("contextBundle:");
         assertThat(diagnostics.path("contextBundle").path("runtimeContext").path("hostApplication").asText())
                 .isEqualTo("Angular Praxis Page Builder assistant");
+        assertThat(diagnostics.path("contextBundle").path("governedDomainContext").path("available").asBoolean())
+                .isFalse();
+        assertThat(diagnostics.path("contextBundle").path("governedDomainContext").path("resolutionStatus").asText())
+                .isEqualTo("not_requested");
+        assertThat(diagnostics.path("contextBundle").path("governedDomainContext").path("requested").path("present").asBoolean())
+                .isFalse();
         assertThat(diagnostics.path("contextBundle").path("toolCatalog").path("searchApiResources").path("endpoint").asText())
                 .isEqualTo("/api/praxis/config/ai/authoring/resource-candidates");
     }

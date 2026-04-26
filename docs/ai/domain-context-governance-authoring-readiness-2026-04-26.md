@@ -158,6 +158,7 @@ Add or document a first-class authoring context section, for example
 - `source=domain-catalog/context`;
 - `policyProfile`;
 - `available`;
+- `resolutionStatus`;
 - `requested`;
 - `usageRule`;
 - `promptBlock`.
