@@ -105,6 +105,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "rich-content-block-add".equals(handler)
                 || "rich-content-media-block-update".equals(handler)
                 || "rich-content-link-remove".equals(handler)
+                || "rich-content-timeline-node-update".equals(handler)
                 || "rich-content-timeline-item-add".equals(handler)
                 || "rich-content-timeline-item-update".equals(handler)
                 || "rich-content-timeline-item-remove".equals(handler)
@@ -365,6 +366,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     failures);
             case "rich-content-link-remove" -> compileRichContentLinkRemove(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "rich-content-timeline-node-update" -> compileRichContentTimelineNodeUpdate(
                     componentId,
                     operation,
                     effect,
@@ -1451,6 +1460,85 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileRichContentTimelineNodeUpdate(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null ? MissingNode.getInstance() : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode timelineBlock)) {
+            failures.add("rich-content-timeline-node-update target not found: " + (resolved == null ? "" : resolved.path()));
+            return null;
+        }
+        String nodeType = firstText(timelineBlock, "type", "kind");
+        if (!"timeline".equals(nodeType) && !"timelineBlock".equals(nodeType)) {
+            failures.add("rich-content-timeline-node-update target is not timeline: " + nodeType);
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        String timelineBlockId = text(input, "timelineBlockId");
+        if (timelineBlockId.isBlank()) {
+            failures.add("rich-content-timeline-node-update requires timelineBlockId");
+            return null;
+        }
+        String blockId = text(timelineBlock, "id");
+        if (blockId.isBlank()) {
+            failures.add("rich-content-timeline-node-update target requires timeline block id");
+            return null;
+        }
+        if (!blockId.equals(timelineBlockId)) {
+            failures.add("rich-content-timeline-node-update target does not match input timelineBlockId: " + timelineBlockId);
+            return null;
+        }
+
+        ObjectNode value = objectMapper.createObjectNode();
+        Iterator<Map.Entry<String, JsonNode>> fields = input.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            String fieldName = field.getKey();
+            if ("timelineBlockId".equals(fieldName)) {
+                continue;
+            }
+            if (!timelineNodeFields().contains(fieldName)) {
+                failures.add("rich-content-timeline-node-update unsupported field: " + fieldName);
+                return null;
+            }
+            if (!isTimelineNodeFieldValueValid(fieldName, field.getValue())) {
+                failures.add("rich-content-timeline-node-update invalid field value: " + fieldName);
+                return null;
+            }
+            value.set(fieldName, field.getValue());
+        }
+        if (value.isEmpty()) {
+            failures.add("rich-content-timeline-node-update requires at least one supported field");
+            return null;
+        }
+        value.fields().forEachRemaining(field -> timelineBlock.set(field.getKey(), field.getValue()));
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "merge-rich-timeline-node");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", text(effect, "path").isBlank() ? "document.nodes[]" : text(effect, "path"));
+        compiled.put("resolvedPath", resolved == null ? "" : resolved.path());
+        if (resolved != null) {
+            compiled.set("resolvedValue", resolved.value());
+        }
+        compiled.put("timelineBlockId", timelineBlockId);
+        compiled.put("keyValue", blockId);
+        compiled.set("value", value);
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
     private ObjectNode compileRichContentTimelineItemAdd(
             String componentId,
             JsonNode operation,
@@ -1577,7 +1665,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         String itemIdBefore = text(item, "id");
         ObjectNode value = objectMapper.createObjectNode();
         if (input.path("patch") instanceof ObjectNode patch) {
-            if (!applyTimelineItemPatch(item, patch, value, failures)) {
+            if (!collectTimelineItemPatch(item, patch, value, failures)) {
                 return null;
             }
         }
@@ -1591,13 +1679,17 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 failures.add("rich-content-timeline-item-update field update requires value");
                 return null;
             }
-            item.set(field, input.path("value"));
+            if (!isTimelineItemFieldValueValid(field, input.path("value"))) {
+                failures.add("rich-content-timeline-item-update invalid field value: " + field);
+                return null;
+            }
             value.set(field, input.path("value"));
         }
         if (value.isEmpty()) {
             failures.add("rich-content-timeline-item-update requires patch or field");
             return null;
         }
+        value.fields().forEachRemaining(fieldEntry -> item.set(fieldEntry.getKey(), fieldEntry.getValue()));
 
         ObjectNode compiled = objectMapper.createObjectNode();
         compiled.put("componentId", componentId);
@@ -1620,7 +1712,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
-    private boolean applyTimelineItemPatch(
+    private boolean collectTimelineItemPatch(
             ObjectNode item,
             ObjectNode patch,
             ObjectNode value,
@@ -1640,7 +1732,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 failures.add("rich-content-timeline-item-update unsupported patch field: " + fieldName);
                 return false;
             }
-            item.set(fieldName, field.getValue());
+            if (!isTimelineItemFieldValueValid(fieldName, field.getValue())) {
+                failures.add("rich-content-timeline-item-update invalid patch field value: " + fieldName);
+                return false;
+            }
             value.set(fieldName, field.getValue());
         }
         return true;
@@ -5944,10 +6039,61 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 "subtitleExpr",
                 "meta",
                 "metaExpr",
+                "opposite",
+                "oppositeExpr",
                 "icon",
                 "iconExpr",
                 "badge",
-                "badgeExpr");
+                "badgeExpr",
+                "markerColor",
+                "markerStyle",
+                "connectorColor",
+                "connectorVariant");
+    }
+
+    private Set<String> timelineNodeFields() {
+        return Set.of(
+                "title",
+                "titleExpr",
+                "emptyText",
+                "orientation",
+                "order",
+                "position",
+                "connectorVariant",
+                "connectorColor",
+                "markerVariant",
+                "markerColor",
+                "markerStyle");
+    }
+
+    private boolean isTimelineNodeFieldValueValid(String field, JsonNode value) {
+        return switch (field) {
+            case "orientation" -> isTimelineEnum(value, Set.of("vertical", "horizontal"));
+            case "order" -> isTimelineEnum(value, Set.of("normal", "reverse"));
+            case "position" -> isTimelineEnum(value, Set.of("left", "right", "alternate", "alternate-reverse"));
+            case "connectorVariant" -> isTimelineEnum(value, Set.of("solid", "dashed", "none"));
+            case "connectorColor", "markerColor" -> isTimelineEnum(value, timelineColorValues());
+            case "markerVariant" -> isTimelineEnum(value, Set.of("dot", "icon", "number"));
+            case "markerStyle" -> isTimelineEnum(value, Set.of("filled", "outlined"));
+            default -> true;
+        };
+    }
+
+    private boolean isTimelineItemFieldValueValid(String field, JsonNode value) {
+        return switch (field) {
+            case "connectorVariant" -> isTimelineEnum(value, Set.of("solid", "dashed", "none"));
+            case "connectorColor", "markerColor" -> isTimelineEnum(value, timelineColorValues());
+            case "markerStyle" -> isTimelineEnum(value, Set.of("filled", "outlined"));
+            default -> true;
+        };
+    }
+
+    private boolean isTimelineEnum(JsonNode value, Set<String> allowedValues) {
+        return value != null && value.isTextual() && allowedValues.contains(value.asText());
+    }
+
+    private Set<String> timelineColorValues() {
+        return Set.of("primary", "secondary", "tertiary", "success", "warning", "error", "info", "neutral");
     }
 
     private int resolveReorderIndex(

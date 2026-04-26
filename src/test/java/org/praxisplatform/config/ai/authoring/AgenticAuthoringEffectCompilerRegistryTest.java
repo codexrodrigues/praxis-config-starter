@@ -971,6 +971,130 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileRichContentTimelineNodeUpdateDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "history",
+                        "type": "timeline",
+                        "title": "History",
+                        "position": "right",
+                        "items": [
+                          { "id": "created", "title": "Created" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("timeline.node.update", "timeline", "rich-timeline-node-by-id-or-path", true,
+                        "compile-domain-patch", "rich-content-timeline-node-update", "document.nodes[]"),
+                plan("\"history\"", """
+                        {
+                          "timelineBlockId": "history",
+                          "title": "Activity",
+                          "emptyText": "No events",
+                          "orientation": "horizontal",
+                          "order": "reverse",
+                          "position": "alternate",
+                          "connectorVariant": "dashed",
+                          "connectorColor": "neutral",
+                          "markerVariant": "number",
+                          "markerColor": "primary",
+                          "markerStyle": "filled"
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("merge-rich-timeline-node");
+        assertThat(patchOperation.path("domainHandler").asText()).isEqualTo("rich-content-timeline-node-update");
+        assertThat(patchOperation.path("timelineBlockId").asText()).isEqualTo("history");
+        assertThat(patchOperation.path("keyValue").asText()).isEqualTo("history");
+        assertThat(patchOperation.path("value").path("title").asText()).isEqualTo("Activity");
+        assertThat(patchOperation.path("value").path("emptyText").asText()).isEqualTo("No events");
+        assertThat(patchOperation.path("value").path("orientation").asText()).isEqualTo("horizontal");
+        assertThat(patchOperation.path("value").path("order").asText()).isEqualTo("reverse");
+        assertThat(patchOperation.path("value").path("position").asText()).isEqualTo("alternate");
+        assertThat(patchOperation.path("value").path("connectorVariant").asText()).isEqualTo("dashed");
+        assertThat(patchOperation.path("value").path("connectorColor").asText()).isEqualTo("neutral");
+        assertThat(patchOperation.path("value").path("markerVariant").asText()).isEqualTo("number");
+        assertThat(patchOperation.path("value").path("markerColor").asText()).isEqualTo("primary");
+        assertThat(patchOperation.path("value").path("markerStyle").asText()).isEqualTo("filled");
+        JsonNode timeline = proposedConfig.path("document").path("nodes").get(0);
+        assertThat(timeline.path("title").asText()).isEqualTo("Activity");
+        assertThat(timeline.path("emptyText").asText()).isEqualTo("No events");
+        assertThat(timeline.path("orientation").asText()).isEqualTo("horizontal");
+        assertThat(timeline.path("order").asText()).isEqualTo("reverse");
+        assertThat(timeline.path("position").asText()).isEqualTo("alternate");
+        assertThat(timeline.path("connectorVariant").asText()).isEqualTo("dashed");
+        assertThat(timeline.path("connectorColor").asText()).isEqualTo("neutral");
+        assertThat(timeline.path("markerVariant").asText()).isEqualTo("number");
+        assertThat(timeline.path("markerColor").asText()).isEqualTo("primary");
+        assertThat(timeline.path("markerStyle").asText()).isEqualTo("filled");
+        assertThat(timeline.path("items")).hasSize(1);
+    }
+
+    @Test
+    void shouldRejectInvalidRichContentTimelineNodeSettingDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "history",
+                        "type": "timeline",
+                        "items": [
+                          { "id": "created", "title": "Created" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("timeline.node.update", "timeline", "rich-timeline-node-by-id-or-path", true,
+                        "compile-domain-patch", "rich-content-timeline-node-update", "document.nodes[]"),
+                plan("\"history\"", """
+                        {
+                          "timelineBlockId": "history",
+                          "title": "Should not persist",
+                          "orientation": "diagonal"
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(patchOperations).isEmpty();
+        assertThat(failures).contains("rich-content-timeline-node-update invalid field value: orientation");
+        JsonNode timeline = proposedConfig.path("document").path("nodes").get(0);
+        assertThat(timeline.has("orientation")).isFalse();
+        assertThat(timeline.has("title")).isFalse();
+    }
+
+    @Test
     void shouldCompileRichContentTimelineItemAddDomainPatch() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {
@@ -1062,7 +1186,12 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                           "timelineBlockId": "history",
                           "patch": {
                             "title": "Published live",
-                            "badge": "done"
+                            "badge": "done",
+                            "opposite": "Apr 2026",
+                            "markerColor": "success",
+                            "markerStyle": "outlined",
+                            "connectorColor": "neutral",
+                            "connectorVariant": "dashed"
                           }
                         }
                         """),
@@ -1080,10 +1209,72 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(patchOperation.path("keyValue").asText()).isEqualTo("published");
         assertThat(patchOperation.path("value").path("title").asText()).isEqualTo("Published live");
         assertThat(patchOperation.path("value").path("badge").asText()).isEqualTo("done");
+        assertThat(patchOperation.path("value").path("opposite").asText()).isEqualTo("Apr 2026");
+        assertThat(patchOperation.path("value").path("markerColor").asText()).isEqualTo("success");
+        assertThat(patchOperation.path("value").path("markerStyle").asText()).isEqualTo("outlined");
+        assertThat(patchOperation.path("value").path("connectorColor").asText()).isEqualTo("neutral");
+        assertThat(patchOperation.path("value").path("connectorVariant").asText()).isEqualTo("dashed");
         JsonNode item = proposedConfig.path("document").path("nodes").get(0).path("items").get(1);
         assertThat(item.path("title").asText()).isEqualTo("Published live");
         assertThat(item.path("subtitle").asText()).isEqualTo("Draft");
         assertThat(item.path("badge").asText()).isEqualTo("done");
+        assertThat(item.path("opposite").asText()).isEqualTo("Apr 2026");
+        assertThat(item.path("markerColor").asText()).isEqualTo("success");
+        assertThat(item.path("markerStyle").asText()).isEqualTo("outlined");
+        assertThat(item.path("connectorColor").asText()).isEqualTo("neutral");
+        assertThat(item.path("connectorVariant").asText()).isEqualTo("dashed");
+    }
+
+    @Test
+    void shouldRejectInvalidRichContentTimelineItemSettingDomainPatch() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "history",
+                        "type": "timeline",
+                        "items": [
+                          { "id": "published", "title": "Published" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("timeline.item.update", "timelineItem", "rich-timeline-item-by-block-id-and-item-id", true,
+                        "compile-domain-patch", "rich-content-timeline-item-update", "document.nodes[].items[].markerColor"),
+                plan("""
+                        {
+                          "timelineBlockId": "history",
+                          "itemId": "published"
+                        }
+                        """, """
+                        {
+                          "timelineBlockId": "history",
+                          "patch": {
+                            "title": "Should not persist",
+                            "markerColor": "brand"
+                          }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(patchOperations).isEmpty();
+        assertThat(failures).contains("rich-content-timeline-item-update invalid patch field value: markerColor");
+        JsonNode item = proposedConfig.path("document").path("nodes").get(0).path("items").get(0);
+        assertThat(item.has("markerColor")).isFalse();
+        assertThat(item.path("title").asText()).isEqualTo("Published");
     }
 
     @Test
