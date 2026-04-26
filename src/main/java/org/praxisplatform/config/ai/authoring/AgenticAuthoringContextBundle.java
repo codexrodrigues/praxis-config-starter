@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
+import org.springframework.util.StringUtils;
 
 final class AgenticAuthoringContextBundle {
 
@@ -25,7 +26,7 @@ final class AgenticAuthoringContextBundle {
         bundle.set("runtimeContext", runtimeContext(objectMapper, request, currentPageSummary, target));
         bundle.set("userIntent", userIntent(objectMapper, request, effectivePrompt));
         bundle.set("retrievalContext", retrievalContext(objectMapper, candidateOptions));
-        bundle.set("governedDomainContext", governedDomainContext(objectMapper, governedDomainContext));
+        bundle.set("governedDomainContext", governedDomainContext(objectMapper, request, governedDomainContext));
         bundle.set("componentContext", componentContext(objectMapper, componentCapabilities));
         bundle.set("conversationContext", conversationContext(objectMapper, request));
         bundle.set("toolCatalog", toolCatalog(objectMapper));
@@ -70,15 +71,39 @@ final class AgenticAuthoringContextBundle {
         return retrieval;
     }
 
-    private static ObjectNode governedDomainContext(ObjectMapper objectMapper, String promptBlock) {
+    private static ObjectNode governedDomainContext(
+            ObjectMapper objectMapper,
+            AgenticAuthoringIntentResolutionRequest request,
+            String promptBlock) {
         ObjectNode context = objectMapper.createObjectNode();
         String value = valueOrEmpty(promptBlock);
         context.put("schemaVersion", "praxis-agentic-authoring-governed-domain-context.v1");
         context.put("source", "domain-catalog/context");
+        context.put("policyProfile", policyProfile(request));
         context.put("available", !value.isBlank());
+        context.set("requested", requestedDomainCatalogContext(objectMapper, request));
         context.put("usageRule", "Treat this block as governed semantic grounding for decision authoring; do not expose masked or denied source payloads, and do not use UI surfaces as the primary business rule source.");
         context.put("promptBlock", value);
         return context;
+    }
+
+    private static ObjectNode requestedDomainCatalogContext(
+            ObjectMapper objectMapper,
+            AgenticAuthoringIntentResolutionRequest request) {
+        ObjectNode requested = objectMapper.createObjectNode();
+        JsonNode domainCatalog = objectNode(request != null && request.contextHints() != null
+                ? request.contextHints().get("domainCatalog")
+                : null);
+        requested.put("present", domainCatalog != null);
+        copyText(requested, "schemaVersion", domainCatalog, "schemaVersion");
+        copyText(requested, "serviceKey", domainCatalog, "serviceKey");
+        copyText(requested, "resourceKey", domainCatalog, "resourceKey");
+        copyText(requested, "intent", domainCatalog, "intent");
+        copyText(requested, "type", domainCatalog, "type");
+        copyText(requested, "contextKey", domainCatalog, "contextKey");
+        copyText(requested, "nodeType", domainCatalog, "nodeType");
+        copyText(requested, "query", domainCatalog, "query");
+        return requested;
     }
 
     private static ObjectNode componentContext(
@@ -136,5 +161,34 @@ final class AgenticAuthoringContextBundle {
 
     private static String valueOrEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static JsonNode objectNode(JsonNode node) {
+        return node != null && node.isObject() ? node : null;
+    }
+
+    private static void copyText(ObjectNode target, String targetFieldName, JsonNode source, String sourceFieldName) {
+        String value = text(source, sourceFieldName);
+        if (StringUtils.hasText(value)) {
+            target.put(targetFieldName, value);
+        }
+    }
+
+    private static String policyProfile(AgenticAuthoringIntentResolutionRequest request) {
+        JsonNode domainCatalog = objectNode(request != null && request.contextHints() != null
+                ? request.contextHints().get("domainCatalog")
+                : null);
+        String policyProfile = text(domainCatalog, "policyProfile");
+        return StringUtils.hasText(policyProfile) ? policyProfile : "authoring";
+    }
+
+    private static String text(JsonNode node, String fieldName) {
+        if (node == null || !node.isObject() || !node.has(fieldName)) {
+            return null;
+        }
+        JsonNode value = node.get(fieldName);
+        return value != null && value.isTextual() && StringUtils.hasText(value.asText())
+                ? value.asText()
+                : null;
     }
 }

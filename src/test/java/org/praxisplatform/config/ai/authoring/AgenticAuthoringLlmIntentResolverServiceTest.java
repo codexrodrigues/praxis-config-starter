@@ -196,7 +196,11 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .isEqualTo("authoring");
         assertThat(prompt).contains("\"governedDomainContext\"");
         assertThat(prompt).contains("\"schemaVersion\" : \"praxis-agentic-authoring-governed-domain-context.v1\"");
+        assertThat(prompt).contains("\"policyProfile\" : \"authoring\"");
         assertThat(prompt).contains("\"available\" : true");
+        assertThat(prompt).contains("\"requested\"");
+        assertThat(prompt).contains("\"resourceKey\" : \"finance.reimbursements\"");
+        assertThat(prompt).contains("\"intent\" : \"authoring\"");
         assertThat(prompt).contains("DOMAIN_CATALOG_CONTEXT");
         assertThat(prompt).contains("visibility=mask");
         assertThat(prompt).contains("trainingUse=deny");

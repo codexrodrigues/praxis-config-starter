@@ -156,7 +156,9 @@ Add or document a first-class authoring context section, for example
 
 - `schemaVersion=praxis-agentic-authoring-governed-domain-context.v1`;
 - `source=domain-catalog/context`;
+- `policyProfile`;
 - `available`;
+- `requested`;
 - `usageRule`;
 - `promptBlock`.
 
