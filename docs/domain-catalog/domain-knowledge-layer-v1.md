@@ -354,8 +354,11 @@ projection rather than the primary business-rule source.
    governed condition for enforcement on the resource. For `validation`,
    `compliance` and `privacy`, it can also derive a canonical
    `backend_validation` payload with `kind=resource_validation_policy` for the
-   predicted resource-validation target. Derived publication materializations
-   use the same
+   predicted resource-validation target. For `workflow_action_policy`, it can
+   derive a `workflow_action` payload with `kind=workflow_action_policy` and
+   `target_artifact_type=resource-workflow-action` for a resource action such
+   as `human-resources.folhas-pagamento:mark-paid`. Derived publication
+   materializations use the same
    `materialization_key` contract as explicit materialization creation:
    compatible retries reuse the existing row only when the stored
    `source_hash` proves the same canonical decision and payload, while
@@ -549,9 +552,9 @@ Raw sensitive values must not be returned through this path.
 - Store target-specific projections in `domain_rule_materialization`.
 - Require LLM-authored definitions to cite knowledge evidence and carry
   `created_by_type=llm`.
-- Treat generated `option_source` and `backend_validation` payloads as derived
-  materializations of the same governed rule, not as competing sources of
-  business truth.
+- Treat generated `option_source`, `backend_validation` and `workflow_action`
+  payloads as derived materializations of the same governed rule, not as
+  competing sources of business truth.
 - Require materializations into `FormConfig` to remain reviewable and to keep
   `metadata.origin="llm"` and `metadata.reviewStatus="pending"` until approved.
 - Add validators that compare the materialized payload hash against the source

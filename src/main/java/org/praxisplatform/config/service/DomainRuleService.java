@@ -715,12 +715,12 @@ public class DomainRuleService {
             target.put("operation", "validation_rule.review");
         }
 
-        if ("workflow".equals(ruleType)) {
+        if (isWorkflowActionRuleType(ruleType)) {
             ObjectNode target = targets.addObject();
-            target.put("targetLayer", "workflow");
-            target.put("targetArtifactType", "workflow-policy");
-            target.put("targetArtifactKey", resourceKey);
-            target.put("operation", "workflow_rule.review");
+            target.put("targetLayer", "workflow_action");
+            target.put("targetArtifactType", "resource-workflow-action");
+            target.put("targetArtifactKey", deriveWorkflowActionKey(resourceKey, params));
+            target.put("operation", "workflow_action_policy.review");
         }
 
         if ("visual_guidance".equals(ruleType)
@@ -798,6 +798,12 @@ public class DomainRuleService {
                 && definition != null
                 && isBackendValidationRuleType(definition.getRuleType())) {
             return buildBackendValidationMaterializedPayload(definition, request.targetArtifactKey());
+        }
+        if ("workflow_action".equals(request.targetLayer())
+                && "resource-workflow-action".equals(request.targetArtifactType())
+                && definition != null
+                && isWorkflowActionRuleType(definition.getRuleType())) {
+            return buildWorkflowActionMaterializedPayload(definition, request.targetArtifactKey());
         }
         return objectMapper.createObjectNode();
     }
@@ -883,6 +889,61 @@ public class DomainRuleService {
             validationPolicy.set("parameters", parameters);
             copyText(parameters, validationPolicy, "validationMessageTemplate");
             copyText(parameters, validationPolicy, "severity");
+        }
+        return payload;
+    }
+
+    private ObjectNode buildWorkflowActionMaterializedPayload(
+            DomainRuleDefinition definition,
+            String targetArtifactKey) {
+        JsonNode parameters = read(definition.getParameters());
+        JsonNode condition = read(definition.getCondition());
+        String resourceKey = deriveWorkflowActionResourceKey(definition, parameters);
+        String actionId = deriveWorkflowActionId(targetArtifactKey, parameters);
+
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("kind", "workflow_action_policy");
+
+        ObjectNode metadata = payload.putObject("metadata");
+        metadata.put("origin", "domain_rule_definition");
+        metadata.put("ruleType", normalizeOrDefault(definition.getRuleType(), "workflow_action_policy"));
+        metadata.put("reviewStatus", "pending");
+
+        ObjectNode workflowAction = payload.putObject("workflowAction");
+        workflowAction.put("resourceKey", resourceKey);
+        workflowAction.put("actionId", actionId);
+
+        ObjectNode policy = payload.putObject("availabilityPolicy");
+        policy.put("ruleKey", definition.getRuleKey());
+        policy.put("ruleVersion", definition.getVersion());
+        policy.put("resourceKey", resourceKey);
+        policy.put("actionId", actionId);
+        if (condition != null && !condition.isNull()) {
+            policy.set("condition", condition);
+        }
+        if (parameters != null && parameters.isObject()) {
+            copyText(parameters, policy, "message");
+            copyText(parameters, policy, "severity");
+            JsonNode requiredStates = parameters.get("requiredStates");
+            if (requiredStates != null && requiredStates.isArray() && !requiredStates.isEmpty()) {
+                ArrayNode states = policy.putArray("requiredStates");
+                collectTextArray(requiredStates).forEach(states::add);
+            }
+            JsonNode blockedWhen = parameters.get("blockedWhen");
+            if (blockedWhen != null && !blockedWhen.isNull()) {
+                policy.set("blockedWhen", blockedWhen);
+            }
+            JsonNode approvalPolicy = parameters.get("approvalPolicy");
+            if (approvalPolicy != null && approvalPolicy.isObject()) {
+                payload.set("approvalPolicy", approvalPolicy);
+            } else {
+                JsonNode requiredApprovals = parameters.get("requiredApprovals");
+                if (requiredApprovals != null && requiredApprovals.isArray() && !requiredApprovals.isEmpty()) {
+                    ObjectNode approvals = payload.putObject("approvalPolicy");
+                    ArrayNode values = approvals.putArray("requiredApprovals");
+                    collectTextArray(requiredApprovals).forEach(values::add);
+                }
+            }
         }
         return payload;
     }
@@ -1356,6 +1417,18 @@ public class DomainRuleService {
                     environment,
                     materializationOutcomes);
         }
+        if ("workflow_action".equals(targetLayer)
+                && "resource-workflow-action".equals(targetArtifactType)
+                && isWorkflowActionRuleType(definition.getRuleType())) {
+            return createWorkflowActionMaterialization(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    tenantId,
+                    environment,
+                    materializationOutcomes);
+        }
         return null;
     }
 
@@ -1401,6 +1474,30 @@ public class DomainRuleService {
                 targetArtifactKey,
                 "/validationPolicy",
                 "backend-validation-policy",
+                payload,
+                tenantId,
+                environment,
+                materializationOutcomes);
+    }
+
+    private DomainRuleMaterialization createWorkflowActionMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String tenantId,
+            String environment,
+            ArrayNode materializationOutcomes) {
+        ObjectNode payload = buildWorkflowActionMaterializedPayload(
+                definition,
+                targetArtifactKey);
+        return createOrReuseDerivedMaterialization(
+                definition,
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                "/availabilityPolicy",
+                "workflow-action-policy",
                 payload,
                 tenantId,
                 environment,
@@ -1525,6 +1622,68 @@ public class DomainRuleService {
                 || "compliance".equals(ruleType)
                 || "privacy".equals(ruleType)
                 || "selection_eligibility".equals(ruleType);
+    }
+
+    private boolean isWorkflowActionRuleType(String ruleType) {
+        return "workflow_action_policy".equals(ruleType);
+    }
+
+    private String deriveWorkflowActionKey(String resourceKey, JsonNode parameters) {
+        String actionResourceKey = resourceKey;
+        if (parameters != null && parameters.isObject()) {
+            String explicitResource = normalize(parameters.path("resourceKey").asText(null));
+            if (StringUtils.hasText(explicitResource)) {
+                actionResourceKey = explicitResource;
+            }
+            JsonNode workflowAction = parameters.path("workflowAction");
+            if (workflowAction.isObject()) {
+                explicitResource = normalize(workflowAction.path("resourceKey").asText(null));
+                if (StringUtils.hasText(explicitResource)) {
+                    actionResourceKey = explicitResource;
+                }
+            }
+        }
+        return normalizeOrDefault(actionResourceKey, resourceKey) + ":" + deriveWorkflowActionId(null, parameters);
+    }
+
+    private String deriveWorkflowActionResourceKey(DomainRuleDefinition definition, JsonNode parameters) {
+        if (parameters != null && parameters.isObject()) {
+            String explicit = normalize(parameters.path("resourceKey").asText(null));
+            if (StringUtils.hasText(explicit)) {
+                return explicit;
+            }
+            JsonNode workflowAction = parameters.path("workflowAction");
+            if (workflowAction.isObject()) {
+                explicit = normalize(workflowAction.path("resourceKey").asText(null));
+                if (StringUtils.hasText(explicit)) {
+                    return explicit;
+                }
+            }
+        }
+        return normalize(definition.getResourceKey());
+    }
+
+    private String deriveWorkflowActionId(String targetArtifactKey, JsonNode parameters) {
+        if (StringUtils.hasText(targetArtifactKey)) {
+            int separator = targetArtifactKey.lastIndexOf(':');
+            return separator >= 0 && separator + 1 < targetArtifactKey.length()
+                    ? targetArtifactKey.substring(separator + 1)
+                    : targetArtifactKey;
+        }
+        if (parameters != null && parameters.isObject()) {
+            String explicit = normalize(parameters.path("actionId").asText(null));
+            if (StringUtils.hasText(explicit)) {
+                return explicit;
+            }
+            JsonNode workflowAction = parameters.path("workflowAction");
+            if (workflowAction.isObject()) {
+                explicit = normalize(workflowAction.path("actionId").asText(null));
+                if (StringUtils.hasText(explicit)) {
+                    return explicit;
+                }
+            }
+        }
+        return "default";
     }
 
     private DomainRuleMaterialization maybeApplyMaterialization(

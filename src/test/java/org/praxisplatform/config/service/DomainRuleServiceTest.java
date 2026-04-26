@@ -306,6 +306,127 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void publishesWorkflowActionPolicyAsDerivedWorkflowActionMaterialization() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.folhas-pagamento.rule.mark-paid-compliance")
+                .version(1)
+                .ruleType("workflow_action_policy")
+                .status("approved")
+                .contextKey("human-resources")
+                .resourceKey("human-resources.folhas-pagamento")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Bloquear pagamento de folha quando houver pendencia de compliance.\"}")
+                .parameters("""
+                        {
+                          "workflowAction": {
+                            "resourceKey": "human-resources.folhas-pagamento",
+                            "actionId": "mark-paid"
+                          },
+                          "requiredStates": ["PROGRAMADA"],
+                          "requiredApprovals": ["finance-owner"],
+                          "message": "Pagamento bloqueado por decisao governada ate revisao de compliance."
+                        }
+                        """)
+                .condition("""
+                        {
+                          "var": "complianceHold"
+                        }
+                        """)
+                .governance("{\"approval\":\"finance-owner\"}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "human-resources.folhas-pagamento",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "human-resources.folhas-pagamento.rule.mark-paid-compliance:workflow_action:human-resources.folhas-pagamento:mark-paid"))
+                .thenReturn(Optional.empty());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            materialization.setId(UUID.randomUUID());
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "finance-owner",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.explainability().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
+                .isEqualTo(1);
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .hasSize(1)
+                .first()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("created");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("human-resources.folhas-pagamento.rule.mark-paid-compliance:workflow_action:human-resources.folhas-pagamento:mark-paid");
+                    assertThat(outcome.path("targetLayer").asText()).isEqualTo("workflow_action");
+                    assertThat(outcome.path("targetArtifactType").asText()).isEqualTo("resource-workflow-action");
+                    assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
+                });
+        assertThat(response.materializations()).hasSize(1)
+                .first()
+                .satisfies(materialization -> {
+                    JsonNode payload = materialization.materializedPayload();
+                    assertThat(materialization.targetLayer()).isEqualTo("workflow_action");
+                    assertThat(materialization.targetArtifactType()).isEqualTo("resource-workflow-action");
+                    assertThat(materialization.targetArtifactKey())
+                            .isEqualTo("human-resources.folhas-pagamento:mark-paid");
+                    assertThat(materialization.targetPointer()).isEqualTo("/availabilityPolicy");
+                    assertThat(materialization.materializedRuleId()).isEqualTo("workflow-action-policy");
+                    assertThat(materialization.status()).isEqualTo("applied");
+                    assertThat(materialization.sourceHash()).startsWith("derived:sha256:");
+                    assertThat(materialization.decisionDiagnostics().path("runtimeSurfacesAreDerived").asBoolean())
+                            .isTrue();
+                    assertThat(payload.path("kind").asText()).isEqualTo("workflow_action_policy");
+                    assertThat(payload.path("workflowAction").path("resourceKey").asText())
+                            .isEqualTo("human-resources.folhas-pagamento");
+                    assertThat(payload.path("workflowAction").path("actionId").asText()).isEqualTo("mark-paid");
+                    assertThat(payload.path("availabilityPolicy").path("requiredStates"))
+                            .extracting(JsonNode::asText)
+                            .containsExactly("PROGRAMADA");
+                    assertThat(payload.path("availabilityPolicy").path("condition").path("var").asText())
+                            .isEqualTo("complianceHold");
+                    assertThat(payload.path("availabilityPolicy").path("message").asText())
+                            .isEqualTo("Pagamento bloqueado por decisao governada ate revisao de compliance.");
+                    assertThat(payload.path("approvalPolicy").path("requiredApprovals"))
+                            .extracting(JsonNode::asText)
+                            .containsExactly("finance-owner");
+                });
+    }
+
+    @Test
     void createsSharedRuleDefinitionWithoutMaterializingFormConfig() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
