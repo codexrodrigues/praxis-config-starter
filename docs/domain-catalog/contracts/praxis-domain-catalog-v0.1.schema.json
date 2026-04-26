@@ -305,6 +305,7 @@
             "dto_schema",
             "dto_field",
             "workflow_action",
+            "approval_policy",
             "ui_surface",
             "option_source",
             "form_config",

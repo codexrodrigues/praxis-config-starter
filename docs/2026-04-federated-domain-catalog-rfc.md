@@ -775,6 +775,7 @@ Allowed `bindingType` values for v0.1:
 - `dto_schema`;
 - `dto_field`;
 - `workflow_action`;
+- `approval_policy`;
 - `ui_surface`;
 - `option_source`;
 - `state_snapshot`;
