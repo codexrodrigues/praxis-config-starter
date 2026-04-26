@@ -193,9 +193,37 @@ Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG 
 | POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target` | Resolves an operation target using manifest-declared resolver metadata. |
 | POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan` | Validates a component edit plan against the manifest structure. |
 | POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch` | Compiles generic manifest effects into an applicable component config patch with `proposedConfig`; domain effects remain explicit compiler boundaries. |
+| POST | `/api/praxis/config/domain-rules/intake` | Starts a governed semantic decision/rule draft from natural-language intent and canonical resource grounding. |
+| POST | `/api/praxis/config/domain-rules/definitions` | Persists an explicit shared domain rule definition with governance, source release/change-set links and semantic ownership. |
+| GET | `/api/praxis/config/domain-rules/definitions` | Lists shared domain rule definitions by tenant/environment, resource, status, rule type or rule key. |
+| PATCH | `/api/praxis/config/domain-rules/definitions/{definitionId}/status` | Transitions a rule definition through the governed lifecycle. |
+| POST | `/api/praxis/config/domain-rules/simulations` | Produces backend-owned decision diagnostics, existing coverage, predicted materializations, required approvals and warnings. |
+| POST | `/api/praxis/config/domain-rules/publications` | Promotes a ready definition and applies or derives eligible materializations with publication diagnostics. |
+| POST | `/api/praxis/config/domain-rules/materializations` | Creates an explicit runtime/backend materialization for a shared domain rule. |
+| GET | `/api/praxis/config/domain-rules/materializations` | Lists materializations by rule definition, target layer, target artifact and status. |
+| PATCH | `/api/praxis/config/domain-rules/materializations/{materializationId}/status` | Transitions a materialization status without bypassing definition governance. |
 
 Templates are global per key `componentId` (base) or `componentId:variantId` (variants), without `resourcePath` binding.
 Base templates can expose `templateMeta.variants` and `defaultVariantId` to guide variant selection.
+
+### Governed semantic decisions and shared domain rules
+
+The `/api/praxis/config/domain-rules/**` surface is the current canonical path for turning business-rule or shared-decision intent into governed artifacts. It should be used when the user asks for policy, validation, privacy, compliance, eligibility or other domain decisions that must not be reduced to a component-local patch.
+
+The minimal lifecycle is:
+
+1. `POST /api/praxis/config/domain-rules/intake`
+   captures the intent, resource grounding and first draft.
+2. `POST /api/praxis/config/domain-rules/simulations`
+   returns backend-owned diagnostics: existing coverage, predicted materializations, required approvals, warnings and explainability.
+3. `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
+   records governance decisions such as proposal, approval, activation, rejection or retirement.
+4. `POST /api/praxis/config/domain-rules/publications`
+   promotes publishable definitions and derives or applies eligible materializations.
+5. `GET /api/praxis/config/domain-rules/materializations`
+   exposes concrete projections such as `option_source`, `backend_validation` or runtime targets for consumers.
+
+This lifecycle keeps AI authoring at the decision level. Component/page authoring may still use `/api/praxis/config/ai/authoring/**`, but business-rule authoring should route to domain rules first and publish only derived materializations to runtime consumers.
 
 ### Agentic authoring manifests
 
