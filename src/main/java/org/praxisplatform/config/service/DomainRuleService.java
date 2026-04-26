@@ -723,6 +723,14 @@ public class DomainRuleService {
             target.put("operation", "workflow_action_policy.review");
         }
 
+        if (isApprovalPolicyRuleType(ruleType)) {
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", "approval_policy");
+            target.put("targetArtifactType", "resource-action-approval");
+            target.put("targetArtifactKey", deriveActionApprovalKey(resourceKey, params));
+            target.put("operation", "approval_policy.review");
+        }
+
         if ("visual_guidance".equals(ruleType)
                 || "form_rule".equals(ruleType)
                 || "rule.visualBlockGuidance.add".equals(recommendedOperation)) {
@@ -804,6 +812,12 @@ public class DomainRuleService {
                 && definition != null
                 && isWorkflowActionRuleType(definition.getRuleType())) {
             return buildWorkflowActionMaterializedPayload(definition, request.targetArtifactKey());
+        }
+        if ("approval_policy".equals(request.targetLayer())
+                && "resource-action-approval".equals(request.targetArtifactType())
+                && definition != null
+                && isApprovalPolicyRuleType(definition.getRuleType())) {
+            return buildApprovalPolicyMaterializedPayload(definition, request.targetArtifactKey());
         }
         return objectMapper.createObjectNode();
     }
@@ -943,6 +957,60 @@ public class DomainRuleService {
                     ArrayNode values = approvals.putArray("requiredApprovals");
                     collectTextArray(requiredApprovals).forEach(values::add);
                 }
+            }
+        }
+        return payload;
+    }
+
+    private ObjectNode buildApprovalPolicyMaterializedPayload(
+            DomainRuleDefinition definition,
+            String targetArtifactKey) {
+        JsonNode parameters = read(definition.getParameters());
+        JsonNode condition = read(definition.getCondition());
+        String resourceKey = deriveActionApprovalResourceKey(definition, parameters);
+        String actionId = deriveActionApprovalId(targetArtifactKey, parameters);
+
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("kind", "approval_policy");
+
+        ObjectNode metadata = payload.putObject("metadata");
+        metadata.put("origin", "domain_rule_definition");
+        metadata.put("ruleType", normalizeOrDefault(definition.getRuleType(), "approval_policy"));
+        metadata.put("reviewStatus", "pending");
+
+        ObjectNode action = payload.putObject("resourceAction");
+        action.put("resourceKey", resourceKey);
+        action.put("actionId", actionId);
+
+        ObjectNode policy = payload.putObject("approvalPolicy");
+        policy.put("ruleKey", definition.getRuleKey());
+        policy.put("ruleVersion", definition.getVersion());
+        policy.put("resourceKey", resourceKey);
+        policy.put("actionId", actionId);
+        if (condition != null && !condition.isNull()) {
+            policy.set("condition", condition);
+        }
+        if (parameters != null && parameters.isObject()) {
+            copyText(parameters, policy, "message");
+            copyText(parameters, policy, "severity");
+            copyText(parameters, policy, "approverContext");
+            JsonNode explicitPolicy = parameters.get("approvalPolicy");
+            if (explicitPolicy != null && explicitPolicy.isObject()) {
+                policy.setAll((ObjectNode) explicitPolicy);
+            }
+            JsonNode requiredApprovals = parameters.get("requiredApprovals");
+            if (requiredApprovals != null && requiredApprovals.isArray() && !requiredApprovals.isEmpty()) {
+                ArrayNode values = policy.putArray("requiredApprovals");
+                collectTextArray(requiredApprovals).forEach(values::add);
+            }
+            JsonNode approvalGroups = parameters.get("approvalGroups");
+            if (approvalGroups != null && approvalGroups.isArray() && !approvalGroups.isEmpty()) {
+                ArrayNode values = policy.putArray("approvalGroups");
+                collectTextArray(approvalGroups).forEach(values::add);
+            }
+            JsonNode blockedWhen = parameters.get("blockedWhen");
+            if (blockedWhen != null && !blockedWhen.isNull()) {
+                policy.set("blockedWhen", blockedWhen);
             }
         }
         return payload;
@@ -1429,6 +1497,18 @@ public class DomainRuleService {
                     environment,
                     materializationOutcomes);
         }
+        if ("approval_policy".equals(targetLayer)
+                && "resource-action-approval".equals(targetArtifactType)
+                && isApprovalPolicyRuleType(definition.getRuleType())) {
+            return createApprovalPolicyMaterialization(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    tenantId,
+                    environment,
+                    materializationOutcomes);
+        }
         return null;
     }
 
@@ -1498,6 +1578,30 @@ public class DomainRuleService {
                 targetArtifactKey,
                 "/availabilityPolicy",
                 "workflow-action-policy",
+                payload,
+                tenantId,
+                environment,
+                materializationOutcomes);
+    }
+
+    private DomainRuleMaterialization createApprovalPolicyMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String tenantId,
+            String environment,
+            ArrayNode materializationOutcomes) {
+        ObjectNode payload = buildApprovalPolicyMaterializedPayload(
+                definition,
+                targetArtifactKey);
+        return createOrReuseDerivedMaterialization(
+                definition,
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                "/approvalPolicy",
+                "approval-policy",
                 payload,
                 tenantId,
                 environment,
@@ -1626,6 +1730,89 @@ public class DomainRuleService {
 
     private boolean isWorkflowActionRuleType(String ruleType) {
         return "workflow_action_policy".equals(ruleType);
+    }
+
+    private boolean isApprovalPolicyRuleType(String ruleType) {
+        return "approval_policy".equals(ruleType);
+    }
+
+    private String deriveActionApprovalKey(String resourceKey, JsonNode parameters) {
+        String actionResourceKey = resourceKey;
+        if (parameters != null && parameters.isObject()) {
+            String explicitResource = normalize(parameters.path("resourceKey").asText(null));
+            if (StringUtils.hasText(explicitResource)) {
+                actionResourceKey = explicitResource;
+            }
+            JsonNode approvalAction = parameters.path("approvalAction");
+            if (approvalAction.isObject()) {
+                explicitResource = normalize(approvalAction.path("resourceKey").asText(null));
+                if (StringUtils.hasText(explicitResource)) {
+                    actionResourceKey = explicitResource;
+                }
+            }
+            JsonNode workflowAction = parameters.path("workflowAction");
+            if (workflowAction.isObject()) {
+                explicitResource = normalize(workflowAction.path("resourceKey").asText(null));
+                if (StringUtils.hasText(explicitResource)) {
+                    actionResourceKey = explicitResource;
+                }
+            }
+        }
+        return normalizeOrDefault(actionResourceKey, resourceKey) + ":" + deriveActionApprovalId(null, parameters);
+    }
+
+    private String deriveActionApprovalResourceKey(DomainRuleDefinition definition, JsonNode parameters) {
+        if (parameters != null && parameters.isObject()) {
+            String explicit = normalize(parameters.path("resourceKey").asText(null));
+            if (StringUtils.hasText(explicit)) {
+                return explicit;
+            }
+            JsonNode approvalAction = parameters.path("approvalAction");
+            if (approvalAction.isObject()) {
+                explicit = normalize(approvalAction.path("resourceKey").asText(null));
+                if (StringUtils.hasText(explicit)) {
+                    return explicit;
+                }
+            }
+            JsonNode workflowAction = parameters.path("workflowAction");
+            if (workflowAction.isObject()) {
+                explicit = normalize(workflowAction.path("resourceKey").asText(null));
+                if (StringUtils.hasText(explicit)) {
+                    return explicit;
+                }
+            }
+        }
+        return normalize(definition.getResourceKey());
+    }
+
+    private String deriveActionApprovalId(String targetArtifactKey, JsonNode parameters) {
+        if (StringUtils.hasText(targetArtifactKey)) {
+            int separator = targetArtifactKey.lastIndexOf(':');
+            return separator >= 0 && separator + 1 < targetArtifactKey.length()
+                    ? targetArtifactKey.substring(separator + 1)
+                    : targetArtifactKey;
+        }
+        if (parameters != null && parameters.isObject()) {
+            String explicit = normalize(parameters.path("actionId").asText(null));
+            if (StringUtils.hasText(explicit)) {
+                return explicit;
+            }
+            JsonNode approvalAction = parameters.path("approvalAction");
+            if (approvalAction.isObject()) {
+                explicit = normalize(approvalAction.path("actionId").asText(null));
+                if (StringUtils.hasText(explicit)) {
+                    return explicit;
+                }
+            }
+            JsonNode workflowAction = parameters.path("workflowAction");
+            if (workflowAction.isObject()) {
+                explicit = normalize(workflowAction.path("actionId").asText(null));
+                if (StringUtils.hasText(explicit)) {
+                    return explicit;
+                }
+            }
+        }
+        return "default";
     }
 
     private String deriveWorkflowActionKey(String resourceKey, JsonNode parameters) {

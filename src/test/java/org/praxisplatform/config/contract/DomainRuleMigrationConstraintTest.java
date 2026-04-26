@@ -12,10 +12,11 @@ import org.junit.jupiter.api.Test;
 class DomainRuleMigrationConstraintTest {
 
     @Test
-    void latestDomainRuleConstraintMigrationAllowsWorkflowActionPolicyAndTargetLayer() throws IOException {
+    void latestDomainRuleConstraintMigrationAllowsApprovalPolicyAndTargetLayer() throws IOException {
         String migration = Files.readString(Path.of(
-                "src/main/resources/db/migration/V23__expand_domain_rule_constraints_for_workflow_action.sql"));
+                "src/main/resources/db/migration/V24__expand_domain_rule_constraints_for_approval_policy.sql"));
 
+        assertThat(migration).contains("approval_policy");
         assertThat(migration).contains("workflow_action_policy");
         assertThat(migration).contains("workflow_action");
         assertThat(migration).contains("selection_eligibility");
