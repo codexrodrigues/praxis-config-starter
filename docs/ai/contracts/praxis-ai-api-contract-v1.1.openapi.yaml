@@ -2428,7 +2428,7 @@ components:
     DomainRuleTargetLayer:
       type: string
       description: Camada runtime derivada. A regra de negocio permanece na definicao governada.
-      enum: [option_source, backend_validation, workflow, form_config, shared_rule_review]
+      enum: [option_source, backend_validation, workflow_action, form_config, shared_rule_review]
 
     DomainRuleActorType:
       type: string
