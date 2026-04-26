@@ -18,12 +18,14 @@ final class AgenticAuthoringContextBundle {
             JsonNode currentPageSummary,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String governedDomainContext) {
         ObjectNode bundle = objectMapper.createObjectNode();
         bundle.put("schemaVersion", "praxis-agentic-authoring-context-bundle.v1");
         bundle.set("runtimeContext", runtimeContext(objectMapper, request, currentPageSummary, target));
         bundle.set("userIntent", userIntent(objectMapper, request, effectivePrompt));
         bundle.set("retrievalContext", retrievalContext(objectMapper, candidateOptions));
+        bundle.set("governedDomainContext", governedDomainContext(objectMapper, governedDomainContext));
         bundle.set("componentContext", componentContext(objectMapper, componentCapabilities));
         bundle.set("conversationContext", conversationContext(objectMapper, request));
         bundle.set("toolCatalog", toolCatalog(objectMapper));
@@ -66,6 +68,17 @@ final class AgenticAuthoringContextBundle {
         retrieval.put("selectionRule", "Select or suggest only resourcePath values present in candidateResources.");
         retrieval.put("emptyStateRule", "When candidateResources is empty or insufficient, use toolCatalog.searchApiResources before asking the user to type endpoints manually.");
         return retrieval;
+    }
+
+    private static ObjectNode governedDomainContext(ObjectMapper objectMapper, String promptBlock) {
+        ObjectNode context = objectMapper.createObjectNode();
+        String value = valueOrEmpty(promptBlock);
+        context.put("schemaVersion", "praxis-agentic-authoring-governed-domain-context.v1");
+        context.put("source", "domain-catalog/context");
+        context.put("available", !value.isBlank());
+        context.put("usageRule", "Treat this block as governed semantic grounding for decision authoring; do not expose masked or denied source payloads, and do not use UI surfaces as the primary business rule source.");
+        context.put("promptBlock", value);
+        return context;
     }
 
     private static ObjectNode componentContext(

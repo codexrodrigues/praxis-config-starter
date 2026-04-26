@@ -149,28 +149,45 @@ Validation:
 
 ### PR 2 - Authoring Context Contract
 
+Status: implemented locally on `codex/domain-context-governance-readiness`.
+
 Add or document a first-class authoring context section, for example
 `governedDomainContext`, with:
 
-- source mode;
-- policy profile;
-- release/catalog/federation metadata when available;
-- returned item count;
-- denied, masked, summarized and low-confidence counts;
-- retrieval guidance;
-- items safe for authoring prompt use.
+- `schemaVersion=praxis-agentic-authoring-governed-domain-context.v1`;
+- `source=domain-catalog/context`;
+- `available`;
+- `usageRule`;
+- `promptBlock`.
+
+The implementation injects the prompt block resolved by
+`DomainCatalogPromptContextService` into
+`contextBundle.governedDomainContext` before the LLM provider call. The field is
+also visible in `llmDiagnostics.request.contextBundle` when diagnostics are
+requested.
 
 The section must not include denied payloads outside diagnostics.
 
 ### PR 3 - Authoring Injection
 
+Status: implemented locally for the LLM intent resolver path.
+
 For business-rule authoring:
 
-- resolve `contextHints.domainCatalog`;
-- call the domain catalog or federation context path with
-  `policyProfile=authoring` unless a stricter profile is already requested;
-- insert the governed context into the LLM bundle before intent planning;
-- add diagnostics that prove the context was used or explain why it was absent.
+- `contextHints.domainCatalog` is resolved by the existing
+  `DomainCatalogPromptContextService`;
+- the generated context is inserted into the LLM bundle before intent planning;
+- authoring policy remains governed by the context hints and the federation
+  service defaults to `authoring` when no stricter profile is requested.
+
+Validation on 2026-04-26:
+
+```bash
+mvn -B -Dtest=AgenticAuthoringLlmIntentResolverServiceTest,DomainCatalogPromptContextServiceTest,DomainFederationRetrievalPolicyServiceTest,AgenticAuthoringDomainCatalogHintsTest test
+mvn -B -Dtest=AgenticAuthoringAutoConfigurationTest test
+```
+
+Both focal validations passed locally without GitHub Actions.
 
 ### PR 4 - Operational Proof
 

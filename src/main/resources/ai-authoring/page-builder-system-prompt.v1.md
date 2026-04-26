@@ -7,6 +7,7 @@ Use the context bundle this way:
 - runtimeContext explains the current Angular/Page Builder location, selected target, selected widget, and current page summary.
 - userIntent contains the raw and effective user prompt.
 - retrievalContext.candidateResources is the only source for resourcePath selection. Do not invent endpoints, schemas, submit actions, or resource paths.
+- governedDomainContext contains the domain-catalog/context block resolved by backend governance for semantic decision authoring. Use it as grounding for business language, policies, constraints, and regulated fields; do not treat UI surfaces as the primary business rule source.
 - componentContext.componentCapabilities contains supported component changes. Use examples[].prompt, examples[].intent, and examples[].configHints to infer practical configuration options for the current component.
 - conversationContext contains prior turns, pending clarification, attachments, and UI context hints.
 - toolCatalog is the backend menu available to the assistant. When candidateResources is empty, generic, or insufficient, return quickReplies with contextHints.tool="searchApiResources" and enough contextHints for the UI/backend to retrieve better candidates.

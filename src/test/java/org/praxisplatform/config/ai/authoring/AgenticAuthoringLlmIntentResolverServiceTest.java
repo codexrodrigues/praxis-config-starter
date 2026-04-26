@@ -13,9 +13,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -104,6 +106,101 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("/api/praxis/config/ai/authoring/resource-candidates");
         assertThat(prompt).contains("Avoid terse labels such as \"alimentar tela\"");
         assertThat(prompt).contains("resourceSearchQuery");
+    }
+
+    @Test
+    void resolveAddsGovernedDomainContextToContextBundleBeforeCallingProvider() throws Exception {
+        DomainCatalogPromptContextService domainCatalogPromptContextService =
+                Mockito.mock(DomainCatalogPromptContextService.class);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<JsonNode> contextHintsCaptor = ArgumentCaptor.forClass(JsonNode.class);
+        when(domainCatalogPromptContextService.buildPromptContext(
+                eq("crie uma regra de aprovação para reembolso"),
+                contextHintsCaptor.capture(),
+                eq("tenant"),
+                eq("local"))).thenReturn("""
+                DOMAIN_CATALOG_CONTEXT
+                schemaVersion: praxis.domain-catalog.context.v1
+                serviceKey: praxis-service
+                items:
+                - [governance/policy] Reembolso exige aprovação do gestor (finance.reimbursement.approval) | visibility=mask | trainingUse=deny | ruleAuthoring=allow
+                """);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "unknown",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "assistantMessage": "Vou tratar isso como decisão governada.",
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper,
+                        domainCatalogPromptContextService);
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "domainCatalog": {
+                    "schemaVersion": "praxis.ai.context-hints.domain-catalog/v0.2",
+                    "serviceKey": "praxis-service",
+                    "resourceKey": "finance.reimbursements",
+                    "intent": "authoring",
+                    "policyProfile": "authoring",
+                    "query": "reembolso aprovação gestor"
+                  }
+                }
+                """);
+
+        service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "crie uma regra de aprovação para reembolso",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints),
+                "crie uma regra de aprovação para reembolso",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        String prompt = promptCaptor.getValue();
+        assertThat(contextHintsCaptor.getValue().path("domainCatalog").path("policyProfile").asText())
+                .isEqualTo("authoring");
+        assertThat(prompt).contains("\"governedDomainContext\"");
+        assertThat(prompt).contains("\"schemaVersion\" : \"praxis-agentic-authoring-governed-domain-context.v1\"");
+        assertThat(prompt).contains("\"available\" : true");
+        assertThat(prompt).contains("DOMAIN_CATALOG_CONTEXT");
+        assertThat(prompt).contains("visibility=mask");
+        assertThat(prompt).contains("trainingUse=deny");
+        assertThat(prompt).contains("Treat this block as governed semantic grounding");
     }
 
     @Test

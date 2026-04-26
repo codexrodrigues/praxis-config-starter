@@ -32,6 +32,7 @@ import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.AiTurnService;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.UserConfigService;
@@ -87,8 +88,12 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnBean(AiProviderManagementService.class)
     public AgenticAuthoringLlmIntentResolverService agenticAuthoringLlmIntentResolverService(
             AiProviderManagementService providerManagementService,
-            ObjectMapper objectMapper) {
-        return new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+            ObjectMapper objectMapper,
+            ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService) {
+        return new AgenticAuthoringLlmIntentResolverService(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService.getIfAvailable());
     }
 
     @Bean

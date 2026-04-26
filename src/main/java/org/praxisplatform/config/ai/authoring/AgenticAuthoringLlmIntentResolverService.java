@@ -15,6 +15,8 @@ import java.util.Optional;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.springframework.util.StringUtils;
 
 public class AgenticAuthoringLlmIntentResolverService {
 
@@ -23,12 +25,21 @@ public class AgenticAuthoringLlmIntentResolverService {
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
+    private final DomainCatalogPromptContextService domainCatalogPromptContextService;
 
     public AgenticAuthoringLlmIntentResolverService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper) {
+        this(providerManagementService, objectMapper, null);
+    }
+
+    public AgenticAuthoringLlmIntentResolverService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService) {
         this.providerManagementService = Objects.requireNonNull(providerManagementService, "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.domainCatalogPromptContextService = domainCatalogPromptContextService;
     }
 
     public Optional<AgenticAuthoringLlmIntentResolution> resolve(
@@ -47,7 +58,15 @@ public class AgenticAuthoringLlmIntentResolverService {
         List<AgenticAuthoringCandidate> usableCandidates =
                 candidateOptions == null ? List.of() : candidateOptions;
         try {
-            PromptInput promptInput = promptInput(request, effectivePrompt, currentPageSummary, target, usableCandidates, componentCapabilities);
+            PromptInput promptInput = promptInput(
+                    request,
+                    effectivePrompt,
+                    currentPageSummary,
+                    target,
+                    usableCandidates,
+                    componentCapabilities,
+                    tenantId,
+                    environment);
             JsonNode result = providerManagementService.generateJson(
                     promptInput.prompt(),
                     AiJsonSchema.ofSchema(schema()),
@@ -74,7 +93,15 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
-        PromptInput promptInput = promptInput(request, effectivePrompt, currentPageSummary, target, candidateOptions, componentCapabilities);
+        PromptInput promptInput = promptInput(
+                request,
+                effectivePrompt,
+                currentPageSummary,
+                target,
+                candidateOptions,
+                componentCapabilities,
+                null,
+                null);
         ObjectNode diagnostics = objectMapper.createObjectNode();
         diagnostics.put("schemaVersion", "praxis-agentic-authoring-llm-diagnostics.v1");
         diagnostics.put("promptTemplateId", SYSTEM_PROMPT_TEMPLATE_ID);
@@ -89,7 +116,10 @@ public class AgenticAuthoringLlmIntentResolverService {
             JsonNode currentPageSummary,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String tenantId,
+            String environment) {
+        String governedDomainContext = governedDomainContext(request, effectivePrompt, tenantId, environment);
         ObjectNode contextBundle = AgenticAuthoringContextBundle.create(
                 objectMapper,
                 request,
@@ -97,10 +127,32 @@ public class AgenticAuthoringLlmIntentResolverService {
                 currentPageSummary,
                 target,
                 candidateOptions,
-                componentCapabilities);
+                componentCapabilities,
+                governedDomainContext);
         return new PromptInput(
                 contextBundle,
                 SYSTEM_PROMPT_TEMPLATE.formatted(contextBundle.toPrettyString()));
+    }
+
+    private String governedDomainContext(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            String tenantId,
+            String environment) {
+        if (domainCatalogPromptContextService == null || request == null || request.contextHints() == null) {
+            return "";
+        }
+        try {
+            return StringUtils.hasText(effectivePrompt)
+                    ? domainCatalogPromptContextService.buildPromptContext(
+                            effectivePrompt,
+                            request.contextHints(),
+                            tenantId,
+                            environment)
+                    : "";
+        } catch (RuntimeException ex) {
+            return "";
+        }
     }
 
     private Optional<AgenticAuthoringLlmIntentResolution> toResolution(JsonNode result) {
