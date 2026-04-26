@@ -92,6 +92,7 @@ public class DomainFederationContractValidator {
             "shared_identifier",
             "lookup_option_source",
             "workflow_action",
+            "approval_policy",
             "external_system",
             "policy_dependency"
     );

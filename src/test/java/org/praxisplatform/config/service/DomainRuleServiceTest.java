@@ -427,6 +427,134 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void publishesApprovalPolicyAsDerivedApprovalMaterialization() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.eventos-folha.rule.bulk-approve-approval")
+                .version(1)
+                .ruleType("approval_policy")
+                .status("approved")
+                .contextKey("human-resources")
+                .resourceKey("human-resources.eventos-folha")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Exigir aprovacao gerencial para aprovacao em massa de eventos.\"}")
+                .parameters("""
+                        {
+                          "approvalAction": {
+                            "resourceKey": "human-resources.eventos-folha",
+                            "actionId": "bulk-approve"
+                          },
+                          "requiredApprovals": ["payroll-manager"],
+                          "approvalGroups": ["hr-payroll"],
+                          "approverContext": "payroll-events",
+                          "message": "Aprovacao em massa exige decisao gerencial governada.",
+                          "severity": "blocking"
+                        }
+                        """)
+                .condition("""
+                        {
+                          ">": [
+                            { "var": "selectedCount" },
+                            25
+                          ]
+                        }
+                        """)
+                .governance("{}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "human-resources.eventos-folha",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "human-resources.eventos-folha.rule.bulk-approve-approval:approval_policy:human-resources.eventos-folha:bulk-approve"))
+                .thenReturn(Optional.empty());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            materialization.setId(UUID.randomUUID());
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "payroll-manager",
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.explainability().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
+                .isEqualTo(1);
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .hasSize(1)
+                .first()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("created");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("human-resources.eventos-folha.rule.bulk-approve-approval:approval_policy:human-resources.eventos-folha:bulk-approve");
+                    assertThat(outcome.path("targetLayer").asText()).isEqualTo("approval_policy");
+                    assertThat(outcome.path("targetArtifactType").asText()).isEqualTo("resource-action-approval");
+                    assertThat(outcome.path("sourceHash").asText()).startsWith("derived:sha256:");
+                });
+        assertThat(response.materializations()).hasSize(1)
+                .first()
+                .satisfies(materialization -> {
+                    JsonNode payload = materialization.materializedPayload();
+                    assertThat(materialization.targetLayer()).isEqualTo("approval_policy");
+                    assertThat(materialization.targetArtifactType()).isEqualTo("resource-action-approval");
+                    assertThat(materialization.targetArtifactKey())
+                            .isEqualTo("human-resources.eventos-folha:bulk-approve");
+                    assertThat(materialization.targetPointer()).isEqualTo("/approvalPolicy");
+                    assertThat(materialization.materializedRuleId()).isEqualTo("approval-policy");
+                    assertThat(materialization.status()).isEqualTo("applied");
+                    assertThat(materialization.sourceHash()).startsWith("derived:sha256:");
+                    assertThat(materialization.decisionDiagnostics().path("runtimeSurfacesAreDerived").asBoolean())
+                            .isTrue();
+                    assertThat(payload.path("kind").asText()).isEqualTo("approval_policy");
+                    assertThat(payload.path("resourceAction").path("resourceKey").asText())
+                            .isEqualTo("human-resources.eventos-folha");
+                    assertThat(payload.path("resourceAction").path("actionId").asText()).isEqualTo("bulk-approve");
+                    assertThat(payload.path("approvalPolicy").path("requiredApprovals"))
+                            .extracting(JsonNode::asText)
+                            .containsExactly("payroll-manager");
+                    assertThat(payload.path("approvalPolicy").path("approvalGroups"))
+                            .extracting(JsonNode::asText)
+                            .containsExactly("hr-payroll");
+                    assertThat(payload.path("approvalPolicy").path("approverContext").asText())
+                            .isEqualTo("payroll-events");
+                    assertThat(payload.path("approvalPolicy").path("condition").path(">").get(1).asInt())
+                            .isEqualTo(25);
+                    assertThat(payload.path("approvalPolicy").path("message").asText())
+                            .isEqualTo("Aprovacao em massa exige decisao gerencial governada.");
+                });
+    }
+
+    @Test
     void createsSharedRuleDefinitionWithoutMaterializingFormConfig() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

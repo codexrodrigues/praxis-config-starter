@@ -155,7 +155,7 @@ Recommended fields:
 - `concept_id`
 - `binding_type`: `api_resource`, `api_operation`, `dto_class`,
   `dto_field`, `entity_class`, `entity_field`, `service_method`,
-  `repository_projection`, `workflow_action`, `ui_surface`,
+  `repository_projection`, `workflow_action`, `approval_policy`, `ui_surface`,
   `ui_schema_field`, `form_config`, `table_config`, `component_capability`,
   `event_schema`
 - `binding_key`
@@ -300,10 +300,10 @@ Recommended fields:
   to bind the same key to another definition or incompatible target must be
   rejected before creating duplicate runtime projections.
 - `target_layer`: `form_config`, `option_source`, `frontend_adapter`, `backend_validation`,
-  `workflow_action`, `policy_engine`, `notification`, `reporting`, `external_system`
+  `workflow_action`, `approval_policy`, `policy_engine`, `notification`, `reporting`, `external_system`
 - `target_artifact_type`: for example `praxis-dynamic-form`,
   `resource-option-source`,
-  `resource-workflow-action`, `spring-service`, `opa-policy`
+  `resource-workflow-action`, `resource-action-approval`, `spring-service`, `opa-policy`
 - `target_artifact_key`: form id, endpoint key, workflow key or policy key
 - `target_pointer`: JSON pointer/path inside the artifact
 - `target_release_key`: optional release/version of the target artifact
@@ -331,7 +331,14 @@ marking a payroll as paid, the canonical materialization target is
 `target_artifact_type=resource-workflow-action`. This means a governed semantic
 decision constrains or explains an existing resource action. It does not create
 a parallel workflow engine, and the resource action remains a derived runtime
-projection rather than the primary business-rule source.
+projection.
+
+For approval requirements over an already exposed resource action, the
+canonical materialization target is `target_layer=approval_policy` with
+`target_artifact_type=resource-action-approval`. This means the governed
+semantic decision answers whether the action requires approval, which semantic
+approver context applies and how the runtime should explain the gate. It must
+not create a generic approval inbox, BPM engine or UI-local approval rule.
 
 ## Ingestion Flow
 
@@ -357,7 +364,10 @@ projection rather than the primary business-rule source.
    predicted resource-validation target. For `workflow_action_policy`, it can
    derive a `workflow_action` payload with `kind=workflow_action_policy` and
    `target_artifact_type=resource-workflow-action` for a resource action such
-   as `human-resources.folhas-pagamento:mark-paid`. Derived publication
+   as `human-resources.folhas-pagamento:mark-paid`. For `approval_policy`, it
+   can derive an `approval_policy` payload with `kind=approval_policy` and
+   `target_artifact_type=resource-action-approval` for an existing resource
+   action such as `human-resources.eventos-folha:bulk-approve`. Derived publication
    materializations use the same
    `materialization_key` contract as explicit materialization creation:
    compatible retries reuse the existing row only when the stored

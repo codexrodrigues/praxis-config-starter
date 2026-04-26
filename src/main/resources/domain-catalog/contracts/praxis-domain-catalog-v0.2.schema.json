@@ -105,7 +105,7 @@
         "bindingKey": { "$ref": "#/$defs/key" },
         "nodeKey": { "$ref": "#/$defs/key" },
         "bindingType": {
-          "enum": ["api_resource", "api_operation", "dto_schema", "dto_field", "workflow_action", "ui_surface", "option_source", "form_config", "rule_definition", "external_reference"]
+          "enum": ["api_resource", "api_operation", "dto_schema", "dto_field", "workflow_action", "approval_policy", "ui_surface", "option_source", "form_config", "rule_definition", "external_reference"]
         },
         "target": { "$ref": "#/$defs/freeObject" },
         "schemaLinks": { "type": "array", "items": { "$ref": "#/$defs/schemaLink" } },
