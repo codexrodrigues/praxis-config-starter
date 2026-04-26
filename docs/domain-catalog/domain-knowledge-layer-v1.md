@@ -300,10 +300,10 @@ Recommended fields:
   to bind the same key to another definition or incompatible target must be
   rejected before creating duplicate runtime projections.
 - `target_layer`: `form_config`, `option_source`, `frontend_adapter`, `backend_validation`,
-  `workflow`, `policy_engine`, `notification`, `reporting`, `external_system`
+  `workflow_action`, `policy_engine`, `notification`, `reporting`, `external_system`
 - `target_artifact_type`: for example `praxis-dynamic-form`,
   `resource-option-source`,
-  `spring-service`, `opa-policy`, `workflow-definition`
+  `resource-workflow-action`, `spring-service`, `opa-policy`
 - `target_artifact_key`: form id, endpoint key, workflow key or policy key
 - `target_pointer`: JSON pointer/path inside the artifact
 - `target_release_key`: optional release/version of the target artifact
@@ -324,6 +324,14 @@ For today's Dynamic Form flow, the shared rule would live in
 `domain_rule_definition`; the reviewed `visualBlockGuidance` rule applied to
 `FormConfig.formRules[]` would be one `domain_rule_materialization` row with
 `target_layer=form_config` and `target_artifact_type=praxis-dynamic-form`.
+
+For resource actions exposed by a host, such as approving payroll events or
+marking a payroll as paid, the canonical materialization target is
+`target_layer=workflow_action` with
+`target_artifact_type=resource-workflow-action`. This means a governed semantic
+decision constrains or explains an existing resource action. It does not create
+a parallel workflow engine, and the resource action remains a derived runtime
+projection rather than the primary business-rule source.
 
 ## Ingestion Flow
 
