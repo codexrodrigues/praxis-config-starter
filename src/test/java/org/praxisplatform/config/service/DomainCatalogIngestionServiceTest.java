@@ -136,6 +136,45 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void deduplicatesCatalogItemsByCanonicalTypeAndKeyBeforePersistence() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(false);
+
+        JsonNode catalog = sampleCatalog().deepCopy();
+        ((ArrayNode) catalog.path("contexts")).add(objectMapper.readTree("""
+            {
+              "contextKey": "human-resources",
+              "label": "Recursos Humanos duplicado",
+              "status": "active"
+            }
+            """));
+
+        DomainCatalogIngestionResponse response = service.ingest(catalog, "tenant-a", "dev");
+
+        assertThat(response.itemCount()).isEqualTo(9);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<DomainCatalogItem>> itemsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(itemRepository).saveAll(itemsCaptor.capture());
+        assertThat(itemsCaptor.getValue())
+                .extracting(item -> item.getItemType() + "|" + item.getItemKey())
+                .hasSize(9)
+                .doesNotHaveDuplicates();
+    }
+
+    @Test
     void publishesDomainCatalogRagDocumentsInConfiguredBatches() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
