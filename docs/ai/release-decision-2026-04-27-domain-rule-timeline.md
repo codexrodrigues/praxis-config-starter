@@ -149,4 +149,4 @@ Implementation readiness is closed locally. Continue without publishing unless t
 
 If release is requested, publish `praxis-config-starter:0.1.0-rc.36` via the manual release workflow, then update `praxis-api-quickstart` to consume that coordinate without local overrides and run one published-runtime smoke for phase closure.
 
-For the next observability increment beyond v1, follow [`domain-rule-timeline-v1-source-plan.md`](domain-rule-timeline-v1-source-plan.md): any `intake`, `simulation` or rejected/blocked governance event requires a persisted governance source and must not be reconstructed from transient responses or UI state.
+For the next observability increment beyond v1, follow the monorepo backlog `docs/2026-04-domain-rule-timeline-v2-intake-simulation-backlog.md`: any `intake`, `simulation` or rejected/blocked governance event requires a persisted governance source and must not be reconstructed from transient responses or UI state.

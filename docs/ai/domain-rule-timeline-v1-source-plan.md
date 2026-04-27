@@ -174,4 +174,6 @@ Next release increment: publish a coordinated Maven release only after explicit 
 
 Keep the published runtime on the existing public artifact until a real need appears for the durable timeline v1 artifact.
 
-When that need is explicit, release `praxis-config-starter:0.1.0-rc.36`, update quickstart to consume it without local overrides, run one published-runtime smoke, and then promote HTTP corpus status. For new event families beyond v1, start with persisted governance source design in `praxis-config-starter`, not with UI reconstruction or quickstart-only smoke changes.
+When that need is explicit, release `praxis-config-starter:0.1.0-rc.36`, update quickstart to consume it without local overrides, run one published-runtime smoke, and then promote HTTP corpus status.
+
+For new event families beyond v1, use the monorepo backlog `docs/2026-04-domain-rule-timeline-v2-intake-simulation-backlog.md`: add `intake.received` first, then `simulation.requested` and `simulation.completed` only for simulations anchored in a persisted `DomainRuleDefinition`. Continue starting with persisted governance source design in `praxis-config-starter`, not with UI reconstruction or quickstart-only smoke changes.
