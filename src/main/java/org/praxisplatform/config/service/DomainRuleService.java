@@ -352,7 +352,7 @@ public class DomainRuleService {
         return toResponse(saved);
     }
 
-    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleSimulationResponse simulate(
             DomainRuleSimulationRequest request,
             String tenantId,
@@ -382,6 +382,10 @@ public class DomainRuleService {
         }
         if (!StringUtils.hasText(resourceKey)) {
             throw new ConfigurationIngestionException("resourceKey is required for simulation");
+        }
+        Instant simulationRequestedAt = Instant.now();
+        if (persistedDefinition != null) {
+            recordSimulationRequestedEvent(persistedDefinition, simulationRequestedAt);
         }
 
         ArrayNode existingCoverage = buildExistingCoverage(
@@ -423,6 +427,18 @@ public class DomainRuleService {
         grounding.put("conditionPresent", condition != null && !condition.isNull());
 
         String result = existingCoverage.isEmpty() ? "pass" : "pass_with_existing_coverage";
+        Instant simulatedAt = Instant.now();
+        if (persistedDefinition != null) {
+            recordSimulationCompletedEvent(
+                    persistedDefinition,
+                    simulatedAt,
+                    result,
+                    explainability.path("publicationReadiness").asText(null),
+                    existingCoverage,
+                    predictedMaterializations,
+                    requiredApprovals,
+                    warnings);
+        }
         return new DomainRuleSimulationResponse(
                 UUID.randomUUID(),
                 ruleDefinitionId,
@@ -441,7 +457,7 @@ public class DomainRuleService {
                 requiredApprovals,
                 warnings,
                 explainability,
-                Instant.now());
+                simulatedAt);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -2325,6 +2341,60 @@ public class DomainRuleService {
                 .actor(normalize(definition.createdBy()))
                 .summary("Decision intake received")
                 .status(normalize(definition.status()))
+                .safeMetadata(safeMetadata.toString())
+                .build());
+    }
+
+    private void recordSimulationRequestedEvent(DomainRuleDefinition definition, Instant occurredAt) {
+        if (definition == null || definition.getId() == null || occurredAt == null) {
+            return;
+        }
+        ObjectNode safeMetadata = objectMapper.createObjectNode();
+        safeMetadata.put("decisionSource", "persisted_definition");
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(definition.getTenantId())
+                .environment(definition.getEnvironment())
+                .ruleDefinition(definition)
+                .eventType("simulation.requested")
+                .occurredAt(occurredAt)
+                .actorType("system")
+                .summary("Decision simulation requested")
+                .status("requested")
+                .safeMetadata(safeMetadata.toString())
+                .build());
+    }
+
+    private void recordSimulationCompletedEvent(
+            DomainRuleDefinition definition,
+            Instant occurredAt,
+            String result,
+            String publicationReadiness,
+            ArrayNode existingCoverage,
+            ArrayNode predictedMaterializations,
+            ArrayNode requiredApprovals,
+            ArrayNode warnings) {
+        if (definition == null || definition.getId() == null || occurredAt == null) {
+            return;
+        }
+        ObjectNode safeMetadata = objectMapper.createObjectNode();
+        safeMetadata.put("result", normalize(result));
+        if (StringUtils.hasText(publicationReadiness)) {
+            safeMetadata.put("publicationReadiness", publicationReadiness);
+        }
+        safeMetadata.put("existingCoverageCount", existingCoverage != null ? existingCoverage.size() : 0);
+        safeMetadata.put("predictedMaterializationCount",
+                predictedMaterializations != null ? predictedMaterializations.size() : 0);
+        safeMetadata.put("requiredApprovalCount", requiredApprovals != null ? requiredApprovals.size() : 0);
+        safeMetadata.put("warningCount", warnings != null ? warnings.size() : 0);
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(definition.getTenantId())
+                .environment(definition.getEnvironment())
+                .ruleDefinition(definition)
+                .eventType("simulation.completed")
+                .occurredAt(occurredAt)
+                .actorType("system")
+                .summary("Decision simulation completed")
+                .status("completed")
                 .safeMetadata(safeMetadata.toString())
                 .build());
     }

@@ -1564,7 +1564,8 @@ class DomainRuleServiceTest {
     void simulatesProcurementRuleAndDetectsExistingCoverage() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
-        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
 
         DomainRuleDefinition existing = DomainRuleDefinition.builder()
                 .id(UUID.randomUUID())
@@ -1666,6 +1667,107 @@ class DomainRuleServiceTest {
         assertThat(response.explainability().path("nextSteps").get(1).path("kind").asText()).isEqualTo("request_approval");
         assertThat(response.explainability().path("nextSteps").get(2).path("kind").asText()).isEqualTo("persist_definition");
         assertThat(response.explainability().path("nextSteps").get(3).path("kind").asText()).isEqualTo("resolve_warnings");
+        verify(eventRepository, org.mockito.Mockito.never()).save(any(DomainRuleEvent.class));
+    }
+
+    @Test
+    void persistedSimulationRecordsSafeTimelineEventsWithoutDiagnosticsPayloads() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(2)
+                .ruleType("selection_eligibility")
+                .status("draft")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("""
+                        {
+                          "summary": "Sensitive supplier rule summary must not leak"
+                        }
+                        """)
+                .parameters("""
+                        {
+                          "optionSourceKey": "supplier",
+                          "disabledReasonTemplate": "Fornecedor sensivel"
+                        }
+                        """)
+                .condition("""
+                        {
+                          "in": [
+                            { "var": "status" },
+                            ["INACTIVE", "BLOCKED"]
+                          ]
+                        }
+                        """)
+                .governance("""
+                        {
+                          "requiredApprovals": ["procurement-owner"]
+                        }
+                        """)
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        var response = service.simulate(
+                new DomainRuleSimulationRequest(
+                        definitionId,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.grounding().path("source").asText()).isEqualTo("persisted_definition");
+        assertThat(response.result()).isEqualTo("pass");
+
+        ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
+        verify(eventRepository, org.mockito.Mockito.times(2)).save(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
+                .containsExactly("simulation.requested", "simulation.completed");
+        DomainRuleEvent requested = eventCaptor.getAllValues().get(0);
+        assertThat(requested.getSummary()).isEqualTo("Decision simulation requested");
+        assertThat(requested.getActorType()).isEqualTo("system");
+        assertThat(requested.getStatus()).isEqualTo("requested");
+        assertThat(requested.getSafeMetadata()).isEqualTo("{\"decisionSource\":\"persisted_definition\"}");
+
+        DomainRuleEvent completed = eventCaptor.getAllValues().get(1);
+        assertThat(completed.getSummary()).isEqualTo("Decision simulation completed");
+        assertThat(completed.getActorType()).isEqualTo("system");
+        assertThat(completed.getStatus()).isEqualTo("completed");
+        assertThat(completed.getSafeMetadata())
+                .contains("\"result\":\"pass\"")
+                .contains("\"publicationReadiness\":\"approval_required\"")
+                .contains("\"existingCoverageCount\":0")
+                .contains("\"predictedMaterializationCount\":2")
+                .contains("\"requiredApprovalCount\":1")
+                .contains("\"warningCount\":0");
+        assertThat(completed.getSafeMetadata())
+                .doesNotContain("Sensitive supplier")
+                .doesNotContain("supplier")
+                .doesNotContain("Fornecedor sensivel")
+                .doesNotContain("INACTIVE")
+                .doesNotContain("BLOCKED")
+                .doesNotContain("procurement-owner");
     }
 
     @Test
