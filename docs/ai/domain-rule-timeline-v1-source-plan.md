@@ -126,7 +126,13 @@ First source increment:
 - `DomainRuleEventRepository` exposes ordered lookup by definition.
 - This increment does not yet write events from `DomainRuleService` and does not change the public timeline endpoint.
 
-Next code increment: write v0-equivalent events transactionally while keeping the existing derived timeline response as fallback.
+Second source increment:
+
+- `DomainRuleService` writes v0-equivalent events transactionally for definition creation, definition approval/activation, materialization creation and materialization application.
+- The public timeline endpoint still uses the existing derived v0 projection.
+- No `simulation`, `publication` or `approval` timeline events are emitted yet, because those still require a durable governance source.
+
+Next code increment: read persisted events in the timeline endpoint when they exist, keeping the existing derived timeline response as fallback.
 
 ## Non-Goals
 

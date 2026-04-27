@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.domain.DomainRuleEvent;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
@@ -31,6 +32,7 @@ import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleEventRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 
 @Tag("unit")
@@ -42,7 +44,8 @@ class DomainRuleServiceTest {
     void intakeCreatesDraftDefinitionAndGroundingForSimulation() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
-        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
 
         when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> {
             DomainRuleDefinition definition = invocation.getArgument(0);
@@ -114,6 +117,13 @@ class DomainRuleServiceTest {
         assertThat(captor.getValue().getRuleType()).isEqualTo("selection_eligibility");
         assertThat(captor.getValue().getResourceKey()).isEqualTo("procurement.suppliers");
         assertThat(captor.getValue().getStatus()).isEqualTo("draft");
+        ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
+        verify(eventRepository).save(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getEventType()).isEqualTo("definition.created");
+        assertThat(eventCaptor.getValue().getActorType()).isEqualTo("llm");
+        assertThat(eventCaptor.getValue().getActor()).isEqualTo("openai:gpt-5.4-mini");
+        assertThat(eventCaptor.getValue().getSummary()).isEqualTo("Decision definition created");
+        assertThat(eventCaptor.getValue().getStatus()).isEqualTo("draft");
     }
 
     @Test
@@ -1066,7 +1076,8 @@ class DomainRuleServiceTest {
     void createsAppliedMaterializationWhenDefinitionIsActive() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
-        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
 
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
@@ -1110,6 +1121,17 @@ class DomainRuleServiceTest {
         assertThat(response.appliedAt()).isNotNull();
         assertThat(response.appliedByType()).isEqualTo("llm");
         assertThat(response.appliedBy()).isEqualTo("openai:gpt-5.4-mini");
+        ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
+        verify(eventRepository, org.mockito.Mockito.times(2)).save(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
+                .containsExactly("materialization.created", "materialization.applied");
+        assertThat(eventCaptor.getAllValues()).last().satisfies(event -> {
+            assertThat(event.getTargetLayer()).isEqualTo("option_source");
+            assertThat(event.getTargetArtifactType()).isEqualTo("resource-option-source");
+            assertThat(event.getTargetArtifactKey()).isEqualTo("supplier");
+            assertThat(event.getMaterializationKey()).isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
+            assertThat(event.getSourceHash()).isEqualTo("hash-selection-eligibility");
+        });
     }
 
     @Test
@@ -1333,7 +1355,8 @@ class DomainRuleServiceTest {
     void transitionsDefinitionToActiveWithGovernanceTimestamps() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
-        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
                 .id(definitionId)
@@ -1366,6 +1389,10 @@ class DomainRuleServiceTest {
         assertThat(response.activatedAt()).isNotNull();
         assertThat(response.validationResult().path("review").asText()).isEqualTo("approved");
         verify(definitionRepository).save(definition);
+        ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
+        verify(eventRepository, org.mockito.Mockito.times(2)).save(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
+                .containsExactly("definition.approved", "definition.activated");
     }
 
     @Test
@@ -2667,9 +2694,20 @@ class DomainRuleServiceTest {
     private DomainRuleService service(
             DomainRuleDefinitionRepository definitionRepository,
             DomainRuleMaterializationRepository materializationRepository) {
+        return service(
+                definitionRepository,
+                materializationRepository,
+                mock(DomainRuleEventRepository.class));
+    }
+
+    private DomainRuleService service(
+            DomainRuleDefinitionRepository definitionRepository,
+            DomainRuleMaterializationRepository materializationRepository,
+            DomainRuleEventRepository eventRepository) {
         return new DomainRuleService(
                 definitionRepository,
                 materializationRepository,
+                eventRepository,
                 mock(DomainCatalogReleaseRepository.class),
                 mock(DomainKnowledgeChangeSetRepository.class),
                 objectMapper);
