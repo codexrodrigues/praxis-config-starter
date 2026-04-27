@@ -128,3 +128,5 @@ The observability phase can be considered published when all are true:
 Continue local-first platform work without publishing.
 
 The next implementation work should only move this decision to release if a phase-close proof or downstream consumer requires the new Maven coordinate.
+
+For the next observability increment, follow [`domain-rule-timeline-v1-source-plan.md`](domain-rule-timeline-v1-source-plan.md): new `simulation`, `publication` or `approval` timeline events require a persisted governance source and must not be reconstructed from transient responses or UI state.
