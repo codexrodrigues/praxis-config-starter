@@ -417,6 +417,103 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void definitionTimelinePrefersPersistedSafeEventsWhenAvailable() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
+        UUID definitionId = UUID.randomUUID();
+        UUID materializationId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-04-27T01:00:00Z");
+        Instant appliedAt = Instant.parse("2026-04-27T01:04:00Z");
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("operations.missoes.rule.pause")
+                .version(1)
+                .ruleType("workflow_action_policy")
+                .status("active")
+                .resourceKey("operations.missoes")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"sourcePrompt\":\"must not leak from definition\"}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(materializationId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("operations.missoes.rule.pause:workflow_action:operations.missoes:pause")
+                .targetLayer("workflow_action")
+                .targetArtifactType("resource-workflow-action")
+                .targetArtifactKey("operations.missoes:pause")
+                .status("applied")
+                .materializedPayload("{\"message\":\"must not leak from payload\"}")
+                .sourceHash("derived:sha256:abc")
+                .build();
+        DomainRuleEvent created = DomainRuleEvent.builder()
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .eventType("definition.created")
+                .occurredAt(createdAt)
+                .actorType("llm")
+                .actor("runtime-smoke")
+                .summary("Decision definition created")
+                .status("draft")
+                .visibility("safe")
+                .safeMetadata("{}")
+                .build();
+        DomainRuleEvent applied = DomainRuleEvent.builder()
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .eventType("materialization.applied")
+                .occurredAt(appliedAt)
+                .actorType("human")
+                .actor("mission-ops")
+                .summary("Decision materialization applied")
+                .status("applied")
+                .targetLayer("workflow_action")
+                .targetArtifactType("resource-workflow-action")
+                .targetArtifactKey("operations.missoes:pause")
+                .materialization(materialization)
+                .materializationKey(materialization.getMaterializationKey())
+                .sourceHash("derived:sha256:abc")
+                .visibility("safe")
+                .safeMetadata("{\"eventSource\":\"domain_rule_event\"}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(eventRepository.findByTenantIdAndEnvironmentAndRuleDefinition_IdOrderByOccurredAtAscEventTypeAsc(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of(created, applied));
+
+        var timeline = service.definitionTimeline(definitionId, "tenant-a", "dev");
+
+        assertThat(timeline.events()).extracting("eventType")
+                .containsExactly("definition.created", "materialization.applied");
+        assertThat(timeline.events()).allSatisfy(event -> assertThat(event.visibility()).isEqualTo("safe"));
+        assertThat(timeline.events()).last().satisfies(event -> {
+            assertThat(event.materializationId()).isEqualTo(materializationId);
+            assertThat(event.materializationKey()).isEqualTo("operations.missoes.rule.pause:workflow_action:operations.missoes:pause");
+            assertThat(event.targetLayer()).isEqualTo("workflow_action");
+            assertThat(event.sourceHash()).isEqualTo("derived:sha256:abc");
+        });
+        String safeTimelineSurface = timeline.events().stream()
+                .map(Object::toString)
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertThat(safeTimelineSurface).doesNotContain("must not leak");
+        verify(materializationRepository, org.mockito.Mockito.never()).findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                any(),
+                any(),
+                any());
+    }
+
+    @Test
     void publishesWorkflowActionPolicyAsDerivedWorkflowActionMaterialization() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

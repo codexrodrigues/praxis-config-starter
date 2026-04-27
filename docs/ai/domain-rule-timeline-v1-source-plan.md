@@ -132,7 +132,13 @@ Second source increment:
 - The public timeline endpoint still uses the existing derived v0 projection.
 - No `simulation`, `publication` or `approval` timeline events are emitted yet, because those still require a durable governance source.
 
-Next code increment: read persisted events in the timeline endpoint when they exist, keeping the existing derived timeline response as fallback.
+Third source increment:
+
+- The public timeline endpoint reads persisted `domain_rule_event` rows when they exist.
+- The endpoint keeps the existing derived v0 projection as fallback for older data without persisted events.
+- The DTO remains unchanged; this is a source-of-truth switch, not a public response expansion.
+
+Next code increment: prove the persisted-read path against quickstart local + Neon before any release/publication decision.
 
 ## Non-Goals
 

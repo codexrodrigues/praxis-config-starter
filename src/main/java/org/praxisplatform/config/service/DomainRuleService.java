@@ -2021,14 +2021,23 @@ public class DomainRuleService {
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
 
-        ArrayList<DomainRuleTimelineEventResponse> events = new ArrayList<>();
-        addDefinitionTimelineEvents(events, definition);
-        materializationRepository
-                .findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+        ArrayList<DomainRuleTimelineEventResponse> events = eventRepository
+                .findByTenantIdAndEnvironmentAndRuleDefinition_IdOrderByOccurredAtAscEventTypeAsc(
                         normalize(tenantId),
                         normalize(environment),
                         definitionId)
-                .forEach(materialization -> addMaterializationTimelineEvents(events, materialization));
+                .stream()
+                .map(this::toTimelineEvent)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        if (events.isEmpty()) {
+            addDefinitionTimelineEvents(events, definition);
+            materializationRepository
+                    .findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                            normalize(tenantId),
+                            normalize(environment),
+                            definitionId)
+                    .forEach(materialization -> addMaterializationTimelineEvents(events, materialization));
+        }
         events.sort(Comparator
                 .comparing(DomainRuleTimelineEventResponse::occurredAt, Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(DomainRuleTimelineEventResponse::eventType, Comparator.nullsLast(Comparator.naturalOrder())));
@@ -2043,6 +2052,24 @@ public class DomainRuleService {
                 definition.getResourceKey(),
                 definition.getServiceKey(),
                 List.copyOf(events));
+    }
+
+    private DomainRuleTimelineEventResponse toTimelineEvent(DomainRuleEvent event) {
+        DomainRuleMaterialization materialization = event.getMaterialization();
+        return new DomainRuleTimelineEventResponse(
+                event.getEventType(),
+                event.getOccurredAt(),
+                normalize(event.getActorType()),
+                normalize(event.getActor()),
+                event.getSummary(),
+                normalize(event.getStatus()),
+                normalize(event.getTargetLayer()),
+                normalize(event.getTargetArtifactType()),
+                normalize(event.getTargetArtifactKey()),
+                materialization != null ? materialization.getId() : null,
+                normalize(event.getMaterializationKey()),
+                normalize(event.getSourceHash()),
+                normalizeOrDefault(event.getVisibility(), "safe"));
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
