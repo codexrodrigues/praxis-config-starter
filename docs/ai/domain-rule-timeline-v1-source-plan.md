@@ -2,11 +2,11 @@
 
 Date: 2026-04-27
 
-Status: planning note for the next observability increment.
+Status: v1 implementation-ready locally; release publication remains deferred.
 
 ## Purpose
 
-The v0 governed timeline intentionally derives events only from persisted domain-rule definitions and materializations.
+The initial governed timeline intentionally derived events only from persisted domain-rule definitions and materializations.
 
 That keeps the public timeline safe and truthful:
 
@@ -42,11 +42,11 @@ The timeline must not reconstruct lifecycle from transient HTTP responses, logs,
 - `targetArtifactKey`
 - `sourceHash`
 
-These two entities are enough for the v0 read-only endpoint:
+These two entities were enough for the original read-only endpoint:
 
 - `GET /api/praxis/config/domain-rules/definitions/{definitionId}/timeline`
 
-## Deliberate v0 Gaps
+## Deliberate Gaps Before v1
 
 The following conceptual lifecycle points are not yet safe to expose as timeline events because they do not have a dedicated persisted governance source:
 
@@ -59,6 +59,8 @@ The following conceptual lifecycle points are not yet safe to expose as timeline
 - `approval.completed`
 
 Some of these moments appear in request/response DTOs or diagnostics, but those are not durable audit records. Adding them to the timeline today would either invent state, depend on transient payloads, or make clients believe the platform has an audit trail that it does not persist yet.
+
+This constraint has now been resolved for successful publication and approval events through the append-only `domain_rule_event` source. It remains true for intake, simulation and rejected/blocked governance attempts.
 
 ## v1 Rule
 
@@ -152,7 +154,14 @@ Fifth source increment:
 - Approval event metadata is an allowlist: required approval count only.
 - Required approver identities, validation details, prompt, assistant content, condition, parameters and materialized payload remain excluded from public-safe event metadata.
 
-Next code increment: prove approval events against quickstart local + Neon before any release/publication decision.
+Operational proof increment:
+
+- `praxis-api-quickstart` requires `publication.requested` and `publication.completed` when `REQUIRE_TIMELINE=true` on the published `option_source` path.
+- `praxis-api-quickstart` requires `approval.requested` and `approval.completed` when `REQUIRE_TIMELINE=true` on the governed `form_config` path.
+- Local quickstart + Neon proof passed with `eventCount=7` for both paths.
+- Monorepo readiness passed locally with `scripts/workspace/check-v0-readiness.sh`.
+
+Next release increment: publish a coordinated Maven release only after explicit phase-close approval or a named downstream consumer requires the public coordinate.
 
 ## Non-Goals
 
@@ -163,6 +172,6 @@ Next code increment: prove approval events against quickstart local + Neon befor
 
 ## Next Recommended Work
 
-Keep v0 as the public published target until a real need appears for durable simulation/publication/approval audit.
+Keep the published runtime on the existing public artifact until a real need appears for the durable timeline v1 artifact.
 
-When that need is explicit, start with a persistence design PR in `praxis-config-starter`, not with UI reconstruction or quickstart-only smoke changes.
+When that need is explicit, release `praxis-config-starter:0.1.0-rc.36`, update quickstart to consume it without local overrides, run one published-runtime smoke, and then promote HTTP corpus status. For new event families beyond v1, start with persisted governance source design in `praxis-config-starter`, not with UI reconstruction or quickstart-only smoke changes.
