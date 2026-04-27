@@ -1640,7 +1640,8 @@ class DomainRuleServiceTest {
     void publishesPersistedRuleWhenSimulationReadinessIsReadyToPublish() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
-        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
 
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
@@ -1693,7 +1694,7 @@ class DomainRuleServiceTest {
                         true,
                         "human",
                         "procurement-owner",
-                        null),
+                        objectMapper.createObjectNode().put("raw", "must not leak publication notes")),
                 "tenant-a",
                 "dev");
 
@@ -1717,6 +1718,26 @@ class DomainRuleServiceTest {
                     assertThat(item.status()).isEqualTo("applied");
                     assertThat(item.appliedBy()).isEqualTo("procurement-owner");
                 });
+        ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
+        verify(eventRepository, org.mockito.Mockito.times(3)).save(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
+                .containsExactly("publication.requested", "materialization.applied", "publication.completed");
+        assertThat(eventCaptor.getAllValues().get(0)).satisfies(event -> {
+            assertThat(event.getActorType()).isEqualTo("human");
+            assertThat(event.getActor()).isEqualTo("procurement-owner");
+            assertThat(event.getStatus()).isEqualTo("requested");
+            assertThat(event.getSafeMetadata()).contains("\"publicationReadiness\":\"ready_to_publish\"");
+            assertThat(event.getSafeMetadata()).contains("\"materializationCount\":0");
+            assertThat(event.getSafeMetadata()).doesNotContain("must not leak");
+        });
+        assertThat(eventCaptor.getAllValues().get(2)).satisfies(event -> {
+            assertThat(event.getActorType()).isEqualTo("human");
+            assertThat(event.getActor()).isEqualTo("procurement-owner");
+            assertThat(event.getStatus()).isEqualTo("published");
+            assertThat(event.getSafeMetadata()).contains("\"materializationCount\":1");
+            assertThat(event.getSafeMetadata()).doesNotContain("must not leak");
+            assertThat(event.getOccurredAt()).isAfterOrEqualTo(eventCaptor.getAllValues().get(0).getOccurredAt());
+        });
     }
 
     @Test

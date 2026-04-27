@@ -138,7 +138,14 @@ Third source increment:
 - The endpoint keeps the existing derived v0 projection as fallback for older data without persisted events.
 - The DTO remains unchanged; this is a source-of-truth switch, not a public response expansion.
 
-Next code increment: prove the persisted-read path against quickstart local + Neon before any release/publication decision.
+Fourth source increment:
+
+- `DomainRuleService.publish` writes `publication.requested` and `publication.completed` events transactionally on successful publication.
+- Publication event metadata is an allowlist: publication id, publication readiness and materialization count.
+- `publicationNotes`, prompt, assistant content, condition, parameters and materialized payload remain excluded from public-safe event metadata.
+- Blocked publication responses still do not become persisted audit events until there is a durable governance model for rejected/blocked attempts.
+
+Next code increment: prove publication events against quickstart local + Neon before any release/publication decision.
 
 ## Non-Goals
 

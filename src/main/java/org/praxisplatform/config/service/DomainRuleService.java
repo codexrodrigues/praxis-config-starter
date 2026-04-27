@@ -490,17 +490,29 @@ public class DomainRuleService {
                     Instant.now());
         }
 
-        Instant now = Instant.now();
+        Instant publicationRequestedAt = Instant.now();
+        UUID publicationId = UUID.randomUUID();
+        recordPublicationEvent(
+                definition,
+                "publication.requested",
+                publicationRequestedAt,
+                request.publishedByType(),
+                request.publishedBy(),
+                "Decision publication requested",
+                "requested",
+                readiness,
+                0,
+                publicationId);
         if (isPublishableDefinitionStatus(definition.getStatus())) {
             definition.setStatus("active");
             if (!StringUtils.hasText(definition.getApprovedBy()) && StringUtils.hasText(request.publishedBy())) {
                 definition.setApprovedBy(request.publishedBy().trim());
             }
             if (definition.getApprovedAt() == null) {
-                definition.setApprovedAt(now);
+                definition.setApprovedAt(publicationRequestedAt);
             }
             if (definition.getActivatedAt() == null) {
-                definition.setActivatedAt(now);
+                definition.setActivatedAt(publicationRequestedAt);
             }
             definition = definitionRepository.save(definition);
         }
@@ -512,11 +524,26 @@ public class DomainRuleService {
                 simulation.predictedMaterializations(),
                 tenantId,
                 environment,
-                now,
+                publicationRequestedAt,
                 materializationOutcomes);
+        Instant publicationCompletedAt = Instant.now();
+        if (!publicationCompletedAt.isAfter(publicationRequestedAt)) {
+            publicationCompletedAt = publicationRequestedAt.plusNanos(1);
+        }
+        recordPublicationEvent(
+                definition,
+                "publication.completed",
+                publicationCompletedAt,
+                request.publishedByType(),
+                request.publishedBy(),
+                "Decision publication completed",
+                "published",
+                readiness,
+                publishedMaterializations.size(),
+                publicationId);
 
         return new DomainRulePublicationResponse(
-                UUID.randomUUID(),
+                publicationId,
                 definition.getTenantId(),
                 definition.getEnvironment(),
                 "published",
@@ -530,7 +557,7 @@ public class DomainRuleService {
                 toResponse(definition),
                 publishedMaterializations,
                 withPublicationDiagnostics(simulation.explainability(), materializationOutcomes),
-                now);
+                publicationCompletedAt);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -2169,6 +2196,42 @@ public class DomainRuleService {
                 .materialization(materialization.getId() != null ? materialization : null)
                 .materializationKey(normalize(materialization.getMaterializationKey()))
                 .sourceHash(normalize(materialization.getSourceHash()))
+                .build());
+    }
+
+    private void recordPublicationEvent(
+            DomainRuleDefinition definition,
+            String eventType,
+            Instant occurredAt,
+            String actorType,
+            String actor,
+            String summary,
+            String status,
+            String publicationReadiness,
+            int materializationCount,
+            UUID publicationId) {
+        if (definition == null || definition.getId() == null || occurredAt == null) {
+            return;
+        }
+        ObjectNode safeMetadata = objectMapper.createObjectNode();
+        if (publicationId != null) {
+            safeMetadata.put("publicationId", publicationId.toString());
+        }
+        if (StringUtils.hasText(publicationReadiness)) {
+            safeMetadata.put("publicationReadiness", publicationReadiness);
+        }
+        safeMetadata.put("materializationCount", Math.max(0, materializationCount));
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(definition.getTenantId())
+                .environment(definition.getEnvironment())
+                .ruleDefinition(definition)
+                .eventType(eventType)
+                .occurredAt(occurredAt)
+                .actorType(normalizeOrDefault(actorType, "human"))
+                .actor(normalize(actor))
+                .summary(summary)
+                .status(normalize(status))
+                .safeMetadata(safeMetadata.toString())
                 .build());
     }
 
