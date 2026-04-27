@@ -156,6 +156,13 @@ public class DomainRuleService {
         decisionDiagnostics.put("decisionStage", "intake");
         grounding.set("decisionDiagnostics", decisionDiagnostics);
 
+        recordIntakeReceivedEvent(
+                persisted,
+                existingCoverage,
+                predictedMaterializations,
+                requiredApprovals,
+                warnings);
+
         return new DomainRuleIntakeResponse(
                 UUID.randomUUID(),
                 persisted.tenantId(),
@@ -2286,6 +2293,38 @@ public class DomainRuleService {
                 .actor(normalize(actor))
                 .summary("Decision approval completed")
                 .status("completed")
+                .safeMetadata(safeMetadata.toString())
+                .build());
+    }
+
+    private void recordIntakeReceivedEvent(
+            DomainRuleDefinitionResponse definition,
+            ArrayNode existingCoverage,
+            ArrayNode predictedMaterializations,
+            ArrayNode requiredApprovals,
+            ArrayNode warnings) {
+        if (definition == null || definition.id() == null || definition.createdAt() == null) {
+            return;
+        }
+        DomainRuleDefinition eventDefinition = definitionRepository.getReferenceById(definition.id());
+        ObjectNode safeMetadata = objectMapper.createObjectNode();
+        safeMetadata.put("decisionStage", "intake");
+        safeMetadata.put("definitionStatus", normalize(definition.status()));
+        safeMetadata.put("existingCoverageCount", existingCoverage != null ? existingCoverage.size() : 0);
+        safeMetadata.put("predictedMaterializationCount",
+                predictedMaterializations != null ? predictedMaterializations.size() : 0);
+        safeMetadata.put("requiredApprovalCount", requiredApprovals != null ? requiredApprovals.size() : 0);
+        safeMetadata.put("warningCount", warnings != null ? warnings.size() : 0);
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(definition.tenantId())
+                .environment(definition.environment())
+                .ruleDefinition(eventDefinition)
+                .eventType("intake.received")
+                .occurredAt(definition.createdAt())
+                .actorType(normalizeOrDefault(definition.createdByType(), "llm"))
+                .actor(normalize(definition.createdBy()))
+                .summary("Decision intake received")
+                .status(normalize(definition.status()))
                 .safeMetadata(safeMetadata.toString())
                 .build());
     }
