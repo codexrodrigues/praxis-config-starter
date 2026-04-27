@@ -30,6 +30,7 @@ Escopo coberto:
 - `POST /api/praxis/config/domain-rules/definitions`
 - `GET /api/praxis/config/domain-rules/definitions`
 - `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
+- `GET /api/praxis/config/domain-rules/definitions/{definitionId}/timeline`
 - `POST /api/praxis/config/domain-rules/simulations`
 - `POST /api/praxis/config/domain-rules/publications`
 - `POST /api/praxis/config/domain-rules/materializations`
