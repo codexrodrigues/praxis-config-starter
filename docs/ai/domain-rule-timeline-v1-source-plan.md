@@ -117,6 +117,17 @@ Guardrails:
 6. Update quickstart runtime smoke to require the new events only after local proof against Neon.
 7. Update Angular/landing only after the backend contract and HTTP proof are stable.
 
+## Implementation Status
+
+First source increment:
+
+- `V25__create_domain_rule_event.sql` creates the append-only `domain_rule_event` table.
+- `DomainRuleEvent` maps the persisted event source.
+- `DomainRuleEventRepository` exposes ordered lookup by definition.
+- This increment does not yet write events from `DomainRuleService` and does not change the public timeline endpoint.
+
+Next code increment: write v0-equivalent events transactionally while keeping the existing derived timeline response as fallback.
+
 ## Non-Goals
 
 - Do not create a second decision source outside `/api/praxis/config/domain-rules/**`.
