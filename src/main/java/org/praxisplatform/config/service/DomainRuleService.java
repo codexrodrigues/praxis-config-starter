@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.domain.DomainRuleEvent;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
@@ -35,6 +36,7 @@ import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleEventRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -44,7 +46,7 @@ import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnBean({DomainRuleDefinitionRepository.class, DomainRuleMaterializationRepository.class})
+@ConditionalOnBean({DomainRuleDefinitionRepository.class, DomainRuleMaterializationRepository.class, DomainRuleEventRepository.class})
 public class DomainRuleService {
 
     private static final List<String> DEFINITION_STATUSES = List.of(
@@ -55,6 +57,7 @@ public class DomainRuleService {
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
+    private final DomainRuleEventRepository eventRepository;
     private final DomainCatalogReleaseRepository releaseRepository;
     private final DomainKnowledgeChangeSetRepository changeSetRepository;
     private final ObjectMapper objectMapper;
@@ -204,7 +207,16 @@ public class DomainRuleService {
         definition.setCreatedByType(normalizeOrDefault(request.createdByType(), "system"));
         definition.setCreatedBy(normalize(request.createdBy()));
         definition.setApprovedBy(normalize(request.approvedBy()));
-        return toResponse(definitionRepository.save(definition));
+        DomainRuleDefinition saved = definitionRepository.save(definition);
+        recordDefinitionEvent(
+                saved,
+                "definition.created",
+                saved.getCreatedAt(),
+                saved.getCreatedByType(),
+                saved.getCreatedBy(),
+                "Decision definition created",
+                saved.getStatus());
+        return toResponse(saved);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -281,6 +293,9 @@ public class DomainRuleService {
         requireScope(definition.getEnvironment(), environment, "environment");
         requireAllowedDefinitionTransition(definition.getStatus(), status);
 
+        String previousStatus = definition.getStatus();
+        boolean hadApprovedAt = definition.getApprovedAt() != null;
+        boolean hadActivatedAt = definition.getActivatedAt() != null;
         definition.setStatus(status);
         if (request.validationResult() != null && !request.validationResult().isNull()) {
             definition.setValidationResult(write(request.validationResult()));
@@ -300,7 +315,28 @@ public class DomainRuleService {
                 definition.setActivatedAt(now);
             }
         }
-        return toResponse(definitionRepository.save(definition));
+        DomainRuleDefinition saved = definitionRepository.save(definition);
+        if (!hadApprovedAt && saved.getApprovedAt() != null) {
+            recordDefinitionEvent(
+                    saved,
+                    "definition.approved",
+                    saved.getApprovedAt(),
+                    normalizeOrDefault(request.decidedByType(), "human"),
+                    request.decidedBy(),
+                    "Decision definition approved",
+                    saved.getStatus());
+        }
+        if (!hadActivatedAt && saved.getActivatedAt() != null && !"active".equals(previousStatus)) {
+            recordDefinitionEvent(
+                    saved,
+                    "definition.activated",
+                    saved.getActivatedAt(),
+                    normalizeOrDefault(request.decidedByType(), "human"),
+                    request.decidedBy(),
+                    "Decision definition activated",
+                    saved.getStatus());
+        }
+        return toResponse(saved);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -557,7 +593,24 @@ public class DomainRuleService {
         if ("applied".equals(status)) {
             materialization.setAppliedAt(Instant.now());
         }
-        return toResponse(materializationRepository.save(materialization));
+        DomainRuleMaterialization saved = materializationRepository.save(materialization);
+        recordMaterializationEvent(
+                saved,
+                "materialization.created",
+                saved.getCreatedAt(),
+                "system",
+                "domain-rule-materialization",
+                "Decision materialization created");
+        if ("applied".equals(saved.getStatus())) {
+            recordMaterializationEvent(
+                    saved,
+                    "materialization.applied",
+                    saved.getAppliedAt(),
+                    saved.getAppliedByType(),
+                    saved.getAppliedBy(),
+                    "Decision materialization applied");
+        }
+        return toResponse(saved);
     }
 
     private void requireReusableMaterialization(
@@ -1661,6 +1714,13 @@ public class DomainRuleService {
         materialization.setMaterializedPayload(write(payload));
         materialization.setSourceHash(sourceHash);
         DomainRuleMaterialization saved = materializationRepository.save(materialization);
+        recordMaterializationEvent(
+                saved,
+                "materialization.created",
+                saved.getCreatedAt(),
+                "system",
+                "domain-rule-materialization",
+                "Decision materialization created");
         addMaterializationOutcome(materializationOutcomes, saved, "created", null);
         return saved;
     }
@@ -1888,7 +1948,15 @@ public class DomainRuleService {
             if (materialization.getAppliedAt() == null) {
                 materialization.setAppliedAt(now);
             }
-            return materializationRepository.save(materialization);
+            DomainRuleMaterialization saved = materializationRepository.save(materialization);
+            recordMaterializationEvent(
+                    saved,
+                    "materialization.applied",
+                    saved.getAppliedAt(),
+                    saved.getAppliedByType(),
+                    saved.getAppliedBy(),
+                    "Decision materialization applied");
+            return saved;
         }
         return materialization;
     }
@@ -1999,6 +2067,7 @@ public class DomainRuleService {
             throw new ConfigurationIngestionException("Rule materialization can only be applied when its definition is active");
         }
 
+        String previousStatus = materialization.getStatus();
         materialization.setStatus(status);
         materialization.setValidationResult(writeNullable(request.validationResult()));
         if (StringUtils.hasText(request.decidedByType())) {
@@ -2010,7 +2079,70 @@ public class DomainRuleService {
         if ("applied".equals(status) && materialization.getAppliedAt() == null) {
             materialization.setAppliedAt(Instant.now());
         }
-        return toResponse(materializationRepository.save(materialization));
+        DomainRuleMaterialization saved = materializationRepository.save(materialization);
+        if ("applied".equals(status) && !"applied".equals(previousStatus)) {
+            recordMaterializationEvent(
+                    saved,
+                    "materialization.applied",
+                    saved.getAppliedAt(),
+                    saved.getAppliedByType(),
+                    saved.getAppliedBy(),
+                    "Decision materialization applied");
+        }
+        return toResponse(saved);
+    }
+
+    private void recordDefinitionEvent(
+            DomainRuleDefinition definition,
+            String eventType,
+            Instant occurredAt,
+            String actorType,
+            String actor,
+            String summary,
+            String status) {
+        if (definition == null || definition.getId() == null || occurredAt == null) {
+            return;
+        }
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(definition.getTenantId())
+                .environment(definition.getEnvironment())
+                .ruleDefinition(definition)
+                .eventType(eventType)
+                .occurredAt(occurredAt)
+                .actorType(normalize(actorType))
+                .actor(normalize(actor))
+                .summary(summary)
+                .status(normalize(status))
+                .build());
+    }
+
+    private void recordMaterializationEvent(
+            DomainRuleMaterialization materialization,
+            String eventType,
+            Instant occurredAt,
+            String actorType,
+            String actor,
+            String summary) {
+        if (materialization == null || materialization.getRuleDefinition() == null || occurredAt == null) {
+            return;
+        }
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(materialization.getTenantId())
+                .environment(materialization.getEnvironment())
+                .ruleDefinition(materialization.getRuleDefinition())
+                .eventType(eventType)
+                .occurredAt(occurredAt)
+                .actorType(normalize(actorType))
+                .actor(normalize(actor))
+                .summary(summary)
+                .status(normalize(materialization.getStatus()))
+                .targetLayer(normalize(materialization.getTargetLayer()))
+                .targetArtifactType(normalize(materialization.getTargetArtifactType()))
+                .targetArtifactKey(normalize(materialization.getTargetArtifactKey()))
+                .materialization(materialization.getId() != null ? materialization : null)
+                .materializationKey(normalize(materialization.getMaterializationKey()))
+                .sourceHash(normalize(materialization.getSourceHash()))
+                .build());
     }
 
     private void addDefinitionTimelineEvents(
