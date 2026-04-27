@@ -119,6 +119,50 @@ class DomainKnowledgeEntityLifecycleTest {
     }
 
     @Test
+    void domainRuleEventDefaultsSafeVisibilityAndMetadata() {
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .ruleKey("operations.missoes.rule.pause")
+                .ruleType("workflow_action_policy")
+                .resourceKey("operations.missoes")
+                .createdByType("llm")
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(UUID.randomUUID())
+                .ruleDefinition(definition)
+                .materializationKey("operations.missoes.rule.pause:workflow_action:operations.missoes:pause")
+                .targetLayer("workflow_action")
+                .targetArtifactType("resource-workflow-action")
+                .targetArtifactKey("operations.missoes:pause")
+                .sourceHash("derived:sha256:abc")
+                .build();
+        DomainRuleEvent event = DomainRuleEvent.builder()
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .eventType("materialization.applied")
+                .actorType("system")
+                .actor("publication")
+                .summary("Decision materialization applied")
+                .status("applied")
+                .targetLayer("workflow_action")
+                .targetArtifactType("resource-workflow-action")
+                .targetArtifactKey("operations.missoes:pause")
+                .materialization(materialization)
+                .materializationKey(materialization.getMaterializationKey())
+                .sourceHash(materialization.getSourceHash())
+                .build();
+
+        event.onInsert();
+
+        assertThat(event.getId()).isNotNull();
+        assertThat(event.getOccurredAt()).isNotNull();
+        assertThat(event.getVisibility()).isEqualTo("safe");
+        assertThat(event.getSafeMetadata()).isEqualTo("{}");
+        assertThat(event.getCreatedAt()).isNotNull();
+    }
+
+    @Test
     void federationEntitiesDefaultLifecycleAndEvidencePayloads() {
         DomainFederationRelease release = DomainFederationRelease.builder()
                 .releaseKey("domain-federation:default:dev:v2026-04-23T16:00Z")
