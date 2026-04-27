@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +29,8 @@ import org.praxisplatform.config.dto.DomainRulePublicationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
+import org.praxisplatform.config.dto.DomainRuleTimelineEventResponse;
+import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
@@ -1936,6 +1940,43 @@ public class DomainRuleService {
                 .toList();
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public DomainRuleTimelineResponse definitionTimeline(
+            UUID definitionId,
+            String tenantId,
+            String environment) {
+        if (definitionId == null) {
+            throw new ConfigurationIngestionException("definitionId is required");
+        }
+        DomainRuleDefinition definition = definitionRepository.findById(definitionId)
+                .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + definitionId));
+        requireScope(definition.getTenantId(), tenantId, "tenantId");
+        requireScope(definition.getEnvironment(), environment, "environment");
+
+        ArrayList<DomainRuleTimelineEventResponse> events = new ArrayList<>();
+        addDefinitionTimelineEvents(events, definition);
+        materializationRepository
+                .findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                        normalize(tenantId),
+                        normalize(environment),
+                        definitionId)
+                .forEach(materialization -> addMaterializationTimelineEvents(events, materialization));
+        events.sort(Comparator
+                .comparing(DomainRuleTimelineEventResponse::occurredAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(DomainRuleTimelineEventResponse::eventType, Comparator.nullsLast(Comparator.naturalOrder())));
+
+        return new DomainRuleTimelineResponse(
+                definition.getId(),
+                definition.getTenantId(),
+                definition.getEnvironment(),
+                definition.getRuleKey(),
+                definition.getVersion(),
+                definition.getRuleType(),
+                definition.getResourceKey(),
+                definition.getServiceKey(),
+                List.copyOf(events));
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleMaterializationResponse transitionMaterializationStatus(
             UUID materializationId,
@@ -1970,6 +2011,89 @@ public class DomainRuleService {
             materialization.setAppliedAt(Instant.now());
         }
         return toResponse(materializationRepository.save(materialization));
+    }
+
+    private void addDefinitionTimelineEvents(
+            List<DomainRuleTimelineEventResponse> events,
+            DomainRuleDefinition definition) {
+        addTimelineEvent(
+                events,
+                "definition.created",
+                definition.getCreatedAt(),
+                definition.getCreatedByType(),
+                definition.getCreatedBy(),
+                "Decision definition created",
+                definition.getStatus(),
+                null);
+        addTimelineEvent(
+                events,
+                "definition.approved",
+                definition.getApprovedAt(),
+                "human",
+                definition.getApprovedBy(),
+                "Decision definition approved",
+                definition.getStatus(),
+                null);
+        addTimelineEvent(
+                events,
+                "definition.activated",
+                definition.getActivatedAt(),
+                "human",
+                definition.getApprovedBy(),
+                "Decision definition activated",
+                definition.getStatus(),
+                null);
+    }
+
+    private void addMaterializationTimelineEvents(
+            List<DomainRuleTimelineEventResponse> events,
+            DomainRuleMaterialization materialization) {
+        addTimelineEvent(
+                events,
+                "materialization.created",
+                materialization.getCreatedAt(),
+                "system",
+                "domain-rule-materialization",
+                "Decision materialization created",
+                materialization.getStatus(),
+                materialization);
+        addTimelineEvent(
+                events,
+                "materialization.applied",
+                materialization.getAppliedAt(),
+                materialization.getAppliedByType(),
+                materialization.getAppliedBy(),
+                "Decision materialization applied",
+                materialization.getStatus(),
+                materialization);
+    }
+
+    private void addTimelineEvent(
+            List<DomainRuleTimelineEventResponse> events,
+            String eventType,
+            Instant occurredAt,
+            String actorType,
+            String actor,
+            String summary,
+            String status,
+            DomainRuleMaterialization materialization) {
+        if (occurredAt == null) {
+            return;
+        }
+        events.add(new DomainRuleTimelineEventResponse(
+                eventType,
+                occurredAt,
+                normalize(actorType),
+                normalize(actor),
+                summary,
+                normalize(status),
+                materialization != null ? materialization.getTargetLayer() : null,
+                materialization != null ? materialization.getTargetArtifactType() : null,
+                materialization != null ? materialization.getTargetArtifactKey() : null,
+                materialization != null ? materialization.getId() : null,
+                materialization != null ? materialization.getMaterializationKey() : null,
+                materialization != null ? materialization.getSourceHash() : null,
+                "safe"));
     }
 
     private boolean hasActiveDefinition(DomainRuleMaterialization materialization) {

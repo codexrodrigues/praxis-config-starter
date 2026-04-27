@@ -20,6 +20,7 @@ import org.praxisplatform.config.dto.DomainRulePublicationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
+import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
 import org.praxisplatform.config.service.DomainRuleService;
 
 @Tag("unit")
@@ -207,6 +208,29 @@ class DomainRuleControllerTest {
                 "praxis-dynamic-form",
                 "funcionarios-form-demo",
                 "pending_review");
+    }
+
+    @Test
+    void returnsDefinitionTimelineWithTenantAndEnvironmentHeaders() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleController controller = new DomainRuleController(service);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleTimelineResponse response = new DomainRuleTimelineResponse(
+                definitionId,
+                "tenant-a",
+                "dev",
+                "operations.missoes.rule.pause",
+                1,
+                "workflow_action_policy",
+                "operations.missoes",
+                "praxis-api-quickstart",
+                List.of());
+        when(service.definitionTimeline(definitionId, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.definitionTimeline(definitionId, "tenant-a", "dev");
+
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
     }
 
     @Test

@@ -839,6 +839,41 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
 
+  /api/praxis/config/domain-rules/definitions/{definitionId}/timeline:
+    get:
+      tags: [domain-rules]
+      operationId: getDomainRuleDefinitionTimeline
+      summary: Retorna timeline segura da decisao governada
+      description: Projecao read-only derivada da definicao e materializacoes; nao retorna prompts, condicoes, parametros ou payloads materializados.
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: definitionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Timeline encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleTimelineResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Definicao nao encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
   /api/praxis/config/domain-rules/simulations:
     post:
       tags: [domain-rules]
@@ -1057,7 +1092,7 @@ components:
       required: false
       schema:
         type: string
-        default: acaa7e13b1bff39de4f313f882fd8114017c495f3f5802afcd131619a229a6ad
+        default: 68011e5f49ded11a590170e8440b6b1745c013be44dd101651542e87af6ebcba
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1087,7 +1122,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: acaa7e13b1bff39de4f313f882fd8114017c495f3f5802afcd131619a229a6ad
+        example: 68011e5f49ded11a590170e8440b6b1745c013be44dd101651542e87af6ebcba
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2520,6 +2555,86 @@ components:
               format: date-time
               nullable: true
           additionalProperties: false
+
+    DomainRuleTimelineResponse:
+      type: object
+      description: Timeline segura e derivada da definicao sem expor prompts, condicoes, parametros ou payloads materializados.
+      properties:
+        ruleDefinitionId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        environment:
+          type: string
+        ruleKey:
+          type: string
+        ruleVersion:
+          type: integer
+          nullable: true
+        ruleType:
+          type: string
+        resourceKey:
+          type: string
+          nullable: true
+        serviceKey:
+          type: string
+          nullable: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainRuleTimelineEventResponse'
+      additionalProperties: false
+
+    DomainRuleTimelineEventResponse:
+      type: object
+      description: Evento seguro da timeline de governanca de uma decisao semantica.
+      properties:
+        eventType:
+          type: string
+          enum:
+            - definition.created
+            - definition.approved
+            - definition.activated
+            - materialization.created
+            - materialization.applied
+        occurredAt:
+          type: string
+          format: date-time
+        actorType:
+          type: string
+          nullable: true
+        actor:
+          type: string
+          nullable: true
+        summary:
+          type: string
+        status:
+          type: string
+          nullable: true
+        targetLayer:
+          type: string
+          nullable: true
+        targetArtifactType:
+          type: string
+          nullable: true
+        targetArtifactKey:
+          type: string
+          nullable: true
+        materializationId:
+          type: string
+          format: uuid
+          nullable: true
+        materializationKey:
+          type: string
+          nullable: true
+        sourceHash:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [safe]
+      additionalProperties: false
 
     DomainRuleIntakeRequest:
       type: object
