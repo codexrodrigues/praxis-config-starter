@@ -52,6 +52,11 @@ class DomainRuleServiceTest {
             definition.onInsert();
             return definition;
         });
+        when(definitionRepository.getReferenceById(any(UUID.class))).thenAnswer(invocation -> {
+            DomainRuleDefinition definition = new DomainRuleDefinition();
+            definition.setId(invocation.getArgument(0));
+            return definition;
+        });
 
         var response = service.intake(
                 new DomainRuleIntakeRequest(
@@ -118,15 +123,33 @@ class DomainRuleServiceTest {
         assertThat(captor.getValue().getResourceKey()).isEqualTo("procurement.suppliers");
         assertThat(captor.getValue().getStatus()).isEqualTo("draft");
         ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
-        verify(eventRepository, org.mockito.Mockito.times(2)).save(eventCaptor.capture());
+        verify(eventRepository, org.mockito.Mockito.times(3)).save(eventCaptor.capture());
         assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
-                .containsExactly("definition.created", "approval.requested");
+                .containsExactly("definition.created", "approval.requested", "intake.received");
         assertThat(eventCaptor.getAllValues().get(0).getActorType()).isEqualTo("llm");
         assertThat(eventCaptor.getAllValues().get(0).getActor()).isEqualTo("openai:gpt-5.4-mini");
         assertThat(eventCaptor.getAllValues().get(0).getSummary()).isEqualTo("Decision definition created");
         assertThat(eventCaptor.getAllValues().get(0).getStatus()).isEqualTo("draft");
         assertThat(eventCaptor.getAllValues().get(1).getSummary()).isEqualTo("Decision approval requested");
         assertThat(eventCaptor.getAllValues().get(1).getSafeMetadata()).contains("\"requiredApprovalCount\":1");
+        DomainRuleEvent intakeEvent = eventCaptor.getAllValues().get(2);
+        assertThat(intakeEvent.getSummary()).isEqualTo("Decision intake received");
+        assertThat(intakeEvent.getStatus()).isEqualTo("draft");
+        assertThat(intakeEvent.getActorType()).isEqualTo("llm");
+        assertThat(intakeEvent.getActor()).isEqualTo("openai:gpt-5.4-mini");
+        assertThat(intakeEvent.getSafeMetadata())
+                .contains("\"decisionStage\":\"intake\"")
+                .contains("\"definitionStatus\":\"draft\"")
+                .contains("\"existingCoverageCount\":0")
+                .contains("\"predictedMaterializationCount\":2")
+                .contains("\"requiredApprovalCount\":1")
+                .contains("\"warningCount\":0");
+        assertThat(intakeEvent.getSafeMetadata())
+                .doesNotContain("Impedir seleção")
+                .doesNotContain("Vou abrir")
+                .doesNotContain("INACTIVE")
+                .doesNotContain("BLOCKED")
+                .doesNotContain("optionSourceKey");
     }
 
     @Test
