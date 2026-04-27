@@ -14,6 +14,7 @@ import org.praxisplatform.config.dto.DomainRulePublicationResponse;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
+import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.service.DomainRuleService;
@@ -84,6 +85,14 @@ public class DomainRuleController {
                 request,
                 tenantId,
                 environment));
+    }
+
+    @GetMapping("/definitions/{definitionId}/timeline")
+    public ResponseEntity<DomainRuleTimelineResponse> definitionTimeline(
+            @PathVariable UUID definitionId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainRuleService.definitionTimeline(definitionId, tenantId, environment));
     }
 
     @PostMapping("/simulations")

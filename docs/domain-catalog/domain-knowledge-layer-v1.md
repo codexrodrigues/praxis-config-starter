@@ -403,6 +403,7 @@ Recommended first endpoints:
 - `POST /api/praxis/config/domain-rules/definitions`
 - `GET /api/praxis/config/domain-rules/definitions`
 - `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
+- `GET /api/praxis/config/domain-rules/definitions/{definitionId}/timeline`
 - `POST /api/praxis/config/domain-rules/simulations`
 - `POST /api/praxis/config/domain-rules/publications`
 - `POST /api/praxis/config/domain-rules/materializations`
@@ -427,6 +428,13 @@ is persisted or ad hoc, and summarizes coverage, predicted materializations,
 required approvals and warnings. A materialization row may point to
 `target_layer=form_config`, but applying that payload to `FormConfig` remains a
 separate reviewed authoring operation.
+
+The definition timeline endpoint is a read-only observability projection. It is
+derived from the canonical definition and materialization records and may expose
+safe lifecycle metadata such as event type, timestamp, actor, status, target
+coordinates, `materializationKey` and `sourceHash`. It must not expose raw
+prompts, assistant drafts, authored conditions, parameters or materialized
+payload bodies.
 
 Status transition endpoints accept a compact governance decision payload:
 

@@ -64,6 +64,7 @@ intent -> semantic grounding -> governed rule definition -> simulation -> approv
 | `POST /api/praxis/config/domain-rules/definitions` | Persists explicit rule definitions with semantic owner, steward, source release/change-set and governance payload. |
 | `GET /api/praxis/config/domain-rules/definitions` | Lists definitions by tenant/environment, resource, status, rule type or key. |
 | `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status` | Records lifecycle transitions for definitions. |
+| `GET /api/praxis/config/domain-rules/definitions/{definitionId}/timeline` | Projects a safe governance timeline for definitions and materializations without returning prompts, conditions, parameters or materialized payloads. |
 | `POST /api/praxis/config/domain-rules/simulations` | Returns diagnostics, existing coverage, predicted materializations, required approvals, warnings and explainability. |
 | `POST /api/praxis/config/domain-rules/publications` | Publishes ready definitions and derives/applies eligible materializations. |
 | `POST /api/praxis/config/domain-rules/materializations` | Creates explicit materializations for runtime/backend targets. |

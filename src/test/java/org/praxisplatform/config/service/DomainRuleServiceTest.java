@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -303,6 +304,106 @@ class DomainRuleServiceTest {
                     assertThat(validationPolicy.path("parameters").path("validationMessageTemplate").asText())
                             .isEqualTo("Fornecedor indisponivel para novos pedidos");
                 });
+    }
+
+    @Test
+    void definitionTimelineReturnsSafeDerivedLifecycleWithoutPromptPayloads() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        UUID materializationId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-04-27T01:00:00Z");
+        Instant approvedAt = Instant.parse("2026-04-27T01:01:00Z");
+        Instant activatedAt = Instant.parse("2026-04-27T01:02:00Z");
+        Instant materializationCreatedAt = Instant.parse("2026-04-27T01:03:00Z");
+        Instant appliedAt = Instant.parse("2026-04-27T01:04:00Z");
+
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("operations.missoes.rule.pause")
+                .version(1)
+                .ruleType("workflow_action_policy")
+                .status("active")
+                .contextKey("operations")
+                .resourceKey("operations.missoes")
+                .serviceKey("praxis-api-quickstart")
+                .definition("""
+                        {
+                          "summary": "Block mission pause while operational review is required",
+                          "sourcePrompt": "raw prompt must not leak",
+                          "assistantMessage": "assistant draft must not leak"
+                        }
+                        """)
+                .parameters("{}")
+                .governance("{}")
+                .createdByType("llm")
+                .createdBy("runtime-smoke")
+                .approvedBy("mission-ops")
+                .createdAt(createdAt)
+                .updatedAt(activatedAt)
+                .approvedAt(approvedAt)
+                .activatedAt(activatedAt)
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(materializationId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("operations.missoes.rule.pause:workflow_action:operations.missoes:pause")
+                .targetLayer("workflow_action")
+                .targetArtifactType("resource-workflow-action")
+                .targetArtifactKey("operations.missoes:pause")
+                .status("applied")
+                .materializedPayload("""
+                        {
+                          "kind": "workflow_action_policy",
+                          "availabilityPolicy": {
+                            "message": "sensitive operational message stays out of the timeline event"
+                          }
+                        }
+                        """)
+                .sourceHash("derived:sha256:abc")
+                .appliedByType("human")
+                .appliedBy("mission-ops")
+                .createdAt(materializationCreatedAt)
+                .updatedAt(appliedAt)
+                .appliedAt(appliedAt)
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of(materialization));
+
+        var timeline = service.definitionTimeline(definitionId, "tenant-a", "dev");
+
+        assertThat(timeline.ruleDefinitionId()).isEqualTo(definitionId);
+        assertThat(timeline.ruleKey()).isEqualTo("operations.missoes.rule.pause");
+        assertThat(timeline.events()).extracting("eventType")
+                .containsExactly(
+                        "definition.created",
+                        "definition.approved",
+                        "definition.activated",
+                        "materialization.created",
+                        "materialization.applied");
+        assertThat(timeline.events()).allSatisfy(event -> assertThat(event.visibility()).isEqualTo("safe"));
+        assertThat(timeline.events()).anySatisfy(event -> {
+            assertThat(event.eventType()).isEqualTo("materialization.applied");
+            assertThat(event.targetLayer()).isEqualTo("workflow_action");
+            assertThat(event.targetArtifactType()).isEqualTo("resource-workflow-action");
+            assertThat(event.targetArtifactKey()).isEqualTo("operations.missoes:pause");
+            assertThat(event.sourceHash()).isEqualTo("derived:sha256:abc");
+        });
+        String safeTimelineSurface = timeline.events().stream()
+                .map(Object::toString)
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertThat(safeTimelineSurface).doesNotContain("raw prompt must not leak");
+        assertThat(safeTimelineSurface).doesNotContain("assistant draft must not leak");
+        assertThat(safeTimelineSurface).doesNotContain("sensitive operational message");
     }
 
     @Test

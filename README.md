@@ -197,6 +197,7 @@ Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG 
 | POST | `/api/praxis/config/domain-rules/definitions` | Persists an explicit shared domain rule definition with governance, source release/change-set links and semantic ownership. |
 | GET | `/api/praxis/config/domain-rules/definitions` | Lists shared domain rule definitions by tenant/environment, resource, status, rule type or rule key. |
 | PATCH | `/api/praxis/config/domain-rules/definitions/{definitionId}/status` | Transitions a rule definition through the governed lifecycle. |
+| GET | `/api/praxis/config/domain-rules/definitions/{definitionId}/timeline` | Returns a safe, derived governance timeline for the definition and its materializations without leaking prompts or payloads. |
 | POST | `/api/praxis/config/domain-rules/simulations` | Produces backend-owned decision diagnostics, existing coverage, predicted materializations, required approvals and warnings. |
 | POST | `/api/praxis/config/domain-rules/publications` | Promotes a ready definition and applies or derives eligible materializations with publication diagnostics. |
 | POST | `/api/praxis/config/domain-rules/materializations` | Creates an explicit runtime/backend materialization for a shared domain rule. |
@@ -218,9 +219,11 @@ The minimal lifecycle is:
    returns backend-owned diagnostics: existing coverage, predicted materializations, required approvals, warnings and explainability.
 3. `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`
    records governance decisions such as proposal, approval, activation, rejection or retirement.
-4. `POST /api/praxis/config/domain-rules/publications`
+4. `GET /api/praxis/config/domain-rules/definitions/{definitionId}/timeline`
+   exposes the safe decision audit trail for definition and materialization lifecycle events without returning raw prompts, authored conditions, parameters or materialized payloads.
+5. `POST /api/praxis/config/domain-rules/publications`
    promotes publishable definitions and derives or applies eligible materializations.
-5. `GET /api/praxis/config/domain-rules/materializations`
+6. `GET /api/praxis/config/domain-rules/materializations`
    exposes concrete projections such as `option_source`, `backend_validation` or runtime targets for consumers.
 
 This lifecycle keeps AI authoring at the decision level. Component/page authoring may still use `/api/praxis/config/ai/authoring/**`, but business-rule authoring should route to domain rules first and publish only derived materializations to runtime consumers.
