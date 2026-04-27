@@ -216,6 +216,7 @@ public class DomainRuleService {
                 saved.getCreatedBy(),
                 "Decision definition created",
                 saved.getStatus());
+        recordApprovalRequestedEventIfRequired(saved, saved.getCreatedAt());
         return toResponse(saved);
     }
 
@@ -325,6 +326,11 @@ public class DomainRuleService {
                     request.decidedBy(),
                     "Decision definition approved",
                     saved.getStatus());
+            recordApprovalCompletedEvent(
+                    saved,
+                    saved.getApprovedAt(),
+                    normalizeOrDefault(request.decidedByType(), "human"),
+                    request.decidedBy());
         }
         if (!hadActivatedAt && saved.getActivatedAt() != null && !"active".equals(previousStatus)) {
             recordDefinitionEvent(
@@ -2231,6 +2237,55 @@ public class DomainRuleService {
                 .actor(normalize(actor))
                 .summary(summary)
                 .status(normalize(status))
+                .safeMetadata(safeMetadata.toString())
+                .build());
+    }
+
+    private void recordApprovalRequestedEventIfRequired(DomainRuleDefinition definition, Instant occurredAt) {
+        if (definition == null || definition.getId() == null || occurredAt == null) {
+            return;
+        }
+        ArrayNode requiredApprovals = buildRequiredApprovals(read(definition.getGovernance()));
+        if (requiredApprovals.isEmpty()) {
+            return;
+        }
+        ObjectNode safeMetadata = objectMapper.createObjectNode();
+        safeMetadata.put("requiredApprovalCount", requiredApprovals.size());
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(definition.getTenantId())
+                .environment(definition.getEnvironment())
+                .ruleDefinition(definition)
+                .eventType("approval.requested")
+                .occurredAt(occurredAt)
+                .actorType(normalizeOrDefault(definition.getCreatedByType(), "system"))
+                .actor(normalize(definition.getCreatedBy()))
+                .summary("Decision approval requested")
+                .status("requested")
+                .safeMetadata(safeMetadata.toString())
+                .build());
+    }
+
+    private void recordApprovalCompletedEvent(
+            DomainRuleDefinition definition,
+            Instant occurredAt,
+            String actorType,
+            String actor) {
+        if (definition == null || definition.getId() == null || occurredAt == null) {
+            return;
+        }
+        ArrayNode requiredApprovals = buildRequiredApprovals(read(definition.getGovernance()));
+        ObjectNode safeMetadata = objectMapper.createObjectNode();
+        safeMetadata.put("requiredApprovalCount", requiredApprovals.size());
+        eventRepository.save(DomainRuleEvent.builder()
+                .tenantId(definition.getTenantId())
+                .environment(definition.getEnvironment())
+                .ruleDefinition(definition)
+                .eventType("approval.completed")
+                .occurredAt(occurredAt)
+                .actorType(normalizeOrDefault(actorType, "human"))
+                .actor(normalize(actor))
+                .summary("Decision approval completed")
+                .status("completed")
                 .safeMetadata(safeMetadata.toString())
                 .build());
     }

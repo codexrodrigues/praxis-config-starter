@@ -145,7 +145,14 @@ Fourth source increment:
 - `publicationNotes`, prompt, assistant content, condition, parameters and materialized payload remain excluded from public-safe event metadata.
 - Blocked publication responses still do not become persisted audit events until there is a durable governance model for rejected/blocked attempts.
 
-Next code increment: prove publication events against quickstart local + Neon before any release/publication decision.
+Fifth source increment:
+
+- `DomainRuleService.createDefinition` writes `approval.requested` when persisted governance requires approval.
+- `DomainRuleService.transitionDefinitionStatus` writes `approval.completed` when the persisted definition receives its first approval timestamp.
+- Approval event metadata is an allowlist: required approval count only.
+- Required approver identities, validation details, prompt, assistant content, condition, parameters and materialized payload remain excluded from public-safe event metadata.
+
+Next code increment: prove approval events against quickstart local + Neon before any release/publication decision.
 
 ## Non-Goals
 
