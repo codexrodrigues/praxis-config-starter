@@ -56,7 +56,15 @@ class AiApiContractOpenApiTest {
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch",
                 "/api/praxis/config/ai/authoring/intent-resolution",
                 "/api/praxis/config/ai/authoring/page-preview",
-                "/api/praxis/config/ai/authoring/page-apply");
+                "/api/praxis/config/ai/authoring/page-apply",
+                "/api/praxis/config/domain-rules/intake",
+                "/api/praxis/config/domain-rules/definitions",
+                "/api/praxis/config/domain-rules/definitions/{definitionId}/status",
+                "/api/praxis/config/domain-rules/definitions/{definitionId}/timeline",
+                "/api/praxis/config/domain-rules/simulations",
+                "/api/praxis/config/domain-rules/publications",
+                "/api/praxis/config/domain-rules/materializations",
+                "/api/praxis/config/domain-rules/materializations/{materializationId}/status");
 
         Map<String, Object> components = (Map<String, Object>) document.get("components");
         assertThat(components).isNotNull();
@@ -95,7 +103,9 @@ class AiApiContractOpenApiTest {
                 "AgenticAuthoringPreviewResult",
                 "AgenticAuthoringApplyRequest",
                 "AiDomainCatalogContextHint",
-                "AiDomainCatalogRelationshipHint");
+                "AiDomainCatalogRelationshipHint",
+                "DomainRuleTimelineResponse",
+                "DomainRuleTimelineEventResponse");
 
         Map<String, Object> domainCatalogHint =
                 (Map<String, Object>) schemas.get("AiDomainCatalogContextHint");
@@ -339,6 +349,46 @@ class AiApiContractOpenApiTest {
                 (Map<String, Object>) resourceCandidatesProperties.get("quickReplies");
         assertThat((Map<String, Object>) resourceQuickReplies.get("items"))
                 .containsEntry("$ref", "#/components/schemas/AgenticAuthoringQuickReply");
+
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/domain-rules/definitions/{definitionId}/timeline",
+                "get",
+                null,
+                "#/components/schemas/DomainRuleTimelineResponse");
+        Map<String, Object> timelineResponse =
+                (Map<String, Object>) schemas.get("DomainRuleTimelineResponse");
+        Map<String, Object> timelineResponseProperties =
+                (Map<String, Object>) timelineResponse.get("properties");
+        assertThat(timelineResponseProperties).containsKeys(
+                "ruleDefinitionId",
+                "tenantId",
+                "environment",
+                "ruleKey",
+                "ruleType",
+                "resourceKey",
+                "events");
+        assertThat((Map<String, Object>) ((Map<String, Object>) timelineResponseProperties.get("events")).get("items"))
+                .containsEntry("$ref", "#/components/schemas/DomainRuleTimelineEventResponse");
+        Map<String, Object> timelineEvent =
+                (Map<String, Object>) schemas.get("DomainRuleTimelineEventResponse");
+        Map<String, Object> timelineEventProperties =
+                (Map<String, Object>) timelineEvent.get("properties");
+        assertThat(timelineEventProperties).containsKeys(
+                "eventType",
+                "occurredAt",
+                "actorType",
+                "actor",
+                "summary",
+                "status",
+                "targetLayer",
+                "targetArtifactType",
+                "targetArtifactKey",
+                "materializationId",
+                "materializationKey",
+                "sourceHash",
+                "visibility");
+        assertThat((List<String>) ((Map<String, Object>) timelineEventProperties.get("visibility")).get("enum"))
+                .containsExactly("safe");
 
         Map<String, Object> parameters = (Map<String, Object>) components.get("parameters");
         assertThat(parameters).isNotNull();
