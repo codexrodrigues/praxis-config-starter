@@ -118,12 +118,15 @@ class DomainRuleServiceTest {
         assertThat(captor.getValue().getResourceKey()).isEqualTo("procurement.suppliers");
         assertThat(captor.getValue().getStatus()).isEqualTo("draft");
         ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
-        verify(eventRepository).save(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().getEventType()).isEqualTo("definition.created");
-        assertThat(eventCaptor.getValue().getActorType()).isEqualTo("llm");
-        assertThat(eventCaptor.getValue().getActor()).isEqualTo("openai:gpt-5.4-mini");
-        assertThat(eventCaptor.getValue().getSummary()).isEqualTo("Decision definition created");
-        assertThat(eventCaptor.getValue().getStatus()).isEqualTo("draft");
+        verify(eventRepository, org.mockito.Mockito.times(2)).save(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
+                .containsExactly("definition.created", "approval.requested");
+        assertThat(eventCaptor.getAllValues().get(0).getActorType()).isEqualTo("llm");
+        assertThat(eventCaptor.getAllValues().get(0).getActor()).isEqualTo("openai:gpt-5.4-mini");
+        assertThat(eventCaptor.getAllValues().get(0).getSummary()).isEqualTo("Decision definition created");
+        assertThat(eventCaptor.getAllValues().get(0).getStatus()).isEqualTo("draft");
+        assertThat(eventCaptor.getAllValues().get(1).getSummary()).isEqualTo("Decision approval requested");
+        assertThat(eventCaptor.getAllValues().get(1).getSafeMetadata()).contains("\"requiredApprovalCount\":1");
     }
 
     @Test
@@ -348,7 +351,7 @@ class DomainRuleServiceTest {
                         }
                         """)
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"privacy-office\"],\"privateNotes\":\"must not leak approval notes\"}")
                 .createdByType("llm")
                 .createdBy("runtime-smoke")
                 .approvedBy("mission-ops")
@@ -438,7 +441,7 @@ class DomainRuleServiceTest {
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"sourcePrompt\":\"must not leak from definition\"}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"privacy-office\"],\"privateNotes\":\"must not leak approval notes\"}")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(materializationId)
@@ -1465,7 +1468,7 @@ class DomainRuleServiceTest {
                 .status("approved")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"privacy-office\"],\"privateNotes\":\"must not leak approval notes\"}")
                 .build();
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
         when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -1476,7 +1479,7 @@ class DomainRuleServiceTest {
                         "active",
                         "human",
                         "privacy-office",
-                        objectMapper.readTree("{\"review\":\"approved\"}")),
+                        objectMapper.readTree("{\"review\":\"approved\",\"privateNotes\":\"must not leak approval notes\"}")),
                 "tenant-a",
                 "dev");
 
@@ -1487,9 +1490,15 @@ class DomainRuleServiceTest {
         assertThat(response.validationResult().path("review").asText()).isEqualTo("approved");
         verify(definitionRepository).save(definition);
         ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
-        verify(eventRepository, org.mockito.Mockito.times(2)).save(eventCaptor.capture());
+        verify(eventRepository, org.mockito.Mockito.times(3)).save(eventCaptor.capture());
         assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
-                .containsExactly("definition.approved", "definition.activated");
+                .containsExactly("definition.approved", "approval.completed", "definition.activated");
+        assertThat(eventCaptor.getAllValues().get(1)).satisfies(event -> {
+            assertThat(event.getSummary()).isEqualTo("Decision approval completed");
+            assertThat(event.getStatus()).isEqualTo("completed");
+            assertThat(event.getSafeMetadata()).contains("\"requiredApprovalCount\":1");
+            assertThat(event.getSafeMetadata()).doesNotContain("must not leak");
+        });
     }
 
     @Test
