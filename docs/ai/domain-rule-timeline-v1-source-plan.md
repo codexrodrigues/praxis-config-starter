@@ -2,7 +2,7 @@
 
 Date: 2026-04-27
 
-Status: v1 implementation-ready locally; release publication remains deferred.
+Status: v1 implementation-ready locally; superseded for release planning by the v2 intake/simulation source plan. Release publication remains deferred.
 
 ## Purpose
 
@@ -60,7 +60,7 @@ The following conceptual lifecycle points are not yet safe to expose as timeline
 
 Some of these moments appear in request/response DTOs or diagnostics, but those are not durable audit records. Adding them to the timeline today would either invent state, depend on transient payloads, or make clients believe the platform has an audit trail that it does not persist yet.
 
-This constraint has now been resolved for successful publication and approval events through the append-only `domain_rule_event` source. It remains true for intake, simulation and rejected/blocked governance attempts.
+This constraint has now been resolved for successful publication and approval events through the append-only `domain_rule_event` source. It has also been resolved for governed intake and simulations anchored in persisted definitions by the v2 plan. It remains true for ad hoc simulations and rejected/blocked governance attempts.
 
 ## v1 Rule
 
@@ -161,6 +161,17 @@ Operational proof increment:
 - Local quickstart + Neon proof passed with `eventCount=7` for both paths.
 - Monorepo readiness passed locally with `scripts/workspace/check-v0-readiness.sh`.
 
+v2 intake/simulation increment:
+
+- `DomainRuleService.intake` writes `intake.received` after creating the persisted draft definition.
+- `DomainRuleService.simulate` writes `simulation.requested` and `simulation.completed` only when the request resolves a persisted `DomainRuleDefinition`.
+- Ad hoc simulations still do not emit public timeline events.
+- Safe metadata is allowlisted and excludes prompt, assistant content, condition, parameters, materialized payload and detailed diagnostics.
+- `praxis-api-quickstart` now routes the governed `form_config` smoke through intake before simulation.
+- Local quickstart + Neon proof passed with `eventCount=10` for `form_config` and `eventCount=9` for `option_source`.
+
+See `docs/ai/domain-rule-timeline-v2-intake-simulation-source-plan.md` for the current release planning source.
+
 Next release increment: publish a coordinated Maven release only after explicit phase-close approval or a named downstream consumer requires the public coordinate.
 
 ## Non-Goals
@@ -174,6 +185,6 @@ Next release increment: publish a coordinated Maven release only after explicit 
 
 Keep the published runtime on the existing public artifact until a real need appears for the durable timeline v1 artifact.
 
-When that need is explicit, release `praxis-config-starter:0.1.0-rc.36`, update quickstart to consume it without local overrides, run one published-runtime smoke, and then promote HTTP corpus status.
+When that need is explicit, release the current `praxis-config-starter:0.1.0-rc.36` candidate as the coordinated v1+v2 timeline release, update quickstart to consume it without local overrides, run one published-runtime smoke, and then promote HTTP corpus status.
 
-For new event families beyond v1, use the monorepo backlog `docs/2026-04-domain-rule-timeline-v2-intake-simulation-backlog.md`: add `intake.received` first, then `simulation.requested` and `simulation.completed` only for simulations anchored in a persisted `DomainRuleDefinition`. Continue starting with persisted governance source design in `praxis-config-starter`, not with UI reconstruction or quickstart-only smoke changes.
+For new event families beyond v2, continue starting with persisted governance source design in `praxis-config-starter`, not with UI reconstruction or quickstart-only smoke changes.

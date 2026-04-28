@@ -2,7 +2,7 @@
 
 Date: 2026-04-27
 
-Status: deferred until a coordinated Maven + quickstart rollout is explicitly requested; implementation readiness is closed locally.
+Status: deferred until a coordinated Maven + quickstart rollout is explicitly requested; implementation readiness is closed locally for timeline v1 and v2.
 
 ## Scope
 
@@ -27,9 +27,13 @@ The timeline is not a new source of truth. It is a safe observability projection
 - `praxis-api-quickstart` PR #37 documented the rollout and exposed the manual `require_timeline` workflow input.
 - `praxis-api-quickstart` PR #38 requires persisted publication events when `REQUIRE_TIMELINE=true` on the published `option_source` path.
 - `praxis-api-quickstart` PR #39 requires persisted approval events when `REQUIRE_TIMELINE=true` on the governed `form_config` path.
+- `praxis-config-starter` PR #129 added durable `intake.received` events after governed intake persists the draft definition.
+- `praxis-config-starter` PR #130 added durable `simulation.requested` and `simulation.completed` events for simulations anchored in persisted definitions.
+- `praxis-api-quickstart` PR #40 routes the governed `form_config` runtime smoke through intake, simulates with the persisted `ruleDefinitionId` and requires intake/simulation events when `REQUIRE_TIMELINE=true`.
 - `praxis-ui-landing-page` PR #28 sharpened the public Home positioning around governed semantic decisions and enterprise proof.
 - `praxisui-http-examples` PR #2 added a protected HTTP example and kept it marked as a known published-runtime failure while the deployed quickstart still returns `404`.
 - Local quickstart + Neon proof passed with `BACKEND_URL=http://localhost:8088 REQUIRE_TIMELINE=true scripts/verify-domain-rules-runtime.sh`, returning `eventCount=7` for both the approval-backed `form_config` path and the publication-backed `option_source` path.
+- After timeline v2, local quickstart + Neon proof passed with the same command, returning `eventCount=10` for the intake/simulation-backed `form_config` path and `eventCount=9` for the publication-backed `option_source` path.
 - Monorepo readiness passed locally with `scripts/workspace/check-v0-readiness.sh` after all related PRs were merged and local ports were free.
 
 The latest published Maven tag at the time of this note is:
@@ -145,8 +149,8 @@ The observability phase can be considered published when all are true:
 
 ## Current Recommendation
 
-Implementation readiness is closed locally. Continue without publishing unless the platform owner explicitly decides to close the release phase or a named downstream consumer needs the Maven artifact.
+Implementation readiness is closed locally for the governed timeline through v2 intake/simulation events. Continue without publishing unless the platform owner explicitly decides to close the release phase or a named downstream consumer needs the Maven artifact.
 
-If release is requested, publish `praxis-config-starter:0.1.0-rc.36` via the manual release workflow, then update `praxis-api-quickstart` to consume that coordinate without local overrides and run one published-runtime smoke for phase closure.
+If release is requested and no newer `v0.1.0-rc.*` tag exists, publish the current `praxis-config-starter/main` as `praxis-config-starter:0.1.0-rc.36` via the manual release workflow. That release should be treated as the coordinated v1+v2 timeline release, then `praxis-api-quickstart` should consume that coordinate without local overrides and run one published-runtime smoke for phase closure.
 
-For the next observability increment beyond v1, follow the monorepo backlog `docs/2026-04-domain-rule-timeline-v2-intake-simulation-backlog.md`: any `intake`, `simulation` or rejected/blocked governance event requires a persisted governance source and must not be reconstructed from transient responses or UI state.
+For the next observability increment beyond v2, continue the same rule: any rejected/blocked governance event requires a persisted governance source and must not be reconstructed from transient responses or UI state.
