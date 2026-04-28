@@ -1851,12 +1851,17 @@ class DomainRuleServiceTest {
                 .satisfies(item -> {
                     assertThat(item.status()).isEqualTo("applied");
                     assertThat(item.appliedBy()).isEqualTo("procurement-owner");
-                });
+        });
         ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
-        verify(eventRepository, org.mockito.Mockito.times(3)).save(eventCaptor.capture());
+        verify(eventRepository, org.mockito.Mockito.times(5)).save(eventCaptor.capture());
         assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
-                .containsExactly("publication.requested", "materialization.applied", "publication.completed");
-        assertThat(eventCaptor.getAllValues().get(0)).satisfies(event -> {
+                .containsExactly(
+                        "simulation.requested",
+                        "simulation.completed",
+                        "publication.requested",
+                        "materialization.applied",
+                        "publication.completed");
+        assertThat(eventCaptor.getAllValues().get(2)).satisfies(event -> {
             assertThat(event.getActorType()).isEqualTo("human");
             assertThat(event.getActor()).isEqualTo("procurement-owner");
             assertThat(event.getStatus()).isEqualTo("requested");
@@ -1864,13 +1869,13 @@ class DomainRuleServiceTest {
             assertThat(event.getSafeMetadata()).contains("\"materializationCount\":0");
             assertThat(event.getSafeMetadata()).doesNotContain("must not leak");
         });
-        assertThat(eventCaptor.getAllValues().get(2)).satisfies(event -> {
+        assertThat(eventCaptor.getAllValues().get(4)).satisfies(event -> {
             assertThat(event.getActorType()).isEqualTo("human");
             assertThat(event.getActor()).isEqualTo("procurement-owner");
             assertThat(event.getStatus()).isEqualTo("published");
             assertThat(event.getSafeMetadata()).contains("\"materializationCount\":1");
             assertThat(event.getSafeMetadata()).doesNotContain("must not leak");
-            assertThat(event.getOccurredAt()).isAfterOrEqualTo(eventCaptor.getAllValues().get(0).getOccurredAt());
+            assertThat(event.getOccurredAt()).isAfterOrEqualTo(eventCaptor.getAllValues().get(2).getOccurredAt());
         });
     }
 
