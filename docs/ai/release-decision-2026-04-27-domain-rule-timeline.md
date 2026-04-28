@@ -30,6 +30,7 @@ The timeline is not a new source of truth. It is a safe observability projection
 - `praxis-config-starter` PR #129 added durable `intake.received` events after governed intake persists the draft definition.
 - `praxis-config-starter` PR #130 added durable `simulation.requested` and `simulation.completed` events for simulations anchored in persisted definitions.
 - `praxis-api-quickstart` PR #40 routes the governed `form_config` runtime smoke through intake, simulates with the persisted `ruleDefinitionId` and requires intake/simulation events when `REQUIRE_TIMELINE=true`.
+- The 2026-04-28 local browser cockpit E2E proved governed create, simulate, approve and activate from the shared rules handoff, and identified two additional post-`rc.35` requirements for the same coordinated starter cut: canonical shared-rule type hints must not emit non-contract values, and business/shared-rule authoring must preserve explicit `/api/{context}/{resource}` paths during intent resolution.
 - `praxis-ui-landing-page` PR #28 sharpened the public Home positioning around governed semantic decisions and enterprise proof.
 - `praxisui-http-examples` PR #2 added a protected HTTP example and kept it marked as a known published-runtime failure while the deployed quickstart still returns `404`.
 - Local quickstart + Neon proof passed with `BACKEND_URL=http://localhost:8088 REQUIRE_TIMELINE=true scripts/verify-domain-rules-runtime.sh`, returning `eventCount=7` for both the approval-backed `form_config` path and the publication-backed `option_source` path.
@@ -71,10 +72,12 @@ Run these locally first whenever possible:
    - `mvn -Dtest=DomainRuleServiceTest#definitionTimelineReturnsSafeDerivedLifecycleWithoutPromptPayloads test`
    - `mvn -Dtest=DomainRuleControllerTest#returnsDefinitionTimelineWithTenantAndEnvironmentHeaders test`
    - `mvn -Dtest=AiApiContractOpenApiTest test`
-4. Against a quickstart packaged with the unreleased starter, run the local timeline proof:
+4. In `praxis-config-starter`, run the focal authoring contract tests:
+   - `mvn -Dtest=AgenticAuthoringIntentResolverServiceTest,AgenticAuthoringDomainCatalogHintsTest,AiApiContractOpenApiTest test`
+5. Against a quickstart packaged with the unreleased starter, run the local timeline proof:
    - `scripts/workspace/run-local-readiness-lane.sh domain-rules-timeline-runtime`
    - or, when validating the quickstart directly, `BACKEND_URL=http://localhost:8088 REQUIRE_TIMELINE=true scripts/verify-domain-rules-runtime.sh`
-5. When a visual cockpit proof is required, run:
+6. When a visual cockpit proof is required, run:
    - `scripts/workspace/run-local-readiness-lane.sh shared-rule-timeline-cockpit`
 
 Use GitHub Actions only as the final release gate, not for normal iteration.
@@ -102,6 +105,7 @@ After Maven Central resolves the new coordinate:
 3. Run focal downstream validation locally before pushing:
    - Maven resolution/build for quickstart.
    - Domain-rules runtime smoke with `REQUIRE_TIMELINE=true` against a quickstart using the new starter.
+   - Browser cockpit handoff with an explicit `/api/helpdesk/chamados` prompt, proving intent resolution keeps `helpdesk.chamados` as the governed target.
 4. Open and merge one quickstart PR with `[skip ci]` only if local validation is sufficient and no protected CI gate is required.
 5. Deploy/redeploy the published quickstart runtime.
 6. Run the manual `Domain Rules Runtime Smoke` only once for phase closure, with:
@@ -141,6 +145,7 @@ The observability phase can be considered published when all are true:
 - Maven Central resolves the intended `praxis-config-starter` coordinate.
 - `praxis-api-quickstart` consumes that coordinate without local overrides.
 - Published quickstart returns `200` for `GET /api/praxis/config/domain-rules/definitions/{definitionId}/timeline`.
+- Shared-rule authoring keeps explicit `/api/{context}/{resource}` paths as the selected target during intent resolution.
 - Runtime smoke with `REQUIRE_TIMELINE=true` passes against the published host.
 - The response includes only `visibility=safe` events.
 - The response does not expose prompt, assistant message, condition, parameters or materialized payload.
@@ -149,7 +154,7 @@ The observability phase can be considered published when all are true:
 
 ## Current Recommendation
 
-Implementation readiness is closed locally for the governed timeline through v2 intake/simulation events. Continue without publishing unless the platform owner explicitly decides to close the release phase or a named downstream consumer needs the Maven artifact.
+Implementation readiness is closed locally for the governed timeline through v2 intake/simulation events, and the same `rc.36` cut should include the post-`rc.35` authoring fixes required by the browser cockpit proof: canonical shared-rule type hints and explicit resource-path preservation. Continue without publishing unless the platform owner explicitly decides to close the release phase or a named downstream consumer needs the Maven artifact.
 
 If release is requested and no newer `v0.1.0-rc.*` tag exists, publish the current `praxis-config-starter/main` as `praxis-config-starter:0.1.0-rc.36` via the manual release workflow. That release should be treated as the coordinated v1+v2 timeline release, then `praxis-api-quickstart` should consume that coordinate without local overrides and run one published-runtime smoke for phase closure.
 

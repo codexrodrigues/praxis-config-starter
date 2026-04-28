@@ -2778,6 +2778,30 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void explicitResourcePathInPromptOverridesDomainHeuristicsForSharedRuleAuthoring() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie uma regra de validacao governada para chamados em /api/helpdesk/chamados: prioridade e titulo obrigatorios antes de salvar, mesmo citando funcionarios no texto.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/helpdesk/chamados");
+        assertThat(result.selectedCandidate().evidence()).contains("explicit-resource-path");
+        assertThat(result.assistantMessage())
+                .contains("/api/praxis/config/domain-rules")
+                .contains("/api/helpdesk/chamados");
+    }
+
+    @Test
     void canonicalRoutingMatrixRoutesBusinessRulesToSharedRuleAuthoring() {
         List<RoutingCase> cases = List.of(
                 new RoutingCase(

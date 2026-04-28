@@ -1921,11 +1921,13 @@ components:
           nullable: true
           description: Tipo de regra compartilhada recomendado quando o fluxo canônico for shared_rule_authoring.
           enum:
-            - governance
+            - privacy
+            - compliance
+            - validation
             - selection_eligibility
             - workflow_action_policy
             - approval_policy
-          example: governance
+          example: privacy
         limit:
           type: integer
           format: int32

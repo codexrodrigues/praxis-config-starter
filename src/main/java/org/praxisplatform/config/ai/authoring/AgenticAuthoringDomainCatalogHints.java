@@ -142,10 +142,14 @@ final class AgenticAuthoringDomainCatalogHints {
         }
         if (prompt.contains("lgpd")
                 || prompt.contains("gdpr")
-                || prompt.contains("compliance")
-                || prompt.contains("governanca")
                 || prompt.contains("privacidade")) {
-            return "governance";
+            return "privacy";
+        }
+        if (prompt.contains("compliance")
+                || prompt.contains("governanca")
+                || prompt.contains("governada")
+                || prompt.contains("governado")) {
+            return "compliance";
         }
         if ((prompt.contains("impedir")
                 || prompt.contains("bloquear")

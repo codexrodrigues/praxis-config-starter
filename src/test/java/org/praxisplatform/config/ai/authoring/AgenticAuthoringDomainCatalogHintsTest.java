@@ -53,7 +53,7 @@ class AgenticAuthoringDomainCatalogHintsTest {
         assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").asText())
                 .isEqualTo("shared_rule_authoring");
         assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").asText())
-                .isEqualTo("governance");
+                .isEqualTo("privacy");
         assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("federated").asBoolean())

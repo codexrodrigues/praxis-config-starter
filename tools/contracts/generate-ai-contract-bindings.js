@@ -191,8 +191,12 @@ export type AiDomainCatalogRecommendedAuthoringFlow =
   | 'ui_composition_authoring';
 
 export type AiDomainCatalogRecommendedRuleType =
-  | 'governance'
+  | 'privacy'
+  | 'compliance'
+  | 'validation'
   | 'selection_eligibility'
+  | 'workflow_action_policy'
+  | 'approval_policy'
   | string;
 
 export interface AiDomainCatalogRelationshipHintContract {
