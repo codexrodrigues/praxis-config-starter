@@ -240,6 +240,14 @@ public class AgenticAuthoringIntentResolverService {
             }
         }
         candidates = withEmployeeFormPriorityCandidate(prompt, candidates);
+        boolean explicitResourcePathSelectionEnabled = isBusinessRuleAuthoringPrompt(prompt)
+                || "shared_rule_authoring".equals(requestedAuthoringFlow(request));
+        AgenticAuthoringCandidate explicitResourcePathCandidate = explicitResourcePathSelectionEnabled
+                ? explicitResourcePathCandidate(prompt, artifactKind, candidates)
+                : null;
+        if (explicitResourcePathCandidate != null) {
+            candidates = withPriorityCandidate(candidates, explicitResourcePathCandidate);
+        }
         candidates = withDeterministicPayrollDashboardCandidates(
                 prompt,
                 effectivePrompt,
@@ -265,6 +273,7 @@ public class AgenticAuthoringIntentResolverService {
                 artifactKind,
                 candidates,
                 selectedCandidate);
+        selectedCandidate = selectContextHintCandidate(explicitResourcePathCandidate, candidates, selectedCandidate);
         boolean deterministicPayrollDashboardConfirmation = isConfirmedPayrollDashboardCreate(
                 prompt,
                 effectivePrompt,
@@ -603,6 +612,41 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(candidate -> selectedResourcePath.equals(candidate.resourcePath()))
                 .findFirst()
                 .orElse(fallback);
+    }
+
+    private AgenticAuthoringCandidate explicitResourcePathCandidate(
+            String prompt,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        String resourcePath = explicitResourcePath(prompt);
+        if (resourcePath.isBlank()) {
+            return null;
+        }
+        List<AgenticAuthoringCandidate> usableCandidates = candidates == null ? List.of() : candidates;
+        String normalizedResourcePath = normalizePath(resourcePath);
+        Optional<AgenticAuthoringCandidate> existing = usableCandidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> normalizedResourcePath.equals(normalizePath(candidate.resourcePath())))
+                .findFirst();
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        return candidate(
+                resourcePath,
+                "post",
+                0.99d,
+                "resource path explicitly provided by the user prompt",
+                "explicit-resource-path");
+    }
+
+    private String explicitResourcePath(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "";
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)(/api/[a-z0-9][a-z0-9_./-]*)")
+                .matcher(prompt);
+        return matcher.find() ? matcher.group(1).replaceAll("/+$", "") : "";
     }
 
     private AgenticAuthoringCandidate selectDeterministicFormCandidate(

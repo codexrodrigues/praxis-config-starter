@@ -200,6 +200,8 @@ cd praxis-ui-angular
 
 The browser E2E requires the backend stream auth mode to be `signed-url-token`; plain header-only stream auth is not enough for browser `EventSource`.
 
+For shared-rule cockpit validation, include at least one prompt that names an explicit resource path, such as `/api/helpdesk/chamados`, while also mentioning unrelated domain vocabulary. The expected result is that intent resolution keeps the explicit path as the governed target instead of re-grounding the handoff to another catalog resource.
+
 ## Cleanup
 
 Stop the backend and Angular terminals with `Ctrl-C`, or kill ports:

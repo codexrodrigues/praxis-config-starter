@@ -2,11 +2,17 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,7 +25,6 @@ import org.springframework.stereotype.Service;
  * </p>
  */
 @Service
-@RequiredArgsConstructor
 public class UserConfigService {
 
   private static final int MAX_PAYLOAD_BYTES = 256 * 1024; // 256 KB safeguard
@@ -28,6 +33,18 @@ public class UserConfigService {
   private final UiUserConfigRepository repository;
   private final ObjectMapper objectMapper;
   private final AiApiKeyProtectionService apiKeyProtectionService;
+  private final NamedParameterJdbcTemplate jdbcTemplate;
+
+  public UserConfigService(
+      UiUserConfigRepository repository,
+      ObjectMapper objectMapper,
+      AiApiKeyProtectionService apiKeyProtectionService,
+      @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate jdbcTemplate) {
+    this.repository = repository;
+    this.objectMapper = objectMapper;
+    this.apiKeyProtectionService = apiKeyProtectionService;
+    this.jdbcTemplate = jdbcTemplate;
+  }
 
   public enum Scope {
     USER,
@@ -97,6 +114,18 @@ public class UserConfigService {
     String payloadJson = writeJson(sanitizedPayload);
     String tagsJson = tags != null ? writeJson(tags) : null;
 
+    if (ifMatch == null || ifMatch.isBlank()) {
+      return upsertWithoutPrecondition(
+          tenantId,
+          effectiveUserId,
+          componentType,
+          componentId,
+          environment,
+          payloadJson,
+          tagsJson,
+          updatedBy);
+    }
+
     if (existing.isEmpty()) {
       UiUserConfig created =
           UiUserConfig.builder()
@@ -111,16 +140,139 @@ public class UserConfigService {
               .etag(UUID.randomUUID())
               .updatedBy(updatedBy)
               .build();
-      return repository.save(created);
+      try {
+        return repository.saveAndFlush(created);
+      } catch (DataIntegrityViolationException ex) {
+        return recoverConcurrentCreate(
+            tenantId,
+            effectiveUserId,
+            componentType,
+            componentId,
+            environment,
+            payloadJson,
+            tagsJson,
+            updatedBy,
+            ex);
+      }
     }
 
-    UiUserConfig current = existing.get();
+    return updateExisting(existing.get(), payloadJson, tagsJson, updatedBy);
+  }
+
+  private UiUserConfig upsertWithoutPrecondition(
+      String tenantId,
+      String effectiveUserId,
+      String componentType,
+      String componentId,
+      String environment,
+      String payloadJson,
+      String tagsJson,
+      String updatedBy) {
+    String conflictTarget = conflictTarget(effectiveUserId, environment);
+    UUID insertEtag = UUID.randomUUID();
+    UUID updateEtag = UUID.randomUUID();
+    UUID id = UUID.randomUUID();
+
+    String sql =
+        """
+        INSERT INTO ui_user_config (
+          id, tenant_id, user_id, component_type, component_id, environment,
+          payload, tags, version, etag, created_at, updated_at, updated_by
+        )
+        VALUES (
+          CAST(:id AS uuid), :tenantId, :userId, :componentType, :componentId, :environment,
+          CAST(:payload AS jsonb), CAST(:tags AS jsonb), 1, CAST(:insertEtag AS uuid),
+          now(), now(), :updatedBy
+        )
+        ON CONFLICT %s DO UPDATE SET
+          payload = EXCLUDED.payload,
+          tags = EXCLUDED.tags,
+          version = ui_user_config.version + 1,
+          etag = CAST(:updateEtag AS uuid),
+          updated_at = now(),
+          updated_by = EXCLUDED.updated_by
+        RETURNING
+          id, tenant_id, user_id, component_type, component_id, environment,
+          payload::text AS payload, tags::text AS tags, version, etag, created_at, updated_at, updated_by
+        """
+            .formatted(conflictTarget);
+
+    MapSqlParameterSource params =
+        new MapSqlParameterSource()
+            .addValue("id", id.toString())
+            .addValue("tenantId", tenantId)
+            .addValue("userId", effectiveUserId)
+            .addValue("componentType", componentType)
+            .addValue("componentId", componentId)
+            .addValue("environment", environment)
+            .addValue("payload", payloadJson)
+            .addValue("tags", tagsJson)
+            .addValue("insertEtag", insertEtag.toString())
+            .addValue("updateEtag", updateEtag.toString())
+            .addValue("updatedBy", updatedBy);
+
+    return jdbcTemplate.queryForObject(sql, params, this::mapUiUserConfig);
+  }
+
+  private String conflictTarget(String effectiveUserId, String environment) {
+    if (effectiveUserId == null && environment == null) {
+      return "(tenant_id, component_type, component_id) WHERE environment IS NULL AND user_id IS NULL";
+    }
+    if (effectiveUserId == null) {
+      return "(tenant_id, component_type, component_id, environment) WHERE environment IS NOT NULL AND user_id IS NULL";
+    }
+    if (environment == null) {
+      return "(tenant_id, component_type, component_id, user_id) WHERE environment IS NULL AND user_id IS NOT NULL";
+    }
+    return "(tenant_id, user_id, component_type, component_id, environment)";
+  }
+
+  private UiUserConfig mapUiUserConfig(ResultSet rs, int rowNum) throws SQLException {
+    return UiUserConfig.builder()
+        .id(rs.getObject("id", UUID.class))
+        .tenantId(rs.getString("tenant_id"))
+        .userId(rs.getString("user_id"))
+        .componentType(rs.getString("component_type"))
+        .componentId(rs.getString("component_id"))
+        .environment(rs.getString("environment"))
+        .payload(rs.getString("payload"))
+        .tags(rs.getString("tags"))
+        .version(rs.getLong("version"))
+        .etag(rs.getObject("etag", UUID.class))
+        .createdAt(toInstant(rs, "created_at"))
+        .updatedAt(toInstant(rs, "updated_at"))
+        .updatedBy(rs.getString("updated_by"))
+        .build();
+  }
+
+  private Instant toInstant(ResultSet rs, String column) throws SQLException {
+    return rs.getTimestamp(column) != null ? rs.getTimestamp(column).toInstant() : null;
+  }
+
+  private UiUserConfig recoverConcurrentCreate(
+      String tenantId,
+      String effectiveUserId,
+      String componentType,
+      String componentId,
+      String environment,
+      String payloadJson,
+      String tagsJson,
+      String updatedBy,
+      DataIntegrityViolationException cause) {
+    UiUserConfig current =
+        findConfig(tenantId, effectiveUserId, componentType, componentId, environment)
+            .orElseThrow(() -> cause);
+    return updateExisting(current, payloadJson, tagsJson, updatedBy);
+  }
+
+  private UiUserConfig updateExisting(
+      UiUserConfig current, String payloadJson, String tagsJson, String updatedBy) {
     current.setPayload(payloadJson);
     current.setTags(tagsJson);
     current.setVersion(current.getVersion() + 1);
     current.setEtag(UUID.randomUUID());
     current.setUpdatedBy(updatedBy);
-    return repository.save(current);
+    return repository.saveAndFlush(current);
   }
 
   public void delete(
@@ -267,4 +419,3 @@ public class UserConfigService {
     }
   }
 }
-
