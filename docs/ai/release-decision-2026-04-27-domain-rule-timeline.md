@@ -1,8 +1,9 @@
 # Release Decision: Domain Rule Governed Timeline
 
 Date: 2026-04-27
+Closed: 2026-04-29
 
-Status: deferred until a coordinated Maven + quickstart rollout is explicitly requested; implementation readiness is closed locally for timeline v1 and v2.
+Status: published and closed as the coordinated `praxis-config-starter:0.1.0-rc.36` timeline release.
 
 ## Scope
 
@@ -44,35 +45,41 @@ The timeline is not a new source of truth. It is a safe observability projection
   - `scripts/workspace/check-v0-readiness.sh`
   - `scripts/workspace/run-local-readiness-lane.sh domain-rules-timeline-runtime`, proving `eventCount=10` for `form_config` and `eventCount=9` for `option_source` against Neon
   - `scripts/workspace/run-local-readiness-lane.sh shared-rule-timeline-cockpit`, proving the governed timeline rendered in the Angular cockpit with real local services
+- Manual pre-release gate for `praxis-config-starter` passed in GitHub Actions run `25085122699`.
+- The coordinated release tag was created by run `25086067964`, and Maven Central publication passed in run `25086073591`.
+- Maven Central resolved `io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.36` with `mvn -q dependency:get -Dartifact=io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.36 -Dtransitive=false`.
+- `praxis-api-quickstart` PR #44 consumed `0.1.0-rc.36` without local overrides, passed `./mvnw -B verify`, and passed the Neon-backed local readiness lane with `REQUIRE_TIMELINE=true`.
+- The published quickstart runtime deployed the rc.36 consumer build, and `/actuator/info` reported build time `2026-04-29T01:39:46.288Z`.
+- The published `Domain Rules Runtime Smoke` passed in run `25086775013` with `require_timeline=true`, proving `form_config` timeline `eventCount=10`, `option_source` timeline `eventCount=9`, and safe runtime readiness across publication, backend validation, workflow action and approval policy paths.
+- `praxisui-http-examples` PR #4 promoted the timeline corpus example with `runtimeRecordConfirmed=true`, `publishedBackendConfirmed=true`, `knownPublishedFailure=false`, `protectedContract=true`, and kept `llmOperational=false` because the endpoint remains a protected governed contract rather than an unauthenticated LLM surface.
 
-The latest published Maven tag at the time of this note is:
+The closed Maven tag for this phase is:
 
-- `v0.1.0-rc.35`
+- `v0.1.0-rc.36`
 
-The timeline endpoint was added after that tag. If no newer tag exists when release is requested, the next intended Maven coordinate should be explicit:
+The released Maven coordinate is:
 
-- `0.1.0-rc.36`
-- tag: `v0.1.0-rc.36`
+- `io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.36`
 
-Do not rely on automatic prerelease bumping for this release line without checking tags first.
+Do not create another Maven Central version for this phase. Any next release must be justified by a new named phase, contract change or downstream need.
 
-## Why Release Is Deferred
+## Why Release Was Deferred
 
-Do not publish Maven Central only because the endpoint and durable v1 events exist on `main`.
+The release was intentionally deferred while implementation readiness was still only local.
 
-Publication should happen only when one of these is true:
+Publication became appropriate only after all of these were true:
 
-- a named downstream consumer needs the Maven artifact from Central;
-- the platform owner explicitly decides to close the observability phase;
-- a published quickstart/runtime proof is required for external documentation, demos or corpus promotion.
+- the platform owner explicitly decided to close the observability phase;
+- the quickstart needed a public Maven coordinate instead of local overrides;
+- a published quickstart/runtime proof was required for corpus promotion and external documentation confidence.
 
-Until then, local-first evidence is preferred. This avoids repeated Maven Central waits and keeps GitHub Actions usage reserved for phase closure.
+This preserves the local-first policy: Maven Central and GitHub Actions were used as phase-closure gates, not as normal iteration tools.
 
-As of 2026-04-27, local evidence is sufficient to close implementation readiness for timeline v1, but not sufficient to claim published-runtime readiness. Publishing remains a product/release decision, not an automatic next patch.
+As of 2026-04-29, implementation readiness and published-runtime readiness for timeline v1+v2 are both closed for `rc.36`.
 
-## Required Gates Before Publishing Maven
+## Gates Used Before Publishing Maven
 
-Run these locally first whenever possible:
+The following local-first gates were used before release closure and remain the recommended pattern for future phases:
 
 1. From the monorepo root, run `scripts/workspace/check-v0-readiness.sh`.
 2. In `praxis-config-starter`, run `git diff --check`.
@@ -90,46 +97,40 @@ Run these locally first whenever possible:
 
 Use GitHub Actions only as the final release gate, not for normal iteration.
 
-## Maven Publication Plan
+## Maven Publication Closure
 
-When release is explicitly requested:
+Completed closure:
 
-1. Confirm `praxis-config-starter/main` is clean and contains only the intended post-`rc.35` release commits.
-2. Confirm no newer `v0.1.0-rc.*` tag exists.
-3. Run the manual workflow `CI and Release Java Starter (praxis-config-starter)`.
-4. Use `create_tag=true`.
-5. Use explicit `version=0.1.0-rc.36` if no newer tag exists.
-6. Do not use the default `bump=patch` or automatic prerelease selection for this line.
-7. Wait until Maven Central resolves `io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.36`.
+1. `praxis-config-starter/main` was clean and contained the intended post-`rc.35` release commits.
+2. No newer `v0.1.0-rc.*` tag existed.
+3. Manual release workflow passed the pre-release gate.
+4. The release used explicit `version=0.1.0-rc.36`.
+5. Tag `v0.1.0-rc.36` was created.
+6. Maven Central publication completed.
+7. Dependency resolution for `io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.36` was confirmed.
 
-If publication stalls in Central Portal after upload, validate dependency resolution before deciding whether to retry. Do not create another version only to work around propagation lag.
+For future phases, if publication stalls in Central Portal after upload, validate dependency resolution before deciding whether to retry. Do not create another version only to work around propagation lag.
 
-## Quickstart Rollout Plan
+## Quickstart Rollout Closure
 
-After Maven Central resolves the new coordinate:
+Completed closure:
 
-1. Update `praxis-api-quickstart/pom.xml` property `praxis.config.version` to the released version.
-2. Update quickstart README references to the same version.
-3. Run focal downstream validation locally before pushing:
-   - Maven resolution/build for quickstart.
-   - Domain-rules runtime smoke with `REQUIRE_TIMELINE=true` against a quickstart using the new starter.
-   - Browser cockpit handoff with an explicit `/api/helpdesk/chamados` prompt, proving intent resolution keeps `helpdesk.chamados` as the governed target.
-4. Open and merge one quickstart PR with `[skip ci]` only if local validation is sufficient and no protected CI gate is required.
-5. Deploy/redeploy the published quickstart runtime.
-6. Run the manual `Domain Rules Runtime Smoke` only once for phase closure, with:
-   - `require_publication=true`
-   - `require_timeline=true`
-   - other gates set according to the phase being closed.
+1. `praxis-api-quickstart/pom.xml` now uses `praxis.config.version=0.1.0-rc.36`.
+2. Quickstart README and rollout documentation reference the same version.
+3. Quickstart local validation passed with Maven resolution, `./mvnw -B verify`, and the Neon-backed `domain-rules-timeline-runtime` lane.
+4. Quickstart PR #44 was merged to `main`.
+5. The published quickstart runtime deployed the rc.36 consumer build.
+6. The manual `Domain Rules Runtime Smoke` ran once for phase closure with `require_timeline=true` and passed against the published host.
 
-## HTTP Corpus Rollout Plan
+## HTTP Corpus Rollout Closure
 
-After the published quickstart returns `200` for the timeline endpoint:
+Completed closure:
 
-1. Update `praxisui-http-examples/examples.manifest.json` for the timeline example.
-2. Remove `knownPublishedFailure=true` from the timeline example.
-3. Set `llmOperational=true` only after the published smoke confirms the endpoint and safe event envelope.
-4. Regenerate `LLM_SURFACE.md`.
-5. Run the corpus focal validations.
+1. `praxisui-http-examples/examples.manifest.json` now records the timeline example as published-backend confirmed.
+2. `knownPublishedFailure=true` was removed for the timeline example.
+3. `llmOperational=false` was intentionally preserved because the timeline endpoint is protected and tenant/header-governed.
+4. `LLM_SURFACE.md` was regenerated without promoting the protected timeline endpoint into the unauthenticated LLM surface.
+5. Corpus focal validations and published smoke checks passed.
 
 ## npm Publication
 
@@ -141,14 +142,14 @@ If npm publication is requested, create a separate coordinated release decision 
 
 ## Acceptance Criteria
 
-The observability phase can be considered implementation-ready when all are true:
+The observability phase is implementation-ready because all are true:
 
 - `praxis-config-starter/main` contains the durable event source and lifecycle writes.
 - `praxis-api-quickstart/main` requires approval and publication events in `REQUIRE_TIMELINE=true`.
 - Local quickstart + Neon smoke passes with `REQUIRE_TIMELINE=true`.
 - `scripts/workspace/check-v0-readiness.sh` passes locally.
 
-The observability phase can be considered published when all are true:
+The observability phase is published for `rc.36` because all are true:
 
 - Maven Central resolves the intended `praxis-config-starter` coordinate.
 - `praxis-api-quickstart` consumes that coordinate without local overrides.
@@ -162,8 +163,8 @@ The observability phase can be considered published when all are true:
 
 ## Current Recommendation
 
-Implementation readiness is closed locally for the governed timeline through v2 intake/simulation events, and the same `rc.36` cut should include the post-`rc.35` authoring fixes required by the browser cockpit proof: canonical shared-rule type hints and explicit resource-path preservation. Continue without publishing unless the platform owner explicitly decides to close the release phase or a named downstream consumer needs the Maven artifact.
+Treat `rc.36` as closed. Do not republish this phase, do not create another Maven version for documentation drift, and do not use Actions unless a new phase is being closed.
 
-If release is requested and no newer `v0.1.0-rc.*` tag exists, publish the current `praxis-config-starter/main` as `praxis-config-starter:0.1.0-rc.36` via the manual release workflow. That release should be treated as the coordinated v1+v2 timeline release, then `praxis-api-quickstart` should consume that coordinate without local overrides and run one published-runtime smoke for phase closure.
+The next recommended work is not another release pass. It is to start the next observability increment only if there is a persisted source for rejected, blocked or failed governance attempts.
 
 For the next observability increment beyond v2, continue the same rule: any rejected/blocked governance event requires a persisted governance source and must not be reconstructed from transient responses or UI state.

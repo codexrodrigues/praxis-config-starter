@@ -1,8 +1,9 @@
 # Domain Rule Timeline v1 Source Plan
 
 Date: 2026-04-27
+Updated: 2026-04-29
 
-Status: v1 implementation-ready locally; superseded for release planning by the v2 intake/simulation source plan. Release publication remains deferred.
+Status: v1 implemented and published as part of the coordinated `praxis-config-starter:0.1.0-rc.36` timeline release.
 
 ## Purpose
 
@@ -172,7 +173,12 @@ v2 intake/simulation increment:
 
 See `docs/ai/domain-rule-timeline-v2-intake-simulation-source-plan.md` for the current release planning source.
 
-Next release increment: publish a coordinated Maven release only after explicit phase-close approval or a named downstream consumer requires the public coordinate.
+Release closure:
+
+- `praxis-config-starter:0.1.0-rc.36` was published to Maven Central.
+- `praxis-api-quickstart` consumes the public coordinate without local overrides.
+- Published runtime smoke passed with `require_timeline=true`.
+- The protected HTTP corpus timeline example was promoted from known published failure to published-backend confirmed.
 
 ## Non-Goals
 
@@ -183,8 +189,8 @@ Next release increment: publish a coordinated Maven release only after explicit 
 
 ## Next Recommended Work
 
-Keep the published runtime on the existing public artifact until a real need appears for the durable timeline v1 artifact.
+Keep `rc.36` as the closed coordinated v1+v2 timeline release.
 
-When that need is explicit, release the current `praxis-config-starter:0.1.0-rc.36` candidate as the coordinated v1+v2 timeline release, update quickstart to consume it without local overrides, run one published-runtime smoke, and then promote HTTP corpus status.
+Do not publish another Maven artifact for this phase. The next timeline work should begin only when there is a concrete persisted governance source for rejected, blocked or failed attempts.
 
 For new event families beyond v2, continue starting with persisted governance source design in `praxis-config-starter`, not with UI reconstruction or quickstart-only smoke changes.
