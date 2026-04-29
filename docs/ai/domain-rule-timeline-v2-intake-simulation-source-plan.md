@@ -1,8 +1,9 @@
 # Domain Rule Timeline v2 Intake and Simulation Source Plan
 
 Date: 2026-04-28
+Updated: 2026-04-29
 
-Status: implementation-ready locally; release publication remains deferred.
+Status: implemented and published as part of the coordinated `praxis-config-starter:0.1.0-rc.36` timeline release.
 
 ## Purpose
 
@@ -88,22 +89,28 @@ Monorepo:
 - Local backend was stopped cleanly and ports `4003` and `8088` were free.
 - No Maven/npm publication and no GitHub Actions were used for implementation work.
 
-## Release Recommendation
+## Release Closure
 
-Do not publish Maven only because timeline v2 is implementation-ready.
+Timeline v2 was released only after phase-close approval and downstream proof.
 
-If the platform owner explicitly decides to close the timeline observability phase, prefer releasing the current `praxis-config-starter/main` as a single coordinated artifact containing v1 and v2 persisted event families, rather than publishing v1 and v2 in separate release cycles.
+The platform released a single coordinated artifact containing v1 and v2 persisted event families, rather than publishing v1 and v2 in separate release cycles.
 
-If no newer `v0.1.0-rc.*` tag exists at release time, the next intended coordinate remains:
+Released coordinate:
 
 - `io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.36`
 - tag: `v0.1.0-rc.36`
 
-After Maven Central resolves the coordinate, update `praxis-api-quickstart` to consume that public version without local overrides and run one published-runtime smoke with `require_timeline=true`.
+Closure evidence:
+
+- Maven Central resolves the coordinate.
+- `praxis-api-quickstart` consumes that public version without local overrides.
+- Local quickstart validation passed against Neon with `REQUIRE_TIMELINE=true`.
+- Published quickstart smoke passed with `require_timeline=true`.
+- `praxisui-http-examples` records the protected timeline example as published-backend confirmed while keeping it out of the unauthenticated LLM surface.
 
 ## Acceptance Criteria
 
-Timeline v2 is implementation-ready when all are true:
+Timeline v2 is implementation-ready because all are true:
 
 - `praxis-config-starter/main` records persisted `intake.received` for governed intake.
 - `praxis-config-starter/main` records persisted `simulation.requested` and `simulation.completed` only for simulations anchored in persisted definitions.
@@ -112,7 +119,7 @@ Timeline v2 is implementation-ready when all are true:
 - Local quickstart + Neon smoke passes with `REQUIRE_TIMELINE=true` and returns `eventCount=10` for `form_config`.
 - Monorepo readiness passes locally.
 
-Timeline v2 is published when all are true:
+Timeline v2 is published for `rc.36` because all are true:
 
 - Maven Central resolves the selected `praxis-config-starter` coordinate.
 - `praxis-api-quickstart` consumes that coordinate without local overrides.
