@@ -36,6 +36,14 @@ The timeline is not a new source of truth. It is a safe observability projection
 - Local quickstart + Neon proof passed with `BACKEND_URL=http://localhost:8088 REQUIRE_TIMELINE=true scripts/verify-domain-rules-runtime.sh`, returning `eventCount=7` for both the approval-backed `form_config` path and the publication-backed `option_source` path.
 - After timeline v2, local quickstart + Neon proof passed with the same command, returning `eventCount=10` for the intake/simulation-backed `form_config` path and `eventCount=9` for the publication-backed `option_source` path.
 - Monorepo readiness passed locally with `scripts/workspace/check-v0-readiness.sh` after all related PRs were merged and local ports were free.
+- After PRs #132, `praxis-ui-angular` #87 and `praxis-api-quickstart` #42 were merged on 2026-04-29, the integrated `main` branches passed the local-first rc.36 gates without Maven/npm publication or GitHub Actions:
+  - `mvn -Dtest=AgenticAuthoringIntentResolverServiceTest,AgenticAuthoringDomainCatalogHintsTest,AiApiContractOpenApiTest test -q`
+  - `mvn -Dtest=DomainRuleServiceTest#definitionTimelineReturnsSafeDerivedLifecycleWithoutPromptPayloads,DomainRuleControllerTest#returnsDefinitionTimelineWithTenantAndEnvironmentHeaders,AiApiContractOpenApiTest test -q`
+  - quickstart `DomainAuthoringContextHintsContractTest`
+  - `praxis-ui-angular` page-builder focal spec and `ng build praxis-page-builder`
+  - `scripts/workspace/check-v0-readiness.sh`
+  - `scripts/workspace/run-local-readiness-lane.sh domain-rules-timeline-runtime`, proving `eventCount=10` for `form_config` and `eventCount=9` for `option_source` against Neon
+  - `scripts/workspace/run-local-readiness-lane.sh shared-rule-timeline-cockpit`, proving the governed timeline rendered in the Angular cockpit with real local services
 
 The latest published Maven tag at the time of this note is:
 
