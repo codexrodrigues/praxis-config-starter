@@ -243,6 +243,63 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void stopsAfterSingleRepairAttemptWhenPreviewRemainsInvalid() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(
+                        new AgenticAuthoringPreviewResult(
+                                false,
+                                List.of("fields must not be empty"),
+                                List.of("compile-skipped-invalid-minimal-form-plan"),
+                                objectMapper.createObjectNode(),
+                                objectMapper.createObjectNode(),
+                                null,
+                                null,
+                                "Preview needs repair."),
+                        new AgenticAuthoringPreviewResult(
+                                false,
+                                List.of("fields must not be empty"),
+                                List.of("compile-skipped-invalid-minimal-form-plan"),
+                                objectMapper.createObjectNode(),
+                                objectMapper.createObjectNode(),
+                                null,
+                                null,
+                                "Preview still needs review."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        verify(previewService, Mockito.times(2)).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        long repairAttempts = sink.payloads.stream()
+                .map(payload -> objectMapper.valueToTree(payload).path("phase").asText())
+                .filter("repair.attempt"::equals)
+                .count();
+        org.assertj.core.api.Assertions.assertThat(repairAttempts).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("preview.compile");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("valid").asBoolean())
+                            .isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairAttempted").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairClassification").asText())
+                            .isEqualTo("retryable");
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("canApply").asBoolean())
+                            .isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("assistantMessage").asText())
+                            .isEqualTo("Preview still needs review.");
+                });
+    }
+
+    @Test
     void doesNotRepairPreviewFailureThatRequiresUserClarification() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
