@@ -44,7 +44,8 @@ Already present in `praxis-config-starter`:
 Missing before implementation:
 
 - public or internal service for creating change sets;
-- deterministic patch operation schema;
+- done in the validator foundation slice: deterministic patch operation schema
+  represented by explicit DTOs and validated before any public endpoint exists;
 - validation service for proposed operations;
 - approval/rejection transitions;
 - application service that mutates curated knowledge rows transactionally;
@@ -363,7 +364,9 @@ Pause implementation if the design:
 
 ## Suggested Slices
 
-1. DTOs, validator and service tests for the patch operation contract.
+1. Done in the validator foundation slice: DTOs, deterministic validator and
+   focal service tests for the patch operation contract, without controller or
+   persistence orchestration.
 2. Create/list/get endpoints for proposed change sets.
 3. Validation endpoint and validation result persistence.
 4. Approval/rejection status transitions.
