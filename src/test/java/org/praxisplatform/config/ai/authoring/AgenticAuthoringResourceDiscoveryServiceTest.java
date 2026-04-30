@@ -1,6 +1,8 @@
 package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,7 +11,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.ContextRetrievalService;
 
 @Tag("unit")
 class AgenticAuthoringResourceDiscoveryServiceTest {
@@ -99,6 +103,43 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .contains("folha de pagamento")
                 .contains("analytics folha pagamento");
         assertThat(result.warnings()).isEmpty();
+    }
+
+    @Test
+    void semanticRetrievalIsPreferredOverLexicalFallback() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        when(retrievalService.searchApiMetadata(
+                "Resumo analitico de folha por departamento",
+                null,
+                null,
+                8))
+                .thenReturn(List.of(ApiSearchResult.builder()
+                        .path("/api/human-resources/vw-analytics-folha-pagamento")
+                        .method("GET")
+                        .summary("Analytics de folha de pagamento")
+                        .similarityScore(0.93d)
+                        .build()));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService),
+                        objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "Resumo analitico de folha por departamento",
+                        null,
+                        "dashboard",
+                        5));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.candidates()).hasSize(1);
+        assertThat(result.candidates().get(0).resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.candidates().get(0).evidence())
+                .contains("semantic-retrieval")
+                .doesNotContain("lexical-fallback");
+        verify(repository, never()).findAll();
     }
 
     @Test
