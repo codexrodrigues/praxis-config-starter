@@ -201,7 +201,8 @@ class AgenticAuthoringTurnEngineTest {
                 intentResolverService,
                 previewService,
                 objectMapper,
-                new AgenticAuthoringCurrentPageAnalyzer(objectMapper));
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
     }
 
     private AgenticAuthoringTurnStreamRequest request() {
