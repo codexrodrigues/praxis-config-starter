@@ -244,7 +244,11 @@ status and matched `projectKnowledge:*` source references. It deliberately does
 not copy raw payloads, raw source data or the knowledge `summary` text into
 preview diagnostics.
 
-The next implementation slice is to decide whether this safe audit should be
-rendered in the Page Builder cockpit. If surfaced, the UI must stay on counts,
-source references and citation status only; vector/RAG ranking and
-LLM-authored memory writes remain deferred.
+`praxis-ui-angular` PR #90 surfaces this safe audit in the Page Builder cockpit
+as citation counts only. The UI deliberately avoids rendering Project
+Knowledge summaries, raw payloads, concept keys or source summaries.
+
+The next implementation slice is a browser proof for the visible audit status
+only when the next validation phase needs end-to-end UI evidence. Otherwise,
+keep the focal Page Builder specs as the gate and keep vector/RAG ranking plus
+LLM-authored memory writes deferred.

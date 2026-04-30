@@ -652,6 +652,9 @@ Implemented evidence:
   backend-owned influence audit summary that links governed Project Knowledge
   entries to `sourceRefs` citations without copying raw payloads or knowledge
   summaries into the preview diagnostics.
+- `praxis-ui-angular` PR #90 surfaces the safe audit in the Page Builder
+  cockpit as citation counts only. It does not render Project Knowledge
+  summaries, raw payloads, concept keys or source summaries.
 
 Acceptance:
 
@@ -822,12 +825,10 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Decide whether the safe `projectKnowledgeAudit` should be surfaced in the
-   Page Builder cockpit, and if so render only counts/citation status/source
-   references, not summaries or payloads.
-2. Add a browser proof only if the UI surface changes; otherwise keep the
-   backend focal tests as the gate for this internal diagnostic.
-3. Keep vector/RAG ranking and LLM-authored memory writes deferred until
+1. Add a local-first browser proof for the now-visible
+   `projectKnowledgeAudit` cockpit status only when the next validation phase
+   needs end-to-end UI evidence; otherwise rely on the focal Page Builder specs.
+2. Keep vector/RAG ranking and LLM-authored memory writes deferred until
    relational governance, safe observability and local E2E evidence remain
    stable.
 
