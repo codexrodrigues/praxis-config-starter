@@ -675,6 +675,10 @@ Acceptance:
 - UI explains influence without exposing sensitive payloads by default.
 - Normal authoring influence uses only approved, scoped and AI-visible safe
   projections.
+- The Phase 7 Project Knowledge checkpoint is closed in `main` as of
+  2026-04-30 with `praxis-api-quickstart` PR #45,
+  `praxis-ui-angular` PRs #88, #89, #90 and #91, and
+  `praxis-config-starter` PRs #163, #164 and #165.
 
 ## Browser E2E Gates
 
@@ -850,11 +854,13 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Batch the next phase into a larger local-first PR only after collecting all
-   remaining Phase 7 hardening changes and local validation evidence.
-2. Keep vector/RAG ranking and LLM-authored memory writes deferred until
-   relational governance, safe observability and local E2E evidence remain
-   stable.
+1. Treat Phase 7 Project Knowledge read/audit/UI proof as complete for the
+   current beta checkpoint.
+2. Start the next cut only with an explicit scope: either governance for
+   LLM-authored knowledge writes, governance for vector/RAG-derived ranking, or
+   a small documentation/release-readiness pass.
+3. Keep vector/RAG ranking and LLM-authored memory writes deferred until their
+   own governance, audit, rollback and local E2E gates are planned.
 
 ## Stop Conditions
 

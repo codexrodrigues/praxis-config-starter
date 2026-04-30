@@ -27,22 +27,32 @@ backend opera um turno agentic real:
 Status em 2026-04-30: a extracao do engine, o primeiro tool interno
 `searchApiResources`, a inspecao estrutural de `currentPage`, a separacao de
 retrieval/provenance, o repair loop backend-owned e a primeira trilha de
-project knowledge governado ja estao implementados em `main`. A proxima fase
-ativa e endurecer a observabilidade/governanca dessa influencia antes de
-promover ranking vetorial/RAG ou escrita de memoria authorada por IA.
+project knowledge governado ja estao implementados em `main`. O checkpoint de
+observabilidade/governanca do Project Knowledge tambem esta fechado em `main`:
+o backend deriva contagens de auditoria a partir de entradas seguras, a UI
+exibe apenas citacoes seguras, e a lane local versionada do Page Builder prova
+o fluxo real com LLM/browser. A proxima fase deve manter ranking vetorial/RAG e
+escrita de memoria authorada por IA adiados ate existir um corte explicito de
+governanca para essas capacidades.
 
 ## Ordem de leitura
 
 1. [04-implementation-ready-plan.md](./04-implementation-ready-plan.md)
 2. [05-governed-project-knowledge-plan.md](./05-governed-project-knowledge-plan.md)
-3. [01-current-state-and-target.md](./01-current-state-and-target.md)
-4. [02-implementation-backlog.md](./02-implementation-backlog.md)
-5. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+3. [06-next-cut-decision.md](./06-next-cut-decision.md)
+4. [release-readiness-2026-04-30-project-knowledge.md](../../release-readiness-2026-04-30-project-knowledge.md)
+5. [project-knowledge-release-checklist-2026-04-30.md](../../project-knowledge-release-checklist-2026-04-30.md)
+6. [01-current-state-and-target.md](./01-current-state-and-target.md)
+7. [02-implementation-backlog.md](./02-implementation-backlog.md)
+8. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
-`04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs, e
-`05-governed-project-knowledge-plan.md` detalha a Phase 7. Os documentos
-anteriores continuam uteis como historico e diagnostico, mas devem ser
-interpretados pela direcao atual: Page Builder authora componentes/paginas,
+`04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
+`05-governed-project-knowledge-plan.md` detalha a Phase 7, e
+`06-next-cut-decision.md` registra a recomendacao pos-checkpoint. O relatorio de
+release-readiness e o checklist operacional registram como fechar a fase sem
+transformar docs-only em publicacao ou em uso repetido de GitHub Actions. Os
+documentos anteriores continuam uteis como historico e diagnostico, mas devem
+ser interpretados pela direcao atual: Page Builder authora componentes/paginas,
 enquanto decisoes compartilhadas de negocio devem seguir por
 `/api/praxis/config/domain-rules/**`.
 
