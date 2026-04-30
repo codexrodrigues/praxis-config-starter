@@ -40,15 +40,19 @@ governanca para essas capacidades.
 1. [04-implementation-ready-plan.md](./04-implementation-ready-plan.md)
 2. [05-governed-project-knowledge-plan.md](./05-governed-project-knowledge-plan.md)
 3. [06-next-cut-decision.md](./06-next-cut-decision.md)
-4. [01-current-state-and-target.md](./01-current-state-and-target.md)
-5. [02-implementation-backlog.md](./02-implementation-backlog.md)
-6. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+4. [release-readiness-2026-04-30-project-knowledge.md](../../release-readiness-2026-04-30-project-knowledge.md)
+5. [project-knowledge-release-checklist-2026-04-30.md](../../project-knowledge-release-checklist-2026-04-30.md)
+6. [01-current-state-and-target.md](./01-current-state-and-target.md)
+7. [02-implementation-backlog.md](./02-implementation-backlog.md)
+8. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
-`06-next-cut-decision.md` registra a recomendacao pos-checkpoint. Os documentos
-anteriores continuam uteis como historico e diagnostico, mas devem ser
-interpretados pela direcao atual: Page Builder authora componentes/paginas,
+`06-next-cut-decision.md` registra a recomendacao pos-checkpoint. O relatorio de
+release-readiness e o checklist operacional registram como fechar a fase sem
+transformar docs-only em publicacao ou em uso repetido de GitHub Actions. Os
+documentos anteriores continuam uteis como historico e diagnostico, mas devem
+ser interpretados pela direcao atual: Page Builder authora componentes/paginas,
 enquanto decisoes compartilhadas de negocio devem seguir por
 `/api/praxis/config/domain-rules/**`.
 
