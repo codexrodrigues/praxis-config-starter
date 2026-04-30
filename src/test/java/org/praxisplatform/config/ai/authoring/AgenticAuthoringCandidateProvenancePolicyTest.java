@@ -30,6 +30,22 @@ class AgenticAuthoringCandidateProvenancePolicyTest {
     }
 
     @Test
+    void classifiesSelectedCandidateWhenCandidateListIsEmpty() {
+        assertThat(AgenticAuthoringCandidateProvenancePolicy.retrievalSource(
+                        candidate("quick-reply-context"),
+                        List.of()))
+                .isEqualTo("context_hint");
+    }
+
+    @Test
+    void fallsBackToCandidateListWhenSelectedCandidateHasNoEvidence() {
+        assertThat(AgenticAuthoringCandidateProvenancePolicy.retrievalSource(
+                        candidate(),
+                        List.of(candidate("semantic-retrieval"))))
+                .isEqualTo("semantic_retrieval");
+    }
+
+    @Test
     void reportsNoneOrUnknownWhenEvidenceIsMissing() {
         assertThat(AgenticAuthoringCandidateProvenancePolicy.retrievalSource(List.of()))
                 .isEqualTo("none");
@@ -37,7 +53,7 @@ class AgenticAuthoringCandidateProvenancePolicyTest {
                 .isEqualTo("unknown");
     }
 
-    private AgenticAuthoringCandidate candidate(String evidence) {
+    private AgenticAuthoringCandidate candidate(String... evidence) {
         return new AgenticAuthoringCandidate(
                 "/api/example",
                 "get",
