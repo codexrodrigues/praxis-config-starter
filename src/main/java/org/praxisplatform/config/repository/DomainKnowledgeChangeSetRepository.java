@@ -13,6 +13,10 @@ public interface DomainKnowledgeChangeSetRepository extends JpaRepository<Domain
             String environment,
             String changeSetKey);
 
+    List<DomainKnowledgeChangeSet> findByTenantIdAndEnvironmentOrderByCreatedAtDesc(
+            String tenantId,
+            String environment);
+
     List<DomainKnowledgeChangeSet> findByTenantIdAndEnvironmentAndStatusOrderByCreatedAtDesc(
             String tenantId,
             String environment,
