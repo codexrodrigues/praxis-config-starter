@@ -655,6 +655,13 @@ Implemented evidence:
 - `praxis-ui-angular` PR #90 surfaces the safe audit in the Page Builder
   cockpit as citation counts only. It does not render Project Knowledge
   summaries, raw payloads, concept keys or source summaries.
+- The local-first Page Builder browser proof now also asserts the visible
+  `projectKnowledgeAudit` citation status and guards against leaking the
+  seeded concept key, fixture source summary or knowledge summary text in the
+  cockpit status.
+- `scripts/workspace/run-local-readiness-lane.sh project-knowledge-audit-cockpit`
+  wraps the managed local Page Builder/quickstart/LLM proof for this audit lane
+  so future phase gates do not need exploratory GitHub Actions.
 
 Acceptance:
 
@@ -724,6 +731,18 @@ node scripts/run-page-builder-agentic-authoring-e2e.js \
   --ready-component-type praxis-dynamic-page \
   --ready-component-id page-builder-ia \
   --timeout-ms 900000
+```
+
+Project Knowledge audit cockpit lane:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform
+
+AI_PROVIDER=openai \
+AI_ENV_FILE=praxis-config-starter/.env.openai.local.sh \
+PRAXIS_E2E_API_PORT=8098 \
+PRAXIS_E2E_UI_PORT=4083 \
+scripts/workspace/run-local-readiness-lane.sh project-knowledge-audit-cockpit
 ```
 
 Manual browser inspection target:
@@ -825,9 +844,8 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Add a local-first browser proof for the now-visible
-   `projectKnowledgeAudit` cockpit status only when the next validation phase
-   needs end-to-end UI evidence; otherwise rely on the focal Page Builder specs.
+1. Batch the next phase into a larger local-first PR only after collecting all
+   remaining Phase 7 hardening changes and local validation evidence.
 2. Keep vector/RAG ranking and LLM-authored memory writes deferred until
    relational governance, safe observability and local E2E evidence remain
    stable.

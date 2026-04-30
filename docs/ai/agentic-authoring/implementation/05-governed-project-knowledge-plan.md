@@ -248,7 +248,22 @@ preview diagnostics.
 as citation counts only. The UI deliberately avoids rendering Project
 Knowledge summaries, raw payloads, concept keys or source summaries.
 
-The next implementation slice is a browser proof for the visible audit status
-only when the next validation phase needs end-to-end UI evidence. Otherwise,
-keep the focal Page Builder specs as the gate and keep vector/RAG ranking plus
-LLM-authored memory writes deferred.
+The local-first Page Builder browser proof now also asserts the visible audit
+status and guards against leaking the seeded concept key, fixture source
+summary or knowledge summary text in the cockpit status.
+
+The managed local lane for this proof is:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform
+
+AI_PROVIDER=openai \
+AI_ENV_FILE=praxis-config-starter/.env.openai.local.sh \
+PRAXIS_E2E_API_PORT=8098 \
+PRAXIS_E2E_UI_PORT=4083 \
+scripts/workspace/run-local-readiness-lane.sh project-knowledge-audit-cockpit
+```
+
+The next implementation slice should be batched into a larger Phase 7 hardening
+PR only after collecting all remaining local-first validation evidence. Keep
+vector/RAG ranking plus LLM-authored memory writes deferred.
