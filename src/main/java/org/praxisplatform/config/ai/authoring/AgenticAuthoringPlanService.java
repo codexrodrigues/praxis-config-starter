@@ -265,6 +265,10 @@ public class AgenticAuthoringPlanService {
         if (currentPageSummary == null) {
             return objectMapper.createObjectNode();
         }
+        JsonNode structuralSummary = structuralTargetFormSummary(currentPageSummary, intentResolution.target());
+        if (structuralSummary.isObject() && structuralSummary.path("fieldNames").isArray()) {
+            return structuralSummary;
+        }
         JsonNode formWidgets = currentPageSummary.path("formWidgets");
         if (!formWidgets.isArray() || formWidgets.isEmpty()) {
             return objectMapper.createObjectNode();
@@ -280,6 +284,60 @@ public class AgenticAuthoringPlanService {
         return formWidgets.get(0);
     }
 
+    private JsonNode structuralTargetFormSummary(JsonNode currentPageSummary, AgenticAuthoringTarget target) {
+        JsonNode inspection = currentPageSummary.path("structuralInspection");
+        JsonNode widgets = inspection.path("widgets");
+        JsonNode fields = inspection.path("fields");
+        if (!widgets.isArray() || widgets.isEmpty() || !fields.isArray()) {
+            return objectMapper.createObjectNode();
+        }
+        String targetWidgetKey = target == null ? "" : valueOrEmpty(target.widgetKey());
+        String selectedWidgetKey = targetWidgetKey;
+        if (selectedWidgetKey.isBlank()) {
+            for (JsonNode widget : widgets) {
+                if ("form".equals(text(widget, "artifactKind"))) {
+                    selectedWidgetKey = text(widget, "widgetKey");
+                    break;
+                }
+            }
+        }
+        if (selectedWidgetKey.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        ObjectNode summary = objectMapper.createObjectNode();
+        summary.put("widgetKey", selectedWidgetKey);
+        ArrayNode fieldNames = summary.putArray("fieldNames");
+        ArrayNode localFieldNames = summary.putArray("localFieldNames");
+        ArrayNode serverBackedOverrideNames = summary.putArray("serverBackedOverrideNames");
+        ArrayNode fieldMetadata = summary.putArray("fieldMetadata");
+        for (JsonNode field : fields) {
+            if (!selectedWidgetKey.equals(text(field, "widgetKey"))) {
+                continue;
+            }
+            String name = text(field, "name");
+            if (name.isBlank()) {
+                continue;
+            }
+            fieldNames.add(name);
+            if ("transient".equals(text(field, "binding"))) {
+                localFieldNames.add(name);
+            } else {
+                serverBackedOverrideNames.add(name);
+            }
+            ObjectNode metadata = fieldMetadata.addObject();
+            metadata.put("name", name);
+            copyTextIfPresent(field, metadata, "label");
+            copyTextIfPresent(field, metadata, "controlType");
+            copyTextIfPresent(field, metadata, "source");
+            if (field.has("required")) {
+                metadata.put("required", field.path("required").asBoolean(false));
+            }
+        }
+        summary.put("fieldCount", fieldNames.size());
+        summary.put("localFieldCount", localFieldNames.size());
+        return summary;
+    }
+
     private JsonNode findFieldSummary(JsonNode fields, String fieldName) {
         if (!fields.isArray()) {
             return objectMapper.createObjectNode();
@@ -290,6 +348,13 @@ public class AgenticAuthoringPlanService {
             }
         }
         return objectMapper.createObjectNode();
+    }
+
+    private void copyTextIfPresent(JsonNode source, ObjectNode target, String fieldName) {
+        String value = text(source, fieldName);
+        if (!value.isBlank()) {
+            target.put(fieldName, value);
+        }
     }
 
     private AgenticAuthoringPlanRequest enrichRequest(AgenticAuthoringPlanRequest request) {
@@ -420,11 +485,11 @@ public class AgenticAuthoringPlanService {
                 - For operationKind=modify and changeKind=rename_or_relabel, fields must include only existing field names with the new desired labels.
                 - For operationKind=remove and changeKind=remove_field, fields must include only existing host-owned local/transient field names explicitly requested for removal.
                 - For remove/remove_field, do not include server-backed schema fields; removing schema-owned fields requires a future schema-aware hide flow.
-                - currentPageSummary.formWidgets[].fieldNames lists fields already customized in the page.
-                - currentPageSummary.formWidgets[].localFieldNames lists fields that are safe to remove with remove/remove_field.
-                - currentPageSummary.formWidgets[].serverBackedOverrideNames lists schema-backed field customizations such as relabels.
-                - For modify/add_field, do not repeat names from currentPageSummary.formWidgets[].fieldNames.
-                - For remove/remove_field, use only names from currentPageSummary.formWidgets[].localFieldNames.
+                - currentPageSummary.structuralInspection.fields is the primary source for existing page fields.
+                - currentPageSummary.structuralInspection.fields[].binding="transient" marks fields that are safe to remove with remove/remove_field.
+                - currentPageSummary.formWidgets[] is compatibility-only when structuralInspection is absent.
+                - For modify/add_field, do not repeat existing field names from structuralInspection.fields or formWidgets[].fieldNames.
+                - For remove/remove_field, use only transient/local fields from structuralInspection.fields or formWidgets[].localFieldNames.
                 - For rename_or_relabel, prefer existing field names from the current page summary or schema-backed fields from the request schema.
                 - Prefer the smallest didactic form or incremental change that can satisfy the user request.
                 - Do not include server-managed, audit, id, status, timestamp, owner or workflow fields unless the user explicitly asked for them.
