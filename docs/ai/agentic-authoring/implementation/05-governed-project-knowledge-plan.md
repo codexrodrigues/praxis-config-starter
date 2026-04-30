@@ -252,17 +252,18 @@ The local-first Page Builder browser proof now also asserts the visible audit
 status and guards against leaking the seeded concept key, fixture source
 summary or knowledge summary text in the cockpit status.
 
-The managed local lane for this proof is:
+The versioned managed local lane for this proof is:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
 
 AI_PROVIDER=openai \
-AI_ENV_FILE=praxis-config-starter/.env.openai.local.sh \
-PRAXIS_E2E_API_PORT=8098 \
-PRAXIS_E2E_UI_PORT=4083 \
-scripts/workspace/run-local-readiness-lane.sh project-knowledge-audit-cockpit
+AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
+./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh
 ```
+
+The wrapper uses isolated default ports `8098` and `4083` to avoid reusing
+long-running local API/UI services from another validation lane.
 
 The next implementation slice should be batched into a larger Phase 7 hardening
 PR only after collecting all remaining local-first validation evidence. Keep

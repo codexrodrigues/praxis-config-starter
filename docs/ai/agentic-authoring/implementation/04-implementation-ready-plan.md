@@ -659,9 +659,11 @@ Implemented evidence:
   `projectKnowledgeAudit` citation status and guards against leaking the
   seeded concept key, fixture source summary or knowledge summary text in the
   cockpit status.
-- `scripts/workspace/run-local-readiness-lane.sh project-knowledge-audit-cockpit`
-  wraps the managed local Page Builder/quickstart/LLM proof for this audit lane
-  so future phase gates do not need exploratory GitHub Actions.
+- `praxis-ui-angular/tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh`
+  is the versioned local Page Builder/quickstart/LLM proof for this audit lane.
+  The workspace helper may aggregate it, but the reproducible gate now lives in
+  the UI repository so future phase gates do not need exploratory GitHub
+  Actions.
 
 Acceptance:
 
@@ -733,17 +735,18 @@ node scripts/run-page-builder-agentic-authoring-e2e.js \
   --timeout-ms 900000
 ```
 
-Project Knowledge audit cockpit lane:
+Versioned Project Knowledge audit cockpit lane:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
 
 AI_PROVIDER=openai \
-AI_ENV_FILE=praxis-config-starter/.env.openai.local.sh \
-PRAXIS_E2E_API_PORT=8098 \
-PRAXIS_E2E_UI_PORT=4083 \
-scripts/workspace/run-local-readiness-lane.sh project-knowledge-audit-cockpit
+AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
+./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh
 ```
+
+The wrapper uses isolated default ports `8098` and `4083` to avoid reusing
+long-running local API/UI services from another validation lane.
 
 Manual browser inspection target:
 
