@@ -26,9 +26,10 @@ backend opera um turno agentic real:
 
 Status em 2026-04-30: a extracao do engine, o primeiro tool interno
 `searchApiResources`, a inspecao estrutural de `currentPage`, a separacao de
-retrieval/provenance e o repair loop backend-owned ja estao implementados em
-`main`. A proxima fase ativa e project knowledge governado, ancorado na Domain
-Knowledge Layer existente.
+retrieval/provenance, o repair loop backend-owned e a primeira trilha de
+project knowledge governado ja estao implementados em `main`. A proxima fase
+ativa e endurecer a observabilidade/governanca dessa influencia antes de
+promover ranking vetorial/RAG ou escrita de memoria authorada por IA.
 
 ## Ordem de leitura
 

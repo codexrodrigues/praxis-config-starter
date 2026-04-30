@@ -221,6 +221,18 @@ mapping the safe `projectKnowledge.retrieve` stream phase to Page Builder
 assistant progress. The UI displays only a governed influence count from
 allowlisted diagnostics and does not render raw project knowledge payloads.
 
-The next implementation slice is a local-first browser/HTTP proof that a real
-Page Builder stream turn with seeded governed project knowledge shows the safe
-progress state and reaches the expected terminal result.
+`praxis-api-quickstart` PR #45 adds a local-first operational fixture for seeded
+governed project knowledge against the configured config-store datasource. It
+does not create a public endpoint and scopes the fixture release key by
+tenant/environment to avoid shared-store collisions.
+
+`praxis-ui-angular` PR #89 adds the corresponding browser E2E proof. The test
+opens the real Page Builder UI, submits an agentic authoring prompt, observes
+the stream transport, verifies that the safe `projectKnowledge.retrieve`
+progress state is rendered, and asserts that the turn does not finish as an
+agentic error.
+
+The next implementation slice is governance hardening for the influence
+evidence: persist or expose a safe audit summary that links project knowledge
+influence to preview/source references without leaking raw payloads, while
+keeping vector/RAG ranking and LLM-authored memory writes deferred.
