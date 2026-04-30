@@ -109,7 +109,7 @@ public class AgenticAuthoringIntentResolverService {
         String effectivePrompt = hasLlmIntentResolver ? rawPrompt : turn.effectivePrompt();
         String prompt = normalize(effectivePrompt);
         String discoveryPrompt = normalize(turn.answeredPendingClarification() ? turn.effectivePrompt() : effectivePrompt);
-        JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage());
+        JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage(), request.selectedWidgetKey());
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(request.currentPage(), request.selectedWidgetKey());
         AgenticAuthoringKeywordFallbackResolution fallbackResolution =
                 keywordFallbackResolver.resolve(prompt, currentPageSummary, target);

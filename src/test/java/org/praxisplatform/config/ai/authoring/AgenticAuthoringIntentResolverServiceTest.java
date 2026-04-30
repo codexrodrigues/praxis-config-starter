@@ -3079,6 +3079,13 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.target().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.currentPageSummary().path("formWidgets").size()).isEqualTo(1);
+        assertThat(result.currentPageSummary()
+                        .path("structuralInspection")
+                        .path("widgets")
+                        .path(0)
+                        .path("artifactKind")
+                        .asText())
+                .isEqualTo("form");
     }
 
     private ObjectNode payrollTablePage() {
