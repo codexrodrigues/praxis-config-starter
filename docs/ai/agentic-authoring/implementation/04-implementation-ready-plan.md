@@ -4,8 +4,8 @@ Date: 2026-04-29
 
 Status: implementation-ready planning source. This document supersedes the
 execution order in `02-implementation-backlog.md` when there is a conflict.
-As of 2026-04-30, Phases 1-5 below are implemented in `main`; the next active
-implementation phase is Phase 6.
+As of 2026-04-30, Phases 1-6 below are implemented in `main`; the next active
+implementation phase is Phase 7.
 
 ## Premise
 
@@ -27,8 +27,6 @@ not the source of truth for those decisions.
 
 The following problems from the previous implementation docs are still valid:
 
-- Backend-owned self-healing is not implemented as a bounded, auditable repair
-  loop.
 - Persistent project knowledge is not yet a governed platform source. Client
   conversation history is not a canonical memory model.
 
@@ -43,6 +41,8 @@ The following problems were closed by the first implementation sequence:
 - Semantic retrieval, lexical fallback, broad artifact discovery, context-hint
   candidates and deterministic overrides have explicit provenance labels and
   safe stream/tool diagnostics.
+- Backend-owned self-healing now classifies preview outcomes, emits safe repair
+  progress and retries recoverable preview failures once.
 
 The following problems are partially superseded:
 
@@ -550,9 +550,7 @@ Implemented evidence:
 
 Goal: retry only recoverable failures in a bounded and observable way.
 
-Status: in progress in `main`. Repair classification is implemented, and
-recoverable preview failures receive one backend-owned retry with safe repair
-context.
+Status: implemented in `main` by PRs #150-#153.
 
 Tasks:
 
@@ -571,7 +569,7 @@ Acceptance:
 - Non-recoverable failures remain terminal and clear.
 - User sees progress without raw internal prompt or payload leakage.
 
-Implemented evidence so far:
+Implemented evidence:
 
 - `AgenticAuthoringRepairClassificationPolicy` classifies preview outcomes as
   `retryable`, `non_retryable`, `route_required` or
@@ -582,6 +580,9 @@ Implemented evidence so far:
   classification, attempt number and failure/warning counts.
 - `route_required` and `user_clarification_required` remain excluded from the
   retry path.
+- `AgenticAuthoringTurnEngineTest` guards successful repair, persistent repair
+  failure after one attempt and user-clarification paths without raw payload
+  leakage.
 
 ### Phase 7 - Governed Project Knowledge
 
@@ -747,7 +748,7 @@ Before the full browser gate, prefer focal local checks for the changed layer:
 
 ## Implementation Order
 
-Recommended first PRs:
+Completed first PR sequence:
 
 1. Docs sync: mark this plan active and update old docs to point here.
 2. Backend extraction: `AgenticAuthoringTurnEngine` plus event sink and routing
@@ -759,9 +760,16 @@ Recommended first PRs:
 5. Structural page inspection: reduce summary dependency without inferring
    business policy from UI state.
 6. Browser proof: local-first Page Builder stream E2E plus cockpit/timeline E2E.
+7. Retrieval policy separation: make candidate provenance explicit and safe in
+   diagnostics.
+8. Backend-owned repair loop: classify repairability and retry recoverable
+   preview failures once.
 
-Do not start self-healing or project knowledge until the engine/tool boundary is
-stable.
+Recommended next PR sequence:
+
+1. Start Phase 7 by defining governed project knowledge scope, lifecycle and
+   storage boundaries before adding retrieval.
+2. Add retrieval only after storage/governance is explicit.
 
 ## Stop Conditions
 
