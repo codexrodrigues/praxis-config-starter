@@ -432,7 +432,8 @@ class AgenticAuthoringTurnStreamServiceTest {
                 intentResolverService,
                 previewService,
                 objectMapper,
-                new AgenticAuthoringCurrentPageAnalyzer(objectMapper));
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
         return new AgenticAuthoringTurnStreamService(
                 turnEngine,
                 threadService,

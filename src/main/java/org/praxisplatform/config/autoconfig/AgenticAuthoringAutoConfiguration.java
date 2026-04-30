@@ -23,6 +23,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryS
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegistry;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
@@ -182,6 +183,13 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public AgenticAuthoringToolRegistry agenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService) {
+        return new AgenticAuthoringToolRegistry(resourceDiscoveryService);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public AgenticAuthoringPatchCompilerService agenticAuthoringPatchCompilerService(
             AgenticAuthoringArtifactProperties properties,
             ObjectMapper objectMapper) {
@@ -270,12 +278,14 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringTurnEngine agenticAuthoringTurnEngine(
             AgenticAuthoringIntentResolverService intentResolverService,
             AgenticAuthoringPreviewService previewService,
+            AgenticAuthoringToolRegistry toolRegistry,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
                 objectMapper,
-                new AgenticAuthoringCurrentPageAnalyzer(objectMapper));
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                toolRegistry);
     }
 
     @Bean

@@ -16,6 +16,7 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringPreviewService previewService;
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer;
+    private final AgenticAuthoringToolRegistry toolRegistry;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
     AgenticAuthoringTurnOutcome execute(
