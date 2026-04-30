@@ -397,6 +397,8 @@ Recommended first endpoints:
 - `GET /api/praxis/config/domain-knowledge/context`
 - `GET /api/praxis/config/domain-knowledge/relationships`
 - `POST /api/praxis/config/domain-knowledge/change-sets`
+- `GET /api/praxis/config/domain-knowledge/change-sets`
+- `GET /api/praxis/config/domain-knowledge/change-sets/{id}`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`
 - `POST /api/praxis/config/domain-rules/intake`

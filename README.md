@@ -193,6 +193,9 @@ Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG 
 | POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target` | Resolves an operation target using manifest-declared resolver metadata. |
 | POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan` | Validates a component edit plan against the manifest structure. |
 | POST | `/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch` | Compiles generic manifest effects into an applicable component config patch with `proposedConfig`; domain effects remain explicit compiler boundaries. |
+| POST | `/api/praxis/config/domain-knowledge/change-sets` | Creates a governed Domain Knowledge change-set proposal with deterministic validation and safe response projection. |
+| GET | `/api/praxis/config/domain-knowledge/change-sets` | Lists governed Domain Knowledge change-set proposals by tenant/environment and optional status. |
+| GET | `/api/praxis/config/domain-knowledge/change-sets/{changeSetId}` | Reads a governed Domain Knowledge change-set proposal in scope without exposing raw patch payloads in the common response. |
 | POST | `/api/praxis/config/domain-rules/intake` | Starts a governed semantic decision/rule draft from natural-language intent and canonical resource grounding. |
 | POST | `/api/praxis/config/domain-rules/definitions` | Persists an explicit shared domain rule definition with governance, source release/change-set links and semantic ownership. |
 | GET | `/api/praxis/config/domain-rules/definitions` | Lists shared domain rule definitions by tenant/environment, resource, status, rule type or rule key. |

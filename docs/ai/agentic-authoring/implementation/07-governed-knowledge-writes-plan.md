@@ -43,8 +43,9 @@ Already present in `praxis-config-starter`:
 
 Missing before implementation:
 
-- done in the service foundation slice: internal service for creating, listing
-  and reading proposed change sets with scope checks and safe responses;
+- done in the create/list/get HTTP slice: public `POST` and `GET` endpoints for
+  creating, listing and reading proposed change sets with scope checks and safe
+  responses;
 - done in the validator foundation slice: deterministic patch operation schema
   represented by explicit DTOs and validated before any public endpoint exists;
 - done in the validator foundation slice: validation service for proposed
@@ -183,12 +184,18 @@ should be restricted to admin/debug surfaces or explicit detail endpoints.
 The domain-catalog v1 document already recommends these endpoints. This cut
 should implement the smallest safe subset:
 
-- `POST /api/praxis/config/domain-knowledge/change-sets`
-- `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`
-- `PATCH /api/praxis/config/domain-knowledge/change-sets/{id}/status`
-- `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`
-- `GET /api/praxis/config/domain-knowledge/change-sets`
-- `GET /api/praxis/config/domain-knowledge/change-sets/{id}`
+- done in the create/list/get HTTP slice:
+  `POST /api/praxis/config/domain-knowledge/change-sets`;
+- deferred:
+  `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`;
+- deferred:
+  `PATCH /api/praxis/config/domain-knowledge/change-sets/{id}/status`;
+- deferred:
+  `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`;
+- done in the create/list/get HTTP slice:
+  `GET /api/praxis/config/domain-knowledge/change-sets`;
+- done in the create/list/get HTTP slice:
+  `GET /api/praxis/config/domain-knowledge/change-sets/{id}`.
 
 If we need to reduce scope further, start with create, validate, list and get.
 Do not implement apply before validation and approval semantics are covered by
@@ -372,14 +379,16 @@ Pause implementation if the design:
 2. Done in the service foundation slice: create/list/get service methods for
    proposed change sets, including idempotent retry, semantic conflict
    detection, tenant/environment scope checks and safe response projection.
-   Public endpoints are still intentionally deferred.
-3. Validation endpoint and validation result persistence.
-4. Approval/rejection status transitions.
-5. Apply endpoint for one narrow operation, preferably `add_alias` plus
+3. Done in the create/list/get HTTP slice: public create/list/get endpoints
+   delegate to the service and preserve safe responses. Explicit validation,
+   status transitions and apply are still intentionally deferred.
+4. Validation endpoint and validation result persistence.
+5. Approval/rejection status transitions.
+6. Apply endpoint for one narrow operation, preferably `add_alias` plus
    `add_evidence`.
-6. Quickstart HTTP corpus proving the lifecycle with Neon.
-7. Page Builder cockpit actions for proposal, review and explicit apply.
-8. Browser E2E proving no silent mutation and post-apply influence citation.
+7. Quickstart HTTP corpus proving the lifecycle with Neon.
+8. Page Builder cockpit actions for proposal, review and explicit apply.
+9. Browser E2E proving no silent mutation and post-apply influence citation.
 
 ## Publication Decision
 
