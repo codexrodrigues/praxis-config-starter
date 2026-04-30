@@ -7,6 +7,10 @@ Date: 2026-04-30
 This report records the local-first release-readiness checkpoint for governed
 Project Knowledge in agentic authoring.
 
+The operational checklist for closing this checkpoint is:
+
+- [Project Knowledge Release Checklist](project-knowledge-release-checklist-2026-04-30.md)
+
 The validated path covers:
 
 - read-only retrieval of governed Project Knowledge from Domain Knowledge

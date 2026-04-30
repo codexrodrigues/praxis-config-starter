@@ -26,6 +26,10 @@ The release-readiness report for this checkpoint is:
 
 - [Release Readiness - Governed Project Knowledge Checkpoint](../../release-readiness-2026-04-30-project-knowledge.md)
 
+The operational closure checklist is:
+
+- [Project Knowledge Release Checklist](../../project-knowledge-release-checklist-2026-04-30.md)
+
 ## Why Release-Readiness First
 
 `release-readiness` is the smallest platform-correct next step because it
