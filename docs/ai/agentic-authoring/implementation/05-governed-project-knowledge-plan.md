@@ -215,3 +215,12 @@ that only governed entries are returned with their source release available.
 The next implementation slice is UI explanation of the already-safe
 `projectKnowledge.retrieve` diagnostics, while keeping vector/RAG ranking
 deferred.
+
+`praxis-ui-angular` PR #88 now exposes the first UI explanation slice by
+mapping the safe `projectKnowledge.retrieve` stream phase to Page Builder
+assistant progress. The UI displays only a governed influence count from
+allowlisted diagnostics and does not render raw project knowledge payloads.
+
+The next implementation slice is a local-first browser/HTTP proof that a real
+Page Builder stream turn with seeded governed project knowledge shows the safe
+progress state and reaches the expected terminal result.

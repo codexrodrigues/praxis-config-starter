@@ -635,6 +635,10 @@ Implemented evidence:
 - `DomainKnowledgeConceptRepositoryPersistenceTest` proves the governed
   repository query with persisted Domain Knowledge concepts, visibility/status
   filtering, scope fallback and eager source release availability.
+- `praxis-ui-angular` PR #88 maps the safe `projectKnowledge.retrieve` stream
+  phase to visible Page Builder assistant progress, including an allowlisted
+  influence count and EN/PT-BR i18n coverage, without exposing raw project
+  knowledge payloads.
 
 Acceptance:
 
@@ -805,9 +809,12 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Expose safe `projectKnowledge.retrieve` influence diagnostics in the UI.
-2. Keep vector/RAG ranking deferred until UI explanation and relational
-   governance remain stable.
+1. Add a local-first browser/HTTP proof that a real Page Builder stream turn
+   with seeded governed project knowledge renders the safe
+   `projectKnowledge.retrieve` progress state and reaches the expected
+   terminal result.
+2. Keep vector/RAG ranking deferred until UI explanation, relational
+   governance and E2E observability remain stable.
 
 ## Stop Conditions
 
