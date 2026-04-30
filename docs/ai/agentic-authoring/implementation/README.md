@@ -27,9 +27,13 @@ backend opera um turno agentic real:
 Status em 2026-04-30: a extracao do engine, o primeiro tool interno
 `searchApiResources`, a inspecao estrutural de `currentPage`, a separacao de
 retrieval/provenance, o repair loop backend-owned e a primeira trilha de
-project knowledge governado ja estao implementados em `main`. A proxima fase
-ativa e endurecer a observabilidade/governanca dessa influencia antes de
-promover ranking vetorial/RAG ou escrita de memoria authorada por IA.
+project knowledge governado ja estao implementados em `main`. O checkpoint de
+observabilidade/governanca do Project Knowledge tambem esta fechado em `main`:
+o backend deriva contagens de auditoria a partir de entradas seguras, a UI
+exibe apenas citacoes seguras, e a lane local versionada do Page Builder prova
+o fluxo real com LLM/browser. A proxima fase deve manter ranking vetorial/RAG e
+escrita de memoria authorada por IA adiados ate existir um corte explicito de
+governanca para essas capacidades.
 
 ## Ordem de leitura
 

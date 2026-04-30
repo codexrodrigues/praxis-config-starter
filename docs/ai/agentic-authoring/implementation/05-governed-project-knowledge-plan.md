@@ -1,6 +1,6 @@
 # Governed Project Knowledge Plan
 
-Status: implementation-ready planning  
+Status: beta checkpoint complete for read/audit/UI proof
 Date: 2026-04-30  
 Scope: Phase 7 of agentic authoring in `praxis-config-starter`
 
@@ -269,6 +269,10 @@ AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
 The wrapper uses isolated default ports `8098` and `4083` to avoid reusing
 long-running local API/UI services from another validation lane.
 
-The next implementation slice should be batched into a larger Phase 7 hardening
-PR only after collecting all remaining local-first validation evidence. Keep
-vector/RAG ranking plus LLM-authored memory writes deferred.
+This completes the Phase 7 beta checkpoint for read-only governed Project
+Knowledge influence, safe backend audit and Page Builder UI proof. The next
+implementation slice must be a new explicitly scoped cut: either governed
+LLM-authored knowledge writes, vector/RAG-derived ranking as a derived index, or
+release-readiness documentation. Keep vector/RAG ranking plus LLM-authored
+memory writes deferred until that cut defines governance, audit, rollback and
+local E2E gates.
