@@ -22,7 +22,12 @@ backend opera um turno agentic real:
 4. observa os resultados;
 5. gera preview/resultado;
 6. valida e tenta repair quando a falha for recuperavel;
-7. expone progresso e resultado por stream SSE canonico.
+7. expoe progresso e resultado por stream SSE canonico.
+
+Status em 2026-04-30: a extracao do engine, o primeiro tool interno
+`searchApiResources`, a inspecao estrutural de `currentPage` e a separacao de
+retrieval/provenance ja estao implementados em `main`. A proxima fase ativa e
+o repair loop backend-owned.
 
 ## Ordem de leitura
 
@@ -44,15 +49,15 @@ reaproveitar e extrair capacidades ja existentes, nao reconstruir o fluxo do
 zero:
 
 - `AgenticAuthoringTurnStreamService` ja possui ciclo SSE, replay, probe,
-  cancelamento, timeout, ownership e append de eventos; deve perder
-  orquestracao de negocio para um `AgenticAuthoringTurnEngine`, mas continuar
-  dono do transporte.
+  cancelamento, timeout, ownership e append de eventos; ele deve continuar
+  dono do transporte enquanto `AgenticAuthoringTurnEngine` concentra a
+  orquestracao de negocio.
 - `AiTurnEventService`, `AiTurnEventEnvelope` e `AiSensitiveDataRedactor` ja
   formam a trilha canonica de eventos, replay e redaction segura.
 - `AgenticAuthoringResourceDiscoveryService.search` ja e o comportamento
-  backend que deve virar o primeiro tool interno `searchApiResources`.
-- `AgenticAuthoringCurrentPageAnalyzer` ja oferece base para o futuro
-  `inspectCurrentPage`, reduzindo dependencia de `currentPageSummary`.
+  backend executado pelo primeiro tool interno `searchApiResources`.
+- `AgenticAuthoringCurrentPageAnalyzer` ja oferece inspecao estrutural de
+  `currentPage`, reduzindo dependencia de `currentPageSummary`.
 - `DomainRuleService` e `DomainRuleController` ja sao a fronteira canonica para
   intake, definition, simulation, publication, materialization, timeline e
   transicoes de status.

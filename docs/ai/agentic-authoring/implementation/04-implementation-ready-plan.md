@@ -4,6 +4,8 @@ Date: 2026-04-29
 
 Status: implementation-ready planning source. This document supersedes the
 execution order in `02-implementation-backlog.md` when there is a conflict.
+As of 2026-04-30, Phases 1-5 below are implemented in `main`; the next active
+implementation phase is Phase 6.
 
 ## Premise
 
@@ -25,19 +27,22 @@ not the source of truth for those decisions.
 
 The following problems from the previous implementation docs are still valid:
 
-- `AgenticAuthoringTurnStreamService` still owns too much orchestration. The
-  stream path remains mostly `intent-resolution -> page-preview`, with SSE
-  progress around it.
-- `searchApiResources` exists as backend discovery behavior, but it is not yet
-  a registered executable tool owned by a turn engine.
-- `currentPageSummary` still influences resolver, planner and validator paths
-  more than a derived summary should.
-- Semantic retrieval, lexical fallback and deterministic overrides are not yet
-  cleanly separated as explicit policies.
 - Backend-owned self-healing is not implemented as a bounded, auditable repair
   loop.
 - Persistent project knowledge is not yet a governed platform source. Client
   conversation history is not a canonical memory model.
+
+The following problems were closed by the first implementation sequence:
+
+- `AgenticAuthoringTurnEngine` now owns backend turn orchestration, while
+  `AgenticAuthoringTurnStreamService` remains the lifecycle/SSE owner.
+- `searchApiResources` is a registered executable internal tool, route-scoped
+  and bounded by `MAX_TOOL_CALLS_PER_TURN`.
+- `currentPage` structural inspection is available and resolver/planner paths
+  prefer structured fields over summary text when present.
+- Semantic retrieval, lexical fallback, broad artifact discovery, context-hint
+  candidates and deterministic overrides have explicit provenance labels and
+  safe stream/tool diagnostics.
 
 The following problems are partially superseded:
 
@@ -506,6 +511,8 @@ Suggested focal backend tests:
 
 Goal: make candidate provenance clear and auditable.
 
+Status: implemented in `main` by PRs #144-#148.
+
 Tasks:
 
 - Split retrieval into explicit components:
@@ -523,6 +530,21 @@ Acceptance:
   grounding.
 - Stream diagnostics explain whether discovery came from semantic retrieval,
   lexical fallback, deterministic override or context hint.
+
+Implemented evidence:
+
+- Retrieval is split into `SemanticCandidateRetriever`,
+  `LexicalFallbackCandidateRetriever`, `BroadArtifactCandidateRetriever` and
+  `CandidateRankingPolicy`.
+- `AgenticAuthoringCandidateProvenancePolicy` centralizes safe source
+  classification.
+- Lexical candidates carry explicit `lexical-fallback` evidence; legacy
+  `api-metadata` remains mapped as lexical fallback for compatibility.
+- Stream diagnostics use the same provenance policy and classify
+  selected-candidate handoffs before falling back to candidate lists.
+- `AgenticAuthoringResourceDiscoveryServiceTest` guards that semantic
+  retrieval is preferred and lexical fallback is not consulted when semantic
+  candidates exist.
 
 ### Phase 6 - Backend-Owned Repair Loop
 
