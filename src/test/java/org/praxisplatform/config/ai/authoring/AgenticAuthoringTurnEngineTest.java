@@ -14,9 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.Completion;
+import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiPrincipalContext;
 
 @ExtendWith(MockitoExtension.class)
@@ -196,13 +199,89 @@ class AgenticAuthoringTurnEngineTest {
         verify(previewService, never()).preview(any(), any(), any(), any());
     }
 
+    @Test
+    void invokesResourceDiscoveryToolThroughEngineAndResolvesIntentWithCandidates() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringTurnStreamRequest request = request("Crie dashboard de folha de pagamento");
+        AgenticAuthoringIntentResolutionResult firstIntent = clarificationRequiredIntent();
+        AgenticAuthoringIntentResolutionResult secondIntent = validIntentWithToolCandidate();
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "GET",
+                        "analytics,folha,pagamento",
+                        "Analytics de folha de pagamento",
+                        "Visao analitica de folha de pagamento por departamento",
+                        "listVwAnalyticsFolhaPagamento",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(firstIntent, secondIntent);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine(repository).execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("tool.start");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("tool").asText())
+                            .isEqualTo("searchApiResources");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("maxCallsPerTurn").asInt())
+                            .isEqualTo(1);
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("tool.result");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("candidateCount").asInt())
+                            .isEqualTo(1);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("payload")).isFalse();
+                });
+
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(intentResolverService, org.mockito.Mockito.times(2))
+                .resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(intentRequest.getAllValues().get(1)
+                        .contextHints()
+                        .path("resourceDiscovery")
+                        .path("candidates")
+                        .path(0)
+                        .path("resourcePath")
+                        .asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
     private AgenticAuthoringTurnEngine engine() {
+        return engine(null);
+    }
+
+    private AgenticAuthoringTurnEngine engine(ApiMetadataRepository repository) {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
                 objectMapper,
                 new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
-                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(
+                        repository != null ? new AgenticAuthoringApiMetadataCandidateCatalog(repository) : null,
+                        objectMapper)));
     }
 
     private AgenticAuthoringTurnStreamRequest request() {
@@ -306,6 +385,37 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(),
                 List.of("resource-candidate-required"),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult validIntentWithToolCandidate() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento&operation=get&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "GET",
+                0.95,
+                "resource discovered by backend tool",
+                List.of("api-metadata", "tool-search-api-resources"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_chart",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
                 objectMapper.createObjectNode());
     }
 
