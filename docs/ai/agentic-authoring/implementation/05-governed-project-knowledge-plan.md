@@ -132,10 +132,11 @@ Minimum UI behavior:
 
 ## Implementation Slices
 
-1. Add a backend read model/service that queries approved Domain Knowledge
-   entries by tenant, environment, context/resource and `payload.kind`.
-2. Add unit tests for scope filtering, status filtering, `ai_visibility`
-   behavior and safe projection redaction.
+1. Done in the Phase 7 read-model slice: add a backend read model/service that
+   queries approved Domain Knowledge entries by tenant, environment,
+   context/resource and `payload.kind`.
+2. Done in the Phase 7 read-model slice: add unit tests for scope filtering,
+   status filtering, `ai_visibility` behavior and safe projection redaction.
 3. Add an internal authoring-engine retrieval step that consumes safe
    projections without changing public HTTP contracts.
 4. Emit stream diagnostics that name retrieved knowledge by safe identifier,
@@ -168,3 +169,14 @@ Do not proceed with implementation if the proposed design:
 - introduces a public endpoint before the read model and governance tests are
   stable.
 
+## Implemented Foundation
+
+`AgenticAuthoringProjectKnowledgeService` is the first read-only backend
+foundation for Phase 7. It returns safe projections from `domain_knowledge_concept`
+only when tenant/environment scope, lifecycle, curation status and
+`ai_visibility` allow normal authoring influence. It still does not mutate
+knowledge and is not wired into the authoring engine.
+
+The next implementation slice is to attach this service to
+`AgenticAuthoringTurnEngine` as a planner-context input and emit safe stream
+diagnostics that explain knowledge influence.
