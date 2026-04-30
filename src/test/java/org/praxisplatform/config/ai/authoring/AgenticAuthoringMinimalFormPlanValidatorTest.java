@@ -42,7 +42,47 @@ class AgenticAuthoringMinimalFormPlanValidatorTest {
                 "field controlType is required: ");
     }
 
+    @Test
+    void validateRemoveFieldUsesStructuralInspectionWhenLegacySummaryIsAbsent() {
+        ObjectNode plan = validIntentBackedPlan("observacaoInterna");
+
+        List<String> failures = validator.validate(plan, intentResolution(currentPageStructuralSummary()));
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void validateRemoveFieldRejectsServerBackedFieldFromStructuralInspection() {
+        ObjectNode plan = validIntentBackedPlan("nome");
+
+        List<String> failures = validator.validate(plan, intentResolution(currentPageStructuralSummary()));
+
+        assertThat(failures).contains("remove_field requires current local/transient field: nome");
+    }
+
+    private ObjectNode validIntentBackedPlan(String fieldName) {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0.0");
+        plan.put("profileId", AgenticAuthoringMinimalFormPlanValidator.PROFILE_CREATE_MINIMAL_FORM);
+        plan.put("targetApp", "praxis-ui-angular");
+        plan.put("targetComponentId", "praxis-dynamic-page-builder");
+        plan.put("submitActionRef", "POST /api/human-resources/funcionarios");
+        plan.put("apiUseCaseResolutionRef", "api-use-case");
+        plan.put("fieldSelectionPlanRef", "field-selection");
+        plan.putArray("sourceRefs").add("test");
+        ObjectNode field = plan.putArray("fields").addObject();
+        field.put("name", fieldName);
+        field.put("label", fieldName);
+        field.put("controlType", "text");
+        field.put("required", false);
+        return plan;
+    }
+
     private AgenticAuthoringIntentResolutionResult intentResolution() {
+        return intentResolution(objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult intentResolution(ObjectNode currentPageSummary) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
                 "remove",
@@ -66,6 +106,26 @@ class AgenticAuthoringMinimalFormPlanValidatorTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                objectMapper.createObjectNode());
+                currentPageSummary);
+    }
+
+    private ObjectNode currentPageStructuralSummary() {
+        ObjectNode summary = objectMapper.createObjectNode();
+        ObjectNode inspection = summary.putObject("structuralInspection");
+        inspection.putArray("widgets").addObject()
+                .put("widgetKey", "funcionarios-form")
+                .put("componentType", "praxis-dynamic-form")
+                .put("artifactKind", "form")
+                .put("boundResource", "/api/human-resources/funcionarios");
+        var fields = inspection.putArray("fields");
+        fields.addObject()
+                .put("widgetKey", "funcionarios-form")
+                .put("name", "nome")
+                .put("binding", "server");
+        fields.addObject()
+                .put("widgetKey", "funcionarios-form")
+                .put("name", "observacaoInterna")
+                .put("binding", "transient");
+        return summary;
     }
 }

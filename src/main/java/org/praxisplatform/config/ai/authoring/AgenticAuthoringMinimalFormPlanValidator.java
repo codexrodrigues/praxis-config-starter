@@ -1,7 +1,10 @@
 package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -162,6 +165,10 @@ public class AgenticAuthoringMinimalFormPlanValidator {
         if (currentPageSummary == null) {
             return MissingNode.getInstance();
         }
+        JsonNode structuralSummary = structuralTargetFormSummary(currentPageSummary, intentResolution.target());
+        if (structuralSummary.isObject() && structuralSummary.path("fieldNames").isArray()) {
+            return structuralSummary;
+        }
         JsonNode formWidgets = currentPageSummary.path("formWidgets");
         if (!formWidgets.isArray() || formWidgets.isEmpty()) {
             return MissingNode.getInstance();
@@ -175,6 +182,48 @@ public class AgenticAuthoringMinimalFormPlanValidator {
             }
         }
         return formWidgets.get(0);
+    }
+
+    private JsonNode structuralTargetFormSummary(JsonNode currentPageSummary, AgenticAuthoringTarget target) {
+        JsonNode inspection = currentPageSummary.path("structuralInspection");
+        JsonNode widgets = inspection.path("widgets");
+        JsonNode fields = inspection.path("fields");
+        if (!widgets.isArray() || widgets.isEmpty() || !fields.isArray()) {
+            return MissingNode.getInstance();
+        }
+        String selectedWidgetKey = target == null ? "" : textValue(target.widgetKey());
+        if (selectedWidgetKey.isBlank()) {
+            for (JsonNode widget : widgets) {
+                if ("form".equals(text(widget, "artifactKind"))) {
+                    selectedWidgetKey = text(widget, "widgetKey");
+                    break;
+                }
+            }
+        }
+        if (selectedWidgetKey.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        ObjectNode summary = JsonNodeFactory.instance.objectNode();
+        summary.put("widgetKey", selectedWidgetKey);
+        ArrayNode fieldNames = summary.putArray("fieldNames");
+        ArrayNode localFieldNames = summary.putArray("localFieldNames");
+        ArrayNode serverBackedOverrideNames = summary.putArray("serverBackedOverrideNames");
+        for (JsonNode field : fields) {
+            if (!selectedWidgetKey.equals(text(field, "widgetKey"))) {
+                continue;
+            }
+            String name = text(field, "name");
+            if (name.isBlank()) {
+                continue;
+            }
+            fieldNames.add(name);
+            if ("transient".equals(text(field, "binding"))) {
+                localFieldNames.add(name);
+            } else {
+                serverBackedOverrideNames.add(name);
+            }
+        }
+        return summary;
     }
 
     private String submitActionRef(AgenticAuthoringCandidate candidate) {
@@ -210,6 +259,10 @@ public class AgenticAuthoringMinimalFormPlanValidator {
             }
         }
         return false;
+    }
+
+    private String textValue(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private String text(JsonNode node, String field) {

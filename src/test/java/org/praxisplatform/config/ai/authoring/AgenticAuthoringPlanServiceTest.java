@@ -401,6 +401,35 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanCompletesRemoveFieldFromStructuralInspectionWhenLegacySummaryIsAbsent() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("observacaoInterna", "Observacao interna", "textarea");
+        plan.putArray("fields");
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Remova o campo observacaoInterna do formulario",
+                                null,
+                                null,
+                                null,
+                                funcionariosIntent("remove", "remove_field", currentPageStructuralSummary())),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.minimalFormPlan().path("fields")).hasSize(1);
+        assertThat(result.minimalFormPlan().path("fields").get(0).path("name").asText())
+                .isEqualTo("observacaoInterna");
+    }
+
+    @Test
     void generateMinimalFormPlanCompletesRelabelFieldFromPromptWhenProviderMissesServerBackedField() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
@@ -594,6 +623,26 @@ class AgenticAuthoringPlanServiceTest {
         formWidget.putArray("fieldNames").add("observacaoInterna");
         formWidget.putArray("localFieldNames").add("observacaoInterna");
         formWidget.putArray("serverBackedOverrideNames");
+        return summary;
+    }
+
+    private ObjectNode currentPageStructuralSummary() {
+        ObjectNode summary = objectMapper.createObjectNode();
+        ObjectNode inspection = summary.putObject("structuralInspection");
+        var widgets = inspection.putArray("widgets");
+        widgets.addObject()
+                .put("widgetKey", "funcionarios-form")
+                .put("componentType", "praxis-dynamic-form")
+                .put("artifactKind", "form")
+                .put("boundResource", "/api/human-resources/funcionarios");
+        var fields = inspection.putArray("fields");
+        fields.addObject()
+                .put("widgetKey", "funcionarios-form")
+                .put("name", "observacaoInterna")
+                .put("label", "Observacao interna")
+                .put("controlType", "textarea")
+                .put("binding", "transient")
+                .put("source", "local");
         return summary;
     }
 
