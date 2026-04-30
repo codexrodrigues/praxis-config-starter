@@ -243,6 +243,51 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void doesNotRepairPreviewFailureThatRequiresUserClarification() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        false,
+                        List.of("intent-resolution-selected-candidate-required"),
+                        List.of("preview-skipped-invalid-intent-resolution"),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Ainda preciso que voce escolha a fonte de dados."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .noneSatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("repair.attempt");
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("preview.compile");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairClassification").asText())
+                            .isEqualTo("user_clarification_required");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairAttempted").asBoolean())
+                            .isFalse();
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("canApply").asBoolean())
+                            .isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("assistantMessage").asText())
+                            .isEqualTo("Ainda preciso que voce escolha a fonte de dados.");
+                });
+    }
+
+    @Test
     void routeRequiredSharedRuleHandoffSkipsPreviewAndReturnsExistingIntentPayload() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
