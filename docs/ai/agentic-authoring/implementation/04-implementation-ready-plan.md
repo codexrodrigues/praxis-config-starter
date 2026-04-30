@@ -648,6 +648,10 @@ Implemented evidence:
   error. The local runner now points at the canonical
   `praxis-config-starter/docs/ai/agentic-authoring/**` contract/proof
   directories.
+- `AgenticAuthoringPreviewDiagnostics.projectKnowledgeAudit` provides a safe
+  backend-owned influence audit summary that links governed Project Knowledge
+  entries to `sourceRefs` citations without copying raw payloads or knowledge
+  summaries into the preview diagnostics.
 
 Acceptance:
 
@@ -818,11 +822,11 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Add a safe influence-audit summary for Project Knowledge turns, linking the
-   retrieved governed projections to preview/source references without exposing
-   raw payloads or introducing a public memory endpoint.
-2. Add a focal backend test and, when the UI surface changes, a browser proof
-   that the audit summary remains safe and tenant/environment scoped.
+1. Decide whether the safe `projectKnowledgeAudit` should be surfaced in the
+   Page Builder cockpit, and if so render only counts/citation status/source
+   references, not summaries or payloads.
+2. Add a browser proof only if the UI surface changes; otherwise keep the
+   backend focal tests as the gate for this internal diagnostic.
 3. Keep vector/RAG ranking and LLM-authored memory writes deferred until
    relational governance, safe observability and local E2E evidence remain
    stable.

@@ -303,6 +303,16 @@ class AgenticAuthoringTurnEngineTest {
                                     .path("sourceRefs")
                                     .toString())
                             .contains("projectKnowledge:knowledge-1");
+                    com.fasterxml.jackson.databind.JsonNode audit = node.path("preview")
+                            .path("diagnostics")
+                            .path("projectKnowledgeAudit");
+                    org.assertj.core.api.Assertions.assertThat(audit.path("schemaVersion").asText())
+                            .isEqualTo("praxis-agentic-authoring-project-knowledge-audit.v1");
+                    org.assertj.core.api.Assertions.assertThat(audit.path("citedCount").asInt()).isEqualTo(1);
+                    org.assertj.core.api.Assertions.assertThat(audit.path("entries").path(0).path("cited").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(audit.toString())
+                            .doesNotContain("Prefer compact identity cards");
                 });
     }
 

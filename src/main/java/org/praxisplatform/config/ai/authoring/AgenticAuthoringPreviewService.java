@@ -3,12 +3,16 @@ package org.praxisplatform.config.ai.authoring;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 public class AgenticAuthoringPreviewService {
 
@@ -114,7 +118,13 @@ public class AgenticAuthoringPreviewService {
                     List.copyOf(warnings),
                     planResult.minimalFormPlan(),
                     MissingNode.getInstance(),
-                    diagnostics(intentResolution, List.copyOf(failureCodes), List.copyOf(warnings))
+                    diagnostics(
+                            effectiveRequest,
+                            intentResolution,
+                            List.copyOf(failureCodes),
+                            List.copyOf(warnings),
+                            planResult.minimalFormPlan(),
+                            MissingNode.getInstance())
             );
         }
 
@@ -133,7 +143,13 @@ public class AgenticAuthoringPreviewService {
                 List.copyOf(warnings),
                 planResult.minimalFormPlan(),
                 compileResult.compiledFormPatch(),
-                diagnostics(intentResolution, List.copyOf(failureCodes), List.copyOf(warnings)),
+                diagnostics(
+                        effectiveRequest,
+                        intentResolution,
+                        List.copyOf(failureCodes),
+                        List.copyOf(warnings),
+                        planResult.minimalFormPlan(),
+                        compileResult.compiledFormPatch()),
                 null,
                 previewAssistantMessage(
                         effectiveRequest,
@@ -177,7 +193,15 @@ public class AgenticAuthoringPreviewService {
                     List.copyOf(warnings),
                     MissingNode.getInstance(),
                     planResult.compiledFormPatch() == null ? MissingNode.getInstance() : planResult.compiledFormPatch(),
-                    diagnostics(request.intentResolution(), failureCodes, List.copyOf(warnings)),
+                    diagnostics(
+                            request,
+                            request.intentResolution(),
+                            failureCodes,
+                            List.copyOf(warnings),
+                            MissingNode.getInstance(),
+                            planResult.compiledFormPatch() == null
+                                    ? MissingNode.getInstance()
+                                    : planResult.compiledFormPatch()),
                     planResult.uiCompositionPlan(),
                     previewAssistantMessage(
                             request,
@@ -358,8 +382,24 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringIntentResolutionResult intentResolution,
             List<String> failureCodes,
             List<String> warnings) {
+        return diagnostics(null, intentResolution, failureCodes, warnings, MissingNode.getInstance(), MissingNode.getInstance());
+    }
+
+    private AgenticAuthoringPreviewDiagnostics diagnostics(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            List<String> failureCodes,
+            List<String> warnings,
+            JsonNode minimalFormPlan,
+            JsonNode compiledFormPatch) {
         if (intentResolution == null) {
-            return new AgenticAuthoringPreviewDiagnostics(false, "", "", "", "not-evaluated");
+            return new AgenticAuthoringPreviewDiagnostics(
+                    false,
+                    "",
+                    "",
+                    "",
+                    "not-evaluated",
+                    projectKnowledgeAudit(request, minimalFormPlan, compiledFormPatch));
         }
         String targetWidgetKey = intentResolution.target() == null ? "" : value(intentResolution.target().widgetKey());
         boolean derived = warnings.contains("current-page-summary-derived")
@@ -369,7 +409,92 @@ public class AgenticAuthoringPreviewService {
                 targetWidgetKey,
                 value(intentResolution.operationKind()),
                 value(intentResolution.changeKind()),
-                fieldScopeDecision(intentResolution, failureCodes));
+                fieldScopeDecision(intentResolution, failureCodes),
+                projectKnowledgeAudit(request, minimalFormPlan, compiledFormPatch));
+    }
+
+    private JsonNode projectKnowledgeAudit(
+            AgenticAuthoringPlanRequest request,
+            JsonNode minimalFormPlan,
+            JsonNode compiledFormPatch) {
+        JsonNode projectKnowledge = request == null || request.contextHints() == null
+                ? MissingNode.getInstance()
+                : request.contextHints().path("projectKnowledge");
+        JsonNode entries = projectKnowledge.path("entries");
+        if (!projectKnowledge.isObject() || !entries.isArray() || entries.isEmpty()) {
+            return null;
+        }
+        Set<String> sourceRefs = sourceRefs(minimalFormPlan, compiledFormPatch);
+        ObjectNode audit = objectMapper.createObjectNode();
+        audit.put("schemaVersion", "praxis-agentic-authoring-project-knowledge-audit.v1");
+        audit.put("source", safeText(projectKnowledge.path("source").asText("domain_knowledge_concept")));
+        audit.put("influenceCount", projectKnowledge.path("influenceCount").asInt(entries.size()));
+        ArrayNode safeEntries = audit.putArray("entries");
+        int citedCount = 0;
+        for (JsonNode entry : entries) {
+            if (!entry.isObject()) {
+                continue;
+            }
+            String knowledgeId = safeText(entry.path("knowledgeId").asText(""));
+            String conceptKey = safeText(entry.path("conceptKey").asText(""));
+            List<String> matchedRefs = matchingProjectKnowledgeRefs(sourceRefs, knowledgeId, conceptKey);
+            if (!matchedRefs.isEmpty()) {
+                citedCount++;
+            }
+            ObjectNode safeEntry = safeEntries.addObject();
+            safeEntry.put("knowledgeId", knowledgeId);
+            safeEntry.put("conceptKey", conceptKey);
+            safeEntry.put("kind", safeText(entry.path("kind").asText("")));
+            safeEntry.put("visibility", safeText(entry.path("visibility").asText("")));
+            safeEntry.put("influence", safeText(entry.path("influence").asText("")));
+            safeEntry.put("sourceSummary", safeText(entry.path("sourceSummary").asText("")));
+            safeEntry.put("cited", !matchedRefs.isEmpty());
+            safeEntry.set("sourceRefs", objectMapper.valueToTree(matchedRefs));
+        }
+        audit.put("citedCount", citedCount);
+        audit.put("uncitedCount", Math.max(0, safeEntries.size() - citedCount));
+        audit.put("citationPolicy", "sourceRefs must cite projectKnowledge entries when they materially influence the plan.");
+        return audit;
+    }
+
+    private Set<String> sourceRefs(JsonNode minimalFormPlan, JsonNode compiledFormPatch) {
+        Set<String> refs = new LinkedHashSet<>();
+        collectSourceRefs(minimalFormPlan, refs);
+        collectSourceRefs(compiledFormPatch, refs);
+        return refs;
+    }
+
+    private void collectSourceRefs(JsonNode node, Set<String> refs) {
+        JsonNode sourceRefs = node == null ? MissingNode.getInstance() : node.path("sourceRefs");
+        if (!sourceRefs.isArray()) {
+            return;
+        }
+        for (JsonNode sourceRef : sourceRefs) {
+            if (sourceRef.isTextual() && !sourceRef.asText("").isBlank()) {
+                refs.add(sourceRef.asText());
+            }
+        }
+    }
+
+    private List<String> matchingProjectKnowledgeRefs(
+            Set<String> sourceRefs,
+            String knowledgeId,
+            String conceptKey) {
+        if (sourceRefs == null || sourceRefs.isEmpty()) {
+            return List.of();
+        }
+        List<String> matches = new ArrayList<>();
+        for (String sourceRef : sourceRefs) {
+            if (!sourceRef.startsWith("projectKnowledge:")) {
+                continue;
+            }
+            String ref = sourceRef.substring("projectKnowledge:".length());
+            if ((!knowledgeId.isBlank() && knowledgeId.equals(ref))
+                    || (!conceptKey.isBlank() && conceptKey.equals(ref))) {
+                matches.add(sourceRef);
+            }
+        }
+        return List.copyOf(matches);
     }
 
     private String fieldScopeDecision(AgenticAuthoringIntentResolutionResult intentResolution, List<String> failureCodes) {
@@ -397,6 +522,10 @@ public class AgenticAuthoringPreviewService {
 
     private String value(String value) {
         return value == null ? "" : value;
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private List<String> validateIntentResolution(AgenticAuthoringIntentResolutionResult intentResolution) {

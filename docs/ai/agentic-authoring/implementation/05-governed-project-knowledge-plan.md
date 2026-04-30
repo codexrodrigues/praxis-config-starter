@@ -236,3 +236,15 @@ The next implementation slice is governance hardening for the influence
 evidence: persist or expose a safe audit summary that links project knowledge
 influence to preview/source references without leaking raw payloads, while
 keeping vector/RAG ranking and LLM-authored memory writes deferred.
+
+`AgenticAuthoringPreviewDiagnostics.projectKnowledgeAudit` now implements the
+first safe audit summary. It records schema/source, influence count,
+per-entry identifiers, kind, visibility, influence, source summary, citation
+status and matched `projectKnowledge:*` source references. It deliberately does
+not copy raw payloads, raw source data or the knowledge `summary` text into
+preview diagnostics.
+
+The next implementation slice is to decide whether this safe audit should be
+rendered in the Page Builder cockpit. If surfaced, the UI must stay on counts,
+source references and citation status only; vector/RAG ranking and
+LLM-authored memory writes remain deferred.
