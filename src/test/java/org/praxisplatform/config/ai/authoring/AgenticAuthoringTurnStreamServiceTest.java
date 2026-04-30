@@ -428,13 +428,16 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     private AgenticAuthoringTurnStreamService service() {
-        return new AgenticAuthoringTurnStreamService(
+        AgenticAuthoringTurnEngine turnEngine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper));
+        return new AgenticAuthoringTurnStreamService(
+                turnEngine,
                 threadService,
                 turnService,
                 turnEventService,
-                streamAccessTokenService,
-                objectMapper);
+                streamAccessTokenService);
     }
 }

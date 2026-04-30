@@ -1,0 +1,202 @@
+package org.praxisplatform.config.ai.authoring;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.List;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.Completion;
+import org.praxisplatform.config.service.AiPrincipalContext;
+
+@ExtendWith(MockitoExtension.class)
+@Tag("unit")
+class AgenticAuthoringTurnEngineTest {
+
+    @Mock
+    private AgenticAuthoringIntentResolverService intentResolverService;
+    @Mock
+    private AgenticAuthoringPreviewService previewService;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void executesCurrentLinearFlowThroughEventSink() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = request();
+        AgenticAuthoringIntentResolutionResult intent = validIntent();
+        AgenticAuthoringPreviewResult preview = new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                "Preview ready.");
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(intent);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(preview);
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(sink.types)
+                .containsExactly(
+                        "thought.step",
+                        "thought.step",
+                        "thought.step",
+                        "thought.step",
+                        "result");
+        org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("component_authoring");
+        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void skipsPreviewWhenTerminalReachedAfterIntentResolution() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        sink.terminalReached = true;
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.NONE);
+        verify(previewService, never()).preview(any(), any(), any(), any());
+    }
+
+    @Test
+    void emitsErrorOutcomeWithoutDependingOnStreamServiceInternals() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenThrow(new IllegalStateException("provider quota exhausted"));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.EXPIRE);
+        org.assertj.core.api.Assertions.assertThat(sink.types).contains("error");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("code").asText())
+                            .isEqualTo("agentic-authoring-processing-failed");
+                });
+    }
+
+    @Test
+    void passesIntentAndPreviewRequestsWithOriginalContext() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        engine().execute(request(), principalContext, new CapturingSink());
+
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(intentResolverService).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(intentRequest.getValue().userPrompt()).isEqualTo("Crie um painel");
+        org.assertj.core.api.Assertions.assertThat(intentRequest.getValue().currentRoute()).isEqualTo("/page-builder-ia");
+
+        ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(planRequest.getValue().userPrompt()).isEqualTo("Crie um painel");
+        org.assertj.core.api.Assertions.assertThat(planRequest.getValue().intentResolution()).isNotNull();
+    }
+
+    private AgenticAuthoringTurnEngine engine() {
+        return new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper));
+    }
+
+    private AgenticAuthoringTurnStreamRequest request() {
+        return new AgenticAuthoringTurnStreamRequest(
+                "Crie um painel",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                null);
+    }
+
+    private AgenticAuthoringIntentResolutionResult validIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_chart",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private static final class CapturingSink implements AgenticAuthoringTurnEventSink {
+        private final List<String> types = new ArrayList<>();
+        private final List<Object> payloads = new ArrayList<>();
+        private boolean terminalReached;
+
+        @Override
+        public AgenticAuthoringTurnEventAppendResult append(String type, Object payload) {
+            types.add(type);
+            payloads.add(payload);
+            return new AgenticAuthoringTurnEventAppendResult(type, true);
+        }
+
+        @Override
+        public boolean terminalReached() {
+            return terminalReached;
+        }
+    }
+}
