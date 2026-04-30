@@ -588,6 +588,10 @@ Implemented evidence:
 
 Goal: introduce project memory only as governed platform knowledge.
 
+Detailed plan:
+
+- [05-governed-project-knowledge-plan.md](./05-governed-project-knowledge-plan.md)
+
 Tasks:
 
 - Define canonical model with at least:
@@ -599,12 +603,17 @@ Tasks:
   - `visibility`
 - Add retrieval only after storage/governance is explicit.
 - Do not use browser localStorage/chat history as canonical memory.
+- Reuse the Domain Knowledge Layer as the primary governed store unless an
+  explicit implementation gap proves a small attached extension is required.
+- Treat vector/RAG retrieval as a derived index, never as source of truth.
 
 Acceptance:
 
 - Project knowledge is scoped, governed and auditable.
 - The engine retrieves only relevant knowledge.
 - UI explains influence without exposing sensitive payloads by default.
+- Normal authoring influence uses only approved, scoped and AI-visible safe
+  projections.
 
 ## Browser E2E Gates
 
@@ -767,9 +776,10 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Start Phase 7 by defining governed project knowledge scope, lifecycle and
-   storage boundaries before adding retrieval.
-2. Add retrieval only after storage/governance is explicit.
+1. Implement the governed project knowledge read model/service described in
+   [05-governed-project-knowledge-plan.md](./05-governed-project-knowledge-plan.md).
+2. Add authoring-engine retrieval only after scope, status and visibility tests
+   are explicit.
 
 ## Stop Conditions
 

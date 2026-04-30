@@ -176,16 +176,21 @@ as dependencias estruturais das fases iniciais.
 
 ### Item 14. Definir modelo canonico de project knowledge
 
+Plano detalhado: [05-governed-project-knowledge-plan.md](./05-governed-project-knowledge-plan.md)
+
 **Modelo minimo**
 - `scope`
 - `kind`
 - `source`
 - `status`
 - `payload`
+- `visibility`
 
 **Definition of Done**
 - memoria nao e historico de chat;
 - escopo e governanca sao explicitos.
+- Domain Knowledge Layer e usada como fonte canonica, salvo lacuna explicita.
+- RAG/vector store e tratado apenas como indice derivado.
 
 ### Item 15. Expor retrieval seletivo de knowledge no turno
 
