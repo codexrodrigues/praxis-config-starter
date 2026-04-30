@@ -46,6 +46,19 @@ final class AgenticAuthoringCandidateProvenancePolicy {
         return UNKNOWN;
     }
 
+    static String retrievalSource(
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (hasEvidence(selectedCandidate)) {
+            return retrievalSource(List.of(selectedCandidate));
+        }
+        return retrievalSource(candidates);
+    }
+
+    private static boolean hasEvidence(AgenticAuthoringCandidate candidate) {
+        return candidate != null && candidate.evidence() != null && !candidate.evidence().isEmpty();
+    }
+
     private static boolean hasEvidence(List<AgenticAuthoringCandidate> candidates, String evidence) {
         return candidates.stream()
                 .filter(Objects::nonNull)
