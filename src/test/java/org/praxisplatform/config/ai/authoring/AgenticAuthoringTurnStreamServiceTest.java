@@ -296,6 +296,8 @@ class AgenticAuthoringTurnStreamServiceTest {
                             .isEqualTo(1);
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("selectedResourcePath").asText())
                             .isEqualTo("/api/human-resources/vw-resumo-missoes");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalSource").asText())
+                            .isEqualTo("context_hint");
                 })
                 .anySatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
@@ -307,6 +309,8 @@ class AgenticAuthoringTurnStreamServiceTest {
                             .isTrue();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("selectedResourcePath").asText())
                             .isEqualTo("/api/human-resources/vw-resumo-missoes");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalSource").asText())
+                            .isEqualTo("context_hint");
                 });
         org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
                 .completeTurn(eq(threadId), any(UUID.class));
