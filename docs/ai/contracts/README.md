@@ -31,6 +31,7 @@ Escopo coberto:
 - `GET /api/praxis/config/domain-knowledge/change-sets`
 - `GET /api/praxis/config/domain-knowledge/change-sets/{changeSetId}`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/validate`
+- `PATCH /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/status`
 - `POST /api/praxis/config/domain-rules/definitions`
 - `GET /api/praxis/config/domain-rules/definitions`
 - `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`

@@ -14,6 +14,7 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationSummary;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetResponse;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetStatusRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 
@@ -78,6 +79,23 @@ class DomainKnowledgeChangeSetControllerTest {
         assertThat(entity.getStatusCode().value()).isEqualTo(200);
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).validate(id, "tenant-a", "dev");
+    }
+
+    @Test
+    void transitionsChangeSetStatusByIdAndScope() {
+        DomainKnowledgeChangeSetService service = mock(DomainKnowledgeChangeSetService.class);
+        DomainKnowledgeChangeSetController controller = new DomainKnowledgeChangeSetController(service);
+        UUID id = UUID.randomUUID();
+        DomainKnowledgeChangeSetStatusRequest request =
+                new DomainKnowledgeChangeSetStatusRequest("approved", "reviewer:alice", "Safe to approve.");
+        DomainKnowledgeChangeSetResponse response = response(id, "project-knowledge:employees:cpf:v1");
+        when(service.transitionStatus(id, request, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.transitionStatus(id, request, "tenant-a", "dev");
+
+        assertThat(entity.getStatusCode().value()).isEqualTo(200);
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).transitionStatus(id, request, "tenant-a", "dev");
     }
 
     private DomainKnowledgeChangeSetCreateRequest request() {
