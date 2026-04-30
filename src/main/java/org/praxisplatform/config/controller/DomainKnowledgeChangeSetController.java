@@ -5,6 +5,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetResponse;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.ResponseEntity;
@@ -50,5 +51,13 @@ public class DomainKnowledgeChangeSetController {
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         return ResponseEntity.ok(changeSetService.get(changeSetId, tenantId, environment));
+    }
+
+    @PostMapping("/{changeSetId}/validate")
+    public ResponseEntity<DomainKnowledgeChangeSetValidationResponse> validate(
+            @PathVariable UUID changeSetId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(changeSetService.validate(changeSetId, tenantId, environment));
     }
 }
