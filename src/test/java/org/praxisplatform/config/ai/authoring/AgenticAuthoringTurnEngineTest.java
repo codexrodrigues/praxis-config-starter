@@ -136,6 +136,87 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void injectsGovernedProjectKnowledgeIntoPreviewContextWithSafeDiagnostics() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringProjectKnowledgeService projectKnowledgeService = Mockito.mock(
+                AgenticAuthoringProjectKnowledgeService.class);
+        AgenticAuthoringProjectKnowledgeProjection projection = new AgenticAuthoringProjectKnowledgeProjection(
+                "knowledge-1",
+                "human-resources.funcionarios.preference.identity-card",
+                "project_preference",
+                new AgenticAuthoringProjectKnowledgeProjection.Scope(
+                        "tenant",
+                        "local",
+                        "human-resources",
+                        "human-resources.funcionarios"),
+                new AgenticAuthoringProjectKnowledgeProjection.Status("active", "approved"),
+                "allow",
+                "accepted authoring turn",
+                "layout_preference",
+                "Prefer compact identity cards.",
+                List.of("domain-knowledge:concept:human-resources.funcionarios.preference.identity-card"));
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(projectKnowledgeService.retrieve(any())).thenReturn(List.of(projection));
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine(null, projectKnowledgeService)
+                .execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> knowledgeQuery =
+                ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
+        verify(projectKnowledgeService).retrieve(knowledgeQuery.capture());
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().tenantId()).isEqualTo("tenant");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().environment()).isEqualTo("local");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().contextKey()).isEqualTo("human-resources");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().resourceKey())
+                .isEqualTo("human-resources.funcionarios");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().kinds())
+                .contains("project_preference", "governance_constraint");
+
+        ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        com.fasterxml.jackson.databind.JsonNode projectKnowledge = planRequest.getValue()
+                .contextHints()
+                .path("projectKnowledge");
+        org.assertj.core.api.Assertions.assertThat(projectKnowledge.path("source").asText())
+                .isEqualTo("domain_knowledge_concept");
+        org.assertj.core.api.Assertions.assertThat(projectKnowledge.path("entries").path(0).path("summary").asText())
+                .isEqualTo("Prefer compact identity cards.");
+        org.assertj.core.api.Assertions.assertThat(projectKnowledge.toString()).doesNotContain("payload");
+
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("projectKnowledge.retrieve");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("influenceCount").asInt())
+                            .isEqualTo(1);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("conceptKeys").toString())
+                            .contains("human-resources.funcionarios.preference.identity-card");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("sourceSummaries").toString())
+                            .contains("accepted authoring turn");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("influences").toString())
+                            .contains("layout_preference");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("payload")).isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("summary")).isFalse();
+                });
+    }
+
+    @Test
     void emitsSafeRepairClassificationWhenPreviewFails() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -491,6 +572,12 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     private AgenticAuthoringTurnEngine engine(ApiMetadataRepository repository) {
+        return engine(repository, null);
+    }
+
+    private AgenticAuthoringTurnEngine engine(
+            ApiMetadataRepository repository,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService) {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
@@ -498,7 +585,8 @@ class AgenticAuthoringTurnEngineTest {
                 new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
                 new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(
                         repository != null ? new AgenticAuthoringApiMetadataCandidateCatalog(repository) : null,
-                        objectMapper)));
+                        objectMapper)),
+                projectKnowledgeService);
     }
 
     private AgenticAuthoringTurnStreamRequest request() {
@@ -536,6 +624,36 @@ class AgenticAuthoringTurnEngineTest {
                 "praxis-dynamic-page-builder",
                 null,
                 null,
+                List.of(),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult validIntentWithSelectedCandidate() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_chart",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.99,
+                        "selected employee resource",
+                        List.of("semantic-retrieval")),
                 List.of(),
                 new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
                 null,
