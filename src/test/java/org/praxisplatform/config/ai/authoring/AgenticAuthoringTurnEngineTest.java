@@ -136,6 +136,44 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void emitsSafeRepairClassificationWhenPreviewFails() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        false,
+                        List.of("fields must not be empty"),
+                        List.of("compile-skipped-invalid-minimal-form-plan"),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview needs repair."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("preview.compile");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("valid").asBoolean())
+                            .isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairClassification").asText())
+                            .isEqualTo("retryable");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairAttempted").asBoolean())
+                            .isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("minimalFormPlan"))
+                            .isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("compiledFormPatch"))
+                            .isFalse();
+                });
+    }
+
+    @Test
     void routeRequiredSharedRuleHandoffSkipsPreviewAndReturnsExistingIntentPayload() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
