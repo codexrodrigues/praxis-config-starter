@@ -7,7 +7,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -52,6 +54,79 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.minimalFormPlan()).isSameAs(plan);
         assertThat(result.compiledFormPatch()).isSameAs(patch);
         assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("not-evaluated");
+    }
+
+    @Test
+    void previewBuildsSafeProjectKnowledgeInfluenceAuditFromSourceRefs() throws Exception {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode projectKnowledge = contextHints.putObject("projectKnowledge");
+        projectKnowledge.put("schemaVersion", "praxis-agentic-authoring-project-knowledge.v1");
+        projectKnowledge.put("source", "domain_knowledge_concept");
+        projectKnowledge.put("influenceCount", 2);
+        ArrayNode entries = projectKnowledge.putArray("entries");
+        ObjectNode cited = entries.addObject();
+        cited.put("knowledgeId", "knowledge-1");
+        cited.put("conceptKey", "human-resources.funcionarios.preference.identity-card");
+        cited.put("kind", "project_preference");
+        cited.put("visibility", "allow");
+        cited.put("sourceSummary", "accepted authoring turn");
+        cited.put("influence", "layout_preference");
+        cited.put("summary", "Prefer compact identity cards.");
+        cited.put("rawPayload", "MUST_NOT_LEAK");
+        ObjectNode uncited = entries.addObject();
+        uncited.put("knowledgeId", "knowledge-2");
+        uncited.put("conceptKey", "human-resources.funcionarios.constraint.hidden");
+        uncited.put("kind", "governance_constraint");
+        uncited.put("visibility", "mask");
+        uncited.put("sourceSummary", "security review");
+        uncited.put("influence", "masked_context");
+        uncited.put("summary", "Masked summary must not be copied to audit.");
+
+        AgenticAuthoringIntentResolutionResult intent = modifyAddFieldIntent();
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Adicione cartao de identificacao compacto",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent,
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("profileId", "create-minimal-form");
+        plan.putArray("sourceRefs")
+                .add("intent-resolution")
+                .add("projectKnowledge:knowledge-1");
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.put("version", "1.0.0");
+        patch.putArray("sourceRefs")
+                .add("projectKnowledge:knowledge-1");
+        when(planService.generateMinimalFormPlan(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPlanResult(true, List.of(), List.of(), plan));
+        when(patchCompilerService.compile(new AgenticAuthoringCompileRequest(plan, null, intent)))
+                .thenReturn(new AgenticAuthoringCompileResult(true, List.of(), List.of(), patch));
+
+        AgenticAuthoringPreviewResult result = service().preview(request, "tenant", "user", "local");
+
+        JsonNode audit = result.diagnostics().projectKnowledgeAudit();
+        assertThat(audit.path("schemaVersion").asText())
+                .isEqualTo("praxis-agentic-authoring-project-knowledge-audit.v1");
+        assertThat(audit.path("influenceCount").asInt()).isEqualTo(2);
+        assertThat(audit.path("citedCount").asInt()).isEqualTo(1);
+        assertThat(audit.path("uncitedCount").asInt()).isEqualTo(1);
+        assertThat(audit.path("entries").path(0).path("knowledgeId").asText()).isEqualTo("knowledge-1");
+        assertThat(audit.path("entries").path(0).path("cited").asBoolean()).isTrue();
+        assertThat(audit.path("entries").path(0).path("sourceRefs").toString())
+                .contains("projectKnowledge:knowledge-1");
+        assertThat(audit.path("entries").path(1).path("cited").asBoolean()).isFalse();
+        assertThat(audit.toString())
+                .doesNotContain("MUST_NOT_LEAK")
+                .doesNotContain("Prefer compact identity cards")
+                .doesNotContain("Masked summary");
     }
 
     @Test
