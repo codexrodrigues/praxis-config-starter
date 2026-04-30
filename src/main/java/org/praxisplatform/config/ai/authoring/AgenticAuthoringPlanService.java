@@ -447,6 +447,7 @@ public class AgenticAuthoringPlanService {
                 ? "{}"
                 : intentResolution.currentPageSummary().toString();
         String attachmentSummaries = attachmentSummariesJson(request);
+        String repairContext = repairContextJson(request);
         return """
                 You are generating an internal Praxis MinimalFormPlan.
                 Return only one JSON object. Do not include Markdown.
@@ -455,6 +456,9 @@ public class AgenticAuthoringPlanService {
                 %s
 
                 Attachment summaries:
+                %s
+
+                Repair context:
                 %s
 
                 Resolved intent:
@@ -496,11 +500,13 @@ public class AgenticAuthoringPlanService {
                 - For host-owned helper fields in modify/add_field, choose normal Praxis control types such as text, textarea, checkbox or select.
                 - For rename_or_relabel, do not mark fields as local/transient; they remain server-backed label customizations.
                 - Attachment summaries are metadata-only context. Do not assume access to file bytes, base64, local blob URLs or image pixels.
+                - Repair context is metadata-only. When present, use it only to avoid repeating the previous invalid plan shape.
                 - clarificationNeed.needed must be true only when the prompt cannot be satisfied safely from the resolved API candidate.
                 - sourceRefs must cite intent-resolution and the resolved schema URL.
                 """.formatted(
                 request.userPrompt().trim(),
                 attachmentSummaries,
+                repairContext,
                 intentResolution.operationKind(),
                 intentResolution.artifactKind(),
                 intentResolution.changeKind(),
@@ -513,6 +519,21 @@ public class AgenticAuthoringPlanService {
                 intentResolution.targetApp(),
                 intentResolution.targetComponentId(),
                 submitActionRef);
+    }
+
+    private String repairContextJson(AgenticAuthoringPlanRequest request) {
+        JsonNode repair = request.contextHints() == null ? null : request.contextHints().path("repair");
+        if (repair == null || repair.isMissingNode() || repair.isNull() || !repair.isObject()) {
+            return "{}";
+        }
+        ObjectNode safeRepair = objectMapper.createObjectNode();
+        copyTextIfPresent(repair, safeRepair, "phase");
+        copyTextIfPresent(repair, safeRepair, "classification");
+        safeRepair.put("attempt", repair.path("attempt").asInt(0));
+        safeRepair.put("maxAttempts", repair.path("maxAttempts").asInt(0));
+        safeRepair.put("failureCodeCount", repair.path("failureCodeCount").asInt(0));
+        safeRepair.put("warningCount", repair.path("warningCount").asInt(0));
+        return safeRepair.toString();
     }
 
     private String attachmentSummariesJson(AgenticAuthoringPlanRequest request) {

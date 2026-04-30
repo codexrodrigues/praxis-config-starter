@@ -550,6 +550,10 @@ Implemented evidence:
 
 Goal: retry only recoverable failures in a bounded and observable way.
 
+Status: in progress in `main`. Repair classification is implemented, and
+recoverable preview failures receive one backend-owned retry with safe repair
+context.
+
 Tasks:
 
 - Classify preview/compile/tool errors:
@@ -566,6 +570,18 @@ Acceptance:
 - Recoverable preview failures get one backend-owned retry.
 - Non-recoverable failures remain terminal and clear.
 - User sees progress without raw internal prompt or payload leakage.
+
+Implemented evidence so far:
+
+- `AgenticAuthoringRepairClassificationPolicy` classifies preview outcomes as
+  `retryable`, `non_retryable`, `route_required` or
+  `user_clarification_required`.
+- `AgenticAuthoringTurnEngine` emits safe `repair.attempt` progress and retries
+  preview generation once when classification is `retryable`.
+- Repair context passed to the planner is allowlisted metadata only:
+  classification, attempt number and failure/warning counts.
+- `route_required` and `user_clarification_required` remain excluded from the
+  retry path.
 
 ### Phase 7 - Governed Project Knowledge
 
