@@ -16,6 +16,7 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 public class AgenticAuthoringTurnEngine {
 
     private static final int MAX_TOOL_CALLS_PER_TURN = 1;
+    private static final int MAX_REPAIR_ATTEMPTS_PER_PHASE = 1;
 
     private final AgenticAuthoringIntentResolverService intentResolverService;
     private final AgenticAuthoringPreviewService previewService;
@@ -87,7 +88,13 @@ public class AgenticAuthoringTurnEngine {
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.compile",
                         "summary", preview.valid() ? "Compiled preview payload." : "Preview requires backend repair classification.",
-                        "diagnostics", safePreviewDiagnostics(intentResolution, preview)));
+                        "diagnostics", safePreviewDiagnostics(intentResolution, preview, false)));
+                preview = maybeRepairPreview(
+                        request,
+                        principalContext,
+                        eventSink,
+                        intentResolution,
+                        preview);
             }
             AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", Map.of(
                     "intentResolution", intentResolution,
@@ -140,6 +147,41 @@ public class AgenticAuthoringTurnEngine {
                 result.valid() ? "Backend API resource search completed." : "Backend API resource search failed.",
                 safeToolDiagnostics(result)));
         return result;
+    }
+
+    private AgenticAuthoringPreviewResult maybeRepairPreview(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview) throws Exception {
+        String repairClassification = AgenticAuthoringRepairClassificationPolicy.classify(intentResolution, preview);
+        if (!AgenticAuthoringRepairClassificationPolicy.RETRYABLE.equals(repairClassification)
+                || eventSink.terminalReached()) {
+            return preview;
+        }
+        eventSink.append("thought.step", safeToolProjection(
+                "repair.attempt",
+                "Retrying preview generation with backend repair context.",
+                Map.of(
+                        "phase", "preview",
+                        "repairClassification", repairClassification,
+                        "attempt", 1,
+                        "maxAttempts", MAX_REPAIR_ATTEMPTS_PER_PHASE,
+                        "failureCodeCount", preview.failureCodes() == null ? 0 : preview.failureCodes().size(),
+                        "warningCount", preview.warnings() == null ? 0 : preview.warnings().size())));
+        AgenticAuthoringPreviewResult repairedPreview = previewService.preview(
+                toRepairPlanRequest(request, intentResolution, preview, repairClassification),
+                principalContext.tenantId(),
+                principalContext.userId(),
+                principalContext.environment());
+        eventSink.append("thought.step", Map.of(
+                "phase", "preview.compile",
+                "summary", repairedPreview.valid()
+                        ? "Compiled preview payload after backend repair."
+                        : "Preview repair attempt completed without a valid payload.",
+                "diagnostics", safePreviewDiagnostics(intentResolution, repairedPreview, true)));
+        return repairedPreview;
     }
 
     private boolean needsResourceDiscovery(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -297,6 +339,36 @@ public class AgenticAuthoringTurnEngine {
                 request.contextHints());
     }
 
+    private AgenticAuthoringPlanRequest toRepairPlanRequest(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview,
+            String repairClassification) {
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode repair = contextHints.putObject("repair");
+        repair.put("phase", "preview");
+        repair.put("classification", repairClassification);
+        repair.put("attempt", 1);
+        repair.put("maxAttempts", MAX_REPAIR_ATTEMPTS_PER_PHASE);
+        repair.put("failureCodeCount", preview.failureCodes() == null ? 0 : preview.failureCodes().size());
+        repair.put("warningCount", preview.warnings() == null ? 0 : preview.warnings().size());
+        return new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                intentResolution,
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                contextHints);
+    }
+
     private void emitIntentResolutionProgress(
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -354,13 +426,14 @@ public class AgenticAuthoringTurnEngine {
 
     private Map<String, Object> safePreviewDiagnostics(
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringPreviewResult preview) {
+            AgenticAuthoringPreviewResult preview,
+            boolean repairAttempted) {
         Map<String, Object> diagnostics = new LinkedHashMap<>();
         diagnostics.put("valid", preview != null && preview.valid());
         diagnostics.put("repairClassification", AgenticAuthoringRepairClassificationPolicy.classify(
                 intentResolution,
                 preview));
-        diagnostics.put("repairAttempted", false);
+        diagnostics.put("repairAttempted", repairAttempted);
         if (preview != null && preview.failureCodes() != null && !preview.failureCodes().isEmpty()) {
             diagnostics.put("failureCodeCount", preview.failureCodes().size());
         }

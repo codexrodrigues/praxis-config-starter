@@ -174,6 +174,75 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void retriesRecoverablePreviewFailureOnceWithSafeRepairContext() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(
+                        new AgenticAuthoringPreviewResult(
+                                false,
+                                List.of("fields must not be empty"),
+                                List.of("compile-skipped-invalid-minimal-form-plan"),
+                                objectMapper.createObjectNode(),
+                                objectMapper.createObjectNode(),
+                                null,
+                                null,
+                                "Preview needs repair."),
+                        new AgenticAuthoringPreviewResult(
+                                true,
+                                List.of(),
+                                List.of(),
+                                objectMapper.createObjectNode(),
+                                objectMapper.createObjectNode(),
+                                null,
+                                null,
+                                "Preview repaired."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService, Mockito.times(2)).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(planRequest.getAllValues().get(0).contextHints())
+                .isNull();
+        org.assertj.core.api.Assertions.assertThat(planRequest.getAllValues().get(1)
+                        .contextHints()
+                        .path("repair")
+                        .path("classification")
+                        .asText())
+                .isEqualTo("retryable");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("repair.attempt");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairClassification").asText())
+                            .isEqualTo("retryable");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("minimalFormPlan"))
+                            .isFalse();
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("preview.compile");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("valid").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairAttempted").asBoolean())
+                            .isTrue();
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("canApply").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("assistantMessage").asText())
+                            .isEqualTo("Preview repaired.");
+                });
+    }
+
+    @Test
     void routeRequiredSharedRuleHandoffSkipsPreviewAndReturnsExistingIntentPayload() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
