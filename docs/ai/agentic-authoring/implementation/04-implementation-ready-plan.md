@@ -632,6 +632,9 @@ Implemented evidence:
 - `AgenticAuthoringTurnEngineTest` proves the full local backend path from
   governed project knowledge retrieval to planner prompt consumption and
   compiled preview citation.
+- `DomainKnowledgeConceptRepositoryPersistenceTest` proves the governed
+  repository query with persisted Domain Knowledge concepts, visibility/status
+  filtering, scope fallback and eager source release availability.
 
 Acceptance:
 
@@ -802,10 +805,9 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Decide whether the next safest slice is UI explanation of already-safe
-   influence diagnostics or a persistence-backed seed/retrieval fixture.
-2. Keep vector/RAG ranking deferred until relational governance, stream
-   diagnostics and planner consumption are stable.
+1. Expose safe `projectKnowledge.retrieve` influence diagnostics in the UI.
+2. Keep vector/RAG ranking deferred until UI explanation and relational
+   governance remain stable.
 
 ## Stop Conditions
 

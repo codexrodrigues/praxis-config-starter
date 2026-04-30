@@ -206,3 +206,12 @@ source data.
 The next implementation slice is to decide whether to expose the safe influence
 explanation in the UI or first add a small persistence-backed seed/retrieval
 fixture for Domain Knowledge concepts.
+
+`DomainKnowledgeConceptRepositoryPersistenceTest` now proves the governed
+project knowledge repository query against a real H2/PostgreSQL-mode schema. It
+seeds active/approved/visible, global-scope and rejected candidates and asserts
+that only governed entries are returned with their source release available.
+
+The next implementation slice is UI explanation of the already-safe
+`projectKnowledge.retrieve` diagnostics, while keeping vector/RAG ranking
+deferred.
