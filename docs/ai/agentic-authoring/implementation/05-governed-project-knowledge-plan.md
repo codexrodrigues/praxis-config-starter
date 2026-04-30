@@ -196,3 +196,13 @@ data. The prompt also instructs the model to cite project knowledge entries in
 The next implementation slice is to prove this full path through a local
 agentic authoring turn with seeded governed knowledge, then expose the already
 safe influence explanation in UI only after the backend behavior is stable.
+
+`AgenticAuthoringTurnEngineTest` now proves the full backend path locally with
+seeded governed knowledge: the engine retrieves project knowledge, preview
+planning receives it, the planner prompt includes the allowlisted block, and
+the compiled preview can cite the project knowledge source without exposing raw
+source data.
+
+The next implementation slice is to decide whether to expose the safe influence
+explanation in the UI or first add a small persistence-backed seed/retrieval
+fixture for Domain Knowledge concepts.
