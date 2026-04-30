@@ -86,7 +86,8 @@ public class AgenticAuthoringTurnEngine {
                         principalContext.environment());
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.compile",
-                        "summary", "Compiled preview payload."));
+                        "summary", preview.valid() ? "Compiled preview payload." : "Preview requires backend repair classification.",
+                        "diagnostics", safePreviewDiagnostics(intentResolution, preview)));
             }
             AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", Map.of(
                     "intentResolution", intentResolution,
@@ -348,6 +349,24 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("retrievalSource", AgenticAuthoringCandidateProvenancePolicy.retrievalSource(
                 selectedCandidate,
                 intentResolution.candidates()));
+        return diagnostics;
+    }
+
+    private Map<String, Object> safePreviewDiagnostics(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("valid", preview != null && preview.valid());
+        diagnostics.put("repairClassification", AgenticAuthoringRepairClassificationPolicy.classify(
+                intentResolution,
+                preview));
+        diagnostics.put("repairAttempted", false);
+        if (preview != null && preview.failureCodes() != null && !preview.failureCodes().isEmpty()) {
+            diagnostics.put("failureCodeCount", preview.failureCodes().size());
+        }
+        if (preview != null && preview.warnings() != null && !preview.warnings().isEmpty()) {
+            diagnostics.put("warningCount", preview.warnings().size());
+        }
         return diagnostics;
     }
 
