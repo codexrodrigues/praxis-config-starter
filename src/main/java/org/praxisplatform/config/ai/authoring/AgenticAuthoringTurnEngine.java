@@ -16,6 +16,7 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringPreviewService previewService;
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer;
+    private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
     AgenticAuthoringTurnOutcome execute(
             AgenticAuthoringTurnStreamRequest request,
@@ -38,9 +39,11 @@ public class AgenticAuthoringTurnEngine {
             if (eventSink.terminalReached()) {
                 return AgenticAuthoringTurnOutcome.noop(state);
             }
+            AgenticAuthoringTurnRoute route = routeClassifier.classify(request, intentResolution, state);
+            state = state.withRouteClass(route.routeClass());
             emitIntentResolutionProgress(eventSink, intentResolution);
             AgenticAuthoringPreviewResult preview = null;
-            if (intentResolution.valid()) {
+            if (route.allowsPreview() && intentResolution.valid()) {
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.plan",
                         "summary", "Generating page preview plan."));
@@ -216,6 +219,10 @@ public class AgenticAuthoringTurnEngine {
     }
 
     record AgenticAuthoringTurnState(String routeClass, AgenticAuthoringTarget structuralTarget) {
+
+        AgenticAuthoringTurnState withRouteClass(String routeClass) {
+            return new AgenticAuthoringTurnState(routeClass, structuralTarget);
+        }
     }
 
     record AgenticAuthoringTurnOutcome(Completion completion, AgenticAuthoringTurnState state) {
@@ -237,5 +244,79 @@ public class AgenticAuthoringTurnEngine {
         COMPLETE,
         EXPIRE,
         NONE
+    }
+
+    private record AgenticAuthoringTurnRoute(String routeClass, boolean allowsPreview) {
+    }
+
+    private static final class AgenticAuthoringTurnRouteClassifier {
+
+        private AgenticAuthoringTurnRoute classify(
+                AgenticAuthoringTurnStreamRequest request,
+                AgenticAuthoringIntentResolutionResult intentResolution,
+                AgenticAuthoringTurnState state) {
+            if (requiresSharedRuleAuthoring(intentResolution)) {
+                return new AgenticAuthoringTurnRoute(
+                        hasComponentAuthoringSignal(request, intentResolution, state) ? "mixed" : "shared_rule_authoring",
+                        false);
+            }
+            if (needsClarification(intentResolution)) {
+                return new AgenticAuthoringTurnRoute("needs_clarification", false);
+            }
+            return new AgenticAuthoringTurnRoute("component_authoring", true);
+        }
+
+        private boolean requiresSharedRuleAuthoring(AgenticAuthoringIntentResolutionResult intentResolution) {
+            if (intentResolution == null) {
+                return false;
+            }
+            AgenticAuthoringGateResult gate = intentResolution.gate();
+            return (gate != null
+                    && "route_required".equals(gate.status())
+                    && contains(gate.messages(), "shared-rule-authoring-required"))
+                    || contains(intentResolution.failureCodes(), "shared-rule-authoring-required");
+        }
+
+        private boolean needsClarification(AgenticAuthoringIntentResolutionResult intentResolution) {
+            if (intentResolution == null || intentResolution.gate() == null) {
+                return false;
+            }
+            return "clarification_required".equals(intentResolution.gate().status());
+        }
+
+        private boolean hasComponentAuthoringSignal(
+                AgenticAuthoringTurnStreamRequest request,
+                AgenticAuthoringIntentResolutionResult intentResolution,
+                AgenticAuthoringTurnState state) {
+            if (state != null && state.structuralTarget() != null) {
+                return true;
+            }
+            String artifactKind = safeLower(intentResolution.artifactKind());
+            if ("form".equals(artifactKind)
+                    || "table".equals(artifactKind)
+                    || "dashboard".equals(artifactKind)
+                    || "page".equals(artifactKind)
+                    || "chart".equals(artifactKind)) {
+                return true;
+            }
+            String prompt = safeLower(request.userPrompt());
+            return prompt.contains("formulario")
+                    || prompt.contains("formulário")
+                    || prompt.contains("pagina")
+                    || prompt.contains("página")
+                    || prompt.contains("tabela")
+                    || prompt.contains("dashboard")
+                    || prompt.contains("painel")
+                    || prompt.contains("campo")
+                    || prompt.contains("widget");
+        }
+
+        private boolean contains(List<String> values, String expected) {
+            return values != null && values.stream().anyMatch(expected::equals);
+        }
+
+        private String safeLower(String value) {
+            return value == null ? "" : value.toLowerCase();
+        }
     }
 }
