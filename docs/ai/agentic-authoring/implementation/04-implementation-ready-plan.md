@@ -629,6 +629,9 @@ Implemented evidence:
   materially influences generated plans.
 - `AgenticAuthoringPlanServiceTest` guards prompt inclusion and verifies that
   raw source fields are ignored.
+- `AgenticAuthoringTurnEngineTest` proves the full local backend path from
+  governed project knowledge retrieval to planner prompt consumption and
+  compiled preview citation.
 
 Acceptance:
 
@@ -799,10 +802,10 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Prove the full project-knowledge path through a local agentic authoring turn
-   with seeded governed knowledge.
-2. Expose safe project-knowledge influence in UI only after backend behavior is
-   stable.
+1. Decide whether the next safest slice is UI explanation of already-safe
+   influence diagnostics or a persistence-backed seed/retrieval fixture.
+2. Keep vector/RAG ranking deferred until relational governance, stream
+   diagnostics and planner consumption are stable.
 
 ## Stop Conditions
 

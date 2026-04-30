@@ -9,9 +9,12 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -20,7 +23,9 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.Agentic
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.Completion;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiProviderManagementService;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -30,6 +35,9 @@ class AgenticAuthoringTurnEngineTest {
     private AgenticAuthoringIntentResolverService intentResolverService;
     @Mock
     private AgenticAuthoringPreviewService previewService;
+
+    @TempDir
+    private Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -213,6 +221,88 @@ class AgenticAuthoringTurnEngineTest {
                             .contains("layout_preference");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("payload")).isFalse();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("summary")).isFalse();
+                });
+    }
+
+    @Test
+    void runsProjectKnowledgeThroughEnginePreviewPlannerAndCompiler() throws Exception {
+        writeAuthoringArtifacts();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringProjectKnowledgeService projectKnowledgeService = Mockito.mock(
+                AgenticAuthoringProjectKnowledgeService.class);
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        properties.setArtifactsDir(tempDir);
+        AgenticAuthoringPlanService realPlanService = new AgenticAuthoringPlanService(
+                providerManagementService,
+                properties,
+                objectMapper);
+        AgenticAuthoringPreviewService realPreviewService = new AgenticAuthoringPreviewService(
+                realPlanService,
+                new AgenticAuthoringPatchCompilerService(properties, objectMapper),
+                objectMapper);
+        AgenticAuthoringProjectKnowledgeProjection projection = new AgenticAuthoringProjectKnowledgeProjection(
+                "knowledge-1",
+                "human-resources.colaboradores.preference.identity-card",
+                "project_preference",
+                new AgenticAuthoringProjectKnowledgeProjection.Scope(
+                        "tenant",
+                        "local",
+                        "human-resources",
+                        "human-resources.colaboradores"),
+                new AgenticAuthoringProjectKnowledgeProjection.Status("active", "approved"),
+                "allow",
+                "accepted authoring turn",
+                "layout_preference",
+                "Prefer compact identity cards.",
+                List.of("domain-knowledge:concept:human-resources.colaboradores.preference.identity-card"));
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(colaboradoresFormIntent());
+        when(projectKnowledgeService.retrieve(any())).thenReturn(List.of(projection));
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(colaboradoresMinimalPlan());
+
+        AgenticAuthoringTurnOutcome outcome = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                realPreviewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                projectKnowledgeService)
+                .execute(request("Crie um formulario de colaboradores"), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(promptCaptor.getValue())
+                .contains("Governed project knowledge:")
+                .contains("\"conceptKey\":\"human-resources.colaboradores.preference.identity-card\"")
+                .contains("\"summary\":\"Prefer compact identity cards.\"")
+                .doesNotContain("rawPayload");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("projectKnowledge.retrieve");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("influenceCount").asInt())
+                            .isEqualTo(1);
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("canApply").asBoolean()).isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("preview").path("valid").asBoolean()).isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("preview")
+                                    .path("compiledFormPatch")
+                                    .path("sourceRefs")
+                                    .toString())
+                            .contains("projectKnowledge:knowledge-1");
                 });
     }
 
@@ -663,6 +753,80 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult colaboradoresFormIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "form",
+                "create_minimal_form",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/colaboradores",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/colaboradores&operation=post&schemaType=request",
+                        "/api/human-resources/colaboradores",
+                        "POST",
+                        0.95,
+                        "matched colaboradores",
+                        List.of("semantic-retrieval")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode colaboradoresMinimalPlan() {
+        com.fasterxml.jackson.databind.node.ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0.0");
+        plan.put("profileId", "create-minimal-form");
+        plan.put("targetApp", "praxis-ui-angular");
+        plan.put("targetComponentId", "praxis-dynamic-page-builder");
+        plan.put("apiUseCaseResolutionRef", "intent-resolution:/api/human-resources/colaboradores");
+        plan.put("fieldSelectionPlanRef", "/schemas/filtered?path=/api/human-resources/colaboradores&operation=post&schemaType=request");
+        plan.put("submitActionRef", "POST /api/human-resources/colaboradores");
+        com.fasterxml.jackson.databind.node.ArrayNode fields = plan.putArray("fields");
+        fields.addObject()
+                .put("name", "nome")
+                .put("label", "Nome")
+                .put("controlType", "text")
+                .put("required", true);
+        plan.putObject("clarificationNeed")
+                .put("needed", false)
+                .put("code", "none");
+        plan.putArray("sourceRefs")
+                .add("intent-resolution")
+                .add("/schemas/filtered?path=/api/human-resources/colaboradores&operation=post&schemaType=request")
+                .add("projectKnowledge:knowledge-1");
+        return plan;
+    }
+
+    private void writeAuthoringArtifacts() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        com.fasterxml.jackson.databind.node.ObjectNode catalog = objectMapper.createObjectNode();
+        catalog.put("profileId", "create-minimal-form");
+        catalog.put("targetComponent", "praxis-dynamic-page-builder");
+        catalog.put("catalogReleaseId", "catalog-release-test");
+        com.fasterxml.jackson.databind.node.ObjectNode form = catalog.putArray("allowedWidgets").addObject();
+        form.put("id", "praxis-dynamic-form");
+        form.put("eligible", true);
+        com.fasterxml.jackson.databind.node.ObjectNode evidence = catalog.putObject("evidence");
+        evidence.putObject("schemaRefs")
+                .put("request", "/schemas/request")
+                .put("response", "/schemas/response");
+        evidence.putObject("operationRef")
+                .put("method", "post")
+                .put("path", "/api/human-resources/colaboradores");
+        Files.writeString(tempDir.resolve("page-create-catalog.v0.json"), objectMapper.writeValueAsString(catalog));
     }
 
     private AgenticAuthoringIntentResolutionResult sharedRuleRouteIntent(boolean valid, String artifactKind) {
