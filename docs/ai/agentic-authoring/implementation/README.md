@@ -27,18 +27,21 @@ backend opera um turno agentic real:
 Status em 2026-04-30: a extracao do engine, o primeiro tool interno
 `searchApiResources`, a inspecao estrutural de `currentPage`, a separacao de
 retrieval/provenance e o repair loop backend-owned ja estao implementados em
-`main`. A proxima fase ativa e memoria persistente de projeto governada.
+`main`. A proxima fase ativa e project knowledge governado, ancorado na Domain
+Knowledge Layer existente.
 
 ## Ordem de leitura
 
 1. [04-implementation-ready-plan.md](./04-implementation-ready-plan.md)
-2. [01-current-state-and-target.md](./01-current-state-and-target.md)
-3. [02-implementation-backlog.md](./02-implementation-backlog.md)
-4. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+2. [05-governed-project-knowledge-plan.md](./05-governed-project-knowledge-plan.md)
+3. [01-current-state-and-target.md](./01-current-state-and-target.md)
+4. [02-implementation-backlog.md](./02-implementation-backlog.md)
+5. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
-`04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs. Os
-documentos anteriores continuam uteis como historico e diagnostico, mas devem
-ser interpretados pela direcao atual: Page Builder authora componentes/paginas,
+`04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs, e
+`05-governed-project-knowledge-plan.md` detalha a Phase 7. Os documentos
+anteriores continuam uteis como historico e diagnostico, mas devem ser
+interpretados pela direcao atual: Page Builder authora componentes/paginas,
 enquanto decisoes compartilhadas de negocio devem seguir por
 `/api/praxis/config/domain-rules/**`.
 
@@ -78,8 +81,9 @@ zero:
   backend, nao como hint textual nem contrato publico automatico.
 - Heuristica lexical pode existir como fallback, mas nao como semantica primaria.
 - Repair loop deve ser backend-owned, limitado e auditavel.
-- Memoria persistente de projeto, quando entrar, deve ser governada e escopada;
-  nunca um blob opaco de prompt salvo no cliente.
+- Project knowledge persistente, quando entrar, deve ser governado, escopado e
+  ancorado na Domain Knowledge Layer; nunca um blob opaco de prompt salvo no
+  cliente.
 
 ## O que nao fazer
 
