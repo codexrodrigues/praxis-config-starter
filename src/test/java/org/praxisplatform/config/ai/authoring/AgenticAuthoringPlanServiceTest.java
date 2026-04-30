@@ -369,6 +369,40 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanDoesNotDeriveLegacySummaryWhenStructuralInspectionIsPresent() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("observacaoInterna", "Observacao interna", "textarea");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Remova o campo observacaoInterna",
+                                null,
+                                null,
+                                null,
+                                currentPageWithLocalObservacao(),
+                                funcionariosIntent("remove", "remove_field", currentPageStructuralSummary())),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).doesNotContain("current-page-summary-derived");
+        assertThat(promptCaptor.getValue()).contains("\"structuralInspection\"");
+        assertThat(promptCaptor.getValue()).doesNotContain("\"formWidgets\"");
+    }
+
+    @Test
     void generateMinimalFormPlanCompletesRemoveFieldFromLocalCurrentPageSummaryWhenProviderReturnsEmptyFields() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();

@@ -59,6 +59,9 @@ final class AgenticAuthoringIntentResolutionContext {
     }
 
     private boolean hasFieldAwareFormSummary(JsonNode summary) {
+        if (hasStructuralFieldSummary(summary)) {
+            return true;
+        }
         if (!hasAnyFormSummary(summary)) {
             return false;
         }
@@ -73,8 +76,21 @@ final class AgenticAuthoringIntentResolutionContext {
     }
 
     private boolean hasAnyFormSummary(JsonNode summary) {
-        return summary != null
+        return hasAnyStructuralSummary(summary)
+                || summary != null
                 && summary.path("formWidgets").isArray()
                 && !summary.path("formWidgets").isEmpty();
+    }
+
+    private boolean hasAnyStructuralSummary(JsonNode summary) {
+        return summary != null
+                && summary.path("structuralInspection").path("widgets").isArray()
+                && !summary.path("structuralInspection").path("widgets").isEmpty();
+    }
+
+    private boolean hasStructuralFieldSummary(JsonNode summary) {
+        return summary != null
+                && summary.path("structuralInspection").path("fields").isArray()
+                && !summary.path("structuralInspection").path("fields").isEmpty();
     }
 }
