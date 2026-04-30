@@ -6,6 +6,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiCatalogConversa
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringCurrentPageAnalyzer;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiMetadataCandidateCatalog;
@@ -22,6 +23,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryS
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegistry;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
@@ -263,28 +265,40 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnMissingBean
     @ConditionalOnBean({
             AgenticAuthoringIntentResolverService.class,
-            AgenticAuthoringPreviewService.class,
+            AgenticAuthoringPreviewService.class
+    })
+    public AgenticAuthoringTurnEngine agenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean({
+            AgenticAuthoringTurnEngine.class,
             AiThreadService.class,
             AiTurnService.class,
             AiTurnEventService.class,
             AiStreamAccessTokenService.class
     })
     public AgenticAuthoringTurnStreamService agenticAuthoringTurnStreamService(
-            AgenticAuthoringIntentResolverService intentResolverService,
-            AgenticAuthoringPreviewService previewService,
+            AgenticAuthoringTurnEngine turnEngine,
             AiThreadService threadService,
             AiTurnService turnService,
             AiTurnEventService turnEventService,
-            AiStreamAccessTokenService streamAccessTokenService,
-            ObjectMapper objectMapper) {
+            AiStreamAccessTokenService streamAccessTokenService) {
         return new AgenticAuthoringTurnStreamService(
-                intentResolverService,
-                previewService,
+                turnEngine,
                 threadService,
                 turnService,
                 turnEventService,
-                streamAccessTokenService,
-                objectMapper);
+                streamAccessTokenService);
     }
 
     @Bean
