@@ -206,7 +206,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 operation,
                 score,
                 "api_metadata lexical match",
-                List.of("api-metadata", "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending")),
+                List.of("api-metadata", "lexical-fallback", "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending")),
                 score);
     }
 

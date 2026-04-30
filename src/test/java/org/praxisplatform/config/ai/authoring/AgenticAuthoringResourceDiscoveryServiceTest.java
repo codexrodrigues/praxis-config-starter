@@ -62,6 +62,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.candidates())
                 .extracting(AgenticAuthoringCandidate::resourcePath)
                 .containsExactly("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.candidates().get(0).evidence()).contains("lexical-fallback");
         assertThat(result.assistantMessage()).contains("Encontrei APIs");
         assertThat(result.quickReplies()).hasSize(1);
         assertThat(result.quickReplies().get(0).id())
