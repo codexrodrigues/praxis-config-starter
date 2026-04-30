@@ -109,10 +109,24 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (containsAny(prompt, "stepper", "etapa", "etapas", "passo", "passos")) {
             return "stepper";
         }
-        if (currentPageSummary.path("formWidgets").isArray() && !currentPageSummary.path("formWidgets").isEmpty()) {
+        if (hasInspectedArtifact(currentPageSummary, "form")
+                || (currentPageSummary.path("formWidgets").isArray() && !currentPageSummary.path("formWidgets").isEmpty())) {
             return "form";
         }
         return "unknown";
+    }
+
+    private boolean hasInspectedArtifact(JsonNode currentPageSummary, String artifactKind) {
+        JsonNode widgets = currentPageSummary.path("structuralInspection").path("widgets");
+        if (!widgets.isArray()) {
+            return false;
+        }
+        for (JsonNode widget : widgets) {
+            if (artifactKind.equals(widget.path("artifactKind").asText(""))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String resolveChangeKind(String prompt, String operationKind, String artifactKind) {
