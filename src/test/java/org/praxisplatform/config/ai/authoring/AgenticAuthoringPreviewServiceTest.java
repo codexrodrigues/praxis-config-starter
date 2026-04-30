@@ -62,8 +62,9 @@ class AgenticAuthoringPreviewServiceTest {
         ObjectNode projectKnowledge = contextHints.putObject("projectKnowledge");
         projectKnowledge.put("schemaVersion", "praxis-agentic-authoring-project-knowledge.v1");
         projectKnowledge.put("source", "domain_knowledge_concept");
-        projectKnowledge.put("influenceCount", 2);
+        projectKnowledge.put("influenceCount", 99);
         ArrayNode entries = projectKnowledge.putArray("entries");
+        entries.add("malformed-entry-must-not-count");
         ObjectNode cited = entries.addObject();
         cited.put("knowledgeId", "knowledge-1");
         cited.put("conceptKey", "human-resources.funcionarios.preference.identity-card");
@@ -116,6 +117,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(audit.path("schemaVersion").asText())
                 .isEqualTo("praxis-agentic-authoring-project-knowledge-audit.v1");
         assertThat(audit.path("influenceCount").asInt()).isEqualTo(2);
+        assertThat(audit.path("entries")).hasSize(2);
         assertThat(audit.path("citedCount").asInt()).isEqualTo(1);
         assertThat(audit.path("uncitedCount").asInt()).isEqualTo(1);
         assertThat(audit.path("entries").path(0).path("knowledgeId").asText()).isEqualTo("knowledge-1");

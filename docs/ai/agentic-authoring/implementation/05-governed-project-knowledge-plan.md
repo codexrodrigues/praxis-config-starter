@@ -244,11 +244,31 @@ status and matched `projectKnowledge:*` source references. It deliberately does
 not copy raw payloads, raw source data or the knowledge `summary` text into
 preview diagnostics.
 
+The audit count fields are backend-derived from the safe entries that survive
+audit construction. `influenceCount`, `citedCount` and `uncitedCount` must not
+trust client/context-supplied counters.
+
 `praxis-ui-angular` PR #90 surfaces this safe audit in the Page Builder cockpit
 as citation counts only. The UI deliberately avoids rendering Project
 Knowledge summaries, raw payloads, concept keys or source summaries.
 
-The next implementation slice is a browser proof for the visible audit status
-only when the next validation phase needs end-to-end UI evidence. Otherwise,
-keep the focal Page Builder specs as the gate and keep vector/RAG ranking plus
-LLM-authored memory writes deferred.
+The local-first Page Builder browser proof now also asserts the visible audit
+status and guards against leaking the seeded concept key, fixture source
+summary or knowledge summary text in the cockpit status.
+
+The versioned managed local lane for this proof is:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+
+AI_PROVIDER=openai \
+AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
+./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh
+```
+
+The wrapper uses isolated default ports `8098` and `4083` to avoid reusing
+long-running local API/UI services from another validation lane.
+
+The next implementation slice should be batched into a larger Phase 7 hardening
+PR only after collecting all remaining local-first validation evidence. Keep
+vector/RAG ranking plus LLM-authored memory writes deferred.
