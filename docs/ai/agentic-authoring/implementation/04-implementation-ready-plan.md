@@ -624,6 +624,11 @@ Implemented evidence:
   diagnostics without raw source data.
 - `AgenticAuthoringTurnEngineTest` guards the query scope, preview context
   enrichment and safe diagnostics path.
+- `AgenticAuthoringPlanService` consumes `contextHints.projectKnowledge` through
+  an allowlisted prompt block and requires citation when project knowledge
+  materially influences generated plans.
+- `AgenticAuthoringPlanServiceTest` guards prompt inclusion and verifies that
+  raw source fields are ignored.
 
 Acceptance:
 
@@ -794,10 +799,10 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Teach the planner/prompt layer to consume `contextHints.projectKnowledge`
-   explicitly.
-2. Add assertions that governed project knowledge can influence generated plans
-   without exposing raw source data.
+1. Prove the full project-knowledge path through a local agentic authoring turn
+   with seeded governed knowledge.
+2. Expose safe project-knowledge influence in UI only after backend behavior is
+   stable.
 
 ## Stop Conditions
 
