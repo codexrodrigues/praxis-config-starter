@@ -132,6 +132,70 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(planRequest.getValue().intentResolution()).isNotNull();
     }
 
+    @Test
+    void routeRequiredSharedRuleHandoffSkipsPreviewAndReturnsExistingIntentPayload() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolutionResult routeRequiredIntent = sharedRuleRouteIntent(false, "form");
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(routeRequiredIntent);
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Regra LGPD para CPF"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("mixed");
+        verify(previewService, never()).preview(any(), any(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(sink.types)
+                .containsExactly("thought.step", "thought.step", "result");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("canApply").asBoolean()).isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("preview").isObject()).isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("intentResolution").path("gate").path("status").asText())
+                            .isEqualTo("route_required");
+                    org.assertj.core.api.Assertions.assertThat(node.path("intentResolution").path("failureCodes").toString())
+                            .contains("shared-rule-authoring-required");
+                });
+    }
+
+    @Test
+    void routeClassifierBlocksPreviewEvenIfSharedRuleIntentIsMarkedValid() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(sharedRuleRouteIntent(true, "api_catalog"));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Regra LGPD para CPF"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("shared_rule_authoring");
+        verify(previewService, never()).preview(any(), any(), any(), any());
+    }
+
+    @Test
+    void clarificationRequiredRouteSkipsPreviewExplicitly() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(clarificationRequiredIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("needs_clarification");
+        verify(previewService, never()).preview(any(), any(), any(), any());
+    }
+
     private AgenticAuthoringTurnEngine engine() {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -141,8 +205,12 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     private AgenticAuthoringTurnStreamRequest request() {
+        return request("Crie um painel");
+    }
+
+    private AgenticAuthoringTurnStreamRequest request(String userPrompt) {
         return new AgenticAuthoringTurnStreamRequest(
-                "Crie um painel",
+                userPrompt,
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
                 "/page-builder-ia",
@@ -179,6 +247,64 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(),
                 List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult sharedRuleRouteIntent(boolean valid, String artifactKind) {
+        return new AgenticAuthoringIntentResolutionResult(
+                valid,
+                "create",
+                artifactKind,
+                "create_artifact",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.99,
+                        "selected resource for shared rule grounding",
+                        List.of("quick-reply-context")),
+                List.of(),
+                new AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "route_required",
+                        List.of("shared-rule-authoring-required")),
+                "Crie uma regra LGPD para CPF",
+                "Esse pedido deve seguir pela trilha governada de regra compartilhada.",
+                List.of(),
+                List.of(),
+                List.of("keyword-fallback-applied"),
+                List.of("shared-rule-authoring-required"),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult clarificationRequiredIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                "create",
+                "dashboard",
+                "clarify_resource",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "clarification_required",
+                        List.of("resource-candidate-required")),
+                "Crie uma tela",
+                "Ainda preciso escolher o recurso.",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("resource-candidate-required"),
                 objectMapper.createObjectNode());
     }
 
