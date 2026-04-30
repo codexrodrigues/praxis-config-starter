@@ -80,7 +80,8 @@ class AgenticAuthoringToolRegistryTest {
         assertThat(result.safeDiagnostics())
                 .containsEntry("candidateCount", 1)
                 .containsEntry("artifactKind", "dashboard")
-                .containsEntry("retrievalQuery", "graficos de folha de pagamento");
+                .containsEntry("retrievalQuery", "graficos de folha de pagamento")
+                .containsEntry("retrievalSource", "lexical_fallback");
     }
 
     @Test

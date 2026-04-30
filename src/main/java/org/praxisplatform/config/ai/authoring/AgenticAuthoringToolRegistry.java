@@ -98,7 +98,30 @@ public class AgenticAuthoringToolRegistry {
                     Map.of(
                             "candidateCount", result.candidates() != null ? result.candidates().size() : 0,
                             "artifactKind", result.artifactKind() != null ? result.artifactKind() : "",
-                            "retrievalQuery", result.retrievalQuery() != null ? result.retrievalQuery() : ""));
+                            "retrievalQuery", result.retrievalQuery() != null ? result.retrievalQuery() : "",
+                            "retrievalSource", retrievalSource(result.candidates())));
+        }
+
+        private String retrievalSource(List<AgenticAuthoringCandidate> candidates) {
+            if (candidates == null || candidates.isEmpty()) {
+                return "none";
+            }
+            if (hasEvidence(candidates, "semantic-retrieval")) {
+                return "semantic_retrieval";
+            }
+            if (hasEvidence(candidates, "broad-artifact-discovery")) {
+                return "broad_artifact_discovery";
+            }
+            if (hasEvidence(candidates, "api-metadata")) {
+                return "lexical_fallback";
+            }
+            return "unknown";
+        }
+
+        private boolean hasEvidence(List<AgenticAuthoringCandidate> candidates, String evidence) {
+            return candidates.stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(candidate -> candidate.evidence() != null && candidate.evidence().contains(evidence));
         }
     }
 }

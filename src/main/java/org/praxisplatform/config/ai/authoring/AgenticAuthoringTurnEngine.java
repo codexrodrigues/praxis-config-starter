@@ -187,6 +187,7 @@ public class AgenticAuthoringTurnEngine {
             copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "candidateCount");
             copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "artifactKind");
             copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "retrievalQuery");
+            copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "retrievalSource");
         }
         return diagnostics;
     }

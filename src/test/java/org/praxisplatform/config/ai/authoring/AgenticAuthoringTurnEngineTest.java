@@ -251,6 +251,8 @@ class AgenticAuthoringTurnEngineTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("tool.result");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("candidateCount").asInt())
                             .isEqualTo(1);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalSource").asText())
+                            .isEqualTo("lexical_fallback");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("payload")).isFalse();
                 });
 
