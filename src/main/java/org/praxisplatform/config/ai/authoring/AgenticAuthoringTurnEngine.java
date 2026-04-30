@@ -330,6 +330,7 @@ public class AgenticAuthoringTurnEngine {
         if (selectedCandidate != null && selectedCandidate.resourcePath() != null && !selectedCandidate.resourcePath().isBlank()) {
             diagnostics.put("selectedResourcePath", selectedCandidate.resourcePath());
         }
+        diagnostics.put("retrievalSource", AgenticAuthoringCandidateProvenancePolicy.retrievalSource(intentResolution.candidates()));
         diagnostics.put("source", hasToolDiscoveredCandidates(intentResolution) ? "backend-resource-catalog" : "intent-resolution");
         return diagnostics;
     }
@@ -342,6 +343,7 @@ public class AgenticAuthoringTurnEngine {
         if (selectedCandidate != null && selectedCandidate.resourcePath() != null && !selectedCandidate.resourcePath().isBlank()) {
             diagnostics.put("selectedResourcePath", selectedCandidate.resourcePath());
         }
+        diagnostics.put("retrievalSource", AgenticAuthoringCandidateProvenancePolicy.retrievalSource(intentResolution.candidates()));
         return diagnostics;
     }
 

@@ -254,6 +254,12 @@ class AgenticAuthoringTurnEngineTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalSource").asText())
                             .isEqualTo("lexical_fallback");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("payload")).isFalse();
+                })
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("resource.discovery");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalSource").asText())
+                            .isEqualTo("context_hint");
                 });
 
         ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
