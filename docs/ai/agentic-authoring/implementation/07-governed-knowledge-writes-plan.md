@@ -190,7 +190,7 @@ should implement the smallest safe subset:
   `POST /api/praxis/config/domain-knowledge/change-sets`;
 - done in the validation HTTP slice:
   `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`;
-- deferred:
+- done in the status transition HTTP slice:
   `PATCH /api/praxis/config/domain-knowledge/change-sets/{id}/status`;
 - deferred:
   `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`;
@@ -387,7 +387,9 @@ Pause implementation if the design:
 4. Done in the validation HTTP slice: explicit validation endpoint revalidates
    persisted patches, updates `validation_result` and returns deterministic
    validation issues without approval or application.
-5. Approval/rejection status transitions.
+5. Done in the status transition HTTP slice: approval/rejection/supersede
+   transitions are directional, capture reviewer metadata and cannot mark a
+   change set as `applied`.
 6. Apply endpoint for one narrow operation, preferably `add_alias` plus
    `add_evidence`.
 7. Quickstart HTTP corpus proving the lifecycle with Neon.

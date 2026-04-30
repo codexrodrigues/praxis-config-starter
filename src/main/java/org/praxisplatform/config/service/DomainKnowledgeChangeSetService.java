@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -19,6 +20,7 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationSummary;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetResponse;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetStatusRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
@@ -36,6 +38,8 @@ public class DomainKnowledgeChangeSetService {
 
     private static final String VALIDATION_STATUS_VALID = "valid";
     private static final String VALIDATION_STATUS_INVALID = "invalid";
+    private static final List<String> REVIEW_STATUSES = List.of(
+            "draft", "proposed", "approved", "rejected", "superseded");
 
     private final DomainKnowledgeChangeSetRepository repository;
     private final DomainKnowledgeChangeSetValidator validator;
@@ -143,6 +147,37 @@ public class DomainKnowledgeChangeSetService {
         changeSet.setValidationResult(writeValidationResult(validation, sha256(writePatch(patch))));
         repository.save(changeSet);
         return validation;
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public DomainKnowledgeChangeSetResponse transitionStatus(
+            UUID id,
+            DomainKnowledgeChangeSetStatusRequest request,
+            String tenantId,
+            String environment) {
+        if (request == null) {
+            throw new ConfigurationIngestionException("Domain knowledge change set status request is required");
+        }
+        String status = requireAllowedReviewStatus(request.status());
+        DomainKnowledgeChangeSet changeSet = findInScope(id, tenantId, environment);
+        requireAllowedStatusTransition(changeSet.getStatus(), status);
+        if ("approved".equals(status)) {
+            requireValidChangeSet(changeSet);
+            requireText(request.reviewerId(), "reviewerId");
+        }
+        if ("rejected".equals(status)) {
+            requireText(request.reviewerId(), "reviewerId");
+            requireText(request.reason(), "reason");
+        }
+
+        changeSet.setStatus(status);
+        if (StringUtils.hasText(request.reviewerId())) {
+            changeSet.setReviewerId(request.reviewerId().trim());
+        }
+        if (("approved".equals(status) || "rejected".equals(status)) && changeSet.getReviewedAt() == null) {
+            changeSet.setReviewedAt(Instant.now());
+        }
+        return toResponse(repository.save(changeSet));
     }
 
     private DomainKnowledgeChangeSetResponse persistNew(
@@ -331,6 +366,51 @@ public class DomainKnowledgeChangeSetService {
             throw new ConfigurationIngestionException(fieldName + " is required");
         }
         return value.trim();
+    }
+
+    private String requireAllowedReviewStatus(String value) {
+        String status = normalize(requireText(value, "status"));
+        if (!REVIEW_STATUSES.contains(status)) {
+            throw new ConfigurationIngestionException("status must be one of " + REVIEW_STATUSES
+                    + "; use the apply endpoint for applied change sets");
+        }
+        return status;
+    }
+
+    private void requireAllowedStatusTransition(String currentStatus, String requestedStatus) {
+        if (isSameStatus(currentStatus, requestedStatus) || isAllowedStatusTransition(currentStatus, requestedStatus)) {
+            return;
+        }
+        throw new ConfigurationIngestionException(
+                "Domain knowledge change set status transition is not allowed: "
+                        + nullToEmpty(currentStatus)
+                        + " -> "
+                        + requestedStatus);
+    }
+
+    private boolean isAllowedStatusTransition(String currentStatus, String requestedStatus) {
+        return switch (nullToEmpty(currentStatus)) {
+            case "draft" -> List.of("proposed", "approved", "rejected", "superseded").contains(requestedStatus);
+            case "proposed" -> List.of("draft", "approved", "rejected", "superseded").contains(requestedStatus);
+            case "approved" -> List.of("rejected", "superseded").contains(requestedStatus);
+            default -> false;
+        };
+    }
+
+    private void requireValidChangeSet(DomainKnowledgeChangeSet changeSet) {
+        JsonNode validation = read(changeSet.getValidationResult());
+        if (!VALIDATION_STATUS_VALID.equals(validation.path("validationStatus").asText(null))
+                || validation.path("errorCount").asInt(0) > 0) {
+            throw new ConfigurationIngestionException("Domain knowledge change set must be valid before approval");
+        }
+    }
+
+    private boolean isSameStatus(String currentStatus, String requestedStatus) {
+        return nullToEmpty(currentStatus).equals(requestedStatus);
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private String normalizeOrDefault(String value, String fallback) {

@@ -20,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetStatusRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 
@@ -203,6 +204,88 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThatThrownBy(() -> service.validate(existing.getId(), "tenant-b", ENVIRONMENT))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("not found in request scope");
+    }
+
+    @Test
+    void approvesValidChangeSetAndRecordsReviewer() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.transitionStatus(
+                existing.getId(),
+                new DomainKnowledgeChangeSetStatusRequest("approved", "reviewer:alice", "Safe evidence reviewed."),
+                TENANT,
+                ENVIRONMENT);
+
+        assertThat(response.status()).isEqualTo("approved");
+        assertThat(response.reviewerId()).isEqualTo("reviewer:alice");
+        assertThat(response.reviewedAt()).isNotNull();
+        ArgumentCaptor<DomainKnowledgeChangeSet> captor = ArgumentCaptor.forClass(DomainKnowledgeChangeSet.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo("approved");
+        assertThat(captor.getValue().getReviewerId()).isEqualTo("reviewer:alice");
+        assertThat(captor.getValue().getReviewedAt()).isNotNull();
+    }
+
+    @Test
+    void rejectsInvalidChangeSetApprovalUntilValidationIsClean() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setValidationResult("""
+                {
+                  "validationStatus": "invalid",
+                  "patchHash": "invalid",
+                  "errorCount": 1,
+                  "warningCount": 0,
+                  "issues": []
+                }
+                """);
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.transitionStatus(
+                existing.getId(),
+                new DomainKnowledgeChangeSetStatusRequest("approved", "reviewer:alice", "Invalid proposal."),
+                TENANT,
+                ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("must be valid before approval");
+    }
+
+    @Test
+    void rejectsStatusTransitionToAppliedBecauseApplyNeedsOwnEndpoint() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.transitionStatus(
+                existing.getId(),
+                new DomainKnowledgeChangeSetStatusRequest("applied", "reviewer:alice", "Do not bypass apply."),
+                TENANT,
+                ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("use the apply endpoint");
+    }
+
+    @Test
+    void rejectsTerminalRejectedChangeSetReapproval() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setStatus("rejected");
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.transitionStatus(
+                existing.getId(),
+                new DomainKnowledgeChangeSetStatusRequest("approved", "reviewer:alice", "Reopen rejected proposal."),
+                TENANT,
+                ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("status transition is not allowed: rejected -> approved");
     }
 
     private DomainKnowledgeChangeSetService service(DomainKnowledgeChangeSetRepository repository) {
