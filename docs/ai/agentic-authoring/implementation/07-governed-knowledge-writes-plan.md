@@ -101,6 +101,80 @@ Validation must reject:
 - cross-tenant or cross-environment targets;
 - operations that would create duplicate stable keys without explicit reuse.
 
+## Minimal Payload Examples
+
+Create request:
+
+```json
+{
+  "changeSetKey": "project-knowledge:human-resources.funcionarios:cpf-guidance:v1",
+  "status": "proposed",
+  "authorType": "llm",
+  "authorId": "openai:gpt-5.4",
+  "intent": "Improve CPF field guidance for employee registration",
+  "reason": "The authoring turn detected that CPF field handling needs explicit LGPD guidance.",
+  "patch": [
+    {
+      "operationId": "op-add-cpf-guidance-evidence",
+      "operationType": "add_evidence",
+      "target": {
+        "subjectType": "concept",
+        "conceptKey": "human-resources.funcionarios.field.cpf"
+      },
+      "reason": "Connect the guidance to reviewed Project Knowledge evidence.",
+      "evidenceRefs": [
+        "domain-catalog:human-resources:v2026-04-30"
+      ],
+      "confidence": 0.82,
+      "payload": {
+        "evidenceKey": "llm-proposal:funcionarios:cpf-guidance:v1",
+        "evidenceType": "llm_proposal",
+        "sourceUri": "praxis-agentic-authoring://turn/example",
+        "sourcePointer": "/projectKnowledge/0",
+        "summary": "CPF is personal data and form guidance should explain purpose and minimization."
+      }
+    }
+  ]
+}
+```
+
+Safe response:
+
+```json
+{
+  "id": "3b0d6c7a-5cb3-4d25-8a3e-37b5f8ef61e9",
+  "changeSetKey": "project-knowledge:human-resources.funcionarios:cpf-guidance:v1",
+  "status": "proposed",
+  "authorType": "llm",
+  "intent": "Improve CPF field guidance for employee registration",
+  "operationCount": 1,
+  "validationStatus": "pending",
+  "safeSummary": {
+    "operationTypes": ["add_evidence"],
+    "targetConceptKeys": ["human-resources.funcionarios.field.cpf"],
+    "requiresReview": true
+  }
+}
+```
+
+The common response should expose safe summaries by default. Raw patch payloads
+should be restricted to admin/debug surfaces or explicit detail endpoints.
+
+## Validation Matrix
+
+| Case | Expected result |
+| --- | --- |
+| Unknown `operationType` | Reject with `unsupported_operation_type`. |
+| Missing `reason` | Reject with `missing_reason`. |
+| Missing `evidenceRefs` for LLM-authored change | Reject with `missing_evidence`. |
+| `authorType=llm` and `status=applied` on create | Reject with `invalid_initial_status`. |
+| Target tenant/environment differs from request headers | Reject with `scope_mismatch`. |
+| Operation attempts delete/replace in first cut | Reject with `destructive_operation_not_supported`. |
+| Raw prompt/chat transcript stored as concept payload | Reject with `raw_prompt_memory_not_allowed`. |
+| `ai_visibility=allow` proposed from unsafe/private evidence | Reject or downgrade to review-required visibility. |
+| Duplicate alias/binding with compatible existing target | Reuse or report idempotent no-op. |
+| Duplicate stable key with incompatible target | Reject with `stable_key_conflict`. |
+
 ## Proposed API Shape
 
 The domain-catalog v1 document already recommends these endpoints. This cut
@@ -116,6 +190,41 @@ should implement the smallest safe subset:
 If we need to reduce scope further, start with create, validate, list and get.
 Do not implement apply before validation and approval semantics are covered by
 tests.
+
+## DTO Shape
+
+Suggested request DTOs:
+
+- `DomainKnowledgeChangeSetCreateRequest`
+- `DomainKnowledgeChangeSetStatusRequest`
+- `DomainKnowledgeChangeSetValidationRequest`
+- `DomainKnowledgeChangeSetApplyRequest`
+
+Suggested response DTOs:
+
+- `DomainKnowledgeChangeSetResponse`
+- `DomainKnowledgeChangeSetOperationSummary`
+- `DomainKnowledgeChangeSetValidationResponse`
+- `DomainKnowledgeChangeSetApplyResponse`
+
+Keep DTOs explicit. Do not expose the JPA entity directly through HTTP.
+
+## Idempotency
+
+Use `tenantId + environment + changeSetKey` as the stable create key. Repeated
+create requests with the same key should be safe only when the normalized patch
+hash, author metadata and target scope are compatible.
+
+On retry:
+
+- return the existing change set when the semantic patch is equivalent;
+- reject when the same key points to a different operation set;
+- never create a second row for the same stable key in the same scope.
+
+The implementation can start with a deterministic normalized JSON hash stored
+inside `validation_result` if adding a database column is not justified in the
+first slice. If the hash becomes core lifecycle state, promote it to a real
+column in a later migration.
 
 ## Service Boundaries
 
@@ -211,6 +320,34 @@ Browser E2E:
 - cockpit shows validation status and requires explicit approval/apply;
 - after apply, a subsequent authoring turn can cite the newly curated safe
   knowledge.
+
+## Definition Of Done By Slice
+
+| Slice | Done when |
+| --- | --- |
+| DTO + validator | Allowed/rejected operations are covered by focal unit tests and no endpoint exists yet. |
+| Create/list/get | Proposed change sets persist with tenant/environment scope and safe responses. |
+| Validate | Validation results are deterministic, persisted and do not require an LLM call. |
+| Status transitions | Invalid transitions are blocked and reviewer metadata is captured. |
+| Apply first operation | `add_alias` plus `add_evidence` applies transactionally only after approval. |
+| Quickstart corpus | Neon-backed HTTP flow proves create -> validate -> approve -> apply -> readback. |
+| Page Builder cockpit | UI creates proposals but cannot apply them silently during normal authoring. |
+| Browser E2E | Real browser proves no silent mutation before approval and citation after apply. |
+
+## PR And Merge Strategy
+
+Use small implementation PRs, but avoid opening remote gates for each one.
+
+Recommended sequence:
+
+1. local branch with DTO/validator/service tests;
+2. local focal Maven validation;
+3. PR without relying on Actions for exploratory feedback;
+4. merge only after enough related slices are batched to justify one `main`
+   gate, or after a slice changes public contract and needs a phase checkpoint.
+
+Do not publish Maven/npm until a named downstream consumer needs the completed
+lifecycle from public artifacts.
 
 ## Stop Conditions
 
