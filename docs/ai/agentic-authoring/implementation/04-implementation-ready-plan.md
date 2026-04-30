@@ -619,6 +619,11 @@ Implemented evidence:
   visibility and optional context/resource/node type.
 - `AgenticAuthoringProjectKnowledgeServiceTest` covers scope filtering, status
   filtering, `ai_visibility` behavior, limit clamping and safe masking.
+- `AgenticAuthoringTurnEngine` attaches safe project knowledge projections to
+  preview planning context and emits `projectKnowledge.retrieve` stream
+  diagnostics without raw source data.
+- `AgenticAuthoringTurnEngineTest` guards the query scope, preview context
+  enrichment and safe diagnostics path.
 
 Acceptance:
 
@@ -789,10 +794,10 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Wire `AgenticAuthoringProjectKnowledgeService` into
-   `AgenticAuthoringTurnEngine` as read-only planner context.
-2. Emit safe stream diagnostics that explain project knowledge influence without
-   exposing raw payloads.
+1. Teach the planner/prompt layer to consume `contextHints.projectKnowledge`
+   explicitly.
+2. Add assertions that governed project knowledge can influence generated plans
+   without exposing raw source data.
 
 ## Stop Conditions
 

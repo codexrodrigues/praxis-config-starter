@@ -137,10 +137,12 @@ Minimum UI behavior:
    context/resource and `payload.kind`.
 2. Done in the Phase 7 read-model slice: add unit tests for scope filtering,
    status filtering, `ai_visibility` behavior and safe projection redaction.
-3. Add an internal authoring-engine retrieval step that consumes safe
-   projections without changing public HTTP contracts.
-4. Emit stream diagnostics that name retrieved knowledge by safe identifier,
-   kind, source summary and influence classification.
+3. Done in the Phase 7 engine-wiring slice: add an internal authoring-engine
+   retrieval step that consumes safe projections without changing public HTTP
+   contracts.
+4. Done in the Phase 7 engine-wiring slice: emit stream diagnostics that name
+   retrieved knowledge by safe identifier, kind, source summary and influence
+   classification.
 5. Add UI explanation only after backend diagnostics are stable.
 6. Add optional vector ranking as a derived optimization, never as the canonical
    source of truth.
@@ -174,9 +176,13 @@ Do not proceed with implementation if the proposed design:
 `AgenticAuthoringProjectKnowledgeService` is the first read-only backend
 foundation for Phase 7. It returns safe projections from `domain_knowledge_concept`
 only when tenant/environment scope, lifecycle, curation status and
-`ai_visibility` allow normal authoring influence. It still does not mutate
-knowledge and is not wired into the authoring engine.
+`ai_visibility` allow normal authoring influence.
 
-The next implementation slice is to attach this service to
-`AgenticAuthoringTurnEngine` as a planner-context input and emit safe stream
-diagnostics that explain knowledge influence.
+`AgenticAuthoringTurnEngine` now attaches those safe projections to
+`contextHints.projectKnowledge` before preview planning and emits safe
+`projectKnowledge.retrieve` diagnostics. It still does not mutate knowledge and
+does not expose a public HTTP endpoint for project memory.
+
+The next implementation slice is to make the planner/prompt consume
+`contextHints.projectKnowledge` intentionally and add assertions that governed
+knowledge influences generated plans without leaking raw source data.

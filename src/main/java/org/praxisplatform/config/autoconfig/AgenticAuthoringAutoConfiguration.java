@@ -18,6 +18,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerServi
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewMessageSynthesizerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringProjectKnowledgeService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
@@ -279,13 +280,15 @@ public class AgenticAuthoringAutoConfiguration {
             AgenticAuthoringIntentResolverService intentResolverService,
             AgenticAuthoringPreviewService previewService,
             AgenticAuthoringToolRegistry toolRegistry,
+            ObjectProvider<AgenticAuthoringProjectKnowledgeService> projectKnowledgeService,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
                 objectMapper,
                 new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
-                toolRegistry);
+                toolRegistry,
+                projectKnowledgeService.getIfAvailable());
     }
 
     @Bean
