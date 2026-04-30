@@ -639,6 +639,15 @@ Implemented evidence:
   phase to visible Page Builder assistant progress, including an allowlisted
   influence count and EN/PT-BR i18n coverage, without exposing raw project
   knowledge payloads.
+- `praxis-api-quickstart` PR #45 adds a local-first Project Knowledge fixture
+  that seeds approved, active and AI-visible Domain Knowledge into the
+  configured config-store datasource without adding a public endpoint.
+- `praxis-ui-angular` PR #89 adds a real browser E2E proof that a Page Builder
+  stream turn with seeded governed Project Knowledge renders the safe
+  `projectKnowledge.retrieve` progress state and does not end as an agentic
+  error. The local runner now points at the canonical
+  `praxis-config-starter/docs/ai/agentic-authoring/**` contract/proof
+  directories.
 
 Acceptance:
 
@@ -809,12 +818,14 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Add a local-first browser/HTTP proof that a real Page Builder stream turn
-   with seeded governed project knowledge renders the safe
-   `projectKnowledge.retrieve` progress state and reaches the expected
-   terminal result.
-2. Keep vector/RAG ranking deferred until UI explanation, relational
-   governance and E2E observability remain stable.
+1. Add a safe influence-audit summary for Project Knowledge turns, linking the
+   retrieved governed projections to preview/source references without exposing
+   raw payloads or introducing a public memory endpoint.
+2. Add a focal backend test and, when the UI surface changes, a browser proof
+   that the audit summary remains safe and tenant/environment scoped.
+3. Keep vector/RAG ranking and LLM-authored memory writes deferred until
+   relational governance, safe observability and local E2E evidence remain
+   stable.
 
 ## Stop Conditions
 
