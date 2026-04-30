@@ -284,6 +284,73 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanIncludesGovernedProjectKnowledgeProjectionInPrompt() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = funcionariosPlan("apelido", "Apelido", "text");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode projectKnowledge = contextHints.putObject("projectKnowledge");
+        projectKnowledge.put("schemaVersion", "praxis-agentic-authoring-project-knowledge.v1");
+        projectKnowledge.put("source", "domain_knowledge_concept");
+        projectKnowledge.put("influenceCount", 1);
+        projectKnowledge.put("rawPayload", "MUST_NOT_LEAK");
+        ObjectNode entry = projectKnowledge.putArray("entries").addObject();
+        entry.put("knowledgeId", "knowledge-1");
+        entry.put("conceptKey", "human-resources.funcionarios.preference.identity-card");
+        entry.put("kind", "project_preference");
+        entry.put("visibility", "allow");
+        entry.put("sourceSummary", "accepted authoring turn");
+        entry.put("influence", "layout_preference");
+        entry.put("summary", "Prefer compact identity cards.");
+        entry.put("rawSourceData", "SECRET_SOURCE_DATA");
+        entry.putObject("scope")
+                .put("tenantId", "tenant")
+                .put("environment", "local")
+                .put("contextKey", "human-resources")
+                .put("resourceKey", "human-resources.funcionarios");
+        entry.putObject("status")
+                .put("lifecycle", "active")
+                .put("curationStatus", "approved");
+        entry.putArray("evidence")
+                .add("domain-knowledge:concept:human-resources.funcionarios.preference.identity-card");
+
+        service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Adicione apelido ao formulario",
+                                null,
+                                null,
+                                null,
+                                null,
+                                funcionariosIntent("modify", "add_field"),
+                                "session-1",
+                                "turn-1",
+                                java.util.List.of(),
+                                null,
+                                java.util.List.of(),
+                                contextHints),
+                        "tenant",
+                        "user",
+                        "local");
+
+        assertThat(promptCaptor.getValue()).contains("Governed project knowledge:");
+        assertThat(promptCaptor.getValue()).contains("\"kind\":\"project_preference\"");
+        assertThat(promptCaptor.getValue()).contains("\"summary\":\"Prefer compact identity cards.\"");
+        assertThat(promptCaptor.getValue()).contains("sourceRefs must cite intent-resolution, the resolved schema URL, and projectKnowledge entries");
+        assertThat(promptCaptor.getValue()).doesNotContain("MUST_NOT_LEAK");
+        assertThat(promptCaptor.getValue()).doesNotContain("SECRET_SOURCE_DATA");
+    }
+
+    @Test
     void generateMinimalFormPlanRestoresAttachmentSummariesFromPendingClarificationDiagnostics() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();

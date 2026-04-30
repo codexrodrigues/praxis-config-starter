@@ -143,8 +143,12 @@ Minimum UI behavior:
 4. Done in the Phase 7 engine-wiring slice: emit stream diagnostics that name
    retrieved knowledge by safe identifier, kind, source summary and influence
    classification.
-5. Add UI explanation only after backend diagnostics are stable.
-6. Add optional vector ranking as a derived optimization, never as the canonical
+5. Done in the Phase 7 planner-consumption slice: make the planner prompt
+   consume `contextHints.projectKnowledge` through an allowlisted safe
+   projection and require citation in `sourceRefs` when it materially
+   influences a plan.
+6. Add UI explanation only after backend diagnostics are stable.
+7. Add optional vector ranking as a derived optimization, never as the canonical
    source of truth.
 
 ## Acceptance Criteria
@@ -183,6 +187,12 @@ only when tenant/environment scope, lifecycle, curation status and
 `projectKnowledge.retrieve` diagnostics. It still does not mutate knowledge and
 does not expose a public HTTP endpoint for project memory.
 
-The next implementation slice is to make the planner/prompt consume
-`contextHints.projectKnowledge` intentionally and add assertions that governed
-knowledge influences generated plans without leaking raw source data.
+`AgenticAuthoringPlanService` now includes a dedicated governed project
+knowledge block in the MinimalFormPlan prompt. The block is rebuilt from an
+allowlist of safe fields and ignores non-canonical fields such as raw source
+data. The prompt also instructs the model to cite project knowledge entries in
+`sourceRefs` when they materially influence the generated plan.
+
+The next implementation slice is to prove this full path through a local
+agentic authoring turn with seeded governed knowledge, then expose the already
+safe influence explanation in UI only after the backend behavior is stable.
