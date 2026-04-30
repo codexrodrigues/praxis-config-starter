@@ -244,6 +244,10 @@ status and matched `projectKnowledge:*` source references. It deliberately does
 not copy raw payloads, raw source data or the knowledge `summary` text into
 preview diagnostics.
 
+The audit count fields are backend-derived from the safe entries that survive
+audit construction. `influenceCount`, `citedCount` and `uncitedCount` must not
+trust client/context-supplied counters.
+
 `praxis-ui-angular` PR #90 surfaces this safe audit in the Page Builder cockpit
 as citation counts only. The UI deliberately avoids rendering Project
 Knowledge summaries, raw payloads, concept keys or source summaries.

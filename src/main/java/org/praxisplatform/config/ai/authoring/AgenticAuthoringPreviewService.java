@@ -428,7 +428,6 @@ public class AgenticAuthoringPreviewService {
         ObjectNode audit = objectMapper.createObjectNode();
         audit.put("schemaVersion", "praxis-agentic-authoring-project-knowledge-audit.v1");
         audit.put("source", safeText(projectKnowledge.path("source").asText("domain_knowledge_concept")));
-        audit.put("influenceCount", projectKnowledge.path("influenceCount").asInt(entries.size()));
         ArrayNode safeEntries = audit.putArray("entries");
         int citedCount = 0;
         for (JsonNode entry : entries) {
@@ -451,6 +450,7 @@ public class AgenticAuthoringPreviewService {
             safeEntry.put("cited", !matchedRefs.isEmpty());
             safeEntry.set("sourceRefs", objectMapper.valueToTree(matchedRefs));
         }
+        audit.put("influenceCount", safeEntries.size());
         audit.put("citedCount", citedCount);
         audit.put("uncitedCount", Math.max(0, safeEntries.size() - citedCount));
         audit.put("citationPolicy", "sourceRefs must cite projectKnowledge entries when they materially influence the plan.");

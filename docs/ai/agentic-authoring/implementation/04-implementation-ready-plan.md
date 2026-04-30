@@ -652,6 +652,9 @@ Implemented evidence:
   backend-owned influence audit summary that links governed Project Knowledge
   entries to `sourceRefs` citations without copying raw payloads or knowledge
   summaries into the preview diagnostics.
+- The audit derives `influenceCount`, `citedCount` and `uncitedCount` from the
+  backend-built safe entries instead of trusting counts supplied in
+  `contextHints.projectKnowledge`.
 - `praxis-ui-angular` PR #90 surfaces the safe audit in the Page Builder
   cockpit as citation counts only. It does not render Project Knowledge
   summaries, raw payloads, concept keys or source summaries.
