@@ -607,6 +607,19 @@ Tasks:
   explicit implementation gap proves a small attached extension is required.
 - Treat vector/RAG retrieval as a derived index, never as source of truth.
 
+Implemented evidence:
+
+- `AgenticAuthoringProjectKnowledgeService` retrieves read-only safe
+  projections from approved, active and AI-visible Domain Knowledge concepts.
+- `AgenticAuthoringProjectKnowledgeQuery` and
+  `AgenticAuthoringProjectKnowledgeProjection` define the internal contract for
+  scoped project knowledge influence without creating a public HTTP endpoint.
+- `DomainKnowledgeConceptRepository.findGovernedProjectKnowledgeCandidates`
+  gates retrieval by tenant, environment, lifecycle, curation status,
+  visibility and optional context/resource/node type.
+- `AgenticAuthoringProjectKnowledgeServiceTest` covers scope filtering, status
+  filtering, `ai_visibility` behavior, limit clamping and safe masking.
+
 Acceptance:
 
 - Project knowledge is scoped, governed and auditable.
@@ -776,10 +789,10 @@ Completed first PR sequence:
 
 Recommended next PR sequence:
 
-1. Implement the governed project knowledge read model/service described in
-   [05-governed-project-knowledge-plan.md](./05-governed-project-knowledge-plan.md).
-2. Add authoring-engine retrieval only after scope, status and visibility tests
-   are explicit.
+1. Wire `AgenticAuthoringProjectKnowledgeService` into
+   `AgenticAuthoringTurnEngine` as read-only planner context.
+2. Emit safe stream diagnostics that explain project knowledge influence without
+   exposing raw payloads.
 
 ## Stop Conditions
 
