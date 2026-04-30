@@ -27,6 +27,10 @@ Escopo coberto:
 - `POST /api/praxis/config/ai/authoring/page-preview`
 - `POST /api/praxis/config/ai/authoring/page-apply`
 - `POST /api/praxis/config/domain-rules/intake`
+- `POST /api/praxis/config/domain-knowledge/change-sets`
+- `GET /api/praxis/config/domain-knowledge/change-sets`
+- `GET /api/praxis/config/domain-knowledge/change-sets/{changeSetId}`
+- `POST /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/validate`
 - `POST /api/praxis/config/domain-rules/definitions`
 - `GET /api/praxis/config/domain-rules/definitions`
 - `PATCH /api/praxis/config/domain-rules/definitions/{definitionId}/status`

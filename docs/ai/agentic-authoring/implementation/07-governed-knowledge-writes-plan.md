@@ -50,6 +50,8 @@ Missing before implementation:
   represented by explicit DTOs and validated before any public endpoint exists;
 - done in the validator foundation slice: validation service for proposed
   operations before persistence;
+- done in the validation HTTP slice: public explicit validation endpoint that
+  revalidates persisted proposals and updates safe validation metadata;
 - approval/rejection transitions;
 - application service that mutates curated knowledge rows transactionally;
 - audit/timeline evidence for proposed, approved, rejected and applied changes;
@@ -186,7 +188,7 @@ should implement the smallest safe subset:
 
 - done in the create/list/get HTTP slice:
   `POST /api/praxis/config/domain-knowledge/change-sets`;
-- deferred:
+- done in the validation HTTP slice:
   `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`;
 - deferred:
   `PATCH /api/praxis/config/domain-knowledge/change-sets/{id}/status`;
@@ -382,7 +384,9 @@ Pause implementation if the design:
 3. Done in the create/list/get HTTP slice: public create/list/get endpoints
    delegate to the service and preserve safe responses. Explicit validation,
    status transitions and apply are still intentionally deferred.
-4. Validation endpoint and validation result persistence.
+4. Done in the validation HTTP slice: explicit validation endpoint revalidates
+   persisted patches, updates `validation_result` and returns deterministic
+   validation issues without approval or application.
 5. Approval/rejection status transitions.
 6. Apply endpoint for one narrow operation, preferably `add_alias` plus
    `add_evidence`.

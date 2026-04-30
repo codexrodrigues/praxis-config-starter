@@ -14,6 +14,7 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationSummary;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetResponse;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 
 @Tag("unit")
@@ -61,6 +62,22 @@ class DomainKnowledgeChangeSetControllerTest {
         assertThat(entity.getStatusCode().value()).isEqualTo(200);
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).get(id, "tenant-a", "dev");
+    }
+
+    @Test
+    void validatesChangeSetByIdAndScope() {
+        DomainKnowledgeChangeSetService service = mock(DomainKnowledgeChangeSetService.class);
+        DomainKnowledgeChangeSetController controller = new DomainKnowledgeChangeSetController(service);
+        UUID id = UUID.randomUUID();
+        DomainKnowledgeChangeSetValidationResponse response =
+                new DomainKnowledgeChangeSetValidationResponse(true, 0, 0, List.of());
+        when(service.validate(id, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.validate(id, "tenant-a", "dev");
+
+        assertThat(entity.getStatusCode().value()).isEqualTo(200);
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).validate(id, "tenant-a", "dev");
     }
 
     private DomainKnowledgeChangeSetCreateRequest request() {

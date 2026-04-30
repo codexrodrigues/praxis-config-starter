@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -34,6 +35,7 @@ import org.springframework.util.StringUtils;
 public class DomainKnowledgeChangeSetService {
 
     private static final String VALIDATION_STATUS_VALID = "valid";
+    private static final String VALIDATION_STATUS_INVALID = "invalid";
 
     private final DomainKnowledgeChangeSetRepository repository;
     private final DomainKnowledgeChangeSetValidator validator;
@@ -121,6 +123,28 @@ public class DomainKnowledgeChangeSetService {
         return toResponse(changeSet);
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public DomainKnowledgeChangeSetValidationResponse validate(
+            UUID id,
+            String tenantId,
+            String environment) {
+        DomainKnowledgeChangeSet changeSet = findInScope(id, tenantId, environment);
+        List<DomainKnowledgeChangeSetOperationRequest> patch = readPatchRequests(changeSet.getPatch());
+        DomainKnowledgeChangeSetCreateRequest validationRequest = new DomainKnowledgeChangeSetCreateRequest(
+                changeSet.getChangeSetKey(),
+                changeSet.getStatus(),
+                changeSet.getAuthorType(),
+                changeSet.getAuthorId(),
+                changeSet.getIntent(),
+                changeSet.getReason(),
+                patch);
+        DomainKnowledgeChangeSetValidationResponse validation =
+                validator.validateCreateRequest(changeSet.getTenantId(), changeSet.getEnvironment(), validationRequest);
+        changeSet.setValidationResult(writeValidationResult(validation, sha256(writePatch(patch))));
+        repository.save(changeSet);
+        return validation;
+    }
+
     private DomainKnowledgeChangeSetResponse persistNew(
             DomainKnowledgeChangeSetCreateRequest request,
             String tenantId,
@@ -144,6 +168,25 @@ public class DomainKnowledgeChangeSetService {
         changeSet.setPatch(patch);
         changeSet.setValidationResult(writeValidationResult(validation, patchHash));
         return toResponse(repository.save(changeSet));
+    }
+
+    private DomainKnowledgeChangeSet findInScope(
+            UUID id,
+            String tenantId,
+            String environment) {
+        if (id == null) {
+            throw new ConfigurationIngestionException("Domain knowledge change set id is required");
+        }
+        String normalizedTenant = normalize(tenantId);
+        String normalizedEnvironment = normalize(environment);
+        DomainKnowledgeChangeSet changeSet = repository.findById(id)
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Domain knowledge change set not found: " + id));
+        if (!sameScope(normalizedTenant, changeSet.getTenantId())
+                || !sameScope(normalizedEnvironment, changeSet.getEnvironment())) {
+            throw new ConfigurationIngestionException("Domain knowledge change set not found in request scope: " + id);
+        }
+        return changeSet;
     }
 
     private DomainKnowledgeChangeSetResponse reuseExistingOrReject(
@@ -222,7 +265,7 @@ public class DomainKnowledgeChangeSetService {
             DomainKnowledgeChangeSetValidationResponse validation,
             String patchHash) {
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("validationStatus", VALIDATION_STATUS_VALID);
+        root.put("validationStatus", validation.valid() ? VALIDATION_STATUS_VALID : VALIDATION_STATUS_INVALID);
         root.put("patchHash", patchHash);
         root.put("errorCount", validation.errorCount());
         root.put("warningCount", validation.warningCount());
@@ -267,6 +310,20 @@ public class DomainKnowledgeChangeSetService {
         }
         return java.util.stream.StreamSupport.stream(node.spliterator(), false)
                 .toList();
+    }
+
+    private List<DomainKnowledgeChangeSetOperationRequest> readPatchRequests(String json) {
+        if (!StringUtils.hasText(json)) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(
+                    json,
+                    new TypeReference<List<DomainKnowledgeChangeSetOperationRequest>>() {
+                    });
+        } catch (JsonProcessingException ex) {
+            throw new ConfigurationIngestionException("Unable to read domain knowledge change set patch", ex);
+        }
     }
 
     private String requireText(String value, String fieldName) {

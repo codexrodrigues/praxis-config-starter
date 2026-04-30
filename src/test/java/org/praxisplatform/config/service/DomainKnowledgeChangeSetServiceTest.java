@@ -165,6 +165,46 @@ class DomainKnowledgeChangeSetServiceTest {
                 .hasMessageContaining("not found in request scope");
     }
 
+    @Test
+    void validatesExistingChangeSetAndPersistsInvalidResult() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setPatch(write(objectMapper.valueToTree(List.of(new DomainKnowledgeChangeSetOperationRequest(
+                "op-invalid-delete",
+                "delete_concept",
+                target(),
+                "Destructive operation should stay invalid.",
+                List.of("domain-catalog:human-resources:v2026-04-30"),
+                0.8,
+                payload("llm-proposal:invalid:v1"))))));
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var validation = service.validate(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(validation.valid()).isFalse();
+        assertThat(validation.issues())
+                .extracting(org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue::code)
+                .contains("destructive_operation_not_supported");
+        ArgumentCaptor<DomainKnowledgeChangeSet> captor = ArgumentCaptor.forClass(DomainKnowledgeChangeSet.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getValidationResult()).contains("\"validationStatus\":\"invalid\"");
+        assertThat(captor.getValue().getValidationResult()).contains("destructive_operation_not_supported");
+    }
+
+    @Test
+    void validateRejectsChangeSetOutsideRequestScope() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.validate(existing.getId(), "tenant-b", ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("not found in request scope");
+    }
+
     private DomainKnowledgeChangeSetService service(DomainKnowledgeChangeSetRepository repository) {
         return new DomainKnowledgeChangeSetService(repository, validator, objectMapper);
     }
