@@ -38,11 +38,11 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     public List<AgenticAuthoringCandidate> discover(String normalizedPrompt, String artifactKind) {
         String expectedMethod = expectedMethod(artifactKind);
+        RetrievalContext context = new RetrievalContext(normalizedPrompt, artifactKind, expectedMethod);
         if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
-            return repository == null ? List.of() : discoverBroadCandidates(artifactKind, expectedMethod);
+            return repository == null ? List.of() : new BroadArtifactCandidateRetriever().retrieve(context);
         }
-        List<AgenticAuthoringCandidate> semanticCandidates =
-                discoverWithRetrievalService(normalizedPrompt, artifactKind, expectedMethod);
+        List<AgenticAuthoringCandidate> semanticCandidates = new SemanticCandidateRetriever().retrieve(context);
         if (!semanticCandidates.isEmpty()) {
             return semanticCandidates;
         }
@@ -51,18 +51,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         List<String> tokens = meaningfulTokens(expandDomainSynonyms(normalizedPrompt));
         if (tokens.isEmpty()) {
-            return discoverBroadCandidates(artifactKind, expectedMethod);
+            return new BroadArtifactCandidateRetriever().retrieve(context);
         }
-        return repository.findAll().stream()
-                .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
-                .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
-                .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
-                .map(metadata -> toScoredCandidate(metadata, expectedMethod, artifactKind, tokens))
-                .filter(scored -> scored.score() >= 0.45d)
-                .sorted(Comparator.comparingDouble(ScoredCandidate::score).reversed())
-                .limit(8)
-                .map(ScoredCandidate::candidate)
-                .toList();
+        return new LexicalFallbackCandidateRetriever().retrieve(context.withTokens(tokens));
     }
 
     private List<AgenticAuthoringCandidate> discoverBroadCandidates(String artifactKind, String expectedMethod) {
@@ -75,7 +66,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
                 .map(metadata -> toBroadScoredCandidate(metadata, expectedMethod, artifactKind))
                 .filter(scored -> scored.score() >= 0.36d)
-                .sorted(Comparator.comparingDouble(ScoredCandidate::score).reversed())
+                .sorted(CandidateRankingPolicy.byScoreDescending())
                 .limit(8)
                 .map(ScoredCandidate::candidate)
                 .toList();
@@ -105,6 +96,62 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     .toList();
         } catch (RuntimeException ex) {
             return List.of();
+        }
+    }
+
+    private interface CandidateRetriever {
+
+        List<AgenticAuthoringCandidate> retrieve(RetrievalContext context);
+    }
+
+    private final class SemanticCandidateRetriever implements CandidateRetriever {
+
+        @Override
+        public List<AgenticAuthoringCandidate> retrieve(RetrievalContext context) {
+            return discoverWithRetrievalService(
+                    context.normalizedPrompt(),
+                    context.artifactKind(),
+                    context.expectedMethod());
+        }
+    }
+
+    private final class LexicalFallbackCandidateRetriever implements CandidateRetriever {
+
+        @Override
+        public List<AgenticAuthoringCandidate> retrieve(RetrievalContext context) {
+            return repository.findAll().stream()
+                    .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
+                    .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
+                    .filter(metadata -> context.expectedMethod() == null
+                            || context.expectedMethod().equalsIgnoreCase(metadata.getMethod()))
+                    .map(metadata -> toScoredCandidate(
+                            metadata,
+                            context.expectedMethod(),
+                            context.artifactKind(),
+                            context.tokens()))
+                    .filter(scored -> scored.score() >= 0.45d)
+                    .sorted(CandidateRankingPolicy.byScoreDescending())
+                    .limit(8)
+                    .map(ScoredCandidate::candidate)
+                    .toList();
+        }
+    }
+
+    private final class BroadArtifactCandidateRetriever implements CandidateRetriever {
+
+        @Override
+        public List<AgenticAuthoringCandidate> retrieve(RetrievalContext context) {
+            return discoverBroadCandidates(context.artifactKind(), context.expectedMethod());
+        }
+    }
+
+    private static final class CandidateRankingPolicy {
+
+        private CandidateRankingPolicy() {
+        }
+
+        static Comparator<ScoredCandidate> byScoreDescending() {
+            return Comparator.comparingDouble(ScoredCandidate::score).reversed();
         }
     }
 
@@ -387,5 +434,25 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private record ScoredCandidate(AgenticAuthoringCandidate candidate, double score) {
+    }
+
+    private record RetrievalContext(
+            String normalizedPrompt,
+            String artifactKind,
+            String expectedMethod,
+            List<String> tokens
+    ) {
+
+        private RetrievalContext(String normalizedPrompt, String artifactKind, String expectedMethod) {
+            this(normalizedPrompt, artifactKind, expectedMethod, List.of());
+        }
+
+        private RetrievalContext withTokens(List<String> tokens) {
+            return new RetrievalContext(
+                    normalizedPrompt,
+                    artifactKind,
+                    expectedMethod,
+                    tokens == null ? List.of() : List.copyOf(tokens));
+        }
     }
 }
