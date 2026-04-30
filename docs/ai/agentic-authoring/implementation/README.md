@@ -25,9 +25,9 @@ backend opera um turno agentic real:
 7. expoe progresso e resultado por stream SSE canonico.
 
 Status em 2026-04-30: a extracao do engine, o primeiro tool interno
-`searchApiResources`, a inspecao estrutural de `currentPage` e a separacao de
-retrieval/provenance ja estao implementados em `main`. A proxima fase ativa e
-o repair loop backend-owned.
+`searchApiResources`, a inspecao estrutural de `currentPage`, a separacao de
+retrieval/provenance e o repair loop backend-owned ja estao implementados em
+`main`. A proxima fase ativa e memoria persistente de projeto governada.
 
 ## Ordem de leitura
 
