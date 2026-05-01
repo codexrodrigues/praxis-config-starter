@@ -14,6 +14,7 @@ tags:
   - name: ai-stream
   - name: ai-authoring
   - name: domain-rules
+  - name: domain-knowledge
 
 paths:
   /api/praxis/config/ai/patch:
@@ -735,12 +736,212 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
 
+  /api/praxis/config/domain-knowledge/change-sets:
+    post:
+      tags: [domain-knowledge]
+      operationId: createDomainKnowledgeChangeSet
+      summary: Cria um change set governado de Domain Knowledge
+      description: Persiste uma proposta governada de conhecimento. O corte atual aceita `add_evidence` e `revert_evidence`; operacoes destrutivas `delete_*` e `replace_*` permanecem bloqueadas.
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainKnowledgeChangeSetCreateRequest'
+      responses:
+        '202':
+          description: Change set aceito e validado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainKnowledgeChangeSetResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+    get:
+      tags: [domain-knowledge]
+      operationId: listDomainKnowledgeChangeSets
+      summary: Lista change sets de Domain Knowledge por escopo
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [draft, proposed, approved, rejected, applied, superseded]
+      responses:
+        '200':
+          description: Lista de change sets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DomainKnowledgeChangeSetResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-knowledge/change-sets/{changeSetId}:
+    get:
+      tags: [domain-knowledge]
+      operationId: getDomainKnowledgeChangeSet
+      summary: Retorna um change set governado de Domain Knowledge
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Change set encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainKnowledgeChangeSetResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Change set nao encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/validate:
+    post:
+      tags: [domain-knowledge]
+      operationId: validateDomainKnowledgeChangeSet
+      summary: Revalida um change set governado de Domain Knowledge
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Resultado de validacao
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainKnowledgeChangeSetValidationResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Change set nao encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/status:
+    patch:
+      tags: [domain-knowledge]
+      operationId: transitionDomainKnowledgeChangeSetStatus
+      summary: Transiciona status de um change set governado de Domain Knowledge
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainKnowledgeChangeSetStatusRequest'
+      responses:
+        '200':
+          description: Status atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainKnowledgeChangeSetResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Change set nao encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/apply:
+    post:
+      tags: [domain-knowledge]
+      operationId: applyDomainKnowledgeChangeSet
+      summary: Aplica um change set aprovado de Domain Knowledge
+      description: Aplicacao separada da aprovacao. Exige change set aprovado, validacao vigente e escopo tenant/environment. `revert_evidence` aplica transicao de lifecycle sem deletar evidencia.
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: changeSetId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Change set aplicado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainKnowledgeChangeSetResponse'
+        '400':
+          description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Change set nao encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
   /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/timeline:
     get:
       tags: [domain-knowledge]
       operationId: getDomainKnowledgeChangeSetTimeline
       summary: Retorna timeline segura de um change set de Domain Knowledge
-      description: Projecao read-only derivada do change set, validacao, revisao e aplicacao; nao retorna patch bruto, payload de evidencia, sourcePointer, sourceUri, patchHash, prompt ou historico de chat.
+      description: Projecao read-only derivada do change set, validacao, revisao, aplicacao e lifecycle de evidencia; pode incluir `evidence.reverted` e `evidence.superseded`, mas nao retorna patch bruto, payload de evidencia, evidence keys, replacement keys, sourcePointer, sourceUri, patchHash, prompt ou historico de chat.
       parameters:
         - $ref: '#/components/parameters/TenantIdHeader'
         - $ref: '#/components/parameters/EnvHeader'
@@ -1127,7 +1328,7 @@ components:
       required: false
       schema:
         type: string
-        default: 68011e5f49ded11a590170e8440b6b1745c013be44dd101651542e87af6ebcba
+        default: 42af43aec91777def176def87d2f41d30c8dbc8abb6c21dc38b5e181a1a51f4f
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1157,7 +1358,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 68011e5f49ded11a590170e8440b6b1745c013be44dd101651542e87af6ebcba
+        example: 42af43aec91777def176def87d2f41d30c8dbc8abb6c21dc38b5e181a1a51f4f
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2671,6 +2872,192 @@ components:
         visibility:
           type: string
           enum: [safe]
+      additionalProperties: false
+
+    DomainKnowledgeChangeSetCreateRequest:
+      type: object
+      description: Proposta governada de alteracao em Domain Knowledge. O patch e semantico e allowlisted; nao e JSON Patch arbitrario.
+      properties:
+        changeSetKey:
+          type: string
+        status:
+          type: string
+          enum: [draft, proposed]
+        authorType:
+          type: string
+          nullable: true
+        authorId:
+          type: string
+          nullable: true
+        intent:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        patch:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainKnowledgeChangeSetOperationRequest'
+      required:
+        - changeSetKey
+        - patch
+      additionalProperties: false
+
+    DomainKnowledgeChangeSetOperationRequest:
+      type: object
+      description: Operacao semantica governada de Domain Knowledge. O corte atual permite apenas `add_evidence` e `revert_evidence`.
+      properties:
+        operationId:
+          type: string
+        operationType:
+          type: string
+          enum: [add_evidence, revert_evidence]
+        target:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Alvo semantico. Para `add_evidence` e `revert_evidence`, `target.conceptKey` e obrigatorio.
+        reason:
+          type: string
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+          format: double
+          nullable: true
+        payload:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Payload allowlisted. `payload.evidenceKey` e obrigatorio para `add_evidence` e `revert_evidence`; `payload.revertReason` e obrigatorio para `revert_evidence`.
+      required:
+        - operationId
+        - operationType
+        - target
+        - reason
+        - evidenceRefs
+        - payload
+      additionalProperties: false
+
+    DomainKnowledgeChangeSetStatusRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [draft, proposed, approved, rejected, superseded]
+        reviewerId:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+      required:
+        - status
+      additionalProperties: false
+
+    DomainKnowledgeChangeSetResponse:
+      type: object
+      description: Projecao segura de um change set de Domain Knowledge. Nao retorna patch bruto nem payloads de evidencia.
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        environment:
+          type: string
+        changeSetKey:
+          type: string
+        status:
+          type: string
+          enum: [draft, proposed, approved, rejected, applied, superseded]
+        authorType:
+          type: string
+          nullable: true
+        authorId:
+          type: string
+          nullable: true
+        reviewerId:
+          type: string
+          nullable: true
+        intent:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        operationCount:
+          type: integer
+        validationStatus:
+          type: string
+          enum: [valid, invalid, unknown]
+        safeOperationSummary:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainKnowledgeChangeSetOperationSummary'
+        validationResult:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Resultado seguro de validacao com status, contagens, issues e hash do patch; nao contem payload bruto de evidencia.
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        appliedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    DomainKnowledgeChangeSetOperationSummary:
+      type: object
+      properties:
+        operationId:
+          type: string
+        operationType:
+          type: string
+          enum: [add_evidence, revert_evidence]
+        targetConceptKeys:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    DomainKnowledgeChangeSetValidationResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        errorCount:
+          type: integer
+        warningCount:
+          type: integer
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainKnowledgeChangeSetValidationIssue'
+      additionalProperties: false
+
+    DomainKnowledgeChangeSetValidationIssue:
+      type: object
+      properties:
+        severity:
+          type: string
+          enum: [error, warning]
+        code:
+          type: string
+        pointer:
+          type: string
+        message:
+          type: string
       additionalProperties: false
 
     DomainKnowledgeChangeSetTimelineResponse:
