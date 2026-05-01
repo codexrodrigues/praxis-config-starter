@@ -202,6 +202,38 @@ The browser E2E requires the backend stream auth mode to be `signed-url-token`; 
 
 For shared-rule cockpit validation, include at least one prompt that names an explicit resource path, such as `/api/helpdesk/chamados`, while also mentioning unrelated domain vocabulary. The expected result is that intent resolution keeps the explicit path as the governed target instead of re-grounding the handoff to another catalog resource.
 
+## Page Builder Project Knowledge Cockpit
+
+Use the managed local runner when the goal is to validate governed Project
+Knowledge continuation without spending GitHub Actions:
+
+```bash
+cd praxis-ui-angular
+
+AI_PROVIDER=openai \
+AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
+./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh
+```
+
+This lane installs the local `praxis-config-starter`, starts quickstart and the
+Angular dev server on isolated ports, then runs only the Project Knowledge
+cockpit proof.
+
+Expected proof:
+
+- governed Project Knowledge is seeded through the quickstart operational
+  datasource;
+- `/page-builder-ia` renders the cockpit from a safe Project Knowledge audit;
+- the cockpit creates `POST /api/praxis/config/domain-knowledge/change-sets`;
+- the proposal is validated, approved, applied and read back through the real
+  backend;
+- raw payloads, concept keys, source summaries and knowledge summaries remain
+  hidden from the UI.
+
+Use `PRAXIS_E2E_ENVIRONMENT` to override the semantic environment for this
+lane. Legacy `PRAXIS_E2E_ENV` is still accepted by the Angular runner as a
+fallback.
+
 ## Cleanup
 
 Stop the backend and Angular terminals with `Ctrl-C`, or kill ports:

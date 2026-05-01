@@ -24,6 +24,37 @@ The validated path covers:
 This checkpoint does not authorize Maven Central publication, npm publication,
 vector/RAG ranking or LLM-authored memory writes.
 
+## Post-Checkpoint Update - 2026-05-01
+
+The next beta slice after this read-only checkpoint is now closed in source:
+governed Project Knowledge writes are represented as Domain Knowledge
+change-sets, not as browser memory or direct frontend persistence.
+
+Additional merged proof:
+
+- `praxis-config-starter` PR #175 validates `add_evidence` payloads before
+  persistence, including canonical `target.conceptKey`, `payload.evidenceKey`
+  and supported `evidenceType` values.
+- `praxis-ui-angular` PR #94 proves the Page Builder cockpit can create,
+  validate, approve, apply and read back a governed
+  `/api/praxis/config/domain-knowledge/change-sets` proposal through a real
+  browser/local backend path.
+
+The resulting beta contract is:
+
+- Project Knowledge influence remains a safe, backend-derived projection.
+- LLM-authored continuation must go through a governed change-set.
+- `project_preference` and similar audit entry kinds are source semantics, not
+  persisted `evidenceType` values.
+- The canonical persisted evidence type for the Page Builder continuation path
+  is `llm_proposal`, with source kind preserved separately in the payload.
+- Applying a proposal is separate from approval and remains scoped to validated
+  `add_evidence` operations in this cut.
+
+This update still does not authorize Maven Central or npm publication by
+itself. Treat it as source-level beta evidence until a named downstream
+consumer requires a published artifact.
+
 ## Version Set
 
 - `praxis-config-starter`: `main` commit
@@ -136,6 +167,9 @@ that documentation closure as a phase gate.
 Ready as an internal beta checkpoint for read-only governed Project Knowledge
 influence and safe audit/UI explanation.
 
+The post-checkpoint governed write slice is also ready as source-level beta
+evidence for the current `add_evidence` change-set path.
+
 Not ready for external artifact publication by itself.
 
 Do not create a new Maven Central version or npm package solely for this
@@ -149,8 +183,8 @@ one final gate.
 - The Project Knowledge fixture is operational evidence, not a public endpoint.
 - The current UI explanation is intentionally terse; richer audit UX should
   remain safe-by-default and governed.
-- Vector/RAG ranking and LLM-authored knowledge writes remain unimplemented by
-  design.
+- Vector/RAG ranking, rollback and broader write operation types remain
+  unimplemented by design.
 
 ## Recommended Next Step
 
@@ -160,7 +194,7 @@ The next implementation phase should be one of:
 
 1. Release-readiness closure only, if a downstream consumer needs a documented
    checkpoint without publication.
-2. Governed LLM-authored knowledge writes, only after a change-set, audit,
-   rollback and E2E plan exists.
+2. Hardening governed knowledge writes beyond the current `add_evidence`
+   slice, only after rollback and broader operation semantics are planned.
 3. Vector/RAG-derived ranking, only after a derived-index governance plan
    proves denied/out-of-scope hits cannot influence authoring.
