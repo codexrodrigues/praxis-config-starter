@@ -29,7 +29,8 @@ public class DomainKnowledgeChangeSetValidator {
             "add_alias",
             "add_binding",
             "add_relationship",
-            "add_evidence"
+            "add_evidence",
+            "revert_evidence"
     );
     private static final Set<String> DESTRUCTIVE_OPERATION_TYPES = Set.of(
             "delete_concept",
@@ -212,6 +213,16 @@ public class DomainKnowledgeChangeSetValidator {
                 error(issues, "unsupported_evidence_type", pointer + "/evidenceType",
                         "evidenceType is not supported");
             }
+        } else if ("revert_evidence".equals(operationType)) {
+            requireText(target == null ? null : target.path("conceptKey").asText(null),
+                    pointer.replace("/payload", "/target") + "/conceptKey",
+                    "target_concept_key_required",
+                    "revert_evidence operations require target.conceptKey",
+                    issues);
+            requireText(payload.path("evidenceKey").asText(null), pointer + "/evidenceKey",
+                    "evidence_key_required", "revert_evidence operations require payload.evidenceKey", issues);
+            requireText(payload.path("revertReason").asText(null), pointer + "/revertReason",
+                    "revert_reason_required", "revert_evidence operations require payload.revertReason", issues);
         }
     }
 

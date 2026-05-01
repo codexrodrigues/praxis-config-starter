@@ -165,6 +165,57 @@ class DomainKnowledgeChangeSetValidatorTest {
     }
 
     @Test
+    void acceptsGovernedRevertEvidenceOperation() {
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:employees:revert-cpf-guidance:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.4",
+                "Revert superseded CPF field guidance",
+                "The prior evidence should be reverted because a reviewed accessibility guideline superseded it.",
+                List.of(operation("op-revert-cpf-guidance", "revert_evidence", target(), revertPayload())));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isTrue();
+        assertThat(report.errorCount()).isZero();
+        assertThat(report.issues()).isEmpty();
+    }
+
+    @Test
+    void rejectsRevertEvidenceWithoutCanonicalTargetEvidenceOrReason() {
+        JsonNode targetWithoutConceptKey = objectMapper.createObjectNode()
+                .put("tenantId", TENANT)
+                .put("environment", ENVIRONMENT)
+                .put("subjectType", "concept");
+        JsonNode payloadWithoutRevertContract = objectMapper.createObjectNode()
+                .put("summary", "This is not enough to revert governed evidence.");
+
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:employees:invalid-revert:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.4",
+                "Invalid revert evidence",
+                "Revert must identify governed evidence and explain the reason.",
+                List.of(operation(
+                        "op-invalid-revert",
+                        "revert_evidence",
+                        targetWithoutConceptKey,
+                        payloadWithoutRevertContract)));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isFalse();
+        assertThat(report.issues())
+                .extracting(DomainKnowledgeChangeSetValidationIssue::code)
+                .contains(
+                        "target_concept_key_required",
+                        "evidence_key_required",
+                        "revert_reason_required");
+    }
+
+    @Test
     void rejectsDuplicateOperationIdsAndInvalidConfidence() {
         var request = new DomainKnowledgeChangeSetCreateRequest(
                 "project-knowledge:employees:duplicates:v1",
@@ -237,5 +288,13 @@ class DomainKnowledgeChangeSetValidatorTest {
                 .put("sourceUri", "praxis-agentic-authoring://turn/example")
                 .put("sourcePointer", "/projectKnowledge/0")
                 .put("summary", "CPF is personal data and guidance should explain purpose and minimization.");
+    }
+
+    private JsonNode revertPayload() {
+        return objectMapper.createObjectNode()
+                .put("evidenceKey", "llm-proposal:funcionarios:cpf-guidance:v1")
+                .put("revertReason", "The evidence was superseded by a reviewed accessibility guideline.")
+                .put("replacementEvidenceKey", "llm-proposal:funcionarios:cpf-guidance:v2")
+                .put("visibilityAfterRevert", "deny");
     }
 }

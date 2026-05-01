@@ -341,6 +341,10 @@ Lifecycle baseline iniciado em 2026-05-01: schema e entidade passam a reconhecer
 evidencia `active`, `superseded` e `reverted`, mas `revert_evidence` ainda nao
 foi promovido.
 
+Validation baseline iniciado em 2026-05-01: `revert_evidence` passa a ser uma
+operacao estruturalmente valida quando identifica conceito, evidencia, razao e
+provas, mas apply/repository checks ainda ficam no proximo slice.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**

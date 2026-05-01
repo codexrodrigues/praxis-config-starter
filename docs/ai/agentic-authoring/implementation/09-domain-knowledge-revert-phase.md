@@ -144,6 +144,29 @@ Still intentionally pending:
 - authoring retrieval changes that exclude reverted evidence by default.
 - Page Builder cockpit actions.
 
+## Slice 3 Validation Baseline - 2026-05-01
+
+The validator now recognizes `revert_evidence` as a governed lifecycle
+operation, not as a destructive delete.
+
+Validation boundary:
+
+- LLM-authored `revert_evidence` still requires `evidenceRefs`.
+- `target.conceptKey` is required.
+- `payload.evidenceKey` is required.
+- `payload.revertReason` is required.
+- raw prompt/chat/transcript payload fields remain blocked.
+- `delete_*` and `replace_*` operations remain blocked.
+
+Still intentionally pending:
+
+- repository-backed checks that the evidence exists in the same
+  tenant/environment.
+- checks that the evidence belongs to the target concept.
+- checks that the evidence is currently `active`.
+- transactional apply that marks evidence as `reverted` or `superseded`.
+- runtime/authoring retrieval filtering.
+
 ## Canonical Direction
 
 Model rollback as **revert/supersede**, not deletion.

@@ -75,6 +75,32 @@ class DomainKnowledgeChangeSetServiceTest {
     }
 
     @Test
+    void createsProposedRevertEvidenceChangeSetWithSafeSummary() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSetCreateRequest request = revertEvidenceRequest();
+        when(repository.findByTenantIdAndEnvironmentAndChangeSetKey(
+                TENANT,
+                ENVIRONMENT,
+                request.changeSetKey()))
+                .thenReturn(Optional.empty());
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> {
+            DomainKnowledgeChangeSet changeSet = invocation.getArgument(0);
+            changeSet.onInsert();
+            return changeSet;
+        });
+
+        var response = service.create(request, TENANT, ENVIRONMENT);
+
+        assertThat(response.status()).isEqualTo("proposed");
+        assertThat(response.validationStatus()).isEqualTo("valid");
+        assertThat(response.safeOperationSummary()).hasSize(1);
+        assertThat(response.safeOperationSummary().get(0).operationType()).isEqualTo("revert_evidence");
+        assertThat(response.safeOperationSummary().get(0).targetConceptKeys())
+                .containsExactly("human-resources.funcionarios.field.cpf");
+    }
+
+    @Test
     void returnsExistingChangeSetForIdempotentRetry() {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeChangeSetService service = service(repository);
@@ -480,6 +506,21 @@ class DomainKnowledgeChangeSetServiceTest {
                         payload("llm-proposal:funcionarios:cpf-guidance:v1"))));
     }
 
+    private DomainKnowledgeChangeSetCreateRequest revertEvidenceRequest() {
+        return new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:employees:revert-cpf-guidance:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.4",
+                "Revert superseded CPF field guidance",
+                "The prior evidence should be reverted because a reviewed accessibility guideline superseded it.",
+                List.of(operation(
+                        "op-revert-cpf-guidance",
+                        "revert_evidence",
+                        target(),
+                        revertPayload("llm-proposal:funcionarios:cpf-guidance:v1"))));
+    }
+
     private DomainKnowledgeChangeSetOperationRequest operation(
             String operationId,
             String operationType,
@@ -510,6 +551,14 @@ class DomainKnowledgeChangeSetServiceTest {
                 .put("sourceUri", "praxis-agentic-authoring://turn/example")
                 .put("sourcePointer", "/projectKnowledge/0")
                 .put("summary", "CPF is personal data and guidance should explain purpose and minimization.");
+    }
+
+    private JsonNode revertPayload(String evidenceKey) {
+        return objectMapper.createObjectNode()
+                .put("evidenceKey", evidenceKey)
+                .put("revertReason", "The evidence was superseded by a reviewed accessibility guideline.")
+                .put("replacementEvidenceKey", "llm-proposal:funcionarios:cpf-guidance:v2")
+                .put("visibilityAfterRevert", "deny");
     }
 
     private String write(JsonNode node) {
