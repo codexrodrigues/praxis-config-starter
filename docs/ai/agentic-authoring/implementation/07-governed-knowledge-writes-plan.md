@@ -393,7 +393,14 @@ Pause implementation if the design:
 6. Done in the first apply HTTP slice: approved, valid change sets can apply
    `add_evidence` to an existing concept in scope and are then marked
    `applied`; other operation types remain blocked.
-7. Quickstart HTTP corpus proving the lifecycle with Neon.
+7. Quickstart HTTP corpus validated locally: `praxis-api-quickstart` owns
+   `scripts/verify-domain-knowledge-change-set-runtime.sh`, and
+   `praxis-config-starter` exposes
+   `tools/local-e2e/run-domain-knowledge-change-set-local.sh` as the canonical
+   wrapper. The smoke passed against a quickstart packaged with the local
+   starter, Domain Knowledge projection enabled and the Neon-backed config DB,
+   proving `create -> validate -> approve -> apply -> readback` for safe
+   `add_evidence`.
 8. Page Builder cockpit actions for proposal, review and explicit apply.
 9. Browser E2E proving no silent mutation and post-apply influence citation.
 
