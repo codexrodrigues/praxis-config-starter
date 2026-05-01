@@ -365,6 +365,12 @@ agentic authoring agora exige evidencia `active` vinculada ao conceito antes de
 entrar em `contextHints.projectKnowledge`; conceitos com evidencia apenas
 `reverted` ou `superseded` deixam de influenciar novos turnos.
 
+Runtime retrieval proof concluido em 2026-05-01 contra quickstart empacotado
+com starter local e Neon configurado: o smoke com
+`REQUIRE_PROJECT_KNOWLEDGE_RETRIEVAL=true` confirmou retrieval
+`expected=present` apos `add_evidence` e `expected=absent` apos
+`revert_evidence`.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**
@@ -432,6 +438,11 @@ entrar em `contextHints.projectKnowledge`; conceitos com evidencia apenas
   `revert_evidence` e confirma ausencia do mesmo conhecimento no retrieval;
 - a prova usa Neon configurado e comandos locais, sem GitHub Actions;
 - docs registram o comando focal e o resultado observado.
+
+**Status**
+- Concluido em 2026-05-01 no quickstart local com
+  `REQUIRE_PROJECT_KNOWLEDGE_RETRIEVAL=true`; resultado final
+  `projectKnowledgeRetrievalChecked=true`.
 
 ## Regras operacionais para qualquer PR desta trilha
 

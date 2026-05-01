@@ -283,8 +283,42 @@ Retrieval boundary:
 
 Still intentionally pending:
 
-- quickstart HTTP proof that add -> retrieve -> revert -> retrieve removes the
-  reverted influence from `contextHints.projectKnowledge`.
+- Page Builder browser proof that reverted evidence is not offered as active
+  continuity context.
+
+## Slice 8 Runtime Retrieval Proof - 2026-05-01
+
+The quickstart now proves active-evidence retrieval by HTTP real.
+
+Command:
+
+```bash
+BACKEND_URL=http://localhost:8099 \
+TENANT_ID=desenv \
+ENVIRONMENT=local \
+REQUIRE_CHANGE_SET_TIMELINE=true \
+REQUIRE_EVIDENCE_REVERT=true \
+REQUIRE_PROJECT_KNOWLEDGE_RETRIEVAL=true \
+AUTHORING_STREAM_MAX_TIME=180 \
+scripts/verify-domain-knowledge-change-set-runtime.sh
+```
+
+Observed proof:
+
+- add change set `191e9f50-d840-4f44-ac9c-30e0a40014b4` applied active
+  evidence to Project Knowledge concept
+  `page-builder.e2e.project-knowledge.identity-card`.
+- authoring retrieval after add returned `expected=present` and
+  `retrievalCount=2`.
+- revert change set `1db47667-ce1c-462a-8e42-ce1806782038` applied
+  `revert_evidence` to the same smoke evidence.
+- authoring retrieval after revert returned `expected=absent` and
+  `retrievalCount=0`.
+- final status was `domain-knowledge-change-set-runtime-ready` with
+  `revertChecked=true` and `projectKnowledgeRetrievalChecked=true`.
+
+Still intentionally pending:
+
 - Page Builder browser proof that reverted evidence is not offered as active
   continuity context.
 
