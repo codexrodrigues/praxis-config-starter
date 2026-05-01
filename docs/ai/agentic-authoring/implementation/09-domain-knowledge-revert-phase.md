@@ -167,6 +167,32 @@ Still intentionally pending:
 - transactional apply that marks evidence as `reverted` or `superseded`.
 - runtime/authoring retrieval filtering.
 
+## Slice 4 Apply Baseline - 2026-05-01
+
+`revert_evidence` now applies as a governed lifecycle transition.
+
+Apply boundary:
+
+- target concept must exist in the change-set tenant/environment.
+- target evidence must exist in the same tenant/environment.
+- target evidence must belong to the target concept.
+- target evidence must be `active`.
+- optional `replacementEvidenceKey`, when present, must resolve to active
+  evidence for the same target concept.
+- apply marks the target evidence as `reverted`, records
+  `reverted_by_change_set_id`, `reverted_at`, `revert_reason` and optional
+  `superseded_by_evidence_id`.
+- no evidence row is physically deleted.
+
+Still intentionally pending:
+
+- safe timeline event types dedicated to `evidence.reverted` and
+  `evidence.superseded`.
+- runtime/authoring retrieval filtering that excludes reverted evidence by
+  default.
+- protected HTTP/browser proof of create -> validate -> approve -> apply ->
+  timeline for revert.
+
 ## Canonical Direction
 
 Model rollback as **revert/supersede**, not deletion.

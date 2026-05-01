@@ -362,6 +362,126 @@ class DomainKnowledgeChangeSetServiceTest {
     }
 
     @Test
+    void appliesApprovedRevertEvidenceChangeSetToActiveEvidence() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        DomainKnowledgeChangeSet existing = persisted(revertEvidenceRequest());
+        existing.setStatus("approved");
+        DomainKnowledgeConcept concept = concept();
+        DomainKnowledgeEvidence evidence = evidence(
+                concept,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "active");
+        DomainKnowledgeEvidence replacement = evidence(
+                concept,
+                "llm-proposal:funcionarios:cpf-guidance:v2",
+                "active");
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT,
+                ENVIRONMENT,
+                "human-resources.funcionarios.field.cpf"))
+                .thenReturn(Optional.of(concept));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+                TENANT,
+                ENVIRONMENT,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "active"))
+                .thenReturn(List.of(evidence));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+                TENANT,
+                ENVIRONMENT,
+                "llm-proposal:funcionarios:cpf-guidance:v2",
+                "active"))
+                .thenReturn(List.of(replacement));
+
+        var response = service.apply(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(response.status()).isEqualTo("applied");
+        ArgumentCaptor<DomainKnowledgeEvidence> evidenceCaptor =
+                ArgumentCaptor.forClass(DomainKnowledgeEvidence.class);
+        verify(evidenceRepository).save(evidenceCaptor.capture());
+        assertThat(evidenceCaptor.getValue().getStatus()).isEqualTo("reverted");
+        assertThat(evidenceCaptor.getValue().getRevertedByChangeSetId()).isEqualTo(existing.getId());
+        assertThat(evidenceCaptor.getValue().getRevertedAt()).isNotNull();
+        assertThat(evidenceCaptor.getValue().getRevertReason())
+                .contains("superseded by a reviewed accessibility guideline");
+        assertThat(evidenceCaptor.getValue().getSupersededByEvidenceId()).isEqualTo(replacement.getId());
+    }
+
+    @Test
+    void rejectsRevertEvidenceWhenEvidenceIsNotActive() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        DomainKnowledgeChangeSet existing = persisted(revertEvidenceRequest());
+        existing.setStatus("approved");
+        DomainKnowledgeConcept concept = concept();
+        DomainKnowledgeEvidence reverted = evidence(
+                concept,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "reverted");
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT,
+                ENVIRONMENT,
+                "human-resources.funcionarios.field.cpf"))
+                .thenReturn(Optional.of(concept));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+                TENANT,
+                ENVIRONMENT,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "active"))
+                .thenReturn(List.of());
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(
+                TENANT,
+                ENVIRONMENT,
+                "llm-proposal:funcionarios:cpf-guidance:v1"))
+                .thenReturn(List.of(reverted));
+
+        assertThatThrownBy(() -> service.apply(existing.getId(), TENANT, ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Evidence is not active");
+    }
+
+    @Test
+    void rejectsRevertEvidenceWhenEvidenceBelongsToAnotherConcept() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        DomainKnowledgeChangeSet existing = persisted(revertEvidenceRequest());
+        existing.setStatus("approved");
+        DomainKnowledgeConcept concept = concept();
+        DomainKnowledgeConcept otherConcept = concept();
+        otherConcept.setId(UUID.randomUUID());
+        DomainKnowledgeEvidence evidence = evidence(
+                otherConcept,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "active");
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT,
+                ENVIRONMENT,
+                "human-resources.funcionarios.field.cpf"))
+                .thenReturn(Optional.of(concept));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+                TENANT,
+                ENVIRONMENT,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "active"))
+                .thenReturn(List.of(evidence));
+
+        assertThatThrownBy(() -> service.apply(existing.getId(), TENANT, ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Evidence does not belong to target concept");
+    }
+
+    @Test
     void rejectsApplyBeforeApproval() {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeChangeSetService service = service(repository);
@@ -489,6 +609,25 @@ class DomainKnowledgeChangeSetServiceTest {
                 .build();
         concept.onInsert();
         return concept;
+    }
+
+    private DomainKnowledgeEvidence evidence(
+            DomainKnowledgeConcept concept,
+            String evidenceKey,
+            String status) {
+        DomainKnowledgeEvidence evidence = DomainKnowledgeEvidence.builder()
+                .id(UUID.randomUUID())
+                .tenantId(TENANT)
+                .environment(ENVIRONMENT)
+                .evidenceKey(evidenceKey)
+                .subjectType("concept")
+                .subjectId(concept.getId())
+                .evidenceType("llm_proposal")
+                .status(status)
+                .payload("{}")
+                .build();
+        evidence.onInsert();
+        return evidence;
     }
 
     private DomainKnowledgeChangeSetCreateRequest validRequest() {

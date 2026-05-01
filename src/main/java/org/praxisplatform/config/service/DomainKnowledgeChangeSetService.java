@@ -363,11 +363,16 @@ public class DomainKnowledgeChangeSetService {
             DomainKnowledgeChangeSet changeSet,
             DomainKnowledgeChangeSetOperationRequest operation) {
         String operationType = normalize(operation.operationType());
-        if (!"add_evidence".equals(operationType)) {
-            throw new ConfigurationIngestionException(
-                    "Only add_evidence operations can be applied in this cut: " + operationType);
+        if ("add_evidence".equals(operationType)) {
+            applyEvidenceOperation(changeSet, operation);
+            return;
         }
-        applyEvidenceOperation(changeSet, operation);
+        if ("revert_evidence".equals(operationType)) {
+            applyRevertEvidenceOperation(changeSet, operation);
+            return;
+        }
+        throw new ConfigurationIngestionException(
+                "Only add_evidence and revert_evidence operations can be applied in this cut: " + operationType);
     }
 
     private void applyEvidenceOperation(
@@ -404,6 +409,38 @@ public class DomainKnowledgeChangeSetService {
         evidenceRepository.save(evidence);
     }
 
+    private void applyRevertEvidenceOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        JsonNode target = operation.target();
+        JsonNode payload = operation.payload();
+        String conceptKey = target == null ? null : target.path("conceptKey").asText(null);
+        String evidenceKey = payload == null ? null : payload.path("evidenceKey").asText(null);
+        String replacementEvidenceKey = payload == null ? null : payload.path("replacementEvidenceKey").asText(null);
+        DomainKnowledgeConcept concept = conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                        changeSet.getTenantId(),
+                        changeSet.getEnvironment(),
+                        requireText(conceptKey, "target.conceptKey"))
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Target concept not found for evidence revert operation: " + conceptKey));
+        DomainKnowledgeEvidence evidence = activeEvidenceForRevert(
+                changeSet,
+                concept,
+                requireText(evidenceKey, "payload.evidenceKey"));
+        if (StringUtils.hasText(replacementEvidenceKey)) {
+            DomainKnowledgeEvidence replacement = activeReplacementEvidence(
+                    changeSet,
+                    concept,
+                    replacementEvidenceKey.trim());
+            evidence.setSupersededByEvidenceId(replacement.getId());
+        }
+        evidence.setStatus("reverted");
+        evidence.setRevertedByChangeSetId(changeSet.getId());
+        evidence.setRevertedAt(Instant.now());
+        evidence.setRevertReason(requireText(text(payload, "revertReason"), "payload.revertReason"));
+        evidenceRepository.save(evidence);
+    }
+
     private DomainKnowledgeEvidence reusableEvidenceOrNew(
             DomainKnowledgeChangeSet changeSet,
             DomainKnowledgeConcept concept,
@@ -423,6 +460,66 @@ public class DomainKnowledgeChangeSetService {
                     "Evidence key already exists for a different subject: " + evidenceKey);
         }
         return evidence;
+    }
+
+    private DomainKnowledgeEvidence activeEvidenceForRevert(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeConcept concept,
+            String evidenceKey) {
+        List<DomainKnowledgeEvidence> activeEvidence =
+                evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+                        changeSet.getTenantId(),
+                        changeSet.getEnvironment(),
+                        evidenceKey.trim(),
+                        "active");
+        if (!activeEvidence.isEmpty()) {
+            DomainKnowledgeEvidence evidence = activeEvidence.get(0);
+            requireEvidenceSubject(evidence, concept, evidenceKey);
+            return evidence;
+        }
+        List<DomainKnowledgeEvidence> existingEvidence =
+                evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(
+                        changeSet.getTenantId(),
+                        changeSet.getEnvironment(),
+                        evidenceKey.trim());
+        if (existingEvidence.isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "Active evidence not found for revert operation: " + evidenceKey);
+        }
+        DomainKnowledgeEvidence evidence = existingEvidence.get(0);
+        requireEvidenceSubject(evidence, concept, evidenceKey);
+        throw new ConfigurationIngestionException(
+                "Evidence is not active and cannot be reverted: " + evidenceKey);
+    }
+
+    private DomainKnowledgeEvidence activeReplacementEvidence(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeConcept concept,
+            String evidenceKey) {
+        List<DomainKnowledgeEvidence> activeEvidence =
+                evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+                        changeSet.getTenantId(),
+                        changeSet.getEnvironment(),
+                        evidenceKey,
+                        "active");
+        if (activeEvidence.isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "Active replacement evidence not found for revert operation: " + evidenceKey);
+        }
+        DomainKnowledgeEvidence evidence = activeEvidence.get(0);
+        requireEvidenceSubject(evidence, concept, evidenceKey);
+        return evidence;
+    }
+
+    private void requireEvidenceSubject(
+            DomainKnowledgeEvidence evidence,
+            DomainKnowledgeConcept concept,
+            String evidenceKey) {
+        if (!"concept".equals(evidence.getSubjectType())
+                || !java.util.Objects.equals(concept.getId(), evidence.getSubjectId())) {
+            throw new ConfigurationIngestionException(
+                    "Evidence does not belong to target concept: " + evidenceKey);
+        }
     }
 
     private DomainKnowledgeChangeSet findInScope(

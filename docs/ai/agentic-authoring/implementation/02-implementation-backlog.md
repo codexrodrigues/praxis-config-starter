@@ -345,6 +345,9 @@ Validation baseline iniciado em 2026-05-01: `revert_evidence` passa a ser uma
 operacao estruturalmente valida quando identifica conceito, evidencia, razao e
 provas, mas apply/repository checks ainda ficam no proximo slice.
 
+Apply baseline iniciado em 2026-05-01: `revert_evidence` agora exige evidencia
+ativa no mesmo conceito e aplica lifecycle `reverted` sem delete fisico.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**
