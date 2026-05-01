@@ -233,7 +233,8 @@ Status: implementada ate o primeiro corte publicado em `rc.37`.
 Plano detalhado: [08-page-builder-continuity-phase.md](./08-page-builder-continuity-phase.md)
 
 Status: implementada localmente em `praxis-ui-angular/main`; handoff
-documental e decisao de release gate em andamento.
+documental concluido; aguardando consumidor nomeado ou release gate para novo
+corte.
 
 ### Item 19. Inventariar contratos e modelos atuais do cockpit
 
@@ -318,7 +319,12 @@ documental e decisao de release gate em andamento.
   release ou smoke publicado.
 
 **Status**
-- Em andamento.
+- Concluido em 2026-05-01. Runbooks, handoff e guia do quickstart registram o
+  comando local, o resultado da lane verde, a fronteira do renderer
+  rich-content e a politica local-first.
+- Decisao atual: nao publicar Maven/npm e nao acionar GitHub Actions apenas por
+  esta fase. O proximo gate remoto deve acontecer somente quando houver
+  consumidor nomeado, release planejada ou smoke publicado a validar.
 
 ## Regras operacionais para qualquer PR desta trilha
 

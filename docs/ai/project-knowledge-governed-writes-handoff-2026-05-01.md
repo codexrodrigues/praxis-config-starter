@@ -95,11 +95,17 @@ canonical while rendering a light internal cockpit view. A future renderer
 unification should first review the public-lib boundary or route the renderer
 through an existing neutral runtime composition surface.
 
-## Remaining Work Before RC Cut
+## Release Gate Decision
 
-- Decide whether this Page Builder continuity checkpoint needs a named RC cut
-  now or can wait for the next downstream consumer.
-- If opening PRs or a release gate, include the local validation evidence above
-  in each PR/release body.
-- Before publication/release, run one phase gate that covers the current canonical flow end-to-end instead of rerunning remote Actions for every small adjustment.
-- Keep broader future work explicitly separate: rollback UX, vector/RAG evidence retrieval, richer materialization diagnostics and runtime enforcement validation beyond the current Project Knowledge proof.
+Decision on 2026-05-01: wait for the next named downstream consumer, planned
+release candidate or hosted smoke target before publishing Maven/npm or spending
+GitHub Actions on this checkpoint.
+
+If opening a later PR, release gate or smoke:
+
+- include the local validation evidence above in the PR/release body;
+- run one phase gate that covers the current canonical flow end-to-end instead
+  of rerunning remote Actions for every small adjustment;
+- keep broader future work explicitly separate: rollback UX, vector/RAG
+  evidence retrieval, richer materialization diagnostics and runtime
+  enforcement validation beyond the current Project Knowledge proof.

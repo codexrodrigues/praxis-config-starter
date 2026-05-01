@@ -1,6 +1,6 @@
 # Page Builder Governed Continuity Phase
 
-Status: local browser proof completed; docs handoff in progress
+Status: local browser proof and docs handoff completed; release gate deferred
 Date: 2026-05-01
 Scope: post-rc.37 functional phase
 
@@ -268,12 +268,20 @@ If a future phase needs the full renderer in cockpit surfaces, first review the
 public-lib dependency boundary and decide whether the renderer should be hosted
 by a neutral shell or exposed through an existing runtime composition path.
 
-### Remaining Work
+### Release Gate Policy
 
-Slice 5 is now limited to documentation handoff and release-gate decision:
+Slice 5 is complete for local-first implementation. The current release
+decision is to defer publication until a named consumer or planned release
+needs the cut.
 
-- update local proof runbooks with the exact result above;
+Do now:
+
 - keep protected config actions out of unauthenticated LLM surfaces;
-- do not publish Maven/npm unless a named downstream consumer needs the cut;
-- use GitHub Actions only as a phase/release gate, not for exploratory
-  iterations already covered locally.
+- keep local validation evidence in PR/release notes if a gate is opened later;
+- keep GitHub Actions reserved for phase/release gates or published-host smoke.
+
+Do not do now:
+
+- do not publish Maven/npm just to record this cockpit checkpoint;
+- do not open another small PR or rerun Actions unless there is a concrete
+  downstream consumer, release candidate or hosted smoke target.
