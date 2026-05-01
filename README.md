@@ -198,7 +198,7 @@ Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG 
 | GET | `/api/praxis/config/domain-knowledge/change-sets/{changeSetId}` | Reads a governed Domain Knowledge change-set proposal in scope without exposing raw patch payloads in the common response. |
 | POST | `/api/praxis/config/domain-knowledge/change-sets/{changeSetId}/validate` | Revalidates a persisted change-set proposal deterministically and updates its safe validation result. |
 | PATCH | `/api/praxis/config/domain-knowledge/change-sets/{changeSetId}/status` | Transitions a governed change-set review status with reviewer metadata; application remains a separate governed step. |
-| POST | `/api/praxis/config/domain-knowledge/change-sets/{changeSetId}/apply` | Applies an approved, valid change set through the governed application boundary; this cut supports safe `add_evidence` projection. |
+| POST | `/api/praxis/config/domain-knowledge/change-sets/{changeSetId}/apply` | Applies an approved, valid change set through the governed application boundary; supports safe `add_evidence` projection and governed `revert_evidence` lifecycle reversal without physical delete. |
 | POST | `/api/praxis/config/domain-rules/intake` | Starts a governed semantic decision/rule draft from natural-language intent and canonical resource grounding. |
 | POST | `/api/praxis/config/domain-rules/definitions` | Persists an explicit shared domain rule definition with governance, source release/change-set links and semantic ownership. |
 | GET | `/api/praxis/config/domain-rules/definitions` | Lists shared domain rule definitions by tenant/environment, resource, status, rule type or rule key. |

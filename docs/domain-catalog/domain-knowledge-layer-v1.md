@@ -401,6 +401,7 @@ Recommended first endpoints:
 - `GET /api/praxis/config/domain-knowledge/change-sets/{id}`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`
 - `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`
+- `GET /api/praxis/config/domain-knowledge/change-sets/{id}/timeline`
 - `POST /api/praxis/config/domain-rules/intake`
 - `POST /api/praxis/config/domain-rules/definitions`
 - `GET /api/praxis/config/domain-rules/definitions`
@@ -437,6 +438,16 @@ safe lifecycle metadata such as event type, timestamp, actor, status, target
 coordinates, `materializationKey` and `sourceHash`. It must not expose raw
 prompts, assistant drafts, authored conditions, parameters or materialized
 payload bodies.
+
+Domain Knowledge change sets support additive evidence and governed evidence
+reversal. `add_evidence` persists governed evidence against an existing concept
+after validation, approval and apply. `revert_evidence` does not delete
+evidence; it requires the target evidence to be `active`, in the same
+tenant/environment and attached to the target concept, then marks it
+`reverted` with revert metadata. The change-set timeline may expose safe
+`evidence.reverted` and `evidence.superseded` events, but must not expose raw
+evidence payloads, evidence keys, replacement keys, source pointers, source
+URIs, patch hashes, prompts or chat history.
 
 Status transition endpoints accept a compact governance decision payload:
 

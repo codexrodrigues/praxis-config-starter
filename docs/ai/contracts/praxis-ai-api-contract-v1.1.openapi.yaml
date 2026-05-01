@@ -2715,6 +2715,8 @@ components:
             - review.approved
             - review.rejected
             - change_set.applied
+            - evidence.reverted
+            - evidence.superseded
         occurredAt:
           type: string
           format: date-time
