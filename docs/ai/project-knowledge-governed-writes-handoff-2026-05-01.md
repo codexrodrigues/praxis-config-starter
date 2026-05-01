@@ -30,19 +30,23 @@ The goal is to keep the batch ready for review/merge while avoiding unnecessary 
 
 ### praxis-ui-angular
 
-- Branch: `test/page-builder-e2e-origin-env-runner`
-- Commits:
-  - `b808fe3d Clarify page builder E2E env file help`
-  - `18598b70 Honor semantic environment in page builder E2E runner`
-  - `5d07cf8c Align page builder local E2E environment`
-- Scope: local E2E runner and documentation for the Project Knowledge cockpit proof.
-- Canonical meaning: the official local browser proof now uses the same semantic environment/origin as the controlled UI/API flow and executes create, validate, approve, apply and readback for a governed change-set.
+- Branch: `main`
+- Latest continuity commit: `60a56062 Prove Project Knowledge timeline in Page Builder E2E [skip ci]`
+- Scope: local E2E runner, governed cockpit continuation UX and safe timeline
+  proof for the Project Knowledge cockpit.
+- Canonical meaning: the official local browser proof now uses the same
+  semantic environment/origin as the controlled UI/API flow and executes create,
+  validate, approve, apply, readback and safe timeline rendering for a governed
+  change-set.
 - Local validation:
   - `node --check scripts/run-page-builder-agentic-authoring-e2e.js`
   - `node scripts/run-page-builder-agentic-authoring-e2e.js --help`
   - `git diff --check`
+  - `npx tsc --noEmit --project tsconfig.json --pretty false`
+  - `npx ng test praxis-core --watch=false --include='projects/praxis-core/src/lib/models/domain-knowledge-timeline.rich-content.spec.ts'`
   - `AI_PROVIDER=openai AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh PRAXIS_E2E_TIMEOUT_MS=900000 ./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh`
-  - Result: Project Knowledge cockpit E2E passed locally, with services cleaned up by the runner.
+  - Result: Project Knowledge cockpit E2E passed locally (`1 passed (10.2s)`
+    after services became ready), with services cleaned up by the runner.
 
 ## Recommended Merge Order
 
@@ -74,11 +78,28 @@ The milestone proven locally is:
 2. The backend validates the `add_evidence` payload.
 3. The cockpit approves/applies the change-set.
 4. The cockpit reads back the materialized project knowledge state.
+5. The cockpit renders safe timeline body evidence without exposing concept
+   keys, source summaries, source pointers, patch hashes, assistant messages,
+   materialized payloads or raw knowledge summaries.
+
+## Renderer Boundary Decision
+
+The Page Builder cockpit consumes the canonical
+`domainKnowledgeTimelineToRichContentDocument` projection from `@praxisui/core`,
+but it does not import the full `<praxis-rich-content>` renderer directly.
+
+This is intentional. Adding `@praxisui/rich-content` as a new public dependency
+of `@praxisui/page-builder` only for cockpit markup would create an unnecessary
+cross-lib edge. The current implementation keeps the semantic projection
+canonical while rendering a light internal cockpit view. A future renderer
+unification should first review the public-lib boundary or route the renderer
+through an existing neutral runtime composition surface.
 
 ## Remaining Work Before RC Cut
 
-- Decide when to spend the PR/CI budget for the three branches.
-- If opening PRs, include the local validation evidence above in each PR body.
+- Decide whether this Page Builder continuity checkpoint needs a named RC cut
+  now or can wait for the next downstream consumer.
+- If opening PRs or a release gate, include the local validation evidence above
+  in each PR/release body.
 - Before publication/release, run one phase gate that covers the current canonical flow end-to-end instead of rerunning remote Actions for every small adjustment.
 - Keep broader future work explicitly separate: rollback UX, vector/RAG evidence retrieval, richer materialization diagnostics and runtime enforcement validation beyond the current Project Knowledge proof.
-

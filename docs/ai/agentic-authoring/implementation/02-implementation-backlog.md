@@ -232,7 +232,8 @@ Status: implementada ate o primeiro corte publicado em `rc.37`.
 
 Plano detalhado: [08-page-builder-continuity-phase.md](./08-page-builder-continuity-phase.md)
 
-Status: proxima fase recomendada.
+Status: implementada localmente em `praxis-ui-angular/main`; handoff
+documental e decisao de release gate em andamento.
 
 ### Item 19. Inventariar contratos e modelos atuais do cockpit
 
@@ -245,6 +246,9 @@ Status: proxima fase recomendada.
 - o plano cita arquivos Angular e comandos locais exatos;
 - lacunas de client method sao documentadas antes de alterar UX.
 
+**Status**
+- Concluido no inventario local do Page Builder.
+
 ### Item 20. Consolidar modelo de acoes governadas
 
 **Objetivo**
@@ -256,6 +260,9 @@ Status: proxima fase recomendada.
 - acoes bloqueadas explicam o motivo;
 - nenhum payload bruto de regra, evidencia, patch ou prompt entra no modelo
   comum do cockpit.
+
+**Status**
+- Concluido no modelo local de acoes governadas do `@praxisui/page-builder`.
 
 ### Item 21. Unificar UX de continuidade para Domain Rules e Project Knowledge
 
@@ -270,6 +277,11 @@ Status: proxima fase recomendada.
 - Page Builder preview/apply nao e usado como materializacao de decisao
   compartilhada.
 
+**Status**
+- Concluido para a primeira trilha de continuidade: Shared Rules e Project
+  Knowledge usam acoes governadas e Project Knowledge renderiza timeline segura
+  derivada da projeção canonica em `@praxisui/core`.
+
 ### Item 22. Provar no navegador local
 
 **Objetivo**
@@ -281,6 +293,32 @@ Status: proxima fase recomendada.
 - post-apply Project Knowledge pode ser citado de forma segura em turno
   posterior;
 - servicos locais sao limpos pelo runner.
+
+**Status**
+- Concluido para a lane Project Knowledge cockpit em 2026-05-01:
+  `AI_PROVIDER=openai AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh PRAXIS_E2E_TIMEOUT_MS=900000 ./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh`
+  passou localmente em `praxis-ui-angular` (`1 passed (10.2s)` apos os servicos
+  ficarem prontos).
+- A prova inclui create, validate, approve, apply, readback e timeline segura
+  sem expor `conceptKey`, `sourceSummary`, `sourcePointer`, `patchHash`,
+  `assistantMessage`, `materializedPayload` ou resumo bruto de conhecimento.
+
+### Item 23. Handoff documental e decisao de release gate
+
+**Objetivo**
+- registrar o estado real da fase, os comandos locais e a politica de nao
+  publicar enquanto nenhum consumidor nomeado exigir o corte.
+
+**Definition of Done**
+- runbooks locais citam o comando e o resultado da lane verde;
+- docs explicam que a projeção de timeline e canonica em `@praxisui/core`;
+- docs registram que `@praxisui/page-builder` nao deve criar dependencia
+  publica nova em `@praxisui/rich-content` apenas para renderizar cockpit;
+- proximo uso de GitHub Actions fica reservado para fechamento de fase,
+  release ou smoke publicado.
+
+**Status**
+- Em andamento.
 
 ## Regras operacionais para qualquer PR desta trilha
 

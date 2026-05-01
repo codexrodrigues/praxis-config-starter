@@ -227,8 +227,19 @@ Expected proof:
 - the cockpit creates `POST /api/praxis/config/domain-knowledge/change-sets`;
 - the proposal is validated, approved, applied and read back through the real
   backend;
-- raw payloads, concept keys, source summaries and knowledge summaries remain
+- the cockpit renders safe timeline body items derived from the canonical
+  `RichContentDocument` projection;
+- raw payloads, concept keys, source summaries, source pointers, patch hashes,
+  assistant messages, materialized payloads and knowledge summaries remain
   hidden from the UI.
+
+Latest local checkpoint:
+
+- Date: 2026-05-01
+- Repo: `praxis-ui-angular`
+- Commit: `60a56062 Prove Project Knowledge timeline in Page Builder E2E [skip ci]`
+- Result: `1 passed (10.2s)` after quickstart and Angular became ready.
+- Actions budget: no GitHub Actions were required for this proof.
 
 Use `PRAXIS_E2E_ENVIRONMENT` to override the semantic environment for this
 lane. Legacy `PRAXIS_E2E_ENV` is still accepted by the Angular runner as a

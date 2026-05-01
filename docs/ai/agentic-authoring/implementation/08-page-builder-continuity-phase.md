@@ -1,6 +1,6 @@
 # Page Builder Governed Continuity Phase
 
-Status: ready for implementation planning
+Status: local browser proof completed; docs handoff in progress
 Date: 2026-05-01
 Scope: post-rc.37 functional phase
 
@@ -217,3 +217,63 @@ Start with Slice 1 plus the smallest Slice 2 foundation in `praxis-ui-angular`:
 
 This first PR should not publish packages and should not require GitHub Actions
 for exploratory feedback.
+
+## Local Completion Update - 2026-05-01
+
+The local-first Page Builder continuity batch has now completed the core
+implementation slices in `praxis-ui-angular/main`:
+
+- Slice 1 inventoried the existing canonical Domain Rules and Domain Knowledge
+  service boundaries.
+- Slice 2 introduced the UI-local governed continuation action model without
+  making Page Builder a business-rule source.
+- Slice 3 connected the cockpit UX for shared-rule and Project Knowledge
+  continuation actions.
+- Slice 4 passed the managed local Project Knowledge browser lane:
+
+```bash
+cd praxis-ui-angular
+
+AI_PROVIDER=openai \
+AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
+PRAXIS_E2E_TIMEOUT_MS=900000 \
+./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh
+```
+
+Observed result after the safe timeline/body assertion update:
+
+- `1 passed (10.2s)` for the focused Project Knowledge cockpit proof;
+- the runner installed local `praxis-config-starter`, started quickstart and
+  Angular on isolated ports, then cleaned up services;
+- the cockpit created, validated, approved, applied and read back a real Domain
+  Knowledge change-set;
+- the rendered safe timeline body did not expose `conceptKey`,
+  `sourceSummary`, `sourcePointer`, `patchHash`, `assistantMessage`,
+  `materializedPayload` or raw knowledge summary text.
+
+### Rich Content Renderer Decision
+
+The cockpit now uses the canonical
+`domainKnowledgeTimelineToRichContentDocument` projection from `@praxisui/core`,
+but it intentionally does not import `<praxis-rich-content>` directly.
+
+Reason: adding the full renderer inside `@praxisui/page-builder` would create a
+new public package dependency on `@praxisui/rich-content` only to reuse markup in
+an internal cockpit rail. That is not the correct platform tradeoff for this
+slice. The canonical contract remains the `RichContentDocument` projection in
+`@praxisui/core`; Page Builder renders a light cockpit view from that projection
+without redefining timeline semantics.
+
+If a future phase needs the full renderer in cockpit surfaces, first review the
+public-lib dependency boundary and decide whether the renderer should be hosted
+by a neutral shell or exposed through an existing runtime composition path.
+
+### Remaining Work
+
+Slice 5 is now limited to documentation handoff and release-gate decision:
+
+- update local proof runbooks with the exact result above;
+- keep protected config actions out of unauthenticated LLM surfaces;
+- do not publish Maven/npm unless a named downstream consumer needs the cut;
+- use GitHub Actions only as a phase/release gate, not for exploratory
+  iterations already covered locally.
