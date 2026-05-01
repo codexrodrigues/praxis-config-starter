@@ -1,6 +1,6 @@
 # Domain Knowledge Supersede Evidence Plan
 
-Status: Slice 2 source-level hardening implemented
+Status: Slice 2 source-level hardening and quickstart runtime proof complete
 Date: 2026-05-01
 Scope: next functional slice after governed Domain Knowledge revert readiness
 
@@ -90,6 +90,17 @@ Slice 2 implementation result:
   `evidence.superseded` for replacement-backed supersession;
 - no OpenAPI, generated binding, Angular, quickstart or HTTP corpus changes
   were made in this source-level hardening patch.
+
+Quickstart runtime proof:
+
+- completed on 2026-05-01 against a quickstart packaged with the local starter
+  artifact and Neon-backed persistence;
+- `REQUIRE_EVIDENCE_SUPERSESSION=true` created active replacement evidence in
+  the add change set, applied `revert_evidence` with
+  `replacementEvidenceKey`, required safe `evidence.superseded`, and rejected a
+  duplicate `evidence.reverted` event for that replacement-backed revert;
+- the same runtime session also reran plain `REQUIRE_EVIDENCE_REVERT=true`,
+  proving the existing `evidence.reverted` path still works.
 
 ## Why This Is The Next Slice
 
@@ -378,8 +389,6 @@ Pause and redesign if a proposed implementation:
 
 ## Recommended Next Action
 
-Slice 2 is complete. The next recommended action is a local quickstart runtime
-proof for supersession status only if a downstream consumer needs evidence that
-replacement-backed revert persists as `superseded` through the reference host.
-Otherwise, move the next functional investment to vector/RAG active-evidence
-filtering.
+Slice 2 and its quickstart runtime proof are complete. The next recommended
+functional investment is vector/RAG active-evidence filtering, unless a named
+consumer asks to promote `supersede_evidence` as a separate public operation.

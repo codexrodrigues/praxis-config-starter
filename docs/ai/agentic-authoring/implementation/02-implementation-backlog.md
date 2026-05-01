@@ -507,6 +507,11 @@ Plano detalhado:
   `replacementEvidenceKey` agora persiste a evidencia anterior como
   `superseded`; revert simples continua `reverted`; nenhum contrato publico foi
   alterado.
+- Prova runtime concluida em 2026-05-01 no quickstart local empacotado com o
+  starter local e Neon configurado: `REQUIRE_EVIDENCE_SUPERSESSION=true`
+  confirmou timeline segura `evidence.superseded` sem `evidence.reverted`
+  duplicado, e `REQUIRE_EVIDENCE_REVERT=true` confirmou que revert puro segue
+  emitindo `evidence.reverted`.
 
 ## Regras operacionais para qualquer PR desta trilha
 
