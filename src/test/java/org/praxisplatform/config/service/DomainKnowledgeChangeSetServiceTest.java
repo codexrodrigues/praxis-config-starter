@@ -404,12 +404,53 @@ class DomainKnowledgeChangeSetServiceTest {
         ArgumentCaptor<DomainKnowledgeEvidence> evidenceCaptor =
                 ArgumentCaptor.forClass(DomainKnowledgeEvidence.class);
         verify(evidenceRepository).save(evidenceCaptor.capture());
-        assertThat(evidenceCaptor.getValue().getStatus()).isEqualTo("reverted");
+        assertThat(evidenceCaptor.getValue().getStatus()).isEqualTo("superseded");
         assertThat(evidenceCaptor.getValue().getRevertedByChangeSetId()).isEqualTo(existing.getId());
         assertThat(evidenceCaptor.getValue().getRevertedAt()).isNotNull();
         assertThat(evidenceCaptor.getValue().getRevertReason())
                 .contains("superseded by a reviewed accessibility guideline");
         assertThat(evidenceCaptor.getValue().getSupersededByEvidenceId()).isEqualTo(replacement.getId());
+    }
+
+    @Test
+    void appliesApprovedRevertEvidenceWithoutReplacementAsRevertedEvidence() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        DomainKnowledgeChangeSet existing = persisted(revertEvidenceWithoutReplacementRequest());
+        existing.setStatus("approved");
+        DomainKnowledgeConcept concept = concept();
+        DomainKnowledgeEvidence evidence = evidence(
+                concept,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "active");
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT,
+                ENVIRONMENT,
+                "human-resources.funcionarios.field.cpf"))
+                .thenReturn(Optional.of(concept));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+                TENANT,
+                ENVIRONMENT,
+                "llm-proposal:funcionarios:cpf-guidance:v1",
+                "active"))
+                .thenReturn(List.of(evidence));
+
+        var response = service.apply(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(response.status()).isEqualTo("applied");
+        ArgumentCaptor<DomainKnowledgeEvidence> evidenceCaptor =
+                ArgumentCaptor.forClass(DomainKnowledgeEvidence.class);
+        verify(evidenceRepository).save(evidenceCaptor.capture());
+        assertThat(evidenceCaptor.getValue().getStatus()).isEqualTo("reverted");
+        assertThat(evidenceCaptor.getValue().getRevertedByChangeSetId()).isEqualTo(existing.getId());
+        assertThat(evidenceCaptor.getValue().getRevertedAt()).isNotNull();
+        assertThat(evidenceCaptor.getValue().getRevertReason())
+                .contains("withdrawn from future authoring influence");
+        assertThat(evidenceCaptor.getValue().getSupersededByEvidenceId()).isNull();
     }
 
     @Test
@@ -569,7 +610,6 @@ class DomainKnowledgeChangeSetServiceTest {
                         "validation.completed",
                         "review.approved",
                         "change_set.applied",
-                        "evidence.reverted",
                         "evidence.superseded");
         assertThat(timeline.events()).allSatisfy(event -> {
             assertThat(event.visibility()).isEqualTo("safe");
@@ -577,8 +617,8 @@ class DomainKnowledgeChangeSetServiceTest {
             assertThat(event.targetConceptKeys()).containsExactly("human-resources.funcionarios.field.cpf");
         });
         assertThat(timeline.events()).anySatisfy(event -> {
-            assertThat(event.eventType()).isEqualTo("evidence.reverted");
-            assertThat(event.summary()).isEqualTo("Domain Knowledge evidence reverted");
+            assertThat(event.eventType()).isEqualTo("evidence.superseded");
+            assertThat(event.summary()).isEqualTo("Domain Knowledge evidence superseded by governed replacement evidence");
         });
         String safeSurface = timeline.events().toString();
         assertThat(safeSurface).doesNotContain("llm-proposal:funcionarios:cpf-guidance:v1");
@@ -698,6 +738,21 @@ class DomainKnowledgeChangeSetServiceTest {
                         revertPayload("llm-proposal:funcionarios:cpf-guidance:v1"))));
     }
 
+    private DomainKnowledgeChangeSetCreateRequest revertEvidenceWithoutReplacementRequest() {
+        return new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:employees:revert-cpf-guidance-withdraw:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.4",
+                "Revert obsolete CPF field guidance",
+                "The prior evidence should be withdrawn without a replacement.",
+                List.of(operation(
+                        "op-revert-cpf-guidance-withdraw",
+                        "revert_evidence",
+                        target(),
+                        revertPayloadWithoutReplacement("llm-proposal:funcionarios:cpf-guidance:v1"))));
+    }
+
     private DomainKnowledgeChangeSetOperationRequest operation(
             String operationId,
             String operationType,
@@ -735,6 +790,13 @@ class DomainKnowledgeChangeSetServiceTest {
                 .put("evidenceKey", evidenceKey)
                 .put("revertReason", "The evidence was superseded by a reviewed accessibility guideline.")
                 .put("replacementEvidenceKey", "llm-proposal:funcionarios:cpf-guidance:v2")
+                .put("visibilityAfterRevert", "deny");
+    }
+
+    private JsonNode revertPayloadWithoutReplacement(String evidenceKey) {
+        return objectMapper.createObjectNode()
+                .put("evidenceKey", evidenceKey)
+                .put("revertReason", "The evidence was withdrawn from future authoring influence.")
                 .put("visibilityAfterRevert", "deny");
     }
 

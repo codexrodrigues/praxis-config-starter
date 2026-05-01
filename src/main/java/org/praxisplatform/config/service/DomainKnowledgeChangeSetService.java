@@ -279,18 +279,6 @@ public class DomainKnowledgeChangeSetService {
             if (!"revert_evidence".equals(normalize(operation.path("operationType").asText(null)))) {
                 continue;
             }
-            addTimelineEvent(
-                    events,
-                    "evidence.reverted",
-                    changeSet.getAppliedAt(),
-                    "system",
-                    "domain-knowledge-patch-applier",
-                    "Domain Knowledge evidence reverted",
-                    changeSet.getStatus(),
-                    validationStatus,
-                    operationCount,
-                    operationTypes,
-                    targetConceptKeys);
             if (StringUtils.hasText(operation.path("payload").path("replacementEvidenceKey").asText(null))) {
                 addTimelineEvent(
                         events,
@@ -299,6 +287,19 @@ public class DomainKnowledgeChangeSetService {
                         "system",
                         "domain-knowledge-patch-applier",
                         "Domain Knowledge evidence superseded by governed replacement evidence",
+                        changeSet.getStatus(),
+                        validationStatus,
+                        operationCount,
+                        operationTypes,
+                        targetConceptKeys);
+            } else {
+                addTimelineEvent(
+                        events,
+                        "evidence.reverted",
+                        changeSet.getAppliedAt(),
+                        "system",
+                        "domain-knowledge-patch-applier",
+                        "Domain Knowledge evidence reverted",
                         changeSet.getStatus(),
                         validationStatus,
                         operationCount,
@@ -482,14 +483,15 @@ public class DomainKnowledgeChangeSetService {
                 changeSet,
                 concept,
                 requireText(evidenceKey, "payload.evidenceKey"));
-        if (StringUtils.hasText(replacementEvidenceKey)) {
+        boolean hasReplacementEvidence = StringUtils.hasText(replacementEvidenceKey);
+        if (hasReplacementEvidence) {
             DomainKnowledgeEvidence replacement = activeReplacementEvidence(
                     changeSet,
                     concept,
                     replacementEvidenceKey.trim());
             evidence.setSupersededByEvidenceId(replacement.getId());
         }
-        evidence.setStatus("reverted");
+        evidence.setStatus(hasReplacementEvidence ? "superseded" : "reverted");
         evidence.setRevertedByChangeSetId(changeSet.getId());
         evidence.setRevertedAt(Instant.now());
         evidence.setRevertReason(requireText(text(payload, "revertReason"), "payload.revertReason"));

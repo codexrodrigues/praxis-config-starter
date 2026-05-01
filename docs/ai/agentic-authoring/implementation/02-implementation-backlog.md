@@ -503,6 +503,10 @@ Plano detalhado:
   `revert_evidence + replacementEvidenceKey` como caminho publico beta e
   executar primeiro hardening interno para marcar evidencia substituida como
   `superseded`, sem alterar contrato publico.
+- Slice 2 concluido em 2026-05-01. `revert_evidence` com
+  `replacementEvidenceKey` agora persiste a evidencia anterior como
+  `superseded`; revert simples continua `reverted`; nenhum contrato publico foi
+  alterado.
 
 ## Regras operacionais para qualquer PR desta trilha
 

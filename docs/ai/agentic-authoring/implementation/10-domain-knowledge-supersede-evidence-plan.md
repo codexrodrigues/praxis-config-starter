@@ -1,6 +1,6 @@
 # Domain Knowledge Supersede Evidence Plan
 
-Status: Slice 1 semantic inventory complete, source-level hardening recommended
+Status: Slice 2 source-level hardening implemented
 Date: 2026-05-01
 Scope: next functional slice after governed Domain Knowledge revert readiness
 
@@ -78,6 +78,18 @@ Recommended next source-level slice:
 
 This preserves beta contract stability while making the canonical lifecycle
 state match the semantic decision.
+
+Slice 2 implementation result:
+
+- completed on 2026-05-01;
+- `revert_evidence` without `replacementEvidenceKey` still marks evidence as
+  `reverted`;
+- `revert_evidence` with `replacementEvidenceKey` now marks prior evidence as
+  `superseded`;
+- safe timeline emits `evidence.reverted` for plain revert and
+  `evidence.superseded` for replacement-backed supersession;
+- no OpenAPI, generated binding, Angular, quickstart or HTTP corpus changes
+  were made in this source-level hardening patch.
 
 ## Why This Is The Next Slice
 
@@ -299,6 +311,11 @@ Definition of done:
 - plain `revert_evidence` without replacement still marks prior evidence as
   `reverted`.
 
+Status:
+
+- completed on 2026-05-01 with focused service/validator tests;
+- no public contract promotion was performed.
+
 ### Slice 3. Contract Promotion
 
 Only after source-level behavior is stable.
@@ -361,14 +378,8 @@ Pause and redesign if a proposed implementation:
 
 ## Recommended Next Action
 
-Execute Slice 2 as a source-level lifecycle hardening patch:
-
-- no OpenAPI change;
-- no generated binding change;
-- no Angular/UI change;
-- no HTTP corpus promotion;
-- focused backend service tests first.
-
-After that patch is green, decide whether the next investment should be
-quickstart runtime proof for supersession status or vector/RAG active-evidence
+Slice 2 is complete. The next recommended action is a local quickstart runtime
+proof for supersession status only if a downstream consumer needs evidence that
+replacement-backed revert persists as `superseded` through the reference host.
+Otherwise, move the next functional investment to vector/RAG active-evidence
 filtering.
