@@ -1,8 +1,9 @@
 # Release Decision: Domain Knowledge Change-Set Timeline
 
 Date: 2026-05-01
+Closed: 2026-05-01
 
-Status: implementation merged to `main`; publication deferred until phase-close authorization.
+Status: published and closed as the coordinated `praxis-config-starter:0.1.0-rc.37` Domain Knowledge timeline release.
 
 ## Scope
 
@@ -67,11 +68,26 @@ The strict smoke returned `domain-knowledge-change-set-timeline-ready` with
 ```text
 created -> validated -> approved -> applied -> readback-confirmed -> timeline-confirmed-or-skipped
 ```
+- `praxis-config-starter:0.1.0-rc.37` was published from `main` and Maven
+  Central resolution was confirmed.
+- `praxis-api-quickstart` PR #49 consumed `0.1.0-rc.37` without local
+  overrides, passed `mvn -B verify`, and passed the Neon-backed strict
+  Domain Knowledge timeline smoke.
+- The published quickstart runtime deployed the rc.37 consumer build, and
+  `/actuator/info` reported build time `2026-05-01T03:40:15.468Z`.
+- The hosted strict Domain Knowledge smoke passed against
+  `https://praxis-api-quickstart.onrender.com` with
+  `REQUIRE_CHANGE_SET_TIMELINE=true`, returning
+  `domain-knowledge-change-set-timeline-ready`, `eventCount=4`, and change set
+  `01300db8-119c-4925-9d5f-1049c31cf4cc`.
+- `praxisui-http-examples` commit `271b13e` added the protected timeline corpus
+  proof with `runtimeRecordConfirmed=true`, `publishedBackendConfirmed=true`,
+  `knownPublishedFailure=false`, `protectedContract=true`, and kept
+  `llmOperational=false`.
 
 ## Publication Decision
 
-Do not publish a new Maven Central version only because the implementation
-merged. Publication becomes appropriate when at least one of these is true:
+Publication became appropriate only after all of these were true:
 
 - the owner explicitly authorizes closing this Domain Knowledge observability
   phase;
@@ -80,13 +96,16 @@ merged. Publication becomes appropriate when at least one of these is true:
 - a deployed/published runtime proof is required for public docs, HTTP corpus or
   external consumers.
 
-The next candidate coordinate should be:
+The closed Maven coordinate is:
 
 - `io.github.codexrodrigues:praxis-config-starter:0.1.0-rc.37`
-- tag: `v0.1.0-rc.37`
 
-Use that coordinate only if no newer `v0.1.0-rc.*` tag exists when publication
-is authorized.
+The closed Maven tag is:
+
+- `v0.1.0-rc.37`
+
+Do not create another Maven Central version for this phase. Any next release
+must be justified by a new named phase, contract change or downstream need.
 
 ## Gates Before Publishing Maven
 
@@ -118,15 +137,17 @@ tools/local-e2e/run-domain-knowledge-change-set-local.sh
 Use GitHub Actions only as the phase-closing release gate, not as an iteration
 loop.
 
-## Maven Publication Path
+## Maven Publication Closure
 
-When publication is authorized:
+Completed closure:
 
-1. Trigger the `CI and Release Java Starter (praxis-config-starter)` workflow
-   manually from `main`.
-2. Use explicit `version=0.1.0-rc.37`, unless a newer tag already exists.
-3. Let the workflow create tag `v0.1.0-rc.37` and publish to Maven Central.
-4. Confirm Maven Central resolution:
+1. `praxis-config-starter/main` was clean and contained the intended timeline
+   implementation.
+2. No newer `v0.1.0-rc.*` tag existed.
+3. The release used explicit `version=0.1.0-rc.37`.
+4. Tag `v0.1.0-rc.37` was created.
+5. Maven Central publication completed.
+6. Dependency resolution was confirmed:
 
 ```bash
 mvn -q dependency:get \
@@ -134,46 +155,51 @@ mvn -q dependency:get \
   -Dtransitive=false
 ```
 
-5. Only after resolution succeeds, update `praxis-api-quickstart` to consume the
-   published coordinate and harden published/runtime validation.
+For future phases, if publication stalls in Central Portal after upload,
+validate dependency resolution before deciding whether to retry. Do not create
+another version only to work around propagation lag.
 
-## Quickstart Rollout After Publication
+## Quickstart Rollout Closure
 
-After Maven Central resolves the published coordinate:
+Completed closure:
 
-1. Update `praxis-api-quickstart/pom.xml`:
-   - `praxis.config.version=0.1.0-rc.37`
-2. Update quickstart docs to reference the published Domain Knowledge timeline
-   cut.
-3. Run:
+1. `praxis-api-quickstart/pom.xml` now uses
+   `praxis.config.version=0.1.0-rc.37`.
+2. Quickstart README and rollout documentation reference the same version.
+3. Quickstart local validation passed with Maven resolution:
 
 ```bash
 mvn -B verify
 ```
 
-4. Run the Domain Knowledge change-set runtime smoke with:
+4. The Neon-backed strict runtime proof passed:
 
 ```bash
-REQUIRE_CHANGE_SET_TIMELINE=true
+BASE_URL=http://localhost:8099 TENANT_ID=desenv ENVIRONMENT=local \
+REQUIRE_CHANGE_SET_TIMELINE=true \
+tools/local-e2e/run-domain-knowledge-change-set-local.sh
 ```
 
-5. Merge one quickstart PR with the validation evidence.
-6. Redeploy the published quickstart runtime.
-7. Run the published/hosted smoke once as a phase gate.
+5. Quickstart PR #49 was merged to `main`.
+6. The published quickstart runtime deployed the rc.37 consumer build.
+7. The hosted strict smoke passed against the published host.
 
 ## HTTP Corpus and Public Docs
 
-Do not promote any protected HTTP example as publicly confirmed until a deployed
-quickstart host returns `200` for the timeline endpoint with the expected safe
-events.
+Completed closure:
 
-If an HTTP corpus example is added later:
-
-- keep write examples out of unauthenticated LLM-operational surfaces;
-- mark protected governed endpoints explicitly;
-- only set `publishedBackendConfirmed=true` with hosted proof evidence;
-- regenerate public surfaces only when the endpoint is intentionally part of
-  that surface.
+1. `praxisui-http-examples/examples.manifest.json` now records
+   `domain-knowledge-change-set-timeline` as published-backend confirmed.
+2. The example is marked `protectedContract=true` and `llmOperational=false`.
+3. `DOMAIN_KNOWLEDGE_TIMELINE_RUNBOOK.md` records the hosted proof and safety
+   boundary.
+4. `LLM_SURFACE.md` was regenerated without promoting the protected endpoint
+   into the unauthenticated operational LLM surface.
+5. Corpus validation passed with:
+   - `npm run verify:manifest`
+   - `npm run smoke:corpus-promises`
+6. Direct hosted response inspection returned `eventCount=4`, `unsafeCount=0`
+   and `leakCount=0`.
 
 ## npm Publication
 
@@ -183,3 +209,33 @@ The current phase affects the backend governance/audit contract and quickstart
 runtime smoke. Publish Angular packages only if a named external UI consumer
 needs a public registry version that renders this specific Domain Knowledge
 timeline.
+
+## Acceptance Criteria
+
+The Domain Knowledge timeline phase is published for `rc.37` because all are
+true:
+
+- Maven Central resolves the intended `praxis-config-starter` coordinate.
+- `praxis-api-quickstart` consumes that coordinate without local overrides.
+- Published quickstart returns `200` for
+  `GET /api/praxis/config/domain-knowledge/change-sets/{changeSetId}/timeline`.
+- Runtime smoke with `REQUIRE_CHANGE_SET_TIMELINE=true` passes against the
+  published host.
+- The response includes only `visibility=safe` events.
+- The response includes creation, validation, approval and application events
+  for the governed change-set lifecycle.
+- The response does not expose raw evidence text, source pointers, source URIs,
+  patch hashes, prompt content or chat history.
+- `praxisui-http-examples` records the timeline as a protected, published
+  contract proof and not as an unauthenticated LLM operation.
+
+## Current Recommendation
+
+Treat `rc.37` as closed. Do not republish this phase, do not create another
+Maven version for documentation drift, and do not use Actions unless a new phase
+is being closed.
+
+The next recommended work is to start the next functional phase around cockpit
+and Page Builder continuity only when it has a named scope and local-first test
+lane. The Domain Knowledge timeline itself should remain a safe observability
+projection, not a new source of business truth.
