@@ -215,6 +215,33 @@ Still intentionally pending:
 - protected HTTP/browser proof of create -> validate -> approve -> apply ->
   timeline for revert.
 
+## Slice 6 HTTP Smoke Preparation - 2026-05-01
+
+The quickstart runtime smoke now has an explicit revert gate:
+
+```bash
+REQUIRE_CHANGE_SET_TIMELINE=true \
+REQUIRE_EVIDENCE_REVERT=true \
+tools/local-e2e/run-domain-knowledge-change-set-local.sh
+```
+
+Smoke boundary:
+
+- The baseline `add_evidence` flow remains compatible by default.
+- `REQUIRE_EVIDENCE_REVERT=true` creates a second governed change set with
+  `revert_evidence` for the evidence created by the smoke itself.
+- The revert flow revalidates, approves, applies, reads back and validates
+  timeline event `evidence.reverted`.
+- The smoke still delegates through `praxis-api-quickstart`, the operational
+  reference host.
+
+Still intentionally pending:
+
+- running the Neon-backed local smoke against a quickstart packaged with this
+  local starter cut.
+- runtime/authoring retrieval filtering that excludes reverted evidence by
+  default.
+
 ## Canonical Direction
 
 Model rollback as **revert/supersede**, not deletion.

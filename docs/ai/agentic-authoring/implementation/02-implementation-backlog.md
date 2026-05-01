@@ -352,6 +352,10 @@ Timeline baseline iniciado em 2026-05-01: change sets aplicados com
 `revert_evidence` emitem eventos seguros `evidence.reverted` e
 `evidence.superseded`, sem expor chaves ou payload bruto.
 
+HTTP smoke preparado em 2026-05-01: o runner local pode exigir
+`REQUIRE_EVIDENCE_REVERT=true` para provar `revert_evidence` por HTTP real no
+quickstart, junto de `REQUIRE_CHANGE_SET_TIMELINE=true`.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**
