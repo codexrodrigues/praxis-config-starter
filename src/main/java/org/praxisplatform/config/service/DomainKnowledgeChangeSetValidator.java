@@ -40,6 +40,16 @@ public class DomainKnowledgeChangeSetValidator {
             "replace_concept",
             "replace_payload"
     );
+    private static final Set<String> EVIDENCE_TYPES = Set.of(
+            "annotation",
+            "openapi",
+            "json_schema",
+            "java_symbol",
+            "catalog_release",
+            "manual_review",
+            "llm_proposal",
+            "import"
+    );
     private static final Set<String> RAW_MEMORY_FIELD_NAMES = Set.of(
             "prompt",
             "rawprompt",
@@ -137,7 +147,7 @@ public class DomainKnowledgeChangeSetValidator {
         }
         validateConfidence(operation.confidence(), pointer + "/confidence", issues);
         validateTargetScope(tenantId, environment, operation.target(), pointer + "/target", issues);
-        validatePayload(operation.payload(), pointer + "/payload", issues);
+        validatePayload(operationType, operation.target(), operation.payload(), pointer + "/payload", issues);
     }
 
     private void validateConfidence(
@@ -170,6 +180,8 @@ public class DomainKnowledgeChangeSetValidator {
     }
 
     private void validatePayload(
+            String operationType,
+            JsonNode target,
             JsonNode payload,
             String pointer,
             List<DomainKnowledgeChangeSetValidationIssue> issues) {
@@ -186,6 +198,20 @@ public class DomainKnowledgeChangeSetValidator {
         if ("allow".equals(aiVisibility) && Set.of("unsafe", "private", "restricted", "deny").contains(evidenceSafety)) {
             error(issues, "unsafe_evidence_ai_visibility", pointer + "/aiVisibility",
                     "unsafe evidence cannot be proposed as ai_visibility=allow");
+        }
+        if ("add_evidence".equals(operationType)) {
+            requireText(target == null ? null : target.path("conceptKey").asText(null),
+                    pointer.replace("/payload", "/target") + "/conceptKey",
+                    "target_concept_key_required",
+                    "add_evidence operations require target.conceptKey",
+                    issues);
+            requireText(payload.path("evidenceKey").asText(null), pointer + "/evidenceKey",
+                    "evidence_key_required", "add_evidence operations require payload.evidenceKey", issues);
+            String evidenceType = normalize(payload.path("evidenceType").asText(null));
+            if (StringUtils.hasText(evidenceType) && !EVIDENCE_TYPES.contains(evidenceType)) {
+                error(issues, "unsupported_evidence_type", pointer + "/evidenceType",
+                        "evidenceType is not supported");
+            }
         }
     }
 
