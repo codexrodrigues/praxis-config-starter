@@ -606,6 +606,14 @@ implementacao real de indice derivado que preserve re-check canonico.
   apenas se ela permanecer ativa;
 - falha no indice derivado nao permite influencia indevida.
 
+Status: concluido em 2026-05-01 com hooks internos e publicacao derivada
+opt-in. `RagProjectKnowledgeDerivedIndexService` so publica quando
+`praxis.project-knowledge.rag-publication.enabled=true`, o vector store esta
+disponivel e conceito/evidencia permanecem canonicos (`active`, `approved`,
+AI-visible e evidencia `active`). A publicacao gera documento sanitizado de
+`project_knowledge`; `revert_evidence` e supersession removem o documento
+derivado deterministico da evidencia antiga. O default permanece desligado.
+
 ### Item 36. Provar runtime local-first
 
 **Objetivo**

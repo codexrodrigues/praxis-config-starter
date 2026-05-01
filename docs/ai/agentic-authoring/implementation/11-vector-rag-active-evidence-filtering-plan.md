@@ -364,9 +364,34 @@ Slice 5 vector-disabled runtime proof completed on 2026-05-01:
   and supersession timeline confirmation;
 - no GitHub Actions were used.
 
-Next implementation step: design the first real
-`ProjectKnowledgeDerivedIndexService` implementation as a disposable derived
-index. It must publish only sanitized/provenance metadata, delete or deactivate
-derived entries on revert/supersession and keep the final canonical re-check in
-`AgenticAuthoringProjectKnowledgeService` before any vector-ranked result can
+### Slice 6 - Opt-In Derived Index Publication
+
+Objective:
+
+- make `ProjectKnowledgeDerivedIndexService` capable of publishing a sanitized,
+  disposable Project Knowledge vector document while keeping vector retrieval
+  out of the authoring influence path.
+
+Implementation result:
+
+- completed on 2026-05-01 as an opt-in publication path;
+- `RagProjectKnowledgeDerivedIndexService` is enabled only with
+  `praxis.project-knowledge.rag-publication.enabled=true`;
+- the default remains `false`, so normal runtime keeps the noop lifecycle
+  behavior unless a local/vector proof explicitly opts in;
+- active evidence publishes exactly one derived document with
+  `RagResourceTypes.PROJECT_KNOWLEDGE` metadata;
+- deactivated evidence deletes the deterministic derived document id;
+- publication is skipped when vector store is unavailable, concept/evidence is
+  not canonical active/approved, AI visibility is denied or evidence subject
+  does not match the concept;
+- derived text is sanitized with `AiSensitiveDataRedactor`; raw payload,
+  `sourceUri`, `sourcePointer` and raw evidence payload are not copied;
+- `aiVisibility=mask` publishes only structural context plus the governed masked
+  summary, not the raw payload summary.
+
+Next implementation step: add the vector-ranked candidate retriever behind a
+separate opt-in switch. It must treat vector hits as candidate IDs/provenance
+only, reload canonical Domain Knowledge rows and keep the final active-evidence
+re-check in `AgenticAuthoringProjectKnowledgeService` before anything can
 influence `contextHints.projectKnowledge`.
