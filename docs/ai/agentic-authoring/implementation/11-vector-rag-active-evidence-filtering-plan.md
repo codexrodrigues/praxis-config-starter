@@ -1,6 +1,6 @@
 # Vector/RAG Active Evidence Filtering Plan
 
-Status: Slice 1 guardrail complete
+Status: Slice 2 metadata/provenance baseline complete
 Date: 2026-05-01
 Scope: next capability slice after Domain Knowledge supersession runtime proof
 
@@ -168,6 +168,20 @@ Definition of Done:
 - no authoring code trusts metadata status without canonical re-check;
 - existing RAG document types remain compatible.
 
+Implementation result:
+
+- completed on 2026-05-01 as an internal metadata/provenance baseline;
+- `RagMetadataKeys` now defines Project Knowledge provenance keys for concept,
+  evidence, status, AI visibility and semantic scope;
+- `RagResourceTypes.PROJECT_KNOWLEDGE` identifies future derived Project
+  Knowledge documents without changing public HTTP contracts;
+- `RagProjectKnowledgeMetadata` builds safe derived metadata from canonical
+  `DomainKnowledgeConcept` and `DomainKnowledgeEvidence` rows;
+- tests verify that raw payload, `sourceUri` and `sourcePointer` are not copied
+  to metadata;
+- no vector publication, vector retrieval or authoring prompt injection was
+  introduced in this slice.
+
 ### Slice 3 - Add A Project Knowledge Candidate Retriever
 
 Objective:
@@ -244,6 +258,7 @@ Slice 1 completed on 2026-05-01:
 - No current Project Knowledge influence path depends on `RagVectorStoreService`,
   `ContextRetrievalService`, `AiRagContextService` or `VectorStore`.
 
-Next implementation step: move to Slice 2 as an internal metadata/provenance
-preparation. Do not inject vector hits directly into prompts or
-`contextHints.projectKnowledge`.
+Next implementation step: move to Slice 3 by designing the optional candidate
+retriever interface and canonical re-check path. Do not publish Project
+Knowledge documents or inject vector hits directly into prompts until that
+re-check path exists.

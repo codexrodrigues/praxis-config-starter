@@ -27,6 +27,15 @@ public final class RagMetadataKeys {
     public static final String AUTHORING_OPERATION_COUNT = "authoringOperationCount";
     public static final String AUTHORING_TARGET_COUNT = "authoringTargetCount";
 
+    public static final String DOMAIN_KNOWLEDGE_CONCEPT_ID = "domainKnowledgeConceptId";
+    public static final String DOMAIN_KNOWLEDGE_CONCEPT_KEY = "domainKnowledgeConceptKey";
+    public static final String DOMAIN_KNOWLEDGE_EVIDENCE_ID = "domainKnowledgeEvidenceId";
+    public static final String DOMAIN_KNOWLEDGE_EVIDENCE_KEY = "domainKnowledgeEvidenceKey";
+    public static final String DOMAIN_KNOWLEDGE_EVIDENCE_STATUS = "domainKnowledgeEvidenceStatus";
+    public static final String AI_VISIBILITY = "aiVisibility";
+    public static final String CONTEXT_KEY = "contextKey";
+    public static final String RESOURCE_KEY = "resourceKey";
+
     private RagMetadataKeys() {
     }
 }

@@ -529,6 +529,12 @@ usa apenas `AgenticAuthoringProjectKnowledgeService` para injetar Project
 Knowledge, e que `AgenticAuthoringPlanService` apenas sanitiza o
 `contextHints.projectKnowledge` recebido.
 
+Slice 2 concluido em 2026-05-01: `RagMetadataKeys`,
+`RagResourceTypes.PROJECT_KNOWLEDGE` e `RagProjectKnowledgeMetadata` passaram a
+definir metadata derivada/provenance para Project Knowledge sem payload bruto,
+sem `sourceUri`, sem `sourcePointer`, sem publicacao vetorial e sem influencia
+em `contextHints.projectKnowledge`.
+
 ### Item 32. Travar invariantes de Project Knowledge antes de RAG
 
 **Objetivo**
