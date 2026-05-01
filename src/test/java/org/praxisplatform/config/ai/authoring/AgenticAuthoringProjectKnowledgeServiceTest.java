@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -299,6 +300,82 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                 eq("concept"),
                 eq(revertedOnly.getId()),
                 eq("active"));
+    }
+
+    @Test
+    void excludesProjectKnowledgeWithOnlyRevertedOrSupersededEvidence() {
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        AgenticAuthoringProjectKnowledgeService service = new AgenticAuthoringProjectKnowledgeService(
+                conceptRepository,
+                evidenceRepository,
+                objectMapper,
+                redactor);
+        DomainKnowledgeConcept reverted = concept(
+                "tenant-a",
+                "dev",
+                "human-resources",
+                "human-resources.funcionarios",
+                "active",
+                "approved",
+                "allow",
+                "{\"kind\":\"project_preference\",\"summary\":\"Reverted guidance must not influence authoring.\"}");
+        DomainKnowledgeConcept superseded = concept(
+                "tenant-a",
+                "dev",
+                "human-resources",
+                "human-resources.funcionarios",
+                "active",
+                "approved",
+                "allow",
+                "{\"kind\":\"project_preference\",\"summary\":\"Superseded guidance must not influence authoring.\"}");
+        when(conceptRepository.findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("human-resources"),
+                eq("human-resources.funcionarios"),
+                eq("concept"),
+                any(Pageable.class)))
+                .thenReturn(List.of(reverted, superseded));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("concept"),
+                eq(reverted.getId()),
+                eq("active")))
+                .thenReturn(List.of());
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("concept"),
+                eq(superseded.getId()),
+                eq("active")))
+                .thenReturn(List.of());
+
+        List<AgenticAuthoringProjectKnowledgeProjection> projections = service.retrieve(
+                new AgenticAuthoringProjectKnowledgeQuery(
+                        "tenant-a",
+                        "dev",
+                        "human-resources",
+                        "human-resources.funcionarios",
+                        List.of("project_preference"),
+                        "concept",
+                        5));
+
+        assertThat(projections).isEmpty();
+        verify(evidenceRepository).findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("concept"),
+                eq(reverted.getId()),
+                eq("active"));
+        verify(evidenceRepository).findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("concept"),
+                eq(superseded.getId()),
+                eq("active"));
+        verifyNoMoreInteractions(evidenceRepository);
     }
 
     private DomainKnowledgeConcept concept(
