@@ -6,10 +6,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -23,6 +26,8 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationSummary;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetResponse;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetStatusRequest;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetTimelineEventResponse;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetTimelineResponse;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
@@ -137,6 +142,104 @@ public class DomainKnowledgeChangeSetService {
             throw new ConfigurationIngestionException("Domain knowledge change set not found in request scope: " + id);
         }
         return toResponse(changeSet);
+    }
+
+    @Transactional(readOnly = true, transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public DomainKnowledgeChangeSetTimelineResponse timeline(
+            UUID id,
+            String tenantId,
+            String environment) {
+        DomainKnowledgeChangeSet changeSet = findInScope(id, tenantId, environment);
+        JsonNode validation = read(changeSet.getValidationResult());
+        List<DomainKnowledgeChangeSetOperationSummary> summaries =
+                readPatch(changeSet.getPatch()).stream()
+                        .map(this::toOperationSummary)
+                        .toList();
+        List<String> operationTypes = summaries.stream()
+                .map(DomainKnowledgeChangeSetOperationSummary::operationType)
+                .filter(StringUtils::hasText)
+                .map(this::normalize)
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                        List::copyOf));
+        List<String> targetConceptKeys = summaries.stream()
+                .flatMap(summary -> summary.targetConceptKeys().stream())
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                        List::copyOf));
+        int operationCount = summaries.size();
+        String validationStatus = validation.path("validationStatus").asText("unknown");
+
+        ArrayList<DomainKnowledgeChangeSetTimelineEventResponse> events = new ArrayList<>();
+        addTimelineEvent(
+                events,
+                "change_set.created",
+                changeSet.getCreatedAt(),
+                changeSet.getAuthorType(),
+                changeSet.getAuthorId(),
+                "Domain Knowledge change set created",
+                changeSet.getStatus(),
+                validationStatus,
+                operationCount,
+                operationTypes,
+                targetConceptKeys);
+        addTimelineEvent(
+                events,
+                "validation.completed",
+                changeSet.getCreatedAt(),
+                "system",
+                "domain-knowledge-change-set-validator",
+                validationSummary(validation),
+                changeSet.getStatus(),
+                validationStatus,
+                operationCount,
+                operationTypes,
+                targetConceptKeys);
+        if (changeSet.getReviewedAt() != null) {
+            addTimelineEvent(
+                    events,
+                    reviewEventType(changeSet.getStatus()),
+                    changeSet.getReviewedAt(),
+                    "human",
+                    changeSet.getReviewerId(),
+                    "Domain Knowledge change set reviewed",
+                    changeSet.getStatus(),
+                    validationStatus,
+                    operationCount,
+                    operationTypes,
+                    targetConceptKeys);
+        }
+        addTimelineEvent(
+                events,
+                "change_set.applied",
+                changeSet.getAppliedAt(),
+                "system",
+                "domain-knowledge-patch-applier",
+                "Domain Knowledge change set applied",
+                changeSet.getStatus(),
+                validationStatus,
+                operationCount,
+                operationTypes,
+                targetConceptKeys);
+        events.sort(Comparator
+                .comparing(DomainKnowledgeChangeSetTimelineEventResponse::occurredAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(DomainKnowledgeChangeSetTimelineEventResponse::eventType, Comparator.nullsLast(Comparator.naturalOrder())));
+
+        return new DomainKnowledgeChangeSetTimelineResponse(
+                changeSet.getId(),
+                changeSet.getTenantId(),
+                changeSet.getEnvironment(),
+                changeSet.getChangeSetKey(),
+                changeSet.getStatus(),
+                changeSet.getAuthorType(),
+                changeSet.getAuthorId(),
+                changeSet.getReviewerId(),
+                List.copyOf(events));
+    }
+
+    private String reviewEventType(String status) {
+        return "rejected".equals(normalize(status)) ? "review.rejected" : "review.approved";
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -400,6 +503,48 @@ public class DomainKnowledgeChangeSetService {
                 .map(JsonNode::asText)
                 .filter(StringUtils::hasText)
                 .toList();
+    }
+
+    private void addTimelineEvent(
+            List<DomainKnowledgeChangeSetTimelineEventResponse> events,
+            String eventType,
+            Instant occurredAt,
+            String actorType,
+            String actor,
+            String summary,
+            String status,
+            String validationStatus,
+            int operationCount,
+            List<String> operationTypes,
+            List<String> targetConceptKeys) {
+        if (occurredAt == null) {
+            return;
+        }
+        events.add(new DomainKnowledgeChangeSetTimelineEventResponse(
+                eventType,
+                occurredAt,
+                normalize(actorType),
+                normalize(actor),
+                summary,
+                normalize(status),
+                normalize(validationStatus),
+                operationCount,
+                operationTypes,
+                targetConceptKeys,
+                "safe"));
+    }
+
+    private String validationSummary(JsonNode validation) {
+        String status = validation.path("validationStatus").asText("unknown");
+        int errorCount = validation.path("errorCount").asInt(0);
+        int warningCount = validation.path("warningCount").asInt(0);
+        return "Domain Knowledge change set validation "
+                + status
+                + " with "
+                + errorCount
+                + " errors and "
+                + warningCount
+                + " warnings";
     }
 
     private String writeValidationResult(
