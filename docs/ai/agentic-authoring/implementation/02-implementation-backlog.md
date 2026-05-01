@@ -298,11 +298,13 @@ corte.
 **Status**
 - Concluido para a lane Project Knowledge cockpit em 2026-05-01:
   `AI_PROVIDER=openai AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh PRAXIS_E2E_TIMEOUT_MS=900000 ./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh`
-  passou localmente em `praxis-ui-angular` (`1 passed (10.2s)` apos os servicos
+  passou localmente em `praxis-ui-angular` (`2 passed (1.3m)` apos os servicos
   ficarem prontos).
-- A prova inclui create, validate, approve, apply, readback e timeline segura
-  sem expor `conceptKey`, `sourceSummary`, `sourcePointer`, `patchHash`,
-  `assistantMessage`, `materializedPayload` ou resumo bruto de conhecimento.
+- A prova inclui Project Knowledge ativo no browser, `revert_evidence`
+  governado, Project Knowledge ausente no turno posterior ao revert, create,
+  validate, approve, apply, readback e timeline segura sem expor `conceptKey`,
+  `sourceSummary`, `sourcePointer`, `patchHash`, `assistantMessage`,
+  `materializedPayload` ou resumo bruto de conhecimento.
 
 ### Item 23. Handoff documental e decisao de release gate
 
@@ -330,20 +332,21 @@ corte.
 
 Plano detalhado: [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
 
-Status: proxima fase recomendada; planejamento arquitetural criado antes de
-qualquer contrato publico ou operacao destrutiva.
+Status: baseline local-first implementado; proximo passo recomendado e fechar
+checkpoint/readiness antes de qualquer novo contrato publico ou operacao
+destrutiva.
 
 Inventario inicial concluido em 2026-05-01 no plano detalhado da fase. A
-implementacao deve comecar pelo lifecycle canonico de evidencia e pelos pontos
-de retrieval que precisarao filtrar evidencia ativa.
+implementacao comecou pelo lifecycle canonico de evidencia e pelos pontos de
+retrieval que precisam filtrar evidencia ativa.
 
 Lifecycle baseline iniciado em 2026-05-01: schema e entidade passam a reconhecer
-evidencia `active`, `superseded` e `reverted`, mas `revert_evidence` ainda nao
-foi promovido.
+evidencia `active`, `superseded` e `reverted`.
 
 Validation baseline iniciado em 2026-05-01: `revert_evidence` passa a ser uma
 operacao estruturalmente valida quando identifica conceito, evidencia, razao e
-provas, mas apply/repository checks ainda ficam no proximo slice.
+provas. Checks de existencia, escopo, conceito e status ativo foram fechados no
+slice de apply.
 
 Apply baseline iniciado em 2026-05-01: `revert_evidence` agora exige evidencia
 ativa no mesmo conceito e aplica lifecycle `reverted` sem delete fisico.
@@ -370,6 +373,13 @@ com starter local e Neon configurado: o smoke com
 `REQUIRE_PROJECT_KNOWLEDGE_RETRIEVAL=true` confirmou retrieval
 `expected=present` apos `add_evidence` e `expected=absent` apos
 `revert_evidence`.
+
+Browser retrieval proof concluido em 2026-05-01 no Page Builder real:
+`run-project-knowledge-audit-cockpit-local.sh` confirmou que o
+`projectKnowledgeAudit` contem o conceito enquanto a evidencia esta `active` e
+nao contem o mesmo conceito depois do `revert_evidence` governado. A lane
+passou com `2 passed (1.3m)`, sem GitHub Actions e com limpeza das portas
+locais `8098`/`4083`.
 
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
@@ -443,6 +453,25 @@ com starter local e Neon configurado: o smoke com
 - Concluido em 2026-05-01 no quickstart local com
   `REQUIRE_PROJECT_KNOWLEDGE_RETRIEVAL=true`; resultado final
   `projectKnowledgeRetrievalChecked=true`.
+
+### Item 30. Provar retirada de influencia no browser
+
+**Objetivo**
+- provar no Page Builder real que uma evidencia revertida deixa de aparecer no
+  audit/contexto de authoring, sem depender de mock ou delecao local.
+
+**Definition of Done**
+- primeiro turno browser mostra o conceito governado no `projectKnowledgeAudit`
+  enquanto a evidencia esta `active`;
+- a reversao passa por create, validate, approve e apply no boundary
+  `domain-knowledge/change-sets`;
+- turno posterior ao revert nao contem o mesmo conceito no audit de Project
+  Knowledge;
+- runner local limpa quickstart/UI e nao usa Actions.
+
+**Status**
+- Concluido em 2026-05-01 no `praxis-ui-angular` com
+  `run-project-knowledge-audit-cockpit-local.sh`; resultado `2 passed (1.3m)`.
 
 ## Regras operacionais para qualquer PR desta trilha
 

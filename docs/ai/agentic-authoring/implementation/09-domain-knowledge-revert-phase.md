@@ -1,12 +1,12 @@
 # Domain Knowledge Revert Phase
 
-Status: implementation planning
+Status: local-first baseline implemented
 Date: 2026-05-01
 Scope: post Page Builder continuity hardening for governed Project Knowledge writes
 
 ## Recommendation
 
-The next functional phase should plan and implement governed revert semantics
+The next functional phase has implemented the first governed revert baseline
 for Domain Knowledge evidence before adding broader write operation types.
 
 Do not start by adding destructive operations such as `delete_evidence`,
@@ -24,9 +24,9 @@ The current beta path proves a safe write lifecycle:
 4. The change set applies evidence to an existing governed concept.
 5. The cockpit reads back safe status and safe timeline body evidence.
 
-That is enough for additive governed writes, but not enough for correction,
-rollback or broader operation types. Before the platform lets AI author
-stronger mutations, it must answer:
+That was enough for additive governed writes, but not enough for correction,
+rollback or broader operation types. The current baseline now answers the first
+required questions for beta rollback:
 
 - how an applied evidence row is superseded without deleting audit history;
 - how a revert is reviewed and applied;
@@ -41,16 +41,25 @@ The current implementation owns the lifecycle in `praxis-config-starter`:
 
 - `DomainKnowledgeChangeSet` stores status, reviewer, patch, validation result
   and timestamps.
-- `DomainKnowledgeChangeSetValidator` accepts additive operation types and
-  blocks destructive operation types in this cut.
-- `DomainKnowledgeChangeSetService.apply` applies only `add_evidence`.
-- `DomainKnowledgeEvidence` stores governed evidence rows but currently has no
-  explicit lifecycle status, supersession pointer or reverted timestamp.
+- `DomainKnowledgeChangeSetValidator` accepts `add_evidence` and
+  `revert_evidence`, while destructive operation types remain blocked in this
+  cut.
+- `DomainKnowledgeChangeSetService.apply` applies additive evidence and
+  governed evidence lifecycle transitions transactionally.
+- `DomainKnowledgeEvidence` stores governed evidence rows with explicit
+  lifecycle status, supersession pointer, revert change-set id, reverted
+  timestamp and revert reason.
 - `GET /api/praxis/config/domain-knowledge/change-sets/{id}/timeline` emits a
-  safe derived timeline for creation, validation, review and application.
+  safe derived timeline for creation, validation, review, application and
+  evidence revert/supersede events.
+- `AgenticAuthoringProjectKnowledgeService` only exposes governed Project
+  Knowledge when the concept still has active evidence in the same
+  tenant/environment.
 
-Conclusion: the next phase needs a canonical lifecycle extension, not a UI-only
-delete button and not a raw patch mutation.
+Conclusion: the baseline now supports governed revert/supersede as the
+platform-correct correction model. The next step is checkpoint/readiness and
+only then a separately planned expansion for any broader write operation. Do
+not add a UI-only delete button or raw patch mutation.
 
 ## Slice 1 Inventory Findings - 2026-05-01
 
@@ -66,13 +75,14 @@ Code owners inspected:
 - `AgenticAuthoringProjectKnowledgeService`
 - focused tests around change-set apply, projection and entity lifecycle
 
-Current evidence model:
+Evidence model at inventory time:
 
 - `DomainKnowledgeEvidence` stores tenant, environment, subject scope,
   `evidenceKey`, `evidenceType`, `confidence`, payload, provenance and
   timestamps.
-- It has no explicit lifecycle fields today: no status, supersession pointer,
-  revert change-set id, reverted timestamp or revert reason.
+- It had no explicit lifecycle fields at that point: no status, supersession
+  pointer, revert change-set id, reverted timestamp or revert reason. Slice 2
+  closed this gap with canonical lifecycle columns.
 
 Current repository retrieval:
 
@@ -93,17 +103,15 @@ Current write paths:
   `delete_concept`, `delete_alias`, `delete_binding`, `delete_relationship`,
   `delete_evidence`, `replace_concept` and `replace_payload`.
 
-Current retrieval and influence gap:
+Retrieval and influence gap at inventory time:
 
-- `AgenticAuthoringProjectKnowledgeService` retrieves governed project
+- `AgenticAuthoringProjectKnowledgeService` retrieved governed project
   knowledge candidates from concepts, not from evidence lifecycle-aware
   repository queries.
-- The Page Builder proof reads back a safe concept/timeline projection, but it
-  does not yet prove that reverted evidence stops influencing later AI
-  authoring.
-- Therefore the first implementation must either add evidence-aware retrieval
-  to the authoring path or explicitly limit the initial proof to lifecycle
-  state, timeline and safe readback until influence filtering exists.
+- The Page Builder proof read back a safe concept/timeline projection, but did
+  not yet prove that reverted evidence stopped influencing later AI authoring.
+- Slices 7, 8 and 9 closed this gap with active-evidence retrieval filtering,
+  HTTP runtime proof and browser proof.
 
 Recommended first data-model decision:
 
@@ -321,6 +329,45 @@ Still intentionally pending:
 
 - Page Builder browser proof that reverted evidence is not offered as active
   continuity context.
+
+## Slice 9 Browser Retrieval Proof - 2026-05-01
+
+The Page Builder local browser lane now proves the active-evidence lifecycle in
+the actual cockpit/authoring surface.
+
+Command:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+
+AI_PROVIDER=openai \
+AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
+PRAXIS_E2E_TIMEOUT_MS=900000 \
+./tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh
+```
+
+Observed proof:
+
+- managed runner installed the local `praxis-config-starter`, started isolated
+  quickstart/UI services on `8098`/`4083`, ran the Project Knowledge browser
+  lane and cleaned both ports.
+- first browser turn confirmed the seeded Project Knowledge fixture was present
+  in the Page Builder `projectKnowledgeAudit` while evidence was `active`.
+- the test created, validated, approved and applied a governed
+  `revert_evidence` change set through the canonical Domain Knowledge boundary.
+- second browser turn confirmed the same concept key was absent from the
+  authoring audit after revert.
+- the cockpit proof still validates safe governed actions, readback and
+  timeline without rendering raw concept keys, source summaries, source
+  pointers, patch hashes, assistant messages or materialized payloads.
+- result: `2 passed (1.3m)`.
+
+Baseline status:
+
+- runtime/HTTP proof and browser proof are complete for the current beta
+  checkpoint.
+- no npm/Maven publication and no GitHub Actions were required.
+- destructive `delete_*` and broad `replace_*` operation types remain blocked.
 
 ## Canonical Direction
 
@@ -547,6 +594,11 @@ Definition of done:
 - browser proof shows no local deletion;
 - action is blocked until backend validation/approval conditions are met;
 - services are cleaned up by local runner.
+
+Status:
+
+- complete for the current beta checkpoint via the local Project Knowledge
+  cockpit lane on 2026-05-01.
 
 ## Local-First Validation
 

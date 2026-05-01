@@ -38,9 +38,13 @@ readback, safe timeline, quickstart proof e public-runtime proof em `rc.37`.
 A fase de continuidade governada do Page Builder tambem esta concluida
 localmente em `main`: o cockpit transforma handoffs seguros em acoes governadas
 claras, sem fazer a UI virar fonte primaria de regra, memoria ou
-materializacao. A proxima capacidade recomendada e planejar e implementar
-reversibilidade governada de Domain Knowledge (`revert_evidence`) antes de
-ampliar operacoes destrutivas ou novos tipos de escrita.
+materializacao. A reversibilidade governada de Domain Knowledge
+(`revert_evidence`) tambem ja tem baseline funcional local-first: lifecycle de
+evidencia, validacao, apply transacional, timeline segura, smoke HTTP com Neon,
+retrieval filtering e prova browser no Page Builder confirmando que evidencia
+revertida deixa de aparecer como Project Knowledge ativo. A proxima capacidade
+recomendada e fechar o checkpoint documental/release-readiness dessa fase e so
+depois planejar novos tipos de escrita sem promover `delete_*` por atalho.
 
 ## Ordem de leitura
 
@@ -65,15 +69,16 @@ transformar docs-only em publicacao ou em uso repetido de GitHub Actions.
 LLM pode propor mudancas de conhecimento, mas a plataforma deve persistir isso
 como change set governado, validado e aprovado antes de aplicar.
 `08-page-builder-continuity-phase.md` registra a fase localmente concluida de
-continuidade governada no cockpit. `09-domain-knowledge-revert-phase.md` e o
-plano ativo seguinte: antes de ampliar operacoes alem de `add_evidence`, a
-plataforma deve suportar reversibilidade governada sem deletar evidencia ou
-expor payload bruto. Os documentos anteriores continuam uteis como historico e
-diagnostico, mas devem ser interpretados pela direcao atual: Page Builder
-authora componentes/paginas, decisoes compartilhadas de negocio devem seguir
-por `/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir
-pela fronteira `domain_knowledge_change_set`, e correcoes de conhecimento
-aplicado devem seguir por revert/supersede governado.
+continuidade governada no cockpit. `09-domain-knowledge-revert-phase.md`
+registra o baseline local-first de reversibilidade governada: antes de ampliar
+operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
+essa semantica de revert/supersede sem deletar evidencia ou expor payload
+bruto. Os documentos anteriores continuam uteis como historico e diagnostico,
+mas devem ser interpretados pela direcao atual: Page Builder authora
+componentes/paginas, decisoes compartilhadas de negocio devem seguir por
+`/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir pela
+fronteira `domain_knowledge_change_set`, e correcoes de conhecimento aplicado
+devem seguir por revert/supersede governado.
 
 ## Baseline de reaproveitamento
 
