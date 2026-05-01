@@ -542,6 +542,13 @@ dono dos filtros de lifecycle, curation, AI visibility, escopo, kind e evidencia
 `active`, e o teste focal prova que candidatos de origem derivada ainda passam
 por re-check canonico antes de virar projection.
 
+Slice 4 concluido em 2026-05-01: `ProjectKnowledgeDerivedIndexService` e
+`NoopProjectKnowledgeDerivedIndexService` introduzem hooks internos de lifecycle
+para indice derivado sem publicar Project Knowledge em vector store. O apply de
+`add_evidence` chama ativacao derivada; `revert_evidence` e supersession chamam
+desativacao derivada da evidencia anterior. Testes focais cobrem add, revert e
+supersession.
+
 ### Item 32. Travar invariantes de Project Knowledge antes de RAG
 
 **Objetivo**

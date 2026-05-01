@@ -61,6 +61,7 @@ public class DomainKnowledgeChangeSetService {
     private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final DomainKnowledgeChangeSetValidator validator;
     private final ObjectMapper objectMapper;
+    private final ProjectKnowledgeDerivedIndexService projectKnowledgeDerivedIndexService;
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainKnowledgeChangeSetResponse create(
@@ -462,7 +463,8 @@ public class DomainKnowledgeChangeSetService {
         evidence.setSourcePointer(text(operation.payload(), "sourcePointer"));
         evidence.setConfidence(operation.confidence());
         evidence.setPayload(write(operation.payload()));
-        evidenceRepository.save(evidence);
+        DomainKnowledgeEvidence savedEvidence = evidenceRepository.save(evidence);
+        projectKnowledgeDerivedIndexService.evidenceActivated(concept, savedEvidence);
     }
 
     private void applyRevertEvidenceOperation(
@@ -495,7 +497,8 @@ public class DomainKnowledgeChangeSetService {
         evidence.setRevertedByChangeSetId(changeSet.getId());
         evidence.setRevertedAt(Instant.now());
         evidence.setRevertReason(requireText(text(payload, "revertReason"), "payload.revertReason"));
-        evidenceRepository.save(evidence);
+        DomainKnowledgeEvidence savedEvidence = evidenceRepository.save(evidence);
+        projectKnowledgeDerivedIndexService.evidenceDeactivated(concept, savedEvidence);
     }
 
     private DomainKnowledgeEvidence reusableEvidenceOrNew(

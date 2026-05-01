@@ -1,6 +1,6 @@
 # Vector/RAG Active Evidence Filtering Plan
 
-Status: Slice 3 candidate retriever baseline complete
+Status: Slice 4 lifecycle invalidation hook baseline complete
 Date: 2026-05-01
 Scope: next capability slice after Domain Knowledge supersession runtime proof
 
@@ -231,6 +231,21 @@ Definition of Done:
   eligible only if active;
 - timeline remains observability, not the source of truth.
 
+Implementation result:
+
+- completed on 2026-05-01 as an internal hook baseline, not a vector publication
+  path;
+- `ProjectKnowledgeDerivedIndexService` defines lifecycle hooks for active
+  evidence and deactivated evidence;
+- `NoopProjectKnowledgeDerivedIndexService` keeps runtime behavior unchanged
+  while no derived Project Knowledge index is published;
+- `DomainKnowledgeChangeSetService` calls `evidenceActivated(...)` after
+  governed `add_evidence` apply and `evidenceDeactivated(...)` after
+  `revert_evidence` or replacement-backed supersession;
+- focused tests verify the hook calls for add, plain revert and supersession;
+- no pgvector setup, vector store writes, vector deletes or prompt injection
+  were introduced.
+
 ### Slice 5 - Runtime Proof
 
 Objective:
@@ -273,8 +288,8 @@ Slice 1 completed on 2026-05-01:
 - No current Project Knowledge influence path depends on `RagVectorStoreService`,
   `ContextRetrievalService`, `AiRagContextService` or `VectorStore`.
 
-Next implementation step: plan Slice 4 lifecycle invalidation before enabling
-any Project Knowledge vector publication. The platform now has metadata and a
-candidate-retriever seam, but derived vector documents must not be published
-until `add_evidence`, `revert_evidence` and supersession invalidation behavior
-is defined.
+Next implementation step: prepare Slice 5 runtime proof planning. The platform
+now has metadata, a candidate-retriever seam and lifecycle invalidation hooks,
+but still should not publish Project Knowledge vector documents until a local
+proof can show active -> revert/supersede -> no influence with canonical
+re-checks.

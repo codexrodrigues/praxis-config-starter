@@ -324,7 +324,12 @@ class DomainKnowledgeChangeSetServiceTest {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
         DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
-        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        ProjectKnowledgeDerivedIndexService derivedIndexService = mock(ProjectKnowledgeDerivedIndexService.class);
+        DomainKnowledgeChangeSetService service = service(
+                repository,
+                conceptRepository,
+                evidenceRepository,
+                derivedIndexService);
         DomainKnowledgeChangeSet existing = persisted(validRequest());
         existing.setStatus("approved");
         DomainKnowledgeConcept concept = concept();
@@ -359,6 +364,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(evidenceCaptor.getValue().getSubjectId()).isEqualTo(concept.getId());
         assertThat(evidenceCaptor.getValue().getEvidenceType()).isEqualTo("llm_proposal");
         assertThat(evidenceCaptor.getValue().getPayload()).contains("CPF is personal data");
+        verify(derivedIndexService).evidenceActivated(concept, evidenceCaptor.getValue());
     }
 
     @Test
@@ -366,7 +372,12 @@ class DomainKnowledgeChangeSetServiceTest {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
         DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
-        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        ProjectKnowledgeDerivedIndexService derivedIndexService = mock(ProjectKnowledgeDerivedIndexService.class);
+        DomainKnowledgeChangeSetService service = service(
+                repository,
+                conceptRepository,
+                evidenceRepository,
+                derivedIndexService);
         DomainKnowledgeChangeSet existing = persisted(revertEvidenceRequest());
         existing.setStatus("approved");
         DomainKnowledgeConcept concept = concept();
@@ -397,6 +408,8 @@ class DomainKnowledgeChangeSetServiceTest {
                 "llm-proposal:funcionarios:cpf-guidance:v2",
                 "active"))
                 .thenReturn(List.of(replacement));
+        when(evidenceRepository.save(any(DomainKnowledgeEvidence.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         var response = service.apply(existing.getId(), TENANT, ENVIRONMENT);
 
@@ -410,6 +423,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(evidenceCaptor.getValue().getRevertReason())
                 .contains("superseded by a reviewed accessibility guideline");
         assertThat(evidenceCaptor.getValue().getSupersededByEvidenceId()).isEqualTo(replacement.getId());
+        verify(derivedIndexService).evidenceDeactivated(concept, evidenceCaptor.getValue());
     }
 
     @Test
@@ -417,7 +431,12 @@ class DomainKnowledgeChangeSetServiceTest {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
         DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
-        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        ProjectKnowledgeDerivedIndexService derivedIndexService = mock(ProjectKnowledgeDerivedIndexService.class);
+        DomainKnowledgeChangeSetService service = service(
+                repository,
+                conceptRepository,
+                evidenceRepository,
+                derivedIndexService);
         DomainKnowledgeChangeSet existing = persisted(revertEvidenceWithoutReplacementRequest());
         existing.setStatus("approved");
         DomainKnowledgeConcept concept = concept();
@@ -438,6 +457,8 @@ class DomainKnowledgeChangeSetServiceTest {
                 "llm-proposal:funcionarios:cpf-guidance:v1",
                 "active"))
                 .thenReturn(List.of(evidence));
+        when(evidenceRepository.save(any(DomainKnowledgeEvidence.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         var response = service.apply(existing.getId(), TENANT, ENVIRONMENT);
 
@@ -451,6 +472,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(evidenceCaptor.getValue().getRevertReason())
                 .contains("withdrawn from future authoring influence");
         assertThat(evidenceCaptor.getValue().getSupersededByEvidenceId()).isNull();
+        verify(derivedIndexService).evidenceDeactivated(concept, evidenceCaptor.getValue());
     }
 
     @Test
@@ -639,12 +661,25 @@ class DomainKnowledgeChangeSetServiceTest {
             DomainKnowledgeChangeSetRepository repository,
             DomainKnowledgeConceptRepository conceptRepository,
             DomainKnowledgeEvidenceRepository evidenceRepository) {
+        return service(
+                repository,
+                conceptRepository,
+                evidenceRepository,
+                mock(ProjectKnowledgeDerivedIndexService.class));
+    }
+
+    private DomainKnowledgeChangeSetService service(
+            DomainKnowledgeChangeSetRepository repository,
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            ProjectKnowledgeDerivedIndexService derivedIndexService) {
         return new DomainKnowledgeChangeSetService(
                 repository,
                 conceptRepository,
                 evidenceRepository,
                 validator,
-                objectMapper);
+                objectMapper,
+                derivedIndexService);
     }
 
     private DomainKnowledgeChangeSet persisted(DomainKnowledgeChangeSetCreateRequest request) {
