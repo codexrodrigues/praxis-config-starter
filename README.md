@@ -458,6 +458,19 @@ Full quickstart smoke:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart
 ```
 
+Governed Domain Knowledge change-set runtime smoke, after packaging the
+quickstart against the local starter and starting it with Domain Knowledge
+projection enabled:
+
+```bash
+BACKEND_URL=http://localhost:8088 TENANT_ID=desenv ENVIRONMENT=local \
+tools/local-e2e/run-domain-knowledge-change-set-local.sh
+```
+
+Use `CURL_MAX_TIME=90` or another explicit timeout when diagnosing slow local
+ingestion against Neon; the wrapper passes timing controls through to the
+quickstart-owned smoke.
+
 The quickstart smoke uses `PRAXIS_AI_STREAM_PROCESSING_TIMEOUT_SECONDS=180` by default.
 Keep that value for real provider runs; reduce it only for deterministic mocks or
 isolated unit/integration tests.
