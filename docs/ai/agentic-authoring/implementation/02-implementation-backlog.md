@@ -332,9 +332,10 @@ corte.
 
 Plano detalhado: [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
 
-Status: baseline local-first implementado; proximo passo recomendado e fechar
-checkpoint/readiness antes de qualquer novo contrato publico ou operacao
-destrutiva.
+Status: baseline local-first implementado; checkpoints de readiness operacional
+e contrato/corpus fechados em 2026-05-01. Proximo passo recomendado e escolher
+uma nova capacidade explicita antes de qualquer novo contrato publico ou
+operacao destrutiva.
 
 Inventario inicial concluido em 2026-05-01 no plano detalhado da fase. A
 implementacao comecou pelo lifecycle canonico de evidencia e pelos pontos de
@@ -380,6 +381,13 @@ Browser retrieval proof concluido em 2026-05-01 no Page Builder real:
 nao contem o mesmo conceito depois do `revert_evidence` governado. A lane
 passou com `2 passed (1.3m)`, sem GitHub Actions e com limpeza das portas
 locais `8098`/`4083`.
+
+Contract/corpus checkpoint concluido em 2026-05-01: o OpenAPI v1.1 passou a
+documentar create/list/read/validate/status/apply/timeline de Domain Knowledge
+change sets; os bindings Java e Angular foram regenerados; o corpus HTTP ganhou
+um exemplo `referenceOnly` para `add_evidence` e `revert_evidence`; e
+`npm run smoke:corpus-promises` confirmou que a superficie LLM operacional
+continua limitada a exemplos seguros.
 
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 

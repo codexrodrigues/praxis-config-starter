@@ -42,9 +42,12 @@ materializacao. A reversibilidade governada de Domain Knowledge
 (`revert_evidence`) tambem ja tem baseline funcional local-first: lifecycle de
 evidencia, validacao, apply transacional, timeline segura, smoke HTTP com Neon,
 retrieval filtering e prova browser no Page Builder confirmando que evidencia
-revertida deixa de aparecer como Project Knowledge ativo. A proxima capacidade
-recomendada e fechar o checkpoint documental/release-readiness dessa fase e so
-depois planejar novos tipos de escrita sem promover `delete_*` por atalho.
+revertida deixa de aparecer como Project Knowledge ativo. O checkpoint
+documental/release-readiness dessa fase tambem esta fechado: contrato OpenAPI,
+bindings gerados e corpus HTTP derivado estao alinhados sem promover o exemplo
+mutavel para `llmOperational` e sem publicar novo Maven/npm. A proxima
+capacidade deve ser planejada separadamente antes de novos tipos de escrita,
+sem promover `delete_*` por atalho.
 
 ## Ordem de leitura
 
@@ -57,9 +60,10 @@ depois planejar novos tipos de escrita sem promover `delete_*` por atalho.
 7. [08-page-builder-continuity-phase.md](./08-page-builder-continuity-phase.md)
 8. [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
 9. [release-readiness-2026-05-01-domain-knowledge-revert.md](../../release-readiness-2026-05-01-domain-knowledge-revert.md)
-10. [01-current-state-and-target.md](./01-current-state-and-target.md)
-11. [02-implementation-backlog.md](./02-implementation-backlog.md)
-12. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+10. [release-readiness-2026-05-01-domain-knowledge-contract-corpus.md](../../release-readiness-2026-05-01-domain-knowledge-contract-corpus.md)
+11. [01-current-state-and-target.md](./01-current-state-and-target.md)
+12. [02-implementation-backlog.md](./02-implementation-backlog.md)
+13. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -73,7 +77,10 @@ como change set governado, validado e aprovado antes de aplicar.
 continuidade governada no cockpit. `09-domain-knowledge-revert-phase.md`
 registra o baseline local-first de reversibilidade governada, e
 `release-readiness-2026-05-01-domain-knowledge-revert.md` registra o checkpoint
-operacional dessa fase sem transformar o fechamento em publicacao. Antes de
+operacional dessa fase sem transformar o fechamento em publicacao.
+`release-readiness-2026-05-01-domain-knowledge-contract-corpus.md` fecha o
+checkpoint posterior de contrato/corpus: OpenAPI, binding Angular e corpus HTTP
+estao sincronizados, mas o exemplo mutavel permanece `referenceOnly`. Antes de
 ampliar operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve
 preservar essa semantica de revert/supersede sem deletar evidencia ou expor
 payload bruto. Os documentos anteriores continuam uteis como historico e
