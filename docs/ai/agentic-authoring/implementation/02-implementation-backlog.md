@@ -481,6 +481,26 @@ continua limitada a exemplos seguros.
 - Concluido em 2026-05-01 no `praxis-ui-angular` com
   `run-project-knowledge-audit-cockpit-local.sh`; resultado `2 passed (1.3m)`.
 
+### Item 31. Decidir se supersession vira operacao propria
+
+Plano detalhado:
+[10-domain-knowledge-supersede-evidence-plan.md](./10-domain-knowledge-supersede-evidence-plan.md)
+
+**Objetivo**
+- decidir se `supersede_evidence` deve virar operacao semantica propria ou se
+  o beta deve manter `revert_evidence + replacementEvidenceKey` como caminho
+  canonico de substituicao de influencia.
+
+**Definition of Done**
+- decisao registrada antes de alterar OpenAPI ou UI;
+- nenhum `delete_*` ou `replace_*` promovido por atalho;
+- nenhum Page Builder action criado antes de validacao/apply backend estavel;
+- se virar contrato publico, bindings e corpus derivados entram no mesmo ciclo.
+
+**Status**
+- Planejado em 2026-05-01. Proximo passo recomendado e executar somente o
+  inventario semantico de Slice 1 antes de qualquer codigo.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.

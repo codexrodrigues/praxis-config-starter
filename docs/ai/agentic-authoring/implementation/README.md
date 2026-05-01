@@ -61,9 +61,10 @@ sem promover `delete_*` por atalho.
 8. [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
 9. [release-readiness-2026-05-01-domain-knowledge-revert.md](../../release-readiness-2026-05-01-domain-knowledge-revert.md)
 10. [release-readiness-2026-05-01-domain-knowledge-contract-corpus.md](../../release-readiness-2026-05-01-domain-knowledge-contract-corpus.md)
-11. [01-current-state-and-target.md](./01-current-state-and-target.md)
-12. [02-implementation-backlog.md](./02-implementation-backlog.md)
-13. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+11. [10-domain-knowledge-supersede-evidence-plan.md](./10-domain-knowledge-supersede-evidence-plan.md)
+12. [01-current-state-and-target.md](./01-current-state-and-target.md)
+13. [02-implementation-backlog.md](./02-implementation-backlog.md)
+14. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -80,15 +81,18 @@ registra o baseline local-first de reversibilidade governada, e
 operacional dessa fase sem transformar o fechamento em publicacao.
 `release-readiness-2026-05-01-domain-knowledge-contract-corpus.md` fecha o
 checkpoint posterior de contrato/corpus: OpenAPI, binding Angular e corpus HTTP
-estao sincronizados, mas o exemplo mutavel permanece `referenceOnly`. Antes de
-ampliar operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve
-preservar essa semantica de revert/supersede sem deletar evidencia ou expor
-payload bruto. Os documentos anteriores continuam uteis como historico e
-diagnostico, mas devem ser interpretados pela direcao atual: Page Builder
-authora componentes/paginas, decisoes compartilhadas de negocio devem seguir
-por `/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir
-pela fronteira `domain_knowledge_change_set`, e correcoes de conhecimento
-aplicado devem seguir por revert/supersede governado.
+estao sincronizados, mas o exemplo mutavel permanece `referenceOnly`.
+`10-domain-knowledge-supersede-evidence-plan.md` e o proximo plano ativo: ele
+decide se `supersede_evidence` merece virar operacao semantica propria ou se o
+beta deve manter `revert_evidence + replacementEvidenceKey`. Antes de ampliar
+operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
+essa semantica de revert/supersede sem deletar evidencia ou expor payload
+bruto. Os documentos anteriores continuam uteis como historico e diagnostico,
+mas devem ser interpretados pela direcao atual: Page Builder authora
+componentes/paginas, decisoes compartilhadas de negocio devem seguir por
+`/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir pela
+fronteira `domain_knowledge_change_set`, e correcoes de conhecimento aplicado
+devem seguir por revert/supersede governado.
 
 ## Baseline de reaproveitamento
 
