@@ -193,6 +193,28 @@ Still intentionally pending:
 - protected HTTP/browser proof of create -> validate -> approve -> apply ->
   timeline for revert.
 
+## Slice 5 Timeline Baseline - 2026-05-01
+
+Applied `revert_evidence` change sets now emit safe lifecycle timeline events.
+
+Timeline boundary:
+
+- `evidence.reverted` is emitted after `change_set.applied` for applied
+  revert operations.
+- `evidence.superseded` is emitted when the revert operation references a
+  governed replacement evidence key.
+- timeline events expose operation type, target concept keys, status,
+  validation status and safe summary only.
+- timeline events do not expose evidence keys, replacement evidence keys,
+  source pointer, source URI, patch hash, prompt, transcript or raw payload.
+
+Still intentionally pending:
+
+- runtime/authoring retrieval filtering that excludes reverted evidence by
+  default.
+- protected HTTP/browser proof of create -> validate -> approve -> apply ->
+  timeline for revert.
+
 ## Canonical Direction
 
 Model rollback as **revert/supersede**, not deletion.

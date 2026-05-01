@@ -550,6 +550,44 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(safeSurface).doesNotContain("patchHash");
     }
 
+    @Test
+    void timelineReturnsSafeEvidenceRevertLifecycleWithoutEvidencePayload() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(revertEvidenceRequest());
+        existing.setStatus("applied");
+        existing.setReviewerId("reviewer:alice");
+        existing.setReviewedAt(Instant.parse("2026-05-01T10:15:30Z"));
+        existing.setAppliedAt(Instant.parse("2026-05-01T10:16:30Z"));
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        var timeline = service.timeline(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(timeline.events()).extracting("eventType")
+                .containsExactly(
+                        "change_set.created",
+                        "validation.completed",
+                        "review.approved",
+                        "change_set.applied",
+                        "evidence.reverted",
+                        "evidence.superseded");
+        assertThat(timeline.events()).allSatisfy(event -> {
+            assertThat(event.visibility()).isEqualTo("safe");
+            assertThat(event.operationTypes()).containsExactly("revert_evidence");
+            assertThat(event.targetConceptKeys()).containsExactly("human-resources.funcionarios.field.cpf");
+        });
+        assertThat(timeline.events()).anySatisfy(event -> {
+            assertThat(event.eventType()).isEqualTo("evidence.reverted");
+            assertThat(event.summary()).isEqualTo("Domain Knowledge evidence reverted");
+        });
+        String safeSurface = timeline.events().toString();
+        assertThat(safeSurface).doesNotContain("llm-proposal:funcionarios:cpf-guidance:v1");
+        assertThat(safeSurface).doesNotContain("llm-proposal:funcionarios:cpf-guidance:v2");
+        assertThat(safeSurface).doesNotContain("replacementEvidenceKey");
+        assertThat(safeSurface).doesNotContain("sourcePointer");
+        assertThat(safeSurface).doesNotContain("patchHash");
+    }
+
     private DomainKnowledgeChangeSetService service(DomainKnowledgeChangeSetRepository repository) {
         return service(
                 repository,

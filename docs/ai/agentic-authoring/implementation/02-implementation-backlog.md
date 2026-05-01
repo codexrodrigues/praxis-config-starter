@@ -348,6 +348,10 @@ provas, mas apply/repository checks ainda ficam no proximo slice.
 Apply baseline iniciado em 2026-05-01: `revert_evidence` agora exige evidencia
 ativa no mesmo conceito e aplica lifecycle `reverted` sem delete fisico.
 
+Timeline baseline iniciado em 2026-05-01: change sets aplicados com
+`revert_evidence` emitem eventos seguros `evidence.reverted` e
+`evidence.superseded`, sem expor chaves ou payload bruto.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**

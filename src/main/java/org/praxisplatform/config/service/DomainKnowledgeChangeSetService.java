@@ -151,8 +151,9 @@ public class DomainKnowledgeChangeSetService {
             String environment) {
         DomainKnowledgeChangeSet changeSet = findInScope(id, tenantId, environment);
         JsonNode validation = read(changeSet.getValidationResult());
+        List<JsonNode> patchOperations = readPatch(changeSet.getPatch());
         List<DomainKnowledgeChangeSetOperationSummary> summaries =
-                readPatch(changeSet.getPatch()).stream()
+                patchOperations.stream()
                         .map(this::toOperationSummary)
                         .toList();
         List<String> operationTypes = summaries.stream()
@@ -222,6 +223,14 @@ public class DomainKnowledgeChangeSetService {
                 operationCount,
                 operationTypes,
                 targetConceptKeys);
+        addEvidenceLifecycleTimelineEvents(
+                events,
+                changeSet,
+                patchOperations,
+                validationStatus,
+                operationCount,
+                operationTypes,
+                targetConceptKeys);
         events.sort(Comparator
                 .comparingInt((DomainKnowledgeChangeSetTimelineEventResponse event) -> timelineEventOrder(event.eventType()))
                 .thenComparing(DomainKnowledgeChangeSetTimelineEventResponse::occurredAt, Comparator.nullsLast(Comparator.naturalOrder()))
@@ -249,8 +258,54 @@ public class DomainKnowledgeChangeSetService {
             case "validation.completed" -> 20;
             case "review.approved", "review.rejected" -> 30;
             case "change_set.applied" -> 40;
+            case "evidence.reverted" -> 50;
+            case "evidence.superseded" -> 60;
             default -> 100;
         };
+    }
+
+    private void addEvidenceLifecycleTimelineEvents(
+            List<DomainKnowledgeChangeSetTimelineEventResponse> events,
+            DomainKnowledgeChangeSet changeSet,
+            List<JsonNode> patchOperations,
+            String validationStatus,
+            int operationCount,
+            List<String> operationTypes,
+            List<String> targetConceptKeys) {
+        if (changeSet.getAppliedAt() == null) {
+            return;
+        }
+        for (JsonNode operation : patchOperations) {
+            if (!"revert_evidence".equals(normalize(operation.path("operationType").asText(null)))) {
+                continue;
+            }
+            addTimelineEvent(
+                    events,
+                    "evidence.reverted",
+                    changeSet.getAppliedAt(),
+                    "system",
+                    "domain-knowledge-patch-applier",
+                    "Domain Knowledge evidence reverted",
+                    changeSet.getStatus(),
+                    validationStatus,
+                    operationCount,
+                    operationTypes,
+                    targetConceptKeys);
+            if (StringUtils.hasText(operation.path("payload").path("replacementEvidenceKey").asText(null))) {
+                addTimelineEvent(
+                        events,
+                        "evidence.superseded",
+                        changeSet.getAppliedAt(),
+                        "system",
+                        "domain-knowledge-patch-applier",
+                        "Domain Knowledge evidence superseded by governed replacement evidence",
+                        changeSet.getStatus(),
+                        validationStatus,
+                        operationCount,
+                        operationTypes,
+                        targetConceptKeys);
+            }
+        }
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
