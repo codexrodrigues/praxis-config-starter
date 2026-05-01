@@ -378,6 +378,53 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
         verifyNoMoreInteractions(evidenceRepository);
     }
 
+    @Test
+    void rechecksCanonicalActiveEvidenceForExternallyRetrievedCandidates() {
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeConcept candidate = concept(
+                "tenant-a",
+                "dev",
+                "human-resources",
+                "human-resources.funcionarios",
+                "active",
+                "approved",
+                "allow",
+                "{\"kind\":\"project_preference\",\"summary\":\"Candidate from derived retrieval.\"}");
+        AgenticAuthoringProjectKnowledgeCandidateRetriever derivedRetriever = query -> List.of(candidate);
+        AgenticAuthoringProjectKnowledgeService service = new AgenticAuthoringProjectKnowledgeService(
+                conceptRepository,
+                evidenceRepository,
+                objectMapper,
+                redactor,
+                derivedRetriever);
+        givenActiveEvidence(evidenceRepository, candidate);
+
+        List<AgenticAuthoringProjectKnowledgeProjection> projections = service.retrieve(
+                new AgenticAuthoringProjectKnowledgeQuery(
+                        "tenant-a",
+                        "dev",
+                        "human-resources",
+                        "human-resources.funcionarios",
+                        List.of("project_preference"),
+                        "concept",
+                        5));
+
+        assertThat(projections)
+                .singleElement()
+                .satisfies(projection -> {
+                    assertThat(projection.summary()).isEqualTo("Candidate from derived retrieval.");
+                    assertThat(projection.evidence()).contains("domain-knowledge:evidence-status:active");
+                });
+        verifyNoInteractions(conceptRepository);
+        verify(evidenceRepository).findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("concept"),
+                eq(candidate.getId()),
+                eq("active"));
+    }
+
     private DomainKnowledgeConcept concept(
             String tenantId,
             String environment,

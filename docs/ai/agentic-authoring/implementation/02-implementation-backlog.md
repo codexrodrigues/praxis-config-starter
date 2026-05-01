@@ -535,6 +535,13 @@ definir metadata derivada/provenance para Project Knowledge sem payload bruto,
 sem `sourceUri`, sem `sourcePointer`, sem publicacao vetorial e sem influencia
 em `contextHints.projectKnowledge`.
 
+Slice 3 concluido em 2026-05-01: `AgenticAuthoringProjectKnowledgeCandidateRetriever`
+e `RepositoryBackedProjectKnowledgeCandidateRetriever` separam discovery de
+candidatos da validacao canonica final. O servico de Project Knowledge continua
+dono dos filtros de lifecycle, curation, AI visibility, escopo, kind e evidencia
+`active`, e o teste focal prova que candidatos de origem derivada ainda passam
+por re-check canonico antes de virar projection.
+
 ### Item 32. Travar invariantes de Project Knowledge antes de RAG
 
 **Objetivo**

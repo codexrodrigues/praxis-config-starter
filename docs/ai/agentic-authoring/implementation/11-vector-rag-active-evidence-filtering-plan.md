@@ -1,6 +1,6 @@
 # Vector/RAG Active Evidence Filtering Plan
 
-Status: Slice 2 metadata/provenance baseline complete
+Status: Slice 3 candidate retriever baseline complete
 Date: 2026-05-01
 Scope: next capability slice after Domain Knowledge supersession runtime proof
 
@@ -198,6 +198,21 @@ Definition of Done:
   disabled or unavailable;
 - no public contract changes are required.
 
+Implementation result:
+
+- completed on 2026-05-01 as an internal baseline, not a vector-enabled
+  retrieval path;
+- `AgenticAuthoringProjectKnowledgeCandidateRetriever` separates candidate
+  discovery from canonical influence validation;
+- `RepositoryBackedProjectKnowledgeCandidateRetriever` preserves the existing
+  repository-backed retrieval behavior;
+- `AgenticAuthoringProjectKnowledgeService` still owns the final checks for
+  lifecycle, curation status, AI visibility, scope, kind and active evidence;
+- tests prove a candidate returned by a derived/external retriever is still
+  re-checked against canonical active evidence before projection;
+- no vector search, vector publication or prompt injection from vector hits was
+  introduced.
+
 ### Slice 4 - Lifecycle Invalidation
 
 Objective:
@@ -258,7 +273,8 @@ Slice 1 completed on 2026-05-01:
 - No current Project Knowledge influence path depends on `RagVectorStoreService`,
   `ContextRetrievalService`, `AiRagContextService` or `VectorStore`.
 
-Next implementation step: move to Slice 3 by designing the optional candidate
-retriever interface and canonical re-check path. Do not publish Project
-Knowledge documents or inject vector hits directly into prompts until that
-re-check path exists.
+Next implementation step: plan Slice 4 lifecycle invalidation before enabling
+any Project Knowledge vector publication. The platform now has metadata and a
+candidate-retriever seam, but derived vector documents must not be published
+until `add_evidence`, `revert_evidence` and supersession invalidation behavior
+is defined.

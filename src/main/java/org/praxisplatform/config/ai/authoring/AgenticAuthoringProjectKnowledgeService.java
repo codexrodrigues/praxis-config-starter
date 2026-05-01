@@ -4,18 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
 import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.praxisplatform.config.service.AiSensitiveDataRedactor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 @ConditionalOnBean({DomainKnowledgeConceptRepository.class, DomainKnowledgeEvidenceRepository.class})
 public class AgenticAuthoringProjectKnowledgeService {
 
@@ -25,6 +24,50 @@ public class AgenticAuthoringProjectKnowledgeService {
     private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final ObjectMapper objectMapper;
     private final AiSensitiveDataRedactor redactor;
+    private final AgenticAuthoringProjectKnowledgeCandidateRetriever candidateRetriever;
+
+    public AgenticAuthoringProjectKnowledgeService(
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            ObjectMapper objectMapper,
+            AiSensitiveDataRedactor redactor) {
+        this(
+                conceptRepository,
+                evidenceRepository,
+                objectMapper,
+                redactor,
+                (AgenticAuthoringProjectKnowledgeCandidateRetriever) null);
+    }
+
+    @Autowired
+    public AgenticAuthoringProjectKnowledgeService(
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            ObjectMapper objectMapper,
+            AiSensitiveDataRedactor redactor,
+            ObjectProvider<AgenticAuthoringProjectKnowledgeCandidateRetriever> candidateRetrieverProvider) {
+        this(
+                conceptRepository,
+                evidenceRepository,
+                objectMapper,
+                redactor,
+                candidateRetrieverProvider == null ? null : candidateRetrieverProvider.getIfAvailable());
+    }
+
+    AgenticAuthoringProjectKnowledgeService(
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            ObjectMapper objectMapper,
+            AiSensitiveDataRedactor redactor,
+            AgenticAuthoringProjectKnowledgeCandidateRetriever candidateRetriever) {
+        this.conceptRepository = conceptRepository;
+        this.evidenceRepository = evidenceRepository;
+        this.objectMapper = objectMapper;
+        this.redactor = redactor;
+        this.candidateRetriever = candidateRetriever != null
+                ? candidateRetriever
+                : new RepositoryBackedProjectKnowledgeCandidateRetriever(conceptRepository);
+    }
 
     public List<AgenticAuthoringProjectKnowledgeProjection> retrieve(
             AgenticAuthoringProjectKnowledgeQuery query) {
@@ -33,13 +76,7 @@ public class AgenticAuthoringProjectKnowledgeService {
                 || !StringUtils.hasText(query.environment())) {
             return List.of();
         }
-        List<DomainKnowledgeConcept> candidates = conceptRepository.findGovernedProjectKnowledgeCandidates(
-                query.tenantId(),
-                query.environment(),
-                query.contextKey(),
-                query.resourceKey(),
-                query.nodeType(),
-                PageRequest.of(0, query.limit()));
+        List<DomainKnowledgeConcept> candidates = candidateRetriever.retrieve(query);
         List<AgenticAuthoringProjectKnowledgeProjection> projections = new ArrayList<>();
         for (DomainKnowledgeConcept candidate : candidates) {
             if (!isGovernedCandidate(candidate) || !matchesScope(candidate, query)) {
