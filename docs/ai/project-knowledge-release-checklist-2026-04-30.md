@@ -14,8 +14,8 @@ Do not use it to justify a Maven Central or npm publication by itself.
 
 ## Current Phase State
 
-The checkpoint is complete as internal beta evidence for read-only governed
-Project Knowledge:
+The original checkpoint is complete as internal beta evidence for read-only
+governed Project Knowledge:
 
 - canonical storage remains the Domain Knowledge layer;
 - authoring influence is read-only and filtered to approved, active and
@@ -24,6 +24,19 @@ Project Knowledge:
 - Page Builder renders citation-count explanation only;
 - local browser/LLM proof exists through a versioned wrapper in
   `praxis-ui-angular`.
+
+As of 2026-05-01, the next beta slice also has source-level evidence for
+governed writes:
+
+- LLM-authored continuation of Project Knowledge goes through
+  `/api/praxis/config/domain-knowledge/change-sets`;
+- the Page Builder cockpit can create, validate, approve, apply and read back
+  a governed `add_evidence` proposal;
+- unsupported evidence payloads are rejected by config-starter validation
+  before database constraints can surface as generic runtime failures;
+- source semantics such as `project_preference` remain payload/source metadata,
+  while persisted evidence type stays canonical (`llm_proposal` in the Page
+  Builder continuation path).
 
 ## Local-First Gates
 
@@ -58,9 +71,11 @@ Expected:
 - the wrapper installs the local config starter into the local Maven repository;
 - quickstart starts on an isolated API port;
 - Angular starts on an isolated UI port;
-- Playwright proves the Project Knowledge audit status in Page Builder;
-- the status contains safe citation information;
-- the status does not expose raw payloads, concept keys, source summaries or
+- Playwright proves the Project Knowledge cockpit creates a governed Domain
+  Knowledge change-set;
+- the cockpit validates, approves, applies and reads back the proposal through
+  the backend;
+- the cockpit does not expose raw payloads, concept keys, source summaries or
   knowledge summaries.
 
 ### Docs Gate
@@ -142,8 +157,8 @@ Do not close this checkpoint if any of these happen:
 This checklist does not include:
 
 - vector/RAG ranking;
-- LLM-authored Project Knowledge writes;
-- change-set approval/rollback for memory writes;
 - external package publication.
 
-Those require separate implementation plans and separate gates.
+Rollback, broader operation types beyond the current governed `add_evidence`
+slice, vector/RAG ranking and external publication still require separate
+implementation plans and separate gates.
