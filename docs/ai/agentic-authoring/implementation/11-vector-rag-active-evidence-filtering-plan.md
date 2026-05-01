@@ -1,6 +1,6 @@
 # Vector/RAG Active Evidence Filtering Plan
 
-Status: Slice 4 lifecycle invalidation hook baseline complete
+Status: Slice 5 runtime proof plan complete
 Date: 2026-05-01
 Scope: next capability slice after Domain Knowledge supersession runtime proof
 
@@ -261,6 +261,53 @@ Definition of Done:
   authoring turn;
 - no GitHub Actions are used during normal iteration.
 
+Runtime proof plan:
+
+- Do not publish Project Knowledge vector documents yet. The current proof lane
+  is vector-disabled and validates canonical lifecycle behavior.
+- Package `praxis-api-quickstart` against the local `praxis-config-starter`
+  artifact and run it with the configured Neon datasource, not a local database.
+- Use the existing quickstart smoke to prove repository-backed canonical
+  behavior:
+
+```bash
+BACKEND_URL=http://localhost:8099 \
+TENANT_ID=desenv \
+ENVIRONMENT=local \
+REQUIRE_CHANGE_SET_TIMELINE=true \
+REQUIRE_EVIDENCE_REVERT=true \
+REQUIRE_PROJECT_KNOWLEDGE_RETRIEVAL=true \
+AUTHORING_STREAM_MAX_TIME=180 \
+scripts/verify-domain-knowledge-change-set-runtime.sh
+```
+
+- Use the supersession variant to prove replacement-backed lifecycle does not
+  emit duplicate revert semantics and keeps only active replacement influence:
+
+```bash
+BACKEND_URL=http://localhost:8099 \
+TENANT_ID=desenv \
+ENVIRONMENT=local \
+REQUIRE_CHANGE_SET_TIMELINE=true \
+REQUIRE_EVIDENCE_SUPERSESSION=true \
+AUTHORING_STREAM_MAX_TIME=180 \
+scripts/verify-domain-knowledge-change-set-runtime.sh
+```
+
+Slice 5 is complete only for the vector-disabled baseline when those smokes are
+run against a quickstart packaged with the local starter changes and still show:
+
+- active evidence can influence Project Knowledge retrieval;
+- plain reverted evidence stops influencing later authoring;
+- replacement-backed supersession emits `evidence.superseded`, not duplicate
+  `evidence.reverted`;
+- Project Knowledge influence remains repository-backed and canonically
+  re-checked.
+
+Vector-enabled proof remains blocked until a real Project Knowledge derived
+index implementation exists and can prove active -> revert/supersede -> no
+influence with canonical re-checks.
+
 ## Stop Conditions
 
 Do not implement vector/RAG Project Knowledge ranking if any of these happen:
@@ -288,8 +335,7 @@ Slice 1 completed on 2026-05-01:
 - No current Project Knowledge influence path depends on `RagVectorStoreService`,
   `ContextRetrievalService`, `AiRagContextService` or `VectorStore`.
 
-Next implementation step: prepare Slice 5 runtime proof planning. The platform
-now has metadata, a candidate-retriever seam and lifecycle invalidation hooks,
-but still should not publish Project Knowledge vector documents until a local
-proof can show active -> revert/supersede -> no influence with canonical
-re-checks.
+Next implementation step: run the Slice 5 vector-disabled runtime proof in
+`praxis-api-quickstart` against Neon with the local starter installed. If it is
+green, record the observed result here before considering any vector-enabled
+Project Knowledge index implementation.

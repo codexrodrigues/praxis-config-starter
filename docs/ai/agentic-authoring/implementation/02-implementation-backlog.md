@@ -549,6 +549,13 @@ para indice derivado sem publicar Project Knowledge em vector store. O apply de
 desativacao derivada da evidencia anterior. Testes focais cobrem add, revert e
 supersession.
 
+Slice 5 planejado em 2026-05-01: a primeira prova runtime deve ser
+vector-disabled, usando o quickstart local com Neon e os flags existentes
+`REQUIRE_PROJECT_KNOWLEDGE_RETRIEVAL=true`, `REQUIRE_EVIDENCE_REVERT=true` e
+`REQUIRE_EVIDENCE_SUPERSESSION=true`. Prova vector-enabled permanece bloqueada
+ate existir implementacao real de indice derivado que preserve re-check
+canonico.
+
 ### Item 32. Travar invariantes de Project Knowledge antes de RAG
 
 **Objetivo**
