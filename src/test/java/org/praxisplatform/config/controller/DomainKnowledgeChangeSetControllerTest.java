@@ -15,6 +15,7 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationSummary;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetResponse;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetStatusRequest;
+import org.praxisplatform.config.dto.DomainKnowledgeChangeSetTimelineResponse;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 
@@ -79,6 +80,30 @@ class DomainKnowledgeChangeSetControllerTest {
         assertThat(entity.getStatusCode().value()).isEqualTo(200);
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).validate(id, "tenant-a", "dev");
+    }
+
+    @Test
+    void returnsChangeSetTimelineByIdAndScope() {
+        DomainKnowledgeChangeSetService service = mock(DomainKnowledgeChangeSetService.class);
+        DomainKnowledgeChangeSetController controller = new DomainKnowledgeChangeSetController(service);
+        UUID id = UUID.randomUUID();
+        DomainKnowledgeChangeSetTimelineResponse response = new DomainKnowledgeChangeSetTimelineResponse(
+                id,
+                "tenant-a",
+                "dev",
+                "project-knowledge:employees:cpf:v1",
+                "applied",
+                "llm",
+                "openai:gpt-5.4",
+                "reviewer:alice",
+                List.of());
+        when(service.timeline(id, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.timeline(id, "tenant-a", "dev");
+
+        assertThat(entity.getStatusCode().value()).isEqualTo(200);
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).timeline(id, "tenant-a", "dev");
     }
 
     @Test

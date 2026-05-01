@@ -1,6 +1,6 @@
 # Governed Knowledge Writes Plan
 
-Status: implementation planning
+Status: first governed write lifecycle implemented; audit/timeline hardening in progress
 Date: 2026-04-30
 Scope: post-Phase 7 agentic authoring capability cut
 
@@ -54,7 +54,8 @@ Missing before implementation:
   revalidates persisted proposals and updates safe validation metadata;
 - approval/rejection transitions;
 - application service that mutates curated knowledge rows transactionally;
-- audit/timeline evidence for proposed, approved, rejected and applied changes;
+- done in the first safe timeline slice: read-only timeline evidence for
+  created, validation, review and applied lifecycle events;
 - browser E2E proving authoring cannot silently apply memory writes.
 
 ## Canonical Lifecycle
@@ -194,6 +195,8 @@ should implement the smallest safe subset:
   `PATCH /api/praxis/config/domain-knowledge/change-sets/{id}/status`;
 - done in the first apply HTTP slice for `add_evidence` only:
   `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`;
+- done in the first safe timeline slice:
+  `GET /api/praxis/config/domain-knowledge/change-sets/{id}/timeline`;
 - done in the create/list/get HTTP slice:
   `GET /api/praxis/config/domain-knowledge/change-sets`;
 - done in the create/list/get HTTP slice:
@@ -218,6 +221,8 @@ Suggested response DTOs:
 - `DomainKnowledgeChangeSetOperationSummary`
 - `DomainKnowledgeChangeSetValidationResponse`
 - `DomainKnowledgeChangeSetApplyResponse`
+- `DomainKnowledgeChangeSetTimelineResponse`
+- `DomainKnowledgeChangeSetTimelineEventResponse`
 
 Keep DTOs explicit. Do not expose the JPA entity directly through HTTP.
 
@@ -342,6 +347,7 @@ Browser E2E:
 | Validate | Validation results are deterministic, persisted and do not require an LLM call. |
 | Status transitions | Invalid transitions are blocked and reviewer metadata is captured. |
 | Apply first operation | `add_evidence` applies transactionally only after approval and valid persisted validation. |
+| Safe timeline | Timeline exposes created, validation, review and applied lifecycle events without raw patch/payload leakage. |
 | Quickstart corpus | Neon-backed HTTP flow proves create -> validate -> approve -> apply -> readback. |
 | Page Builder cockpit | UI creates proposals but cannot apply them silently during normal authoring. |
 | Browser E2E | Real browser proves no silent mutation before approval and citation after apply. |
@@ -393,7 +399,13 @@ Pause implementation if the design:
 6. Done in the first apply HTTP slice: approved, valid change sets can apply
    `add_evidence` to an existing concept in scope and are then marked
    `applied`; other operation types remain blocked.
-7. Quickstart HTTP corpus validated locally: `praxis-api-quickstart` owns
+7. Done in the first safe timeline slice: `GET
+   /api/praxis/config/domain-knowledge/change-sets/{id}/timeline` derives safe
+   lifecycle events from change-set metadata and validation result, exposing
+   only event type, timestamps, actors, status, validation status, operation
+   types and target concept keys. It does not expose raw patch, evidence
+   payload, `sourcePointer`, `sourceUri`, `patchHash`, prompt or chat history.
+8. Quickstart HTTP corpus validated locally: `praxis-api-quickstart` owns
    `scripts/verify-domain-knowledge-change-set-runtime.sh`, and
    `praxis-config-starter` exposes
    `tools/local-e2e/run-domain-knowledge-change-set-local.sh` as the canonical
@@ -401,8 +413,12 @@ Pause implementation if the design:
    starter, Domain Knowledge projection enabled and the Neon-backed config DB,
    proving `create -> validate -> approve -> apply -> readback` for safe
    `add_evidence`.
-8. Page Builder cockpit actions for proposal, review and explicit apply.
-9. Browser E2E proving no silent mutation and post-apply influence citation.
+9. Page Builder cockpit actions for proposal, review and explicit apply.
+10. Browser E2E proving no silent mutation and post-apply influence citation.
+11. Next hardening slice: rollback/revert semantics for applied evidence must
+    be planned before adding destructive operation types. The first rollback
+    design should preserve canonical evidence rows, prefer superseding/reverting
+    lifecycle state over deletion and expose only safe timeline events.
 
 ## Publication Decision
 

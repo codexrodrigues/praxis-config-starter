@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -364,6 +365,43 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThatThrownBy(() -> service.apply(existing.getId(), TENANT, ENVIRONMENT))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Target concept not found");
+    }
+
+    @Test
+    void timelineReturnsSafeLifecycleWithoutRawPatchPayload() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setStatus("applied");
+        existing.setReviewerId("reviewer:alice");
+        existing.setReviewedAt(Instant.parse("2026-05-01T10:15:30Z"));
+        existing.setAppliedAt(Instant.parse("2026-05-01T10:16:30Z"));
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        var timeline = service.timeline(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(timeline.changeSetId()).isEqualTo(existing.getId());
+        assertThat(timeline.changeSetKey()).isEqualTo(CHANGE_SET_KEY);
+        assertThat(timeline.events()).extracting("eventType")
+                .containsExactly(
+                        "change_set.created",
+                        "validation.completed",
+                        "review.approved",
+                        "change_set.applied");
+        assertThat(timeline.events()).allSatisfy(event -> {
+            assertThat(event.visibility()).isEqualTo("safe");
+            assertThat(event.operationTypes()).containsExactly("add_evidence");
+            assertThat(event.targetConceptKeys()).containsExactly("human-resources.funcionarios.field.cpf");
+        });
+        assertThat(timeline.events()).anySatisfy(event -> {
+            assertThat(event.eventType()).isEqualTo("validation.completed");
+            assertThat(event.validationStatus()).isEqualTo("valid");
+            assertThat(event.summary()).contains("0 errors").contains("0 warnings");
+        });
+        String safeSurface = timeline.events().toString();
+        assertThat(safeSurface).doesNotContain("CPF is personal data");
+        assertThat(safeSurface).doesNotContain("sourcePointer");
+        assertThat(safeSurface).doesNotContain("patchHash");
     }
 
     private DomainKnowledgeChangeSetService service(DomainKnowledgeChangeSetRepository repository) {
