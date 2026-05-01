@@ -7,6 +7,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
 import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.praxisplatform.config.service.AiSensitiveDataRedactor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.domain.PageRequest;
@@ -15,12 +16,13 @@ import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnBean(DomainKnowledgeConceptRepository.class)
+@ConditionalOnBean({DomainKnowledgeConceptRepository.class, DomainKnowledgeEvidenceRepository.class})
 public class AgenticAuthoringProjectKnowledgeService {
 
     private static final String MASKED_SUMMARY = "Knowledge payload masked by ai_visibility policy.";
 
     private final DomainKnowledgeConceptRepository conceptRepository;
+    private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final ObjectMapper objectMapper;
     private final AiSensitiveDataRedactor redactor;
 
@@ -46,6 +48,9 @@ public class AgenticAuthoringProjectKnowledgeService {
             JsonNode payload = payload(candidate);
             String kind = text(payload, "kind");
             if (!matchesKind(kind, query.kinds())) {
+                continue;
+            }
+            if (!hasActiveEvidence(candidate)) {
                 continue;
             }
             projections.add(toProjection(candidate, payload, kind));
@@ -123,6 +128,18 @@ public class AgenticAuthoringProjectKnowledgeService {
         return StringUtils.hasText(kind) && expectedKinds.contains(kind);
     }
 
+    private boolean hasActiveEvidence(DomainKnowledgeConcept concept) {
+        if (concept == null || concept.getId() == null) {
+            return false;
+        }
+        return !evidenceRepository.findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                concept.getTenantId(),
+                concept.getEnvironment(),
+                "concept",
+                concept.getId(),
+                "active").isEmpty();
+    }
+
     private String influence(DomainKnowledgeConcept concept, JsonNode payload) {
         String explicitInfluence = text(payload, "influence");
         if (StringUtils.hasText(explicitInfluence)) {
@@ -145,6 +162,7 @@ public class AgenticAuthoringProjectKnowledgeService {
         if (StringUtils.hasText(concept.getAiVisibility())) {
             evidence.add("ai-visibility:" + clean(concept.getAiVisibility()));
         }
+        evidence.add("domain-knowledge:evidence-status:active");
         if (concept.getSourceRelease() != null && StringUtils.hasText(concept.getSourceRelease().getReleaseKey())) {
             evidence.add("source-release:" + concept.getSourceRelease().getReleaseKey());
         }

@@ -16,7 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
+import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
 import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.praxisplatform.config.service.AiSensitiveDataRedactor;
 import org.springframework.data.domain.Pageable;
 
@@ -29,8 +31,10 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
     @Test
     void retrievesOnlyGovernedMatchingProjectKnowledgeAsSafeProjection() {
         DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
         AgenticAuthoringProjectKnowledgeService service = new AgenticAuthoringProjectKnowledgeService(
                 conceptRepository,
+                evidenceRepository,
                 objectMapper,
                 redactor);
         DomainCatalogRelease release = DomainCatalogRelease.builder()
@@ -103,6 +107,8 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                 eq("concept"),
                 any(Pageable.class)))
                 .thenReturn(List.of(allowed, masked, denied, draft, wrongKind));
+        givenActiveEvidence(evidenceRepository, allowed);
+        givenActiveEvidence(evidenceRepository, masked);
 
         List<AgenticAuthoringProjectKnowledgeProjection> projections = service.retrieve(
                 new AgenticAuthoringProjectKnowledgeQuery(
@@ -126,6 +132,7 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                     assertThat(projection.influence()).isEqualTo("layout_preference");
                     assertThat(projection.evidence()).contains(
                             "project-knowledge-kind:project_preference",
+                            "domain-knowledge:evidence-status:active",
                             "source-release:quickstart:human-resources:2026-04-30");
                 });
         assertThat(projections.get(1))
@@ -150,8 +157,10 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
     @Test
     void rejectsMissingTenantOrEnvironmentBeforeRepositoryAccess() {
         DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
         AgenticAuthoringProjectKnowledgeService service = new AgenticAuthoringProjectKnowledgeService(
                 conceptRepository,
+                evidenceRepository,
                 objectMapper,
                 redactor);
 
@@ -164,14 +173,16 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                 null,
                 5))).isEmpty();
 
-        verifyNoInteractions(conceptRepository);
+        verifyNoInteractions(conceptRepository, evidenceRepository);
     }
 
     @Test
     void clampsQueryLimitAndKeepsOnlyScopedMatches() {
         DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
         AgenticAuthoringProjectKnowledgeService service = new AgenticAuthoringProjectKnowledgeService(
                 conceptRepository,
+                evidenceRepository,
                 objectMapper,
                 redactor);
         DomainKnowledgeConcept scoped = concept(
@@ -209,6 +220,9 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                 eq(null),
                 any(Pageable.class)))
                 .thenReturn(List.of(scoped, global, otherScope));
+        givenActiveEvidence(evidenceRepository, scoped);
+        givenActiveEvidence(evidenceRepository, global);
+        givenActiveEvidence(evidenceRepository, otherScope);
 
         List<AgenticAuthoringProjectKnowledgeProjection> projections = service.retrieve(
                 new AgenticAuthoringProjectKnowledgeQuery(
@@ -234,6 +248,59 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
         assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(20);
     }
 
+    @Test
+    void excludesProjectKnowledgeWithoutActiveEvidence() {
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        AgenticAuthoringProjectKnowledgeService service = new AgenticAuthoringProjectKnowledgeService(
+                conceptRepository,
+                evidenceRepository,
+                objectMapper,
+                redactor);
+        DomainKnowledgeConcept revertedOnly = concept(
+                "tenant-a",
+                "dev",
+                "human-resources",
+                "human-resources.funcionarios",
+                "active",
+                "approved",
+                "allow",
+                "{\"kind\":\"project_preference\",\"summary\":\"Do not reuse reverted preference.\"}");
+        when(conceptRepository.findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("human-resources"),
+                eq("human-resources.funcionarios"),
+                eq("concept"),
+                any(Pageable.class)))
+                .thenReturn(List.of(revertedOnly));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("concept"),
+                eq(revertedOnly.getId()),
+                eq("active")))
+                .thenReturn(List.of());
+
+        List<AgenticAuthoringProjectKnowledgeProjection> projections = service.retrieve(
+                new AgenticAuthoringProjectKnowledgeQuery(
+                        "tenant-a",
+                        "dev",
+                        "human-resources",
+                        "human-resources.funcionarios",
+                        List.of("project_preference"),
+                        "concept",
+                        5));
+
+        assertThat(projections).isEmpty();
+        verify(evidenceRepository).findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("concept"),
+                eq(revertedOnly.getId()),
+                eq("active"));
+    }
+
     private DomainKnowledgeConcept concept(
             String tenantId,
             String environment,
@@ -257,5 +324,27 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                 .aiVisibility(aiVisibility)
                 .payload(payload)
                 .build();
+    }
+
+    private void givenActiveEvidence(
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            DomainKnowledgeConcept concept) {
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                eq(concept.getTenantId()),
+                eq(concept.getEnvironment()),
+                eq("concept"),
+                eq(concept.getId()),
+                eq("active")))
+                .thenReturn(List.of(DomainKnowledgeEvidence.builder()
+                        .id(UUID.randomUUID())
+                        .tenantId(concept.getTenantId())
+                        .environment(concept.getEnvironment())
+                        .evidenceKey("evidence:" + concept.getConceptKey())
+                        .subjectType("concept")
+                        .subjectId(concept.getId())
+                        .evidenceType("llm-proposal")
+                        .status("active")
+                        .payload("{}")
+                        .build()));
     }
 }

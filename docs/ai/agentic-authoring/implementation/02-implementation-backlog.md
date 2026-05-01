@@ -360,6 +360,11 @@ HTTP smoke Neon concluido em 2026-05-01 contra quickstart empacotado com o
 starter local: baseline timeline `eventCount=4`, revert timeline `eventCount=5`
 e `revertChecked=true`.
 
+Retrieval baseline iniciado em 2026-05-01: Project Knowledge usado por
+agentic authoring agora exige evidencia `active` vinculada ao conceito antes de
+entrar em `contextHints.projectKnowledge`; conceitos com evidencia apenas
+`reverted` ou `superseded` deixam de influenciar novos turnos.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**
@@ -415,6 +420,18 @@ e `revertChecked=true`.
 - UI so oferece acao quando backend expuser contrato estavel;
 - browser E2E prova que nao ha delecao local;
 - Actions continuam reservadas para gate de fase/release.
+
+### Item 29. Provar retirada de influencia no runtime
+
+**Objetivo**
+- provar por HTTP real que uma evidencia revertida deixa de alimentar
+  `contextHints.projectKnowledge` em turnos posteriores.
+
+**Definition of Done**
+- quickstart cria Project Knowledge, confirma retrieval ativo, aplica
+  `revert_evidence` e confirma ausencia do mesmo conhecimento no retrieval;
+- a prova usa Neon configurado e comandos locais, sem GitHub Actions;
+- docs registram o comando focal e o resultado observado.
 
 ## Regras operacionais para qualquer PR desta trilha
 

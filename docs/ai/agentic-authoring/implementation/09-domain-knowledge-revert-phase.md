@@ -210,8 +210,8 @@ Timeline boundary:
 
 Still intentionally pending:
 
-- runtime/authoring retrieval filtering that excludes reverted evidence by
-  default.
+- runtime/browser proof that a reverted evidence row no longer reaches
+  authoring retrieval after apply.
 - protected HTTP/browser proof of create -> validate -> approve -> apply ->
   timeline for revert.
 
@@ -258,8 +258,35 @@ Observed proof:
 
 Still intentionally pending:
 
-- runtime/authoring retrieval filtering that excludes reverted evidence by
-  default.
+- browser proof that Page Builder never offers reverted evidence as active
+  Project Knowledge.
+
+## Slice 7 Authoring Retrieval Baseline - 2026-05-01
+
+Project Knowledge retrieval for agentic authoring now requires active evidence.
+
+Retrieval boundary:
+
+- `AgenticAuthoringProjectKnowledgeService` still starts from governed concept
+  candidates: `lifecycle=active`, `curationStatus=approved` and LLM-safe
+  `aiVisibility`.
+- before projecting a concept into the authoring context, the service requires
+  at least one `domain_knowledge_evidence` row for the same
+  tenant/environment, `subjectType=concept`, matching concept id and
+  `status=active`.
+- concepts whose evidence has only been reverted or superseded are not exposed
+  as Project Knowledge context for later AI authoring turns.
+- safe projection evidence now includes
+  `domain-knowledge:evidence-status:active` so downstream diagnostics can show
+  that the context came from active governed evidence without exposing evidence
+  keys or raw payload.
+
+Still intentionally pending:
+
+- quickstart HTTP proof that add -> retrieve -> revert -> retrieve removes the
+  reverted influence from `contextHints.projectKnowledge`.
+- Page Builder browser proof that reverted evidence is not offered as active
+  continuity context.
 
 ## Canonical Direction
 
