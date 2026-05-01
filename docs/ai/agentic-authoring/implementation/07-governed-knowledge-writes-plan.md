@@ -1,14 +1,21 @@
 # Governed Knowledge Writes Plan
 
-Status: first governed write lifecycle implemented; audit/timeline hardening in progress
+Status: first governed write lifecycle published in `rc.37`; next work moves to Page Builder continuity
 Date: 2026-04-30
 Scope: post-Phase 7 agentic authoring capability cut
 
 ## Recommendation
 
-The next capability cut should be governed LLM-authored Project Knowledge
-writes, but only as proposed change sets. A normal authoring turn must still
-remain unable to silently mutate canonical knowledge.
+The first governed LLM-authored Project Knowledge write cut is closed through
+`praxis-config-starter:0.1.0-rc.37`: proposals are represented as Domain
+Knowledge change sets, validated, approved, applied explicitly, read back and
+exposed through a safe timeline. A normal authoring turn must still remain
+unable to silently mutate canonical knowledge.
+
+The next capability cut should not add another write contract. It should make
+the Page Builder cockpit continue from these governed change sets and Domain
+Rules handoffs using the plan in
+[08-page-builder-continuity-phase.md](./08-page-builder-continuity-phase.md).
 
 The canonical boundary is the existing `domain_knowledge_change_set` table and
 `DomainKnowledgeChangeSet` entity. Do not create browser-local memory, Page
@@ -41,7 +48,7 @@ Already present in `praxis-config-starter`:
 - domain rules already referencing `source_change_set_id`;
 - Phase 7 read-only Project Knowledge retrieval and safe audit diagnostics.
 
-Missing before implementation:
+Closed in the first implementation:
 
 - done in the create/list/get HTTP slice: public `POST` and `GET` endpoints for
   creating, listing and reading proposed change sets with scope checks and safe
@@ -53,10 +60,19 @@ Missing before implementation:
 - done in the validation HTTP slice: public explicit validation endpoint that
   revalidates persisted proposals and updates safe validation metadata;
 - approval/rejection transitions;
-- application service that mutates curated knowledge rows transactionally;
+- application service that mutates curated knowledge rows transactionally for
+  the first safe `add_evidence` operation;
 - done in the first safe timeline slice: read-only timeline evidence for
   created, validation, review and applied lifecycle events;
-- browser E2E proving authoring cannot silently apply memory writes.
+- local and published quickstart proof with strict timeline validation.
+
+Still open for the Page Builder continuity phase:
+
+- richer cockpit UX for action availability, blocked states and safe timeline
+  continuation;
+- browser E2E proving authoring cannot silently apply memory writes through the
+  visible cockpit;
+- rollback/revert semantics before adding destructive operation types.
 
 ## Canonical Lifecycle
 
@@ -263,7 +279,7 @@ boundary.
 
 ## Agentic Authoring Integration
 
-First integration should be proposal-only:
+The first integration remains proposal-only:
 
 1. Agentic authoring detects a knowledge gap or correction opportunity.
 2. The engine emits a safe diagnostic that a governed correction can be
@@ -422,9 +438,10 @@ Pause implementation if the design:
 
 ## Publication Decision
 
-No Maven Central or npm publication should be triggered for planning or early
-implementation slices.
+`praxis-config-starter:0.1.0-rc.37` is already published for the first governed
+write lifecycle. Do not publish another Maven Central or npm version for
+documentation drift or early Page Builder continuity planning.
 
-Use local tests and Neon-backed quickstart proof during development. Use
-GitHub Actions only as a phase-closing gate when the lifecycle is complete and
-a downstream consumer needs the public artifact.
+Use local tests and Neon-backed quickstart/browser proof during the next phase.
+Use GitHub Actions only as a phase-closing gate when the UI continuity lifecycle
+is complete and a downstream consumer needs the public artifact.

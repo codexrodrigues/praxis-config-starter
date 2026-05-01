@@ -199,6 +199,89 @@ Plano detalhado: [05-governed-project-knowledge-plan.md](./05-governed-project-k
 - knowledge influencia o turno de forma auditavel;
 - cliente nao e a fonte canonica dessa memoria.
 
+## Fase 6 - Escrita governada de Project Knowledge
+
+Plano detalhado: [07-governed-knowledge-writes-plan.md](./07-governed-knowledge-writes-plan.md)
+
+Status: implementada ate o primeiro corte publicado em `rc.37`.
+
+### Item 16. Persistir propostas como Domain Knowledge change sets
+
+**Definition of Done**
+- criacao, listagem e leitura usam `/api/praxis/config/domain-knowledge/change-sets`;
+- respostas comuns sao seguras e nao expõem patch bruto;
+- escopo tenant/environment e validado.
+
+### Item 17. Validar, aprovar, aplicar e auditar change sets
+
+**Definition of Done**
+- validacao deterministica e persistida;
+- transicoes de status capturam reviewer;
+- aplicacao de `add_evidence` exige `approved` e `valid`;
+- timeline segura expõe criacao, validacao, aprovacao e aplicacao sem vazamento.
+
+### Item 18. Provar no quickstart e corpus
+
+**Definition of Done**
+- smoke Neon-backed prova create -> validate -> approve -> apply -> readback;
+- host publicado passa com `REQUIRE_CHANGE_SET_TIMELINE=true`;
+- corpus HTTP protegido registra a timeline como `protectedContract`, nao como
+  `llmOperational`.
+
+## Fase 7 - Continuidade governada no Page Builder
+
+Plano detalhado: [08-page-builder-continuity-phase.md](./08-page-builder-continuity-phase.md)
+
+Status: proxima fase recomendada.
+
+### Item 19. Inventariar contratos e modelos atuais do cockpit
+
+**Objetivo**
+- mapear os endpoints, services Angular, fixtures e E2E lanes existentes antes
+  de implementar novas acoes.
+
+**Definition of Done**
+- nenhum endpoint e rota sao inferidos por nome ou duplicados na UI;
+- o plano cita arquivos Angular e comandos locais exatos;
+- lacunas de client method sao documentadas antes de alterar UX.
+
+### Item 20. Consolidar modelo de acoes governadas
+
+**Objetivo**
+- representar acoes de continuidade como projeção segura do backend, nao como
+  regra de negocio no frontend.
+
+**Definition of Done**
+- disponibilidade de acoes vem do handoff/status canonico;
+- acoes bloqueadas explicam o motivo;
+- nenhum payload bruto de regra, evidencia, patch ou prompt entra no modelo
+  comum do cockpit.
+
+### Item 21. Unificar UX de continuidade para Domain Rules e Project Knowledge
+
+**Objetivo**
+- fazer o cockpit guiar create/open, simulate, approve/publish, materialize,
+  validate enforcement, create/validate/apply change set e open timeline com a
+  mesma linguagem visual de governanca.
+
+**Definition of Done**
+- Domain Rules e Project Knowledge compartilham estados visuais de governanca;
+- timeline/audit e readback aparecem como prova derivada;
+- Page Builder preview/apply nao e usado como materializacao de decisao
+  compartilhada.
+
+### Item 22. Provar no navegador local
+
+**Objetivo**
+- estender as lanes locais versionadas sem criar runners ad hoc.
+
+**Definition of Done**
+- browser E2E prova que nao ha mutacao silenciosa antes de approval/apply;
+- cockpit nao renderiza patch, prompt, evidencia bruta ou chat history;
+- post-apply Project Knowledge pode ser citado de forma segura em turno
+  posterior;
+- servicos locais sao limpos pelo runner.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.
