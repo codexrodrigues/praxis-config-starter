@@ -333,6 +333,10 @@ Plano detalhado: [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-rev
 Status: proxima fase recomendada; planejamento arquitetural criado antes de
 qualquer contrato publico ou operacao destrutiva.
 
+Inventario inicial concluido em 2026-05-01 no plano detalhado da fase. A
+implementacao deve comecar pelo lifecycle canonico de evidencia e pelos pontos
+de retrieval que precisarao filtrar evidencia ativa.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**

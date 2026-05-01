@@ -52,6 +52,78 @@ The current implementation owns the lifecycle in `praxis-config-starter`:
 Conclusion: the next phase needs a canonical lifecycle extension, not a UI-only
 delete button and not a raw patch mutation.
 
+## Slice 1 Inventory Findings - 2026-05-01
+
+The first inventory pass confirms that revert must start in the canonical
+backend model, not in Page Builder state.
+
+Code owners inspected:
+
+- `DomainKnowledgeEvidence`
+- `DomainKnowledgeEvidenceRepository`
+- `DomainKnowledgeChangeSetService`
+- `DomainKnowledgeProjectionService`
+- `AgenticAuthoringProjectKnowledgeService`
+- focused tests around change-set apply, projection and entity lifecycle
+
+Current evidence model:
+
+- `DomainKnowledgeEvidence` stores tenant, environment, subject scope,
+  `evidenceKey`, `evidenceType`, `confidence`, payload, provenance and
+  timestamps.
+- It has no explicit lifecycle fields today: no status, supersession pointer,
+  revert change-set id, reverted timestamp or revert reason.
+
+Current repository retrieval:
+
+- `findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectId(...)`
+- `findByTenantIdAndEnvironmentAndEvidenceKey(...)`
+- `findByTenantIdAndEnvironmentAndEvidenceKeyIn(...)`
+
+Current write paths:
+
+- `DomainKnowledgeProjectionService.projectEvidence(...)` upserts evidence
+  from catalog releases through `findByTenantIdAndEnvironmentAndEvidenceKeyIn`
+  and `saveAll`.
+- `DomainKnowledgeChangeSetService.apply(...)` currently applies
+  `add_evidence` only.
+- `DomainKnowledgeChangeSetService.applyEvidenceOperation(...)` creates or
+  reuses an evidence row and persists it through `evidenceRepository.save`.
+- `DomainKnowledgeChangeSetValidator` blocks destructive operations such as
+  `delete_concept`, `delete_alias`, `delete_binding`, `delete_relationship`,
+  `delete_evidence`, `replace_concept` and `replace_payload`.
+
+Current retrieval and influence gap:
+
+- `AgenticAuthoringProjectKnowledgeService` retrieves governed project
+  knowledge candidates from concepts, not from evidence lifecycle-aware
+  repository queries.
+- The Page Builder proof reads back a safe concept/timeline projection, but it
+  does not yet prove that reverted evidence stops influencing later AI
+  authoring.
+- Therefore the first implementation must either add evidence-aware retrieval
+  to the authoring path or explicitly limit the initial proof to lifecycle
+  state, timeline and safe readback until influence filtering exists.
+
+Recommended first data-model decision:
+
+- Add lifecycle columns directly to `domain_knowledge_evidence` for this beta
+  phase: `status`, `superseded_by_evidence_id`,
+  `reverted_by_change_set_id`, `reverted_at` and `revert_reason`.
+- Default existing rows to `active`.
+- Add repository methods that retrieve only active evidence by default where
+  evidence participates in runtime or AI-authoring decisions.
+
+Implementation boundary confirmed:
+
+- Do not promote `delete_*` operations.
+- Do not add Page Builder revert buttons before backend lifecycle semantics are
+  stable.
+- Do not add a special evidence `DELETE` endpoint.
+- Do not rely on GitHub Actions for exploratory validation.
+- Do not treat raw evidence payload, source pointer, source URI, prompt or chat
+  history as safe timeline/readback content.
+
 ## Canonical Direction
 
 Model rollback as **revert/supersede**, not deletion.
