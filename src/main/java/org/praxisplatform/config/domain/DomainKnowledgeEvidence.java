@@ -55,6 +55,21 @@ public class DomainKnowledgeEvidence {
   @Column(name = "source_pointer", length = 1024)
   private String sourcePointer;
 
+  @Column(nullable = false, length = 32)
+  private String status;
+
+  @Column(name = "superseded_by_evidence_id")
+  private UUID supersededByEvidenceId;
+
+  @Column(name = "reverted_by_change_set_id")
+  private UUID revertedByChangeSetId;
+
+  @Column(name = "reverted_at")
+  private Instant revertedAt;
+
+  @Column(name = "revert_reason", columnDefinition = "TEXT")
+  private String revertReason;
+
   private Double confidence;
 
   @Column(columnDefinition = "jsonb", nullable = false)
@@ -71,6 +86,9 @@ public class DomainKnowledgeEvidence {
     }
     if (payload == null || payload.isBlank()) {
       payload = "{}";
+    }
+    if (status == null || status.isBlank()) {
+      status = "active";
     }
     if (createdAt == null) {
       createdAt = Instant.now();

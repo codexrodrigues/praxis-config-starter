@@ -223,7 +223,8 @@ public class DomainKnowledgeChangeSetService {
                 operationTypes,
                 targetConceptKeys);
         events.sort(Comparator
-                .comparing(DomainKnowledgeChangeSetTimelineEventResponse::occurredAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .comparingInt((DomainKnowledgeChangeSetTimelineEventResponse event) -> timelineEventOrder(event.eventType()))
+                .thenComparing(DomainKnowledgeChangeSetTimelineEventResponse::occurredAt, Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(DomainKnowledgeChangeSetTimelineEventResponse::eventType, Comparator.nullsLast(Comparator.naturalOrder())));
 
         return new DomainKnowledgeChangeSetTimelineResponse(
@@ -240,6 +241,16 @@ public class DomainKnowledgeChangeSetService {
 
     private String reviewEventType(String status) {
         return "rejected".equals(normalize(status)) ? "review.rejected" : "review.approved";
+    }
+
+    private int timelineEventOrder(String eventType) {
+        return switch (normalize(eventType)) {
+            case "change_set.created" -> 10;
+            case "validation.completed" -> 20;
+            case "review.approved", "review.rejected" -> 30;
+            case "change_set.applied" -> 40;
+            default -> 100;
+        };
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)

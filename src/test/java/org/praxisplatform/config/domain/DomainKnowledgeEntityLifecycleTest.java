@@ -75,6 +75,7 @@ class DomainKnowledgeEntityLifecycleTest {
         assertThat(binding.getCurationStatus()).isEqualTo("generated");
         assertThat(relationship.getCrossContext()).isFalse();
         assertThat(relationship.getPayload()).isEqualTo("{}");
+        assertThat(evidence.getStatus()).isEqualTo("active");
         assertThat(evidence.getPayload()).isEqualTo("{}");
         assertThat(changeSet.getStatus()).isEqualTo("draft");
         assertThat(changeSet.getPatch()).isEqualTo("[]");

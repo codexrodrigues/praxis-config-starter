@@ -337,6 +337,10 @@ Inventario inicial concluido em 2026-05-01 no plano detalhado da fase. A
 implementacao deve comecar pelo lifecycle canonico de evidencia e pelos pontos
 de retrieval que precisarao filtrar evidencia ativa.
 
+Lifecycle baseline iniciado em 2026-05-01: schema e entidade passam a reconhecer
+evidencia `active`, `superseded` e `reverted`, mas `revert_evidence` ainda nao
+foi promovido.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**

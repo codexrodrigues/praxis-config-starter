@@ -13,13 +13,32 @@ public interface DomainKnowledgeEvidenceRepository extends JpaRepository<DomainK
             String subjectType,
             UUID subjectId);
 
+    List<DomainKnowledgeEvidence> findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+            String tenantId,
+            String environment,
+            String subjectType,
+            UUID subjectId,
+            String status);
+
     List<DomainKnowledgeEvidence> findByTenantIdAndEnvironmentAndEvidenceKey(
             String tenantId,
             String environment,
             String evidenceKey);
 
+    List<DomainKnowledgeEvidence> findByTenantIdAndEnvironmentAndEvidenceKeyAndStatus(
+            String tenantId,
+            String environment,
+            String evidenceKey,
+            String status);
+
     List<DomainKnowledgeEvidence> findByTenantIdAndEnvironmentAndEvidenceKeyIn(
             String tenantId,
             String environment,
             List<String> evidenceKeys);
+
+    List<DomainKnowledgeEvidence> findByTenantIdAndEnvironmentAndEvidenceKeyInAndStatus(
+            String tenantId,
+            String environment,
+            List<String> evidenceKeys,
+            String status);
 }

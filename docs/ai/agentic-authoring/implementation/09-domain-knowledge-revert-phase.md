@@ -124,6 +124,26 @@ Implementation boundary confirmed:
 - Do not treat raw evidence payload, source pointer, source URI, prompt or chat
   history as safe timeline/readback content.
 
+## Slice 2 Lifecycle Baseline - 2026-05-01
+
+The first implementation slice establishes evidence lifecycle state without
+making revert executable yet.
+
+Implemented boundary:
+
+- `domain_knowledge_evidence.status` defaults to `active`.
+- `superseded_by_evidence_id`, `reverted_by_change_set_id`, `reverted_at` and
+  `revert_reason` exist as canonical lifecycle fields.
+- Repository methods can now query active evidence explicitly by subject,
+  evidence key or evidence-key set.
+
+Still intentionally pending:
+
+- `revert_evidence` validation.
+- transactional apply of revert/supersede.
+- authoring retrieval changes that exclude reverted evidence by default.
+- Page Builder cockpit actions.
+
 ## Canonical Direction
 
 Model rollback as **revert/supersede**, not deletion.
