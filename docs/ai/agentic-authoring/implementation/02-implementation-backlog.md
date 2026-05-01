@@ -520,11 +520,14 @@ Plano detalhado:
 
 Status: planejada em 2026-05-01 apos a prova runtime de supersession.
 
-Slice 1 iniciado em 2026-05-01: o teste focal
+Slice 1 concluido em 2026-05-01: o teste focal
 `AgenticAuthoringProjectKnowledgeServiceTest` passou a explicitar que
 candidatos sem evidencia canonica `active`, incluindo cenarios revertidos ou
 superseded, nao entram em `contextHints.projectKnowledge`. Nenhum caminho RAG
-foi introduzido.
+foi introduzido. A leitura de codigo confirmou que `AgenticAuthoringTurnEngine`
+usa apenas `AgenticAuthoringProjectKnowledgeService` para injetar Project
+Knowledge, e que `AgenticAuthoringPlanService` apenas sanitiza o
+`contextHints.projectKnowledge` recebido.
 
 ### Item 32. Travar invariantes de Project Knowledge antes de RAG
 

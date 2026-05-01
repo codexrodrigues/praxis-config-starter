@@ -1,6 +1,6 @@
 # Vector/RAG Active Evidence Filtering Plan
 
-Status: Slice 1 guardrail started
+Status: Slice 1 guardrail complete
 Date: 2026-05-01
 Scope: next capability slice after Domain Knowledge supersession runtime proof
 
@@ -232,12 +232,18 @@ Do not implement vector/RAG Project Knowledge ranking if any of these happen:
 
 ## Recommended Next Step
 
-Slice 1 started on 2026-05-01 by making the current active-evidence invariant
-explicit in `AgenticAuthoringProjectKnowledgeServiceTest`: Project Knowledge
-retrieval stays empty when candidates have no canonical `active` evidence,
-including the explicit reverted/superseded guardrail.
+Slice 1 completed on 2026-05-01:
 
-Next implementation step: complete Slice 1 by confirming no current vector/RAG
-surface is wired into Project Knowledge influence, then move to Slice 2 as an
-internal metadata/provenance preparation. Do not inject vector hits directly
-into prompts or `contextHints.projectKnowledge`.
+- `AgenticAuthoringProjectKnowledgeServiceTest` makes the active-evidence
+  invariant explicit: Project Knowledge retrieval stays empty when candidates
+  have no canonical `active` evidence, including reverted/superseded guardrails.
+- `AgenticAuthoringTurnEngine` injects Project Knowledge through
+  `AgenticAuthoringProjectKnowledgeService`, not vector/RAG.
+- `AgenticAuthoringPlanService` only sanitizes already-provided
+  `contextHints.projectKnowledge`.
+- No current Project Knowledge influence path depends on `RagVectorStoreService`,
+  `ContextRetrievalService`, `AiRagContextService` or `VectorStore`.
+
+Next implementation step: move to Slice 2 as an internal metadata/provenance
+preparation. Do not inject vector hits directly into prompts or
+`contextHints.projectKnowledge`.
