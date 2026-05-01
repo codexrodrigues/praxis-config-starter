@@ -356,6 +356,10 @@ HTTP smoke preparado em 2026-05-01: o runner local pode exigir
 `REQUIRE_EVIDENCE_REVERT=true` para provar `revert_evidence` por HTTP real no
 quickstart, junto de `REQUIRE_CHANGE_SET_TIMELINE=true`.
 
+HTTP smoke Neon concluido em 2026-05-01 contra quickstart empacotado com o
+starter local: baseline timeline `eventCount=4`, revert timeline `eventCount=5`
+e `revertChecked=true`.
+
 ### Item 24. Inventariar lifecycle e retrieval de evidencias
 
 **Objetivo**

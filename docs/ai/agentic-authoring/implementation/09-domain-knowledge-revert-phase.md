@@ -235,10 +235,29 @@ Smoke boundary:
 - The smoke still delegates through `praxis-api-quickstart`, the operational
   reference host.
 
+Neon-backed proof completed on 2026-05-01 against a quickstart packaged with
+the local starter cut:
+
+```bash
+BASE_URL=http://localhost:8099 \
+TENANT_ID=desenv \
+ENVIRONMENT=local \
+REQUIRE_CHANGE_SET_TIMELINE=true \
+REQUIRE_EVIDENCE_REVERT=true \
+tools/local-e2e/run-domain-knowledge-change-set-local.sh
+```
+
+Observed proof:
+
+- baseline change set `622d5fb8-727a-49a5-b8e2-f684f790ace8` returned timeline
+  `eventCount=4`.
+- revert change set `e8861241-fbd8-48f9-9571-35dec841bca5` returned timeline
+  `eventCount=5`.
+- final status was `domain-knowledge-change-set-runtime-ready` with
+  `revertChecked=true`.
+
 Still intentionally pending:
 
-- running the Neon-backed local smoke against a quickstart packaged with this
-  local starter cut.
 - runtime/authoring retrieval filtering that excludes reverted evidence by
   default.
 
