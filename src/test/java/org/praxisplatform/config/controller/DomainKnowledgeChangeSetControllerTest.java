@@ -98,6 +98,21 @@ class DomainKnowledgeChangeSetControllerTest {
         verify(service).transitionStatus(id, request, "tenant-a", "dev");
     }
 
+    @Test
+    void appliesChangeSetByIdAndScope() {
+        DomainKnowledgeChangeSetService service = mock(DomainKnowledgeChangeSetService.class);
+        DomainKnowledgeChangeSetController controller = new DomainKnowledgeChangeSetController(service);
+        UUID id = UUID.randomUUID();
+        DomainKnowledgeChangeSetResponse response = response(id, "project-knowledge:employees:cpf:v1");
+        when(service.apply(id, "tenant-a", "dev")).thenReturn(response);
+
+        var entity = controller.apply(id, "tenant-a", "dev");
+
+        assertThat(entity.getStatusCode().value()).isEqualTo(200);
+        assertThat(entity.getBody()).isSameAs(response);
+        verify(service).apply(id, "tenant-a", "dev");
+    }
+
     private DomainKnowledgeChangeSetCreateRequest request() {
         return new DomainKnowledgeChangeSetCreateRequest(
                 "project-knowledge:employees:cpf:v1",
