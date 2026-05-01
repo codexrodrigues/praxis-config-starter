@@ -192,7 +192,7 @@ should implement the smallest safe subset:
   `POST /api/praxis/config/domain-knowledge/change-sets/{id}/validate`;
 - done in the status transition HTTP slice:
   `PATCH /api/praxis/config/domain-knowledge/change-sets/{id}/status`;
-- deferred:
+- done in the first apply HTTP slice for `add_evidence` only:
   `POST /api/praxis/config/domain-knowledge/change-sets/{id}/apply`;
 - done in the create/list/get HTTP slice:
   `GET /api/praxis/config/domain-knowledge/change-sets`;
@@ -341,7 +341,7 @@ Browser E2E:
 | Create/list/get | Proposed change sets persist with tenant/environment scope and safe responses. |
 | Validate | Validation results are deterministic, persisted and do not require an LLM call. |
 | Status transitions | Invalid transitions are blocked and reviewer metadata is captured. |
-| Apply first operation | `add_alias` plus `add_evidence` applies transactionally only after approval. |
+| Apply first operation | `add_evidence` applies transactionally only after approval and valid persisted validation. |
 | Quickstart corpus | Neon-backed HTTP flow proves create -> validate -> approve -> apply -> readback. |
 | Page Builder cockpit | UI creates proposals but cannot apply them silently during normal authoring. |
 | Browser E2E | Real browser proves no silent mutation before approval and citation after apply. |
@@ -390,8 +390,9 @@ Pause implementation if the design:
 5. Done in the status transition HTTP slice: approval/rejection/supersede
    transitions are directional, capture reviewer metadata and cannot mark a
    change set as `applied`.
-6. Apply endpoint for one narrow operation, preferably `add_alias` plus
-   `add_evidence`.
+6. Done in the first apply HTTP slice: approved, valid change sets can apply
+   `add_evidence` to an existing concept in scope and are then marked
+   `applied`; other operation types remain blocked.
 7. Quickstart HTTP corpus proving the lifecycle with Neon.
 8. Page Builder cockpit actions for proposal, review and explicit apply.
 9. Browser E2E proving no silent mutation and post-apply influence citation.

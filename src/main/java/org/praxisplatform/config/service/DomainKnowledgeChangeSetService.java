@@ -16,6 +16,8 @@ import java.util.Locale;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
+import org.praxisplatform.config.domain.DomainKnowledgeConcept;
+import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationSummary;
@@ -25,6 +27,8 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
@@ -33,15 +37,23 @@ import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnBean(DomainKnowledgeChangeSetRepository.class)
+@ConditionalOnBean({
+        DomainKnowledgeChangeSetRepository.class,
+        DomainKnowledgeConceptRepository.class,
+        DomainKnowledgeEvidenceRepository.class
+})
 public class DomainKnowledgeChangeSetService {
 
     private static final String VALIDATION_STATUS_VALID = "valid";
     private static final String VALIDATION_STATUS_INVALID = "invalid";
+    private static final String STATUS_APPROVED = "approved";
+    private static final String STATUS_APPLIED = "applied";
     private static final List<String> REVIEW_STATUSES = List.of(
             "draft", "proposed", "approved", "rejected", "superseded");
 
     private final DomainKnowledgeChangeSetRepository repository;
+    private final DomainKnowledgeConceptRepository conceptRepository;
+    private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final DomainKnowledgeChangeSetValidator validator;
     private final ObjectMapper objectMapper;
 
@@ -180,6 +192,34 @@ public class DomainKnowledgeChangeSetService {
         return toResponse(repository.save(changeSet));
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public DomainKnowledgeChangeSetResponse apply(
+            UUID id,
+            String tenantId,
+            String environment) {
+        DomainKnowledgeChangeSet changeSet = findInScope(id, tenantId, environment);
+        if (STATUS_APPLIED.equals(changeSet.getStatus())) {
+            return toResponse(changeSet);
+        }
+        if (!STATUS_APPROVED.equals(changeSet.getStatus())) {
+            throw new ConfigurationIngestionException(
+                    "Domain knowledge change set must be approved before apply");
+        }
+        requireValidChangeSet(changeSet);
+        List<DomainKnowledgeChangeSetOperationRequest> operations = readPatchRequests(changeSet.getPatch());
+        if (operations.isEmpty()) {
+            throw new ConfigurationIngestionException("Domain knowledge change set patch is empty");
+        }
+        for (DomainKnowledgeChangeSetOperationRequest operation : operations) {
+            applyOperation(changeSet, operation);
+        }
+        changeSet.setStatus(STATUS_APPLIED);
+        if (changeSet.getAppliedAt() == null) {
+            changeSet.setAppliedAt(Instant.now());
+        }
+        return toResponse(repository.save(changeSet));
+    }
+
     private DomainKnowledgeChangeSetResponse persistNew(
             DomainKnowledgeChangeSetCreateRequest request,
             String tenantId,
@@ -203,6 +243,72 @@ public class DomainKnowledgeChangeSetService {
         changeSet.setPatch(patch);
         changeSet.setValidationResult(writeValidationResult(validation, patchHash));
         return toResponse(repository.save(changeSet));
+    }
+
+    private void applyOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        String operationType = normalize(operation.operationType());
+        if (!"add_evidence".equals(operationType)) {
+            throw new ConfigurationIngestionException(
+                    "Only add_evidence operations can be applied in this cut: " + operationType);
+        }
+        applyEvidenceOperation(changeSet, operation);
+    }
+
+    private void applyEvidenceOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        JsonNode target = operation.target();
+        String conceptKey = target == null ? null : target.path("conceptKey").asText(null);
+        String evidenceKey = operation.payload() == null
+                ? null
+                : operation.payload().path("evidenceKey").asText(null);
+        String evidenceType = normalizeOrDefault(
+                operation.payload() == null ? null : operation.payload().path("evidenceType").asText(null),
+                "llm_proposal");
+        DomainKnowledgeConcept concept = conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                        changeSet.getTenantId(),
+                        changeSet.getEnvironment(),
+                        requireText(conceptKey, "target.conceptKey"))
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Target concept not found for evidence operation: " + conceptKey));
+        DomainKnowledgeEvidence evidence = reusableEvidenceOrNew(
+                changeSet,
+                concept,
+                requireText(evidenceKey, "payload.evidenceKey"));
+        evidence.setTenantId(changeSet.getTenantId());
+        evidence.setEnvironment(changeSet.getEnvironment());
+        evidence.setEvidenceKey(evidenceKey.trim());
+        evidence.setSubjectType("concept");
+        evidence.setSubjectId(concept.getId());
+        evidence.setEvidenceType(evidenceType);
+        evidence.setSourceUri(text(operation.payload(), "sourceUri"));
+        evidence.setSourcePointer(text(operation.payload(), "sourcePointer"));
+        evidence.setConfidence(operation.confidence());
+        evidence.setPayload(write(operation.payload()));
+        evidenceRepository.save(evidence);
+    }
+
+    private DomainKnowledgeEvidence reusableEvidenceOrNew(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeConcept concept,
+            String evidenceKey) {
+        List<DomainKnowledgeEvidence> existingEvidence =
+                evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(
+                        changeSet.getTenantId(),
+                        changeSet.getEnvironment(),
+                        evidenceKey.trim());
+        if (existingEvidence.isEmpty()) {
+            return new DomainKnowledgeEvidence();
+        }
+        DomainKnowledgeEvidence evidence = existingEvidence.get(0);
+        if (!"concept".equals(evidence.getSubjectType())
+                || !java.util.Objects.equals(concept.getId(), evidence.getSubjectId())) {
+            throw new ConfigurationIngestionException(
+                    "Evidence key already exists for a different subject: " + evidenceKey);
+        }
+        return evidence;
     }
 
     private DomainKnowledgeChangeSet findInScope(
@@ -359,6 +465,14 @@ public class DomainKnowledgeChangeSetService {
         } catch (JsonProcessingException ex) {
             throw new ConfigurationIngestionException("Unable to read domain knowledge change set patch", ex);
         }
+    }
+
+    private String text(JsonNode node, String fieldName) {
+        if (node == null || node.isNull() || !node.hasNonNull(fieldName)) {
+            return null;
+        }
+        String value = node.path(fieldName).asText(null);
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private String requireText(String value, String fieldName) {

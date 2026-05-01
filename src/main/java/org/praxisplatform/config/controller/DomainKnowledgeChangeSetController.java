@@ -71,4 +71,12 @@ public class DomainKnowledgeChangeSetController {
             @RequestHeader(value = "X-Env", required = false) String environment) {
         return ResponseEntity.ok(changeSetService.transitionStatus(changeSetId, request, tenantId, environment));
     }
+
+    @PostMapping("/{changeSetId}/apply")
+    public ResponseEntity<DomainKnowledgeChangeSetResponse> apply(
+            @PathVariable UUID changeSetId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(changeSetService.apply(changeSetId, tenantId, environment));
+    }
 }

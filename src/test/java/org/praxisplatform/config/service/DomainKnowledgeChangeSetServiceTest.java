@@ -18,11 +18,15 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
+import org.praxisplatform.config.domain.DomainKnowledgeConcept;
+import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetStatusRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 
 @Tag("unit")
 class DomainKnowledgeChangeSetServiceTest {
@@ -288,8 +292,97 @@ class DomainKnowledgeChangeSetServiceTest {
                 .hasMessageContaining("status transition is not allowed: rejected -> approved");
     }
 
+    @Test
+    void appliesApprovedAddEvidenceChangeSetToExistingConcept() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setStatus("approved");
+        DomainKnowledgeConcept concept = concept();
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT,
+                ENVIRONMENT,
+                "human-resources.funcionarios.field.cpf"))
+                .thenReturn(Optional.of(concept));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(
+                TENANT,
+                ENVIRONMENT,
+                "llm-proposal:funcionarios:cpf-guidance:v1"))
+                .thenReturn(List.of());
+        when(evidenceRepository.save(any(DomainKnowledgeEvidence.class))).thenAnswer(invocation -> {
+            DomainKnowledgeEvidence evidence = invocation.getArgument(0);
+            evidence.onInsert();
+            return evidence;
+        });
+
+        var response = service.apply(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(response.status()).isEqualTo("applied");
+        assertThat(response.appliedAt()).isNotNull();
+        ArgumentCaptor<DomainKnowledgeEvidence> evidenceCaptor =
+                ArgumentCaptor.forClass(DomainKnowledgeEvidence.class);
+        verify(evidenceRepository).save(evidenceCaptor.capture());
+        assertThat(evidenceCaptor.getValue().getEvidenceKey())
+                .isEqualTo("llm-proposal:funcionarios:cpf-guidance:v1");
+        assertThat(evidenceCaptor.getValue().getSubjectType()).isEqualTo("concept");
+        assertThat(evidenceCaptor.getValue().getSubjectId()).isEqualTo(concept.getId());
+        assertThat(evidenceCaptor.getValue().getEvidenceType()).isEqualTo("llm_proposal");
+        assertThat(evidenceCaptor.getValue().getPayload()).contains("CPF is personal data");
+    }
+
+    @Test
+    void rejectsApplyBeforeApproval() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.apply(existing.getId(), TENANT, ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("must be approved before apply");
+    }
+
+    @Test
+    void rejectsApplyWhenTargetConceptDoesNotExist() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository, conceptRepository, evidenceRepository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setStatus("approved");
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT,
+                ENVIRONMENT,
+                "human-resources.funcionarios.field.cpf"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.apply(existing.getId(), TENANT, ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Target concept not found");
+    }
+
     private DomainKnowledgeChangeSetService service(DomainKnowledgeChangeSetRepository repository) {
-        return new DomainKnowledgeChangeSetService(repository, validator, objectMapper);
+        return service(
+                repository,
+                mock(DomainKnowledgeConceptRepository.class),
+                mock(DomainKnowledgeEvidenceRepository.class));
+    }
+
+    private DomainKnowledgeChangeSetService service(
+            DomainKnowledgeChangeSetRepository repository,
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository) {
+        return new DomainKnowledgeChangeSetService(
+                repository,
+                conceptRepository,
+                evidenceRepository,
+                validator,
+                objectMapper);
     }
 
     private DomainKnowledgeChangeSet persisted(DomainKnowledgeChangeSetCreateRequest request) {
@@ -317,6 +410,21 @@ class DomainKnowledgeChangeSetServiceTest {
         changeSet.setValidationResult(validationResult);
         changeSet.onInsert();
         return changeSet;
+    }
+
+    private DomainKnowledgeConcept concept() {
+        DomainKnowledgeConcept concept = DomainKnowledgeConcept.builder()
+                .id(UUID.randomUUID())
+                .tenantId(TENANT)
+                .environment(ENVIRONMENT)
+                .conceptKey("human-resources.funcionarios.field.cpf")
+                .nodeType("field")
+                .lifecycle("active")
+                .curationStatus("approved")
+                .aiVisibility("allow")
+                .build();
+        concept.onInsert();
+        return concept;
     }
 
     private DomainKnowledgeChangeSetCreateRequest validRequest() {
