@@ -858,11 +858,15 @@ Recommended next PR sequence:
    current beta checkpoint.
 2. Treat Page Builder governed continuity as complete locally unless a named
    consumer requires a release gate.
-3. Start the next cut with
-   [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md):
-   governed `revert_evidence`/supersede semantics before destructive operation
-   types or broader write capabilities.
-4. Keep vector/RAG ranking and broader LLM-authored memory writes deferred until
+3. Treat
+   [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
+   and
+   [Release Readiness - Domain Knowledge Revert Checkpoint](../../release-readiness-2026-05-01-domain-knowledge-revert.md)
+   as the closed source-level beta checkpoint for governed
+   `revert_evidence`/supersede semantics.
+4. Start the next cut only with a separate plan for broader write capabilities;
+   do not promote destructive operation types as an incremental shortcut.
+5. Keep vector/RAG ranking and broader LLM-authored memory writes deferred until
    their own governance, audit, rollback and local E2E gates are planned.
 
 ## Stop Conditions
