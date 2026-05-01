@@ -62,9 +62,10 @@ sem promover `delete_*` por atalho.
 9. [release-readiness-2026-05-01-domain-knowledge-revert.md](../../release-readiness-2026-05-01-domain-knowledge-revert.md)
 10. [release-readiness-2026-05-01-domain-knowledge-contract-corpus.md](../../release-readiness-2026-05-01-domain-knowledge-contract-corpus.md)
 11. [10-domain-knowledge-supersede-evidence-plan.md](./10-domain-knowledge-supersede-evidence-plan.md)
-12. [01-current-state-and-target.md](./01-current-state-and-target.md)
-13. [02-implementation-backlog.md](./02-implementation-backlog.md)
-14. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+12. [11-vector-rag-active-evidence-filtering-plan.md](./11-vector-rag-active-evidence-filtering-plan.md)
+13. [01-current-state-and-target.md](./01-current-state-and-target.md)
+14. [02-implementation-backlog.md](./02-implementation-backlog.md)
+15. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -82,17 +83,21 @@ operacional dessa fase sem transformar o fechamento em publicacao.
 `release-readiness-2026-05-01-domain-knowledge-contract-corpus.md` fecha o
 checkpoint posterior de contrato/corpus: OpenAPI, binding Angular e corpus HTTP
 estao sincronizados, mas o exemplo mutavel permanece `referenceOnly`.
-`10-domain-knowledge-supersede-evidence-plan.md` e o proximo plano ativo: ele
-decide se `supersede_evidence` merece virar operacao semantica propria ou se o
-beta deve manter `revert_evidence + replacementEvidenceKey`. Antes de ampliar
-operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
-essa semantica de revert/supersede sem deletar evidencia ou expor payload
-bruto. Os documentos anteriores continuam uteis como historico e diagnostico,
-mas devem ser interpretados pela direcao atual: Page Builder authora
-componentes/paginas, decisoes compartilhadas de negocio devem seguir por
+`10-domain-knowledge-supersede-evidence-plan.md` registra a decisao beta de nao
+promover `supersede_evidence` agora e o hardening concluido de
+`revert_evidence + replacementEvidenceKey`. O plano ativo seguinte e
+`11-vector-rag-active-evidence-filtering-plan.md`: ele define como preparar
+ranking vector/RAG sem permitir que indice derivado substitua a fonte canonica
+de Domain Knowledge ou contorne evidencia ativa. Antes de ampliar operacoes
+alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar essa
+semantica de revert/supersede sem deletar evidencia ou expor payload bruto. Os
+documentos anteriores continuam uteis como historico e diagnostico, mas devem
+ser interpretados pela direcao atual: Page Builder authora componentes/paginas,
+decisoes compartilhadas de negocio devem seguir por
 `/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir pela
-fronteira `domain_knowledge_change_set`, e correcoes de conhecimento aplicado
-devem seguir por revert/supersede governado.
+fronteira `domain_knowledge_change_set`, correcoes de conhecimento aplicado
+devem seguir por revert/supersede governado, e ranking RAG deve permanecer uma
+projecao derivada revalidada contra o estado canonico.
 
 ## Baseline de reaproveitamento
 

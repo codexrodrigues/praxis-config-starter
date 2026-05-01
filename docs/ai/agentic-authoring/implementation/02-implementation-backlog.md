@@ -513,6 +513,73 @@ Plano detalhado:
   duplicado, e `REQUIRE_EVIDENCE_REVERT=true` confirmou que revert puro segue
   emitindo `evidence.reverted`.
 
+## Fase 9 - Vector/RAG com filtro de evidencia ativa
+
+Plano detalhado:
+[11-vector-rag-active-evidence-filtering-plan.md](./11-vector-rag-active-evidence-filtering-plan.md)
+
+Status: planejada em 2026-05-01 apos a prova runtime de supersession.
+
+### Item 32. Travar invariantes de Project Knowledge antes de RAG
+
+**Objetivo**
+- provar que a trilha atual repository-backed exige evidencia ativa e que
+  vector/RAG ainda nao e canal de influencia para Project Knowledge.
+
+**Definition of Done**
+- testes focais documentam que evidencia `reverted` e `superseded` nao entra em
+  `contextHints.projectKnowledge`;
+- docs registram que Domain Knowledge continua fonte canonica;
+- nenhuma indexacao vetorial nova e criada antes desse guardrail.
+
+### Item 33. Definir metadata derivada de Project Knowledge para RAG
+
+**Objetivo**
+- preparar chaves internas de provenance para futuro ranking vetorial sem
+  alterar contrato publico nem carregar payload bruto.
+
+**Definition of Done**
+- metadata inclui identificadores de conceito/evidencia, escopo e visibilidade;
+- metadata de status e tratada como derivada, nunca como autoridade;
+- qualquer hit vetorial exige revalidacao no banco canonico.
+
+### Item 34. Criar retriever candidato com re-check canonico
+
+**Objetivo**
+- permitir ranking opcional por vector/RAG mantendo filtragem canonica antes de
+  injetar contexto no turno.
+
+**Definition of Done**
+- vector store indisponivel cai para a trilha atual;
+- vector hits sao usados como candidatos/provenance;
+- conceitos/evidencias sao recarregados e filtrados por tenant, environment,
+  AI visibility e evidencia `active`.
+
+### Item 35. Invalidar indice derivado no lifecycle de evidencia
+
+**Objetivo**
+- manter revert/supersede seguros para ranking futuro.
+
+**Definition of Done**
+- `add_evidence` pode publicar apenas evidencia ativa;
+- `revert_evidence` remove ou torna inelegivel a evidencia antiga;
+- replacement-backed supersession exclui a antiga e preserva a substituta
+  apenas se ela permanecer ativa;
+- falha no indice derivado nao permite influencia indevida.
+
+### Item 36. Provar runtime local-first
+
+**Objetivo**
+- provar por quickstart real que ranking vetorial nao reintroduz conhecimento
+  revertido ou superseded.
+
+**Definition of Done**
+- smoke baseline com vector disabled continua verde;
+- smoke vector-enabled so roda quando o datasource operacional suportar pgvector
+  sem banco local improvisado;
+- resultado registra active -> revert/supersede -> ausencia de influencia;
+- nenhuma GitHub Action e usada antes do gate de fase/release.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.
