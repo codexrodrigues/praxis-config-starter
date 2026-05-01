@@ -135,6 +135,36 @@ class DomainKnowledgeChangeSetValidatorTest {
     }
 
     @Test
+    void rejectsAddEvidenceWithUnsupportedEvidenceTypeOrMissingCanonicalKeys() {
+        JsonNode targetWithoutConceptKey = objectMapper.createObjectNode()
+                .put("tenantId", TENANT)
+                .put("environment", ENVIRONMENT)
+                .put("subjectType", "concept");
+        JsonNode payload = objectMapper.createObjectNode()
+                .put("evidenceType", "project_preference")
+                .put("summary", "Project preference must stay as source kind, not evidence type.");
+
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:employees:invalid-evidence-type:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.4",
+                "Invalid evidence payload",
+                "Evidence persistence must fail during governed validation, not at database constraints.",
+                List.of(operation("op-invalid-evidence", "add_evidence", targetWithoutConceptKey, payload)));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isFalse();
+        assertThat(report.issues())
+                .extracting(DomainKnowledgeChangeSetValidationIssue::code)
+                .contains(
+                        "target_concept_key_required",
+                        "evidence_key_required",
+                        "unsupported_evidence_type");
+    }
+
+    @Test
     void rejectsDuplicateOperationIdsAndInvalidConfidence() {
         var request = new DomainKnowledgeChangeSetCreateRequest(
                 "project-knowledge:employees:duplicates:v1",
