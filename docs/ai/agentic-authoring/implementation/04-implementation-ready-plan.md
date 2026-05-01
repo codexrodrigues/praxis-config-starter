@@ -856,11 +856,14 @@ Recommended next PR sequence:
 
 1. Treat Phase 7 Project Knowledge read/audit/UI proof as complete for the
    current beta checkpoint.
-2. Start the next cut only with an explicit scope: either governance for
-   LLM-authored knowledge writes, governance for vector/RAG-derived ranking, or
-   a small documentation/release-readiness pass.
-3. Keep vector/RAG ranking and LLM-authored memory writes deferred until their
-   own governance, audit, rollback and local E2E gates are planned.
+2. Treat Page Builder governed continuity as complete locally unless a named
+   consumer requires a release gate.
+3. Start the next cut with
+   [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md):
+   governed `revert_evidence`/supersede semantics before destructive operation
+   types or broader write capabilities.
+4. Keep vector/RAG ranking and broader LLM-authored memory writes deferred until
+   their own governance, audit, rollback and local E2E gates are planned.
 
 ## Stop Conditions
 

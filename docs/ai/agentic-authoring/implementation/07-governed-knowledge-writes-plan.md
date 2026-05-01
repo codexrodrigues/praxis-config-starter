@@ -1,6 +1,6 @@
 # Governed Knowledge Writes Plan
 
-Status: first governed write lifecycle published in `rc.37`; next work moves to Page Builder continuity
+Status: first governed write lifecycle published in `rc.37`; Page Builder continuity completed locally; next work moves to governed revert semantics
 Date: 2026-04-30
 Scope: post-Phase 7 agentic authoring capability cut
 
@@ -66,13 +66,20 @@ Closed in the first implementation:
   created, validation, review and applied lifecycle events;
 - local and published quickstart proof with strict timeline validation.
 
-Still open for the Page Builder continuity phase:
+Closed by the Page Builder continuity phase:
 
 - richer cockpit UX for action availability, blocked states and safe timeline
   continuation;
 - browser E2E proving authoring cannot silently apply memory writes through the
-  visible cockpit;
+  visible cockpit.
+
+Still open for the next hardening phase:
+
 - rollback/revert semantics before adding destructive operation types.
+
+Detailed follow-up plan:
+
+- [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
 
 ## Canonical Lifecycle
 
@@ -431,17 +438,19 @@ Pause implementation if the design:
    `add_evidence`.
 9. Page Builder cockpit actions for proposal, review and explicit apply.
 10. Browser E2E proving no silent mutation and post-apply influence citation.
-11. Next hardening slice: rollback/revert semantics for applied evidence must
-    be planned before adding destructive operation types. The first rollback
-    design should preserve canonical evidence rows, prefer superseding/reverting
-    lifecycle state over deletion and expose only safe timeline events.
+11. Planned next hardening slice:
+    [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
+    defines rollback/revert semantics for applied evidence before adding
+    destructive operation types. The first rollback design should preserve
+    canonical evidence rows, prefer superseding/reverting lifecycle state over
+    deletion and expose only safe timeline events.
 
 ## Publication Decision
 
 `praxis-config-starter:0.1.0-rc.37` is already published for the first governed
 write lifecycle. Do not publish another Maven Central or npm version for
-documentation drift or early Page Builder continuity planning.
+documentation drift, Page Builder continuity closure or revert planning.
 
-Use local tests and Neon-backed quickstart/browser proof during the next phase.
-Use GitHub Actions only as a phase-closing gate when the UI continuity lifecycle
-is complete and a downstream consumer needs the public artifact.
+Use local tests and Neon-backed quickstart/browser proof during the revert
+phase. Use GitHub Actions only as a phase-closing gate when the governed revert
+lifecycle is complete and a downstream consumer needs the public artifact.

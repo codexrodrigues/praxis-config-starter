@@ -35,9 +35,12 @@ o fluxo real com LLM/browser. A escrita governada de Project Knowledge
 authorada por IA tambem avancou pela fronteira canonica
 `domain_knowledge_change_set`, incluindo create, validate, approve, apply,
 readback, safe timeline, quickstart proof e public-runtime proof em `rc.37`.
-A proxima capacidade recomendada e a fase de continuidade governada do Page
-Builder: transformar handoffs seguros em acoes governadas claras no cockpit,
-sem fazer a UI virar fonte primaria de regra, memoria ou materializacao.
+A fase de continuidade governada do Page Builder tambem esta concluida
+localmente em `main`: o cockpit transforma handoffs seguros em acoes governadas
+claras, sem fazer a UI virar fonte primaria de regra, memoria ou
+materializacao. A proxima capacidade recomendada e planejar e implementar
+reversibilidade governada de Domain Knowledge (`revert_evidence`) antes de
+ampliar operacoes destrutivas ou novos tipos de escrita.
 
 ## Ordem de leitura
 
@@ -48,9 +51,10 @@ sem fazer a UI virar fonte primaria de regra, memoria ou materializacao.
 5. [project-knowledge-release-checklist-2026-04-30.md](../../project-knowledge-release-checklist-2026-04-30.md)
 6. [07-governed-knowledge-writes-plan.md](./07-governed-knowledge-writes-plan.md)
 7. [08-page-builder-continuity-phase.md](./08-page-builder-continuity-phase.md)
-8. [01-current-state-and-target.md](./01-current-state-and-target.md)
-9. [02-implementation-backlog.md](./02-implementation-backlog.md)
-10. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+8. [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
+9. [01-current-state-and-target.md](./01-current-state-and-target.md)
+10. [02-implementation-backlog.md](./02-implementation-backlog.md)
+11. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -60,14 +64,16 @@ transformar docs-only em publicacao ou em uso repetido de GitHub Actions.
 `07-governed-knowledge-writes-plan.md` abre o proximo corte de capacidade:
 LLM pode propor mudancas de conhecimento, mas a plataforma deve persistir isso
 como change set governado, validado e aprovado antes de aplicar.
-`08-page-builder-continuity-phase.md` e o plano ativo apos `rc.37`: a UI deve
-apresentar continuidade governada sobre Domain Rules e Domain Knowledge, usando
-as fronteiras canonicas em vez de criar memoria ou materializacao local. Os
-documentos anteriores continuam uteis como historico e diagnostico, mas devem
-ser interpretados pela direcao atual: Page Builder authora componentes/paginas,
-enquanto decisoes compartilhadas de negocio devem seguir por
-`/api/praxis/config/domain-rules/**` e conhecimento persistente deve seguir
-pela fronteira `domain_knowledge_change_set`.
+`08-page-builder-continuity-phase.md` registra a fase localmente concluida de
+continuidade governada no cockpit. `09-domain-knowledge-revert-phase.md` e o
+plano ativo seguinte: antes de ampliar operacoes alem de `add_evidence`, a
+plataforma deve suportar reversibilidade governada sem deletar evidencia ou
+expor payload bruto. Os documentos anteriores continuam uteis como historico e
+diagnostico, mas devem ser interpretados pela direcao atual: Page Builder
+authora componentes/paginas, decisoes compartilhadas de negocio devem seguir
+por `/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir
+pela fronteira `domain_knowledge_change_set`, e correcoes de conhecimento
+aplicado devem seguir por revert/supersede governado.
 
 ## Baseline de reaproveitamento
 

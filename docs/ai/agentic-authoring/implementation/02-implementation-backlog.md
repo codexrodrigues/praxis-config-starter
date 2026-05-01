@@ -326,6 +326,69 @@ corte.
   esta fase. O proximo gate remoto deve acontecer somente quando houver
   consumidor nomeado, release planejada ou smoke publicado a validar.
 
+## Fase 8 - Reversibilidade governada de Domain Knowledge
+
+Plano detalhado: [09-domain-knowledge-revert-phase.md](./09-domain-knowledge-revert-phase.md)
+
+Status: proxima fase recomendada; planejamento arquitetural criado antes de
+qualquer contrato publico ou operacao destrutiva.
+
+### Item 24. Inventariar lifecycle e retrieval de evidencias
+
+**Objetivo**
+- mapear como `domain_knowledge_evidence` e consultada hoje e onde evidencia
+  revertida deve deixar de influenciar authoring.
+
+**Definition of Done**
+- consumidores de retrieval sao nomeados;
+- decisao entre colunas de lifecycle ou tabela de eventos e registrada;
+- nenhum `delete_*` e promovido antes desse mapa.
+
+### Item 25. Modelar lifecycle canonico de evidencia
+
+**Objetivo**
+- preservar linhas originais e permitir estados como `active`, `superseded` e
+  `reverted`.
+
+**Definition of Done**
+- migracao define default seguro para evidencias existentes;
+- entidades/repositorios permitem filtrar evidencias ativas;
+- revert nao depende de estado de UI.
+
+### Item 26. Validar e aplicar `revert_evidence`
+
+**Objetivo**
+- tratar revert como operacao governada por change set, nao como delete fisico.
+
+**Definition of Done**
+- validator exige reason, scope, evidencia existente, conceito alvo e
+  evidenceRefs para LLM;
+- apply marca evidencia como revertida/superseded de forma transacional;
+- aplicar o mesmo change set continua idempotente.
+
+### Item 27. Provar timeline/readback seguro de revert
+
+**Objetivo**
+- expor prova segura de reversao sem payload bruto.
+
+**Definition of Done**
+- timeline inclui eventos seguros de revert/supersede;
+- resposta nao inclui payload, source pointer, source URI, patch hash, prompt
+  ou chat history;
+- smoke local protegido cobre create -> validate -> approve -> apply ->
+  timeline para revert.
+
+### Item 28. Preparar cockpit somente apos backend estavel
+
+**Objetivo**
+- permitir que Page Builder solicite revert governado sem virar fonte de
+  memoria.
+
+**Definition of Done**
+- UI so oferece acao quando backend expuser contrato estavel;
+- browser E2E prova que nao ha delecao local;
+- Actions continuam reservadas para gate de fase/release.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.
