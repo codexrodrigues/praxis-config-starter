@@ -1,6 +1,6 @@
 # Domain Knowledge Supersede Evidence Plan
 
-Status: planning-ready, not implemented
+Status: Slice 1 semantic inventory complete, source-level hardening recommended
 Date: 2026-05-01
 Scope: next functional slice after governed Domain Knowledge revert readiness
 
@@ -32,6 +32,52 @@ The recommended direction is:
 4. if introduced, make `supersede_evidence` a governed change-set operation
    that composes "add/resolve successor evidence" plus "mark prior evidence as
    superseded", never a raw payload overwrite.
+
+## Slice 1 Decision - 2026-05-01
+
+Decision: do not promote `supersede_evidence` to the public OpenAPI contract or
+Page Builder cockpit yet.
+
+The source-level inventory found that the platform already has enough
+supersession primitives to avoid a new public operation in this beta cut:
+
+- `domain_knowledge_evidence.status` already allows `active`, `superseded` and
+  `reverted`;
+- `DomainKnowledgeEvidence.supersededByEvidenceId` already records the
+  replacement edge;
+- `DomainKnowledgeChangeSetService.applyRevertEvidenceOperation(...)` already
+  accepts `payload.replacementEvidenceKey`;
+- `GET /domain-knowledge/change-sets/{id}/timeline` can already emit
+  `evidence.superseded`;
+- `AgenticAuthoringProjectKnowledgeService` already gates influence on active
+  evidence only.
+
+The inventory also found one semantic mismatch to harden before any public
+operation expansion:
+
+- when `revert_evidence` carries `replacementEvidenceKey`, the service records
+  `supersededByEvidenceId`, but still sets the prior evidence status to
+  `reverted`;
+- the timeline then emits both `evidence.reverted` and `evidence.superseded`;
+- this is safe, but semantically blurry: replacement intent should be modeled
+  as supersession internally before the platform considers exposing a
+  first-class `supersede_evidence` authoring operation.
+
+Recommended next source-level slice:
+
+1. keep public operation types unchanged: `add_evidence` and
+   `revert_evidence`;
+2. change only internal lifecycle semantics for `revert_evidence` with
+   `replacementEvidenceKey`, so the prior evidence becomes `superseded`;
+3. keep plain `revert_evidence` without replacement as `reverted`;
+4. keep retrieval behavior unchanged because both `reverted` and `superseded`
+   are already excluded from active Project Knowledge influence;
+5. update focused service tests and safe timeline expectations;
+6. do not touch OpenAPI, generated bindings, Angular cockpit or HTTP corpus
+   until this source-level behavior is proven.
+
+This preserves beta contract stability while making the canonical lifecycle
+state match the semantic decision.
 
 ## Why This Is The Next Slice
 
@@ -74,8 +120,9 @@ Current public contract still says:
 - replacement evidence keys are not exposed by safe timeline/readback.
 
 Conclusion: the platform can represent supersession internally, but the
-authoring language has not yet decided whether `supersede_evidence` is a
-first-class semantic operation.
+authoring language should not expose `supersede_evidence` yet. The next
+implementation should first make internal lifecycle status match the existing
+replacement semantics.
 
 ## Impact Map
 
@@ -148,11 +195,12 @@ Choose first-class `supersede_evidence` if:
 
 Recommended beta decision:
 
-- implement a small source-level spike first;
-- if tests and UX show the distinction is valuable, promote
-  `supersede_evidence` in the next public contract batch;
-- otherwise document that `revert_evidence + replacementEvidenceKey` remains
-  the canonical beta path and defer operation expansion.
+- keep `revert_evidence + replacementEvidenceKey` as the canonical public beta
+  path;
+- harden internal lifecycle status so replacement marks prior evidence as
+  `superseded`;
+- defer first-class `supersede_evidence` until a named UI/LLM authoring
+  consumer needs a distinct action or operation label.
 
 ## Candidate Operation Model
 
@@ -224,14 +272,21 @@ Definition of done:
 - no UI action yet;
 - the beta semantics are explicit.
 
+Status:
+
+- completed on 2026-05-01;
+- decision recorded above;
+- next slice should be source-level lifecycle hardening, not public contract
+  promotion.
+
 ### Slice 2. Backend Source-Level Spike
 
-Only if first-class operation is justified.
+Do this before any first-class operation is justified.
 
 Deliverables:
 
-- validator accepts `supersede_evidence` behind source-level tests;
-- service applies supersession transactionally;
+- service applies replacement-backed `revert_evidence` as supersession
+  transactionally;
 - prior evidence status becomes `superseded`;
 - replacement remains `active`;
 - retrieval excludes prior evidence.
@@ -239,8 +294,10 @@ Deliverables:
 Definition of done:
 
 - focused tests pass;
-- no public contract generation yet unless the operation is intentionally
-  promoted.
+- no public contract generation;
+- no `supersede_evidence` enum is added;
+- plain `revert_evidence` without replacement still marks prior evidence as
+  `reverted`.
 
 ### Slice 3. Contract Promotion
 
@@ -304,9 +361,14 @@ Pause and redesign if a proposed implementation:
 
 ## Recommended Next Action
 
-Execute Slice 1 only: semantic inventory and explicit decision.
+Execute Slice 2 as a source-level lifecycle hardening patch:
 
-If no named consumer needs first-class supersession yet, keep
-`revert_evidence + replacementEvidenceKey` as the beta path and move the next
-functional investment to vector/RAG active-evidence filtering or richer runtime
-enforcement proof.
+- no OpenAPI change;
+- no generated binding change;
+- no Angular/UI change;
+- no HTTP corpus promotion;
+- focused backend service tests first.
+
+After that patch is green, decide whether the next investment should be
+quickstart runtime proof for supersession status or vector/RAG active-evidence
+filtering.

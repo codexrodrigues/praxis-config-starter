@@ -498,8 +498,11 @@ Plano detalhado:
 - se virar contrato publico, bindings e corpus derivados entram no mesmo ciclo.
 
 **Status**
-- Planejado em 2026-05-01. Proximo passo recomendado e executar somente o
-  inventario semantico de Slice 1 antes de qualquer codigo.
+- Slice 1 concluido em 2026-05-01. Decisao: nao promover
+  `supersede_evidence` para OpenAPI/UI agora. Manter
+  `revert_evidence + replacementEvidenceKey` como caminho publico beta e
+  executar primeiro hardening interno para marcar evidencia substituida como
+  `superseded`, sem alterar contrato publico.
 
 ## Regras operacionais para qualquer PR desta trilha
 
