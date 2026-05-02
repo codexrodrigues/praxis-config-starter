@@ -614,6 +614,14 @@ AI-visible e evidencia `active`). A publicacao gera documento sanitizado de
 `project_knowledge`; `revert_evidence` e supersession removem o documento
 derivado deterministico da evidencia antiga. O default permanece desligado.
 
+Item 35b concluido em 2026-05-02: `VectorRankedProjectKnowledgeCandidateRetriever`
+foi adicionado como retrieval candidato opt-in via
+`praxis.project-knowledge.rag-retrieval.enabled=true`. O default permanece
+desligado. Hits vetoriais sao usados apenas para ranquear concept keys; os
+conceitos sao recarregados por tenant/environment e continuam sujeitos ao
+re-check final de lifecycle, curation, AI visibility, escopo, kind e evidencia
+`active` em `AgenticAuthoringProjectKnowledgeService`.
+
 ### Item 36. Provar runtime local-first
 
 **Objetivo**

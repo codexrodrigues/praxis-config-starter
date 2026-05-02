@@ -390,8 +390,37 @@ Implementation result:
 - `aiVisibility=mask` publishes only structural context plus the governed masked
   summary, not the raw payload summary.
 
-Next implementation step: add the vector-ranked candidate retriever behind a
-separate opt-in switch. It must treat vector hits as candidate IDs/provenance
-only, reload canonical Domain Knowledge rows and keep the final active-evidence
-re-check in `AgenticAuthoringProjectKnowledgeService` before anything can
-influence `contextHints.projectKnowledge`.
+### Slice 7 - Opt-In Vector-Ranked Candidate Retrieval
+
+Objective:
+
+- allow Project Knowledge candidate discovery to use vector ranking without
+  turning vector metadata into authority.
+
+Implementation result:
+
+- completed on 2026-05-02 as an opt-in candidate retriever;
+- `VectorRankedProjectKnowledgeCandidateRetriever` is enabled only with
+  `praxis.project-knowledge.rag-retrieval.enabled=true`;
+- the default remains `false`, so normal authoring continues to use
+  `RepositoryBackedProjectKnowledgeCandidateRetriever`;
+- when enabled and vector store is unavailable, retrieval falls back to the
+  repository-backed candidate path;
+- when vector store is available, retrieval searches only derived
+  `project_knowledge` documents scoped by tenant/environment and active derived
+  evidence status;
+- vector hits contribute only concept keys/provenance, then canonical
+  `DomainKnowledgeConcept` rows are reloaded by tenant/environment;
+- vector ranking order is preserved after canonical row reload;
+- final influence still depends on `AgenticAuthoringProjectKnowledgeService`,
+  which re-checks lifecycle, curation, AI visibility, scope, kind and active
+  evidence before adding anything to `contextHints.projectKnowledge`;
+- context/resource scope is intentionally not a hard vector filter, so global
+  Project Knowledge can still be discovered and then filtered canonically.
+
+Next implementation step: extend the quickstart runtime smoke to run a local
+vector-enabled proof with both
+`praxis.project-knowledge.rag-publication.enabled=true` and
+`praxis.project-knowledge.rag-retrieval.enabled=true`, then prove
+active -> revert/supersede -> absence of influence against Neon without using
+GitHub Actions.
