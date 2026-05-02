@@ -274,6 +274,9 @@ No GitHub Actions were used.
 
 ### Slice C - Governed Prompt Fail-Closed Behavior
 
+Status: component-level proof completed locally on 2026-05-02 in
+`praxis-ui-angular`.
+
 Goal:
 
 - ensure business-rule, compliance, validation, approval, eligibility and
@@ -294,6 +297,34 @@ Expected validation:
 - Angular focal tests for the fail-closed branch;
 - browser E2E showing a governed prompt returns handoff/cockpit state instead
   of preview/apply.
+
+Implemented proof:
+
+- Commit in `praxis-ui-angular`: `c4303078 Prove governed stream fallback reaches Page Builder cockpit [skip ci]`.
+- `DynamicPageBuilderComponent` now has a component-level spec proving the
+  new fail-closed turn result is consumed as governed handoff state.
+- The spec forces `/turn/stream/start` pre-connection unavailability, provides
+  governed `contextHints.domainCatalog`, and proves:
+  - `streamTurn` is attempted;
+  - `resolveIntent` and `previewPage` are not called;
+  - no preview is retained;
+  - assistant shell stays in `clarification`;
+  - domain-rules intake receives the governed prompt/rule context;
+  - the shared-rule cockpit renders canonical actions;
+  - `page-builder-agentic-persist` remains disabled.
+
+Local validation:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+
+npx ng test praxis-page-builder --watch=false --browsers=ChromeHeadless \
+  --include=projects/praxis-page-builder/src/lib/dynamic-page-builder.component.spec.ts \
+  --include=projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring-turn-flow.spec.ts \
+  --include=projects/praxis-page-builder/src/lib/i18n/page-builder-agentic-i18n.spec.ts
+```
+
+Result: `94 SUCCESS`. No GitHub Actions were used.
 
 ### Slice D - Local Readiness Lane
 

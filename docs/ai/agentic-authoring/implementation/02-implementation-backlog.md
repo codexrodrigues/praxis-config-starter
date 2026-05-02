@@ -706,6 +706,12 @@ e `npx ng build praxis-page-builder`.
 - nenhum payload bruto, prompt, condicao ou materializacao aparece no cockpit
   comum.
 
+Status: prova focal de componente concluida localmente em 2026-05-02 no
+`praxis-ui-angular`. O spec do `DynamicPageBuilderComponent` cobre stream
+indisponivel, contexto governado, ausencia de `resolveIntent`/`previewPage`,
+handoff para `domain-rules`, cockpit visivel e persistencia local bloqueada.
+Validacao local: specs focais do componente/turn flow/i18n (`94 SUCCESS`).
+
 ### Item 40. Provar em browser local
 
 **Objetivo**
