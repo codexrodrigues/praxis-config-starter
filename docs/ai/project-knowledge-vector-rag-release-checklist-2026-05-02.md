@@ -179,6 +179,36 @@ Observed:
 - lifecycle included `project-knowledge-vector-index-confirmed-after-add` and
   `project-knowledge-vector-index-retained-for-replacement`.
 
+Local `ci-smoke-unit` gate initially exposed a test infrastructure path issue:
+some agentic authoring tests preferred `../docs/ai/agentic-authoring/**` when
+that directory existed, even if the actual proof/schema files lived in this
+repository's own `docs/ai/agentic-authoring/**`. The helper was corrected to
+prefer local files and only fall back to monorepo-level docs when the expected
+artifact exists there.
+
+Targeted regression after the fix passed:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+
+mvn -q -Dtest=AgenticAuthoringChartCapabilityCatalogTest,AgenticAuthoringFormCapabilityCatalogTest,AgenticAuthoringTableCapabilityCatalogTest,AgenticAuthoringDryRunServiceTest test
+```
+
+Full local release-like gate then passed:
+
+```bash
+mvn -B -P ci-smoke-unit -T 1C clean verify
+```
+
+Observed:
+
+- tests run: `775`;
+- failures: `0`;
+- errors: `0`;
+- skipped: `0`;
+- final status: `BUILD SUCCESS`;
+- no GitHub Actions were used.
+
 ## Stop Conditions
 
 Do not publish if any of these are true:

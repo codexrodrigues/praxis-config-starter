@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ensured Project Knowledge vector lifecycle behavior removes reverted evidence
   documents and keeps replacement evidence documents only when the replacement
   remains active.
+- Fixed agentic authoring test artifact path resolution so local release-like
+  gates prefer this repository's `docs/ai/agentic-authoring/**` artifacts and
+  only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
 - Focal starter tests passed for Domain Knowledge lifecycle validation, Project
@@ -60,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REQUIRE_EVIDENCE_SUPERSESSION=true`, proving the original evidence vector
   document is removed while replacement evidence and authoring retrieval remain
   active.
+- Local `ci-smoke-unit` release-like gate passed with `775` tests, `0`
+  failures, `0` errors and `0` skipped after the test artifact path fix.
 - No GitHub Actions, Maven Central publication, npm publication or hosted smoke
   was used for this Unreleased checkpoint.
 
