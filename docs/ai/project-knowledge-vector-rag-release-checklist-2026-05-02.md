@@ -39,6 +39,48 @@ The phase is complete as local beta evidence:
 - Quickstart proves the behavior with Neon-backed persistence and
   `PgVectorStore`.
 
+## Latest Local Preflight
+
+Recorded on 2026-05-02, without GitHub Actions, Maven Central publication, npm
+publication or hosted smoke.
+
+Config-starter focal gate passed:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+
+mvn -q -Dtest=VectorRankedProjectKnowledgeCandidateRetrieverTest,AgenticAuthoringProjectKnowledgeServiceTest,RagProjectKnowledgeDerivedIndexServiceTest,RagProjectKnowledgeMetadataTest test
+```
+
+Repository/tag preflight passed:
+
+```bash
+git fetch origin --tags --prune
+git status --short
+git tag --list 'v0.1.0-rc.*' --sort=-v:refname | head -10
+```
+
+Observed:
+
+- working tree was clean before recording this evidence;
+- latest local release tag remains `v0.1.0-rc.37`;
+- no `v0.1.0-rc.38` tag existed locally after fetching tags.
+
+Quickstart lightweight downstream gate passed:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+
+bash -n scripts/verify-domain-knowledge-change-set-runtime.sh
+mkdir -p target/scripts
+mvn -q dependency:build-classpath -Dmdep.outputFile=target/runtime-classpath.txt -DincludeScope=runtime >/dev/null
+javac -cp "$(cat target/runtime-classpath.txt)" -d target/scripts scripts/ProjectKnowledgeFixture.java
+```
+
+This lightweight gate only proves script syntax and fixture compilation. It does
+not replace the required Neon-backed vector revert and supersession runtime
+smokes before any future Maven publication.
+
 ## Stop Conditions
 
 Do not publish if any of these are true:
