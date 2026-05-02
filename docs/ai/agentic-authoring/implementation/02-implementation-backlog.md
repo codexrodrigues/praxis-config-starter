@@ -724,6 +724,17 @@ Validacao local: specs focais do componente/turn flow/i18n (`94 SUCCESS`).
 - docs registram comando e evidencia;
 - GitHub Actions continuam reservadas para gate de fase/release.
 
+Status: prova browser focal concluida localmente em 2026-05-02 no
+`praxis-ui-angular`. O teste `Shared-rule handoff - stream fallback governado
+falha fechado no cockpit` abre `/page-builder-ia`, injeta contexto governado,
+forca `turn/stream/start` a retornar `404` controlado e verifica cockpit
+Shared Rules visivel, persistencia local bloqueada e ausencia de chamadas para
+`intent-resolution`, `page-preview` e `page-apply`. Validacao local contra
+servicos ja ativos em `http://localhost:4003`: `1 passed`. A lane gerenciada
+`run-shared-rule-stream-fallback-cockpit-local.sh` foi criada; a primeira
+tentativa foi interrompida apos instalar o starter localmente porque o wrapper
+ficou silencioso antes de abrir as portas isoladas `8100/4085`.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.

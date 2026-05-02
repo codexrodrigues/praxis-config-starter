@@ -344,8 +344,40 @@ Definition of Done:
 Expected validation:
 
 ```bash
-# exact command to be filled after inventory confirms the existing runner
+# managed local lane, no GitHub Actions:
+AI_PROVIDER=openai \
+AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
+./tools/local-e2e/run-shared-rule-stream-fallback-cockpit-local.sh
+
+# focal browser proof against already-running local services:
+PLAYWRIGHT_BASE_URL=http://localhost:4003 \
+PRAXIS_E2E_CONFIG_ORIGIN=http://localhost:4003 \
+PRAXIS_E2E_TEST_TIMEOUT_MS=180000 \
+npx playwright test \
+  projects/praxis-page-builder/test-dev/e2e/page-builder-agentic-validation.playwright.spec.ts \
+  --grep "stream fallback governado" \
+  --reporter=list
 ```
+
+Completion evidence:
+
+- `praxis-ui-angular` adds
+  `tools/local-e2e/run-shared-rule-stream-fallback-cockpit-local.sh` and
+  documents it in `tools/local-e2e/README.md`.
+- The browser spec
+  `projects/praxis-page-builder/test-dev/e2e/page-builder-agentic-validation.playwright.spec.ts`
+  now includes `Shared-rule handoff - stream fallback governado falha fechado
+  no cockpit`.
+- The proof opens `/page-builder-ia`, injects governed `domainCatalog`
+  context, makes only `turn/stream/start` return a controlled pre-connection
+  `404`, and verifies the browser does not call `intent-resolution`,
+  `page-preview` or `page-apply`.
+- Focal local validation passed against already-running local services on
+  `http://localhost:4003`: `1 passed`.
+- The managed lane was introduced, but the first local attempt was interrupted
+  after installing the starter locally because the wrapper stayed silent before
+  opening isolated ports `8100` and `4085`. No GitHub Actions, npm publication
+  or Maven Central publication were used.
 
 ## Acceptance Criteria
 
@@ -363,9 +395,7 @@ The slice is complete when a real local browser proves all of these:
 
 ## Recommended Next Action
 
-Start with Slice A in `praxis-ui-angular`: inventory the Page Builder authoring
-entry points, current stream usage, fallback behavior and existing browser E2E
-wrappers.
-
-Do not edit backend contracts or Angular behavior before that inventory is
-complete.
+Close this local checkpoint with `[skip ci]` commits, then start the next
+platform slice from runtime enforcement evidence: prove that published governed
+decisions materialize into runtime consumers without letting Page Builder become
+the source of truth.

@@ -52,7 +52,10 @@ candidate retrieval, reload canonico com `sourceRelease`, revert removendo
 influencia e supersession preservando apenas a evidencia substituta ativa. O
 proximo slice escolhido e tornar o Page Builder stream-first para authoring de
 componente/pagina e fail-closed para decisoes semanticas governadas, mantendo o
-checkpoint Vector RAG fechado localmente e nao publicado. Antes de ampliar
+checkpoint Vector RAG fechado localmente e nao publicado. Esse slice tambem
+passou por prova browser focal local: prompt governado com stream indisponivel
+falha fechado para cockpit de Shared Rules, sem chamar `intent-resolution`,
+`page-preview` ou `page-apply`. Antes de ampliar
 operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
 essa semantica de revert/supersede sem deletar evidencia ou expor payload bruto.
 
