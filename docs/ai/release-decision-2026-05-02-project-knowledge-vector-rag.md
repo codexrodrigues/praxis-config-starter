@@ -59,6 +59,9 @@ the rule source.
   checkpoint.
 - `praxis-config-starter/main` commit `1bf718d` recorded the latest Neon-backed
   runtime gates in the operational release checklist.
+- `praxis-config-starter/main` commit `cf67cd0` fixed local agentic authoring
+  test artifact resolution and recorded the passing local release-like
+  `ci-smoke-unit` gate.
 - `praxis-api-quickstart/main` commit `8dc827f` added the strict vector runtime
   smoke gate.
 - `praxis-api-quickstart/main` commit `5fa9b69` recorded the operational rollout
@@ -130,6 +133,21 @@ The supersession proof observed:
 
 The backend used for this local proof was stopped after the smokes, and
 `http://localhost:8099/actuator/health` no longer responded.
+
+Local release-like `ci-smoke-unit` gate passed after fixing standalone test
+artifact path resolution:
+
+```bash
+mvn -B -P ci-smoke-unit -T 1C clean verify
+```
+
+Observed:
+
+- tests run: `775`;
+- failures: `0`;
+- errors: `0`;
+- skipped: `0`;
+- final status: `BUILD SUCCESS`.
 
 No GitHub Actions, Maven Central publication, npm publication or hosted smoke
 was used for this checkpoint.
