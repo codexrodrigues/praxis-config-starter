@@ -70,9 +70,10 @@ fonte primaria.
 12. [11-vector-rag-active-evidence-filtering-plan.md](./11-vector-rag-active-evidence-filtering-plan.md)
 13. [release-readiness-2026-05-02-project-knowledge-vector-rag.md](../../release-readiness-2026-05-02-project-knowledge-vector-rag.md)
 14. [release-decision-2026-05-02-project-knowledge-vector-rag.md](../../release-decision-2026-05-02-project-knowledge-vector-rag.md)
-15. [01-current-state-and-target.md](./01-current-state-and-target.md)
-16. [02-implementation-backlog.md](./02-implementation-backlog.md)
-17. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+15. [project-knowledge-vector-rag-release-checklist-2026-05-02.md](../../project-knowledge-vector-rag-release-checklist-2026-05-02.md)
+16. [01-current-state-and-target.md](./01-current-state-and-target.md)
+17. [02-implementation-backlog.md](./02-implementation-backlog.md)
+18. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -102,9 +103,12 @@ publicacao/retrieval desabilitadas por padrao.
 `release-decision-2026-05-02-project-knowledge-vector-rag.md` registra a
 decisao atual de nao publicar ainda: a fase esta pronta como evidencia local,
 mas Maven Central so deve ser usado com autorizacao explicita, consumidor
-nomeado e um gate remoto unico de fechamento. Antes de ampliar operacoes alem
-de `add_evidence`/`revert_evidence`, a plataforma deve preservar essa semantica
-de revert/supersede sem deletar evidencia ou expor payload bruto. Os documentos
+nomeado e um gate remoto unico de fechamento.
+`project-knowledge-vector-rag-release-checklist-2026-05-02.md` transforma essa
+decisao em passos operacionais para um futuro RC autorizado, sem gastar Actions
+durante iteracao normal. Antes de ampliar operacoes alem de
+`add_evidence`/`revert_evidence`, a plataforma deve preservar essa semantica de
+revert/supersede sem deletar evidencia ou expor payload bruto. Os documentos
 anteriores continuam uteis como historico e diagnostico, mas devem ser
 interpretados pela direcao atual: Page Builder authora componentes/paginas,
 decisoes compartilhadas de negocio devem seguir por

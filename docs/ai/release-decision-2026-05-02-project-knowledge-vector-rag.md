@@ -129,6 +129,10 @@ was used for this checkpoint.
 
 Do not publish this phase yet.
 
+Operational release checklist:
+
+- [Project Knowledge Vector RAG Release Checklist](project-knowledge-vector-rag-release-checklist-2026-05-02.md)
+
 Publication becomes appropriate only after all of these are true:
 
 - the owner explicitly authorizes closing Project Knowledge Vector RAG as a
