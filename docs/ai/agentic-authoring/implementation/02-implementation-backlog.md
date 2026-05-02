@@ -669,6 +669,11 @@ Status: selecionada como proximo slice de plataforma em 2026-05-02.
 - nenhum contrato backend novo e criado antes do inventario;
 - fallback atual fica documentado por rota de authoring.
 
+Status: concluido localmente em 2026-05-02 por inspecao de codigo. O host
+oficial `/page-builder-ia` ja esta stream-first, a lib generica ainda conserva
+fallback sincrono pre-conexao para compatibilidade, e prompts governados devem
+ser protegidos contra esse fallback no Slice B.
+
 ### Item 38. Tornar stream o caminho primario para componente/pagina
 
 **Objetivo**

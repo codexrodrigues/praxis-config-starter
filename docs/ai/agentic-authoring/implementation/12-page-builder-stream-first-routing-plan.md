@@ -124,6 +124,9 @@ Breaking-change risk:
 
 ### Slice A - Inventory And Default-Path Selection
 
+Status: completed locally on 2026-05-02 by source inspection. No runtime
+behavior was changed.
+
 Goal:
 
 - identify the exact Page Builder entry points where stream is available but
@@ -147,6 +150,73 @@ git status --short
 ```
 
 Plus targeted source inspection. No Action.
+
+Inventory result:
+
+- Official host route: `src/app/features/llm-tests/llm-tests.page.ts`
+  wires `/page-builder-ia` with `enableAgenticAuthoring=true`,
+  `agenticAuthoringEnableStreaming=true`, `agenticAuthoringComponentId`
+  and `componentInstanceId` both set to `page-builder-ia`,
+  `agenticAuthoringIncludeLlmDiagnostics=true`, and governed
+  `contextHints.domainCatalog` for `human-resources.funcionarios`.
+- Library entry point: `projects/praxis-page-builder/src/lib/dynamic-page-builder.component.ts`
+  owns the assistant shell, `previewAgenticAuthoring`,
+  `submitAgenticQuickReply`, `persistAgenticAuthoring`, local preview apply,
+  shared-rule cockpit actions and Project Knowledge cockpit actions.
+- Turn orchestration: `projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring-turn-flow.ts`
+  chooses stream first only when `enableTurnStream()` is true and
+  `streamTurn` exists. Otherwise it still runs the synchronous legacy path:
+  `intent-resolution -> page-preview -> local preview apply`.
+- Stream client: `projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring.service.ts`
+  starts the backend stream through `/turn/stream/start`, probes the stream
+  endpoint, opens EventSource and marks connection failures as non-fallback
+  transport errors.
+- Current fallback behavior: stream transport connection errors do not fall
+  back to synchronous authoring, but pre-connection HTTP statuses
+  `404`, `501` and `503` still fall back to the synchronous
+  `intent-resolution/page-preview` path.
+- Governed route behavior: route-required shared-rule prompts are represented
+  as clarification/handoff state when the backend returns
+  `gate.status=route_required` plus `shared-rule-authoring-required`, and the
+  component maps that into `blocked_by_governed_shared_rule_route`.
+- Existing browser proof: `projects/praxis-page-builder/test-dev/e2e/page-builder-agentic-validation.playwright.spec.ts`
+  validates that `/page-builder-ia` uses SSE stream transport, quick replies
+  come from backend payloads, page persistence goes through `page-apply`, and
+  shared-rule handoff/cockpit flows do not expose raw governed payloads.
+- Existing local runners:
+  `tools/local-e2e/run-page-builder-agentic-full-local.sh`,
+  `tools/local-e2e/run-shared-rule-quick-reply-cockpit-local.sh`,
+  `tools/local-e2e/run-shared-rule-timeline-cockpit-local.sh` and
+  `tools/local-e2e/run-project-knowledge-audit-cockpit-local.sh`.
+- Unit proof already present:
+  `projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring-turn-flow.spec.ts`
+  proves stream progress/result mapping, no synchronous fallback after SSE
+  connection failure, resource-discovery turns staying on SSE when streaming
+  is enabled, and shared-rule route-required prompts not entering preview.
+- Host proof already present:
+  `src/app/features/llm-tests/llm-tests.page.spec.ts` proves the official
+  `/page-builder-ia` host is wired to the canonical stream path.
+- Generic demos still vary: `src/app/features/page-builder-json-logic-lab`
+  enables agentic authoring but does not opt into stream, because it is a
+  JSON-logic lab and not the official LLM/Page Builder cockpit route.
+
+Default-path decision:
+
+- The next code slice should not introduce a backend endpoint or a public
+  contract.
+- Keep `/page-builder-ia` as the official stream-first cockpit and make the
+  stream-first invariant explicit in Angular tests and documentation.
+- Preserve generic `DynamicPageBuilderComponent` compatibility only where it
+  is truly a reusable library concern, but prevent governed routes from using
+  synchronous preview fallback.
+- Treat `404`, `501` and `503` fallback as acceptable only for non-governed
+  component/page authoring in compatibility hosts. For governed semantic
+  decisions, fallback must fail closed with handoff/status instead of invoking
+  `page-preview`.
+- Slice B should start by adding a focused unit guard around fallback policy in
+  `page-builder-agentic-authoring-turn-flow.spec.ts`, then adjust the turn flow
+  only if the current behavior allows governed prompts to reach synchronous
+  preview after stream unavailability.
 
 ### Slice B - Stream-First Component Authoring
 
