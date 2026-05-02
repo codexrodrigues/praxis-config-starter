@@ -81,6 +81,24 @@ This lightweight gate only proves script syntax and fixture compilation. It does
 not replace the required Neon-backed vector revert and supersession runtime
 smokes before any future Maven publication.
 
+Local install/package gate passed after the lightweight preflight:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+mvn -q -DskipTests install
+
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+mvn -q clean package -DskipTests -Dpraxis.config.version=0.1.0-rc.5
+```
+
+Observed:
+
+- `praxis-config-starter` commit `4d3ea8e` installed into the local Maven
+  repository;
+- `praxis-api-quickstart` commit `5fa9b69` packaged against the locally
+  installed starter override;
+- no Maven Central publication or GitHub Actions were used.
+
 ## Stop Conditions
 
 Do not publish if any of these are true:
