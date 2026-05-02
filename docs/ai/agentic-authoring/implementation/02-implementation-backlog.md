@@ -814,6 +814,46 @@ governada para `human-resources.folhas-pagamento:mark-paid`, aplicou uma
 materializacao `workflow_action` com `sourceHash` derivado e confirmou rejeicao
 da action com `rejectedWith: 409`.
 
+### Item 44. Provar enforcement `approval_policy` sem UI
+
+**Objetivo**
+- demonstrar que uma decisao semantica governada em `domain-rules` pode virar
+  materializacao aplicada de aprovacao operacional e bloquear uma action real no
+  quickstart.
+
+**Definition of Done**
+- definicao `approval_policy` aprovada e publicada;
+- publicacao deriva materializacao aplicada `approval_policy` com
+  `kind=approval_policy` e `sourceHash` derivado;
+- action operacional em
+  `POST /api/human-resources/eventos-folha/actions/bulk-approve` e rejeitada
+  com `409 Conflict`;
+- prova local nao usa GitHub Actions, npm nem Maven Central.
+
+Status: concluido localmente em 2026-05-02. A lane
+`scripts/verify-domain-rules-approval-policy-runtime.sh` foi executada contra
+`http://localhost:8091` com `ORIGIN=http://localhost:4003`, publicou a decisao
+governada para `human-resources.eventos-folha:bulk-approve`, aplicou uma
+materializacao `approval_policy` com `sourceHash` derivado e confirmou rejeicao
+da action com `rejectedWith: 409`.
+
+### Fechamento local da Fase 11
+
+Status: fase localmente fechada em 2026-05-02.
+
+Evidencia acumulada:
+- `form_config`: materializacao aplicada consumida no browser por
+  `praxis-dynamic-form`;
+- `backend_validation`: comando de pedido de compra bloqueado por
+  `resource_validation_policy`;
+- `workflow_action`: action `mark-paid` bloqueada por `workflow_action_policy`;
+- `approval_policy`: action `bulk-approve` bloqueada por exigencia governada de
+  aprovacao.
+
+Proximo passo recomendado:
+- consolidar checklist de readiness/release e cockpit/docs antes de abrir uma
+  nova familia de materializacoes ou publicar novo corte remoto.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.

@@ -141,6 +141,35 @@ Evidence:
   semantic decision without making Page Builder, Angular or the quickstart
   controller the source of the policy.
 
+## Approval Policy Proof
+
+Approval-gated action enforcement was proven locally on 2026-05-02 with the
+same quickstart runtime line.
+
+Command:
+
+```bash
+BACKEND_URL=http://localhost:8091 \
+ORIGIN=http://localhost:4003 \
+scripts/verify-domain-rules-approval-policy-runtime.sh
+```
+
+Evidence:
+
+- The smoke created an approved governed `approval_policy` definition for
+  `human-resources.eventos-folha`.
+- `/api/praxis/config/domain-rules/publications` published the definition and
+  applied one `approval_policy` materialization with
+  `targetArtifactType=resource-action-approval`,
+  `targetArtifactKey=human-resources.eventos-folha:bulk-approve`,
+  `kind=approval_policy` and derived `sourceHash`.
+- The authenticated operational command
+  `POST /api/human-resources/eventos-folha/actions/bulk-approve` was rejected
+  by the runtime with `409 Conflict`.
+- This proves that an existing bulk workflow action can require approval by
+  applied semantic decision without introducing a local inbox, BPM engine or UI
+  rule source.
+
 ## Acceptance Criteria
 
 - The runtime consumer reads applied materializations from the canonical
@@ -153,8 +182,7 @@ Evidence:
 
 ## Recommended Next Action
 
-Extend the same local-first proof discipline to `approval_policy`, prioritizing
-command-side evidence over new UI surface. The next slice should prove that an
-applied governed decision requires approval for an existing bulk operational
-action while keeping the rule definition and materialization lifecycle canonical
-in `domain-rules`.
+Treat Fase 11 as locally closed and consolidate the evidence into a compact
+release/readiness checklist before opening a new platform slice. The next
+platform slice should avoid new enforcement kinds until the cockpit and docs can
+surface these three proven projections coherently.

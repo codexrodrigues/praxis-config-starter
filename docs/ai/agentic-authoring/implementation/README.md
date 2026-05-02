@@ -161,6 +161,11 @@ zero:
   action operacional existente: a decisao governada publicada em `domain-rules`
   materializa `human-resources.folhas-pagamento:mark-paid` e o quickstart
   bloqueia a chamada real com `409 Conflict`.
+- A prova local de `approval_policy` completa a primeira matriz de enforcement
+  operacional: a decisao governada publicada em `domain-rules` materializa
+  `human-resources.eventos-folha:bulk-approve` e o quickstart bloqueia a chamada
+  real com `409 Conflict`, sem criar inbox local, BPM ad hoc ou regra primaria
+  na UI.
 
 ## Invariantes canonicos
 
