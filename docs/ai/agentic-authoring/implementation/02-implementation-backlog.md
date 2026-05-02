@@ -686,6 +686,13 @@ ser protegidos contra esse fallback no Slice B.
 - progresso exibido vem de eventos backend, nao de execucao inventada no
   cliente.
 
+Status: guard focal concluido localmente em 2026-05-02 no
+`praxis-ui-angular`. O fallback sincrono pre-conexao continua disponivel para
+hosts de compatibilidade nao governados, mas fica bloqueado para decisoes
+semanticas governadas e retorna handoff/status seguro em vez de chamar
+`page-preview`. Validacao local: specs focais do turn flow/i18n (`30 SUCCESS`)
+e `npx ng build praxis-page-builder`.
+
 ### Item 39. Falhar fechado para prompts governados
 
 **Objetivo**

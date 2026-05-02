@@ -220,6 +220,8 @@ Default-path decision:
 
 ### Slice B - Stream-First Component Authoring
 
+Status: first guard completed locally on 2026-05-02 in `praxis-ui-angular`.
+
 Goal:
 
 - make backend turn stream the primary path for component/page authoring in the
@@ -237,6 +239,38 @@ Expected validation:
 
 - Angular focal unit/spec tests for the selected service/component;
 - local browser smoke for the selected Page Builder flow.
+
+Implemented guard:
+
+- Commit in `praxis-ui-angular`: `e50f674c Fail closed governed Page Builder stream fallback [skip ci]`.
+- `PageBuilderAgenticAuthoringTurnFlow` now preserves synchronous fallback for
+  non-governed compatibility hosts when `/turn/stream/start` is unavailable
+  with `404`, `501` or `503`.
+- The same fallback is blocked when the request carries governed semantic
+  decision signals, such as `contextHints.domainCatalog.recommendedAuthoringFlow`
+  set to `shared_rule_authoring`, explicit rule type/target layer, or a
+  governance context plus protected rule/compliance wording.
+- In the protected case, the flow returns a safe `clarification` result with a
+  synthetic `route_required` intent-resolution diagnostic and
+  `shared-rule-authoring-required`, so the Page Builder cockpit can continue to
+  canonical governed handoff state instead of calling `page-preview`.
+- New i18n key:
+  `praxis.pageBuilder.agentic.governedRoute.streamUnavailable`.
+
+Local validation:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+
+npx ng test praxis-page-builder --watch=false --browsers=ChromeHeadless \
+  --include=projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring-turn-flow.spec.ts \
+  --include=projects/praxis-page-builder/src/lib/i18n/page-builder-agentic-i18n.spec.ts
+
+npx ng build praxis-page-builder
+```
+
+Result: `30 SUCCESS` for the focal specs and `Built @praxisui/page-builder`.
+No GitHub Actions were used.
 
 ### Slice C - Governed Prompt Fail-Closed Behavior
 
