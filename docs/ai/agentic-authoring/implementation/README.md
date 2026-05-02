@@ -45,9 +45,14 @@ retrieval filtering e prova browser no Page Builder confirmando que evidencia
 revertida deixa de aparecer como Project Knowledge ativo. O checkpoint
 documental/release-readiness dessa fase tambem esta fechado: contrato OpenAPI,
 bindings gerados e corpus HTTP derivado estao alinhados sem promover o exemplo
-mutavel para `llmOperational` e sem publicar novo Maven/npm. A proxima
-capacidade deve ser planejada separadamente antes de novos tipos de escrita,
-sem promover `delete_*` por atalho.
+mutavel para `llmOperational` e sem publicar novo Maven/npm. Em 2026-05-02, o
+checkpoint opt-in de Project Knowledge Vector RAG tambem foi provado
+localmente: publicacao derivada no `vector_store`, ranking vetorial apenas como
+candidate retrieval, reload canonico com `sourceRelease`, revert removendo
+influencia e supersession preservando apenas a evidencia substituta ativa. A
+proxima capacidade deve ser planejada separadamente antes de novos tipos de
+escrita, sem promover `delete_*` por atalho nem transformar indice vetorial em
+fonte primaria.
 
 ## Ordem de leitura
 
@@ -63,9 +68,10 @@ sem promover `delete_*` por atalho.
 10. [release-readiness-2026-05-01-domain-knowledge-contract-corpus.md](../../release-readiness-2026-05-01-domain-knowledge-contract-corpus.md)
 11. [10-domain-knowledge-supersede-evidence-plan.md](./10-domain-knowledge-supersede-evidence-plan.md)
 12. [11-vector-rag-active-evidence-filtering-plan.md](./11-vector-rag-active-evidence-filtering-plan.md)
-13. [01-current-state-and-target.md](./01-current-state-and-target.md)
-14. [02-implementation-backlog.md](./02-implementation-backlog.md)
-15. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+13. [release-readiness-2026-05-02-project-knowledge-vector-rag.md](../../release-readiness-2026-05-02-project-knowledge-vector-rag.md)
+14. [01-current-state-and-target.md](./01-current-state-and-target.md)
+15. [02-implementation-backlog.md](./02-implementation-backlog.md)
+16. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -88,11 +94,14 @@ promover `supersede_evidence` agora e o hardening concluido de
 `revert_evidence + replacementEvidenceKey`. O plano ativo seguinte e
 `11-vector-rag-active-evidence-filtering-plan.md`: ele define como preparar
 ranking vector/RAG sem permitir que indice derivado substitua a fonte canonica
-de Domain Knowledge ou contorne evidencia ativa. Antes de ampliar operacoes
-alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar essa
-semantica de revert/supersede sem deletar evidencia ou expor payload bruto. Os
-documentos anteriores continuam uteis como historico e diagnostico, mas devem
-ser interpretados pela direcao atual: Page Builder authora componentes/paginas,
+de Domain Knowledge ou contorne evidencia ativa.
+`release-readiness-2026-05-02-project-knowledge-vector-rag.md` registra a prova
+local desse plano, incluindo os comandos de gate e a decisao de manter
+publicacao/retrieval desabilitadas por padrao. Antes de ampliar operacoes alem
+de `add_evidence`/`revert_evidence`, a plataforma deve preservar essa semantica
+de revert/supersede sem deletar evidencia ou expor payload bruto. Os documentos
+anteriores continuam uteis como historico e diagnostico, mas devem ser
+interpretados pela direcao atual: Page Builder authora componentes/paginas,
 decisoes compartilhadas de negocio devem seguir por
 `/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir pela
 fronteira `domain_knowledge_change_set`, correcoes de conhecimento aplicado
