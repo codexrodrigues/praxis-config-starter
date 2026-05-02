@@ -112,6 +112,35 @@ Operational note:
   procurement probes. Before treating a runtime failure as semantic drift,
   verify the packaged starter version in the active jar.
 
+## Workflow Action Proof
+
+Operational action enforcement was proven locally on 2026-05-02 with the same
+quickstart runtime line.
+
+Command:
+
+```bash
+BACKEND_URL=http://localhost:8091 \
+ORIGIN=http://localhost:4003 \
+scripts/verify-domain-rules-workflow-action-runtime.sh
+```
+
+Evidence:
+
+- The smoke created an approved governed `workflow_action_policy` definition
+  for `human-resources.folhas-pagamento`.
+- `/api/praxis/config/domain-rules/publications` published the definition and
+  applied one `workflow_action` materialization with
+  `targetArtifactType=resource-workflow-action`,
+  `targetArtifactKey=human-resources.folhas-pagamento:mark-paid`,
+  `kind=workflow_action_policy` and derived `sourceHash`.
+- The authenticated operational command
+  `POST /api/human-resources/folhas-pagamento/2/actions/mark-paid` was rejected
+  by the runtime with `409 Conflict`.
+- This proves that an existing workflow action can be governed by an applied
+  semantic decision without making Page Builder, Angular or the quickstart
+  controller the source of the policy.
+
 ## Acceptance Criteria
 
 - The runtime consumer reads applied materializations from the canonical
@@ -124,8 +153,8 @@ Operational note:
 
 ## Recommended Next Action
 
-Extend the same local-first proof discipline to `workflow_action` and then
-`approval_policy`, prioritizing command-side enforcement evidence over new UI
-surface. The next slice should prove that an applied governed decision blocks or
-requires approval for an existing operational action while keeping the rule
-definition and materialization lifecycle canonical in `domain-rules`.
+Extend the same local-first proof discipline to `approval_policy`, prioritizing
+command-side evidence over new UI surface. The next slice should prove that an
+applied governed decision requires approval for an existing bulk operational
+action while keeping the rule definition and materialization lifecycle canonical
+in `domain-rules`.

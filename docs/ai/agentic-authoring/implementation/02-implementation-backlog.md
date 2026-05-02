@@ -791,6 +791,29 @@ materializacao `backend_validation` e confirmou rejeicao do comando com
 gerou falsos `500`; validar a versao embutida do jar ativo antes de diagnosticar
 drift semantico.
 
+### Item 43. Provar enforcement `workflow_action` sem UI
+
+**Objetivo**
+- demonstrar que uma decisao semantica governada em `domain-rules` pode virar
+  materializacao aplicada de action operacional e bloquear uma action real no
+  quickstart.
+
+**Definition of Done**
+- definicao `workflow_action_policy` aprovada e publicada;
+- publicacao deriva materializacao aplicada `workflow_action` com
+  `kind=workflow_action_policy` e `sourceHash` derivado;
+- action operacional em
+  `POST /api/human-resources/folhas-pagamento/2/actions/mark-paid` e rejeitada
+  com `409 Conflict`;
+- prova local nao usa GitHub Actions, npm nem Maven Central.
+
+Status: concluido localmente em 2026-05-02. A lane
+`scripts/verify-domain-rules-workflow-action-runtime.sh` foi executada contra
+`http://localhost:8091` com `ORIGIN=http://localhost:4003`, publicou a decisao
+governada para `human-resources.folhas-pagamento:mark-paid`, aplicou uma
+materializacao `workflow_action` com `sourceHash` derivado e confirmou rejeicao
+da action com `rejectedWith: 409`.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.

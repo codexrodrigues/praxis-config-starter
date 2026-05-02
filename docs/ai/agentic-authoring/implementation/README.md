@@ -157,6 +157,10 @@ zero:
   publicada em `domain-rules` pode ser consumida pelo quickstart para bloquear
   um comando real com `409 Conflict`, desde que o host ativo esteja empacotado
   com o starter correto e a origem configurada para `/api/praxis/config/**`.
+- A prova local de `workflow_action` ja demonstrou o mesmo padrao para uma
+  action operacional existente: a decisao governada publicada em `domain-rules`
+  materializa `human-resources.folhas-pagamento:mark-paid` e o quickstart
+  bloqueia a chamada real com `409 Conflict`.
 
 ## Invariantes canonicos
 
