@@ -57,6 +57,8 @@ the rule source.
   proof.
 - `praxis-config-starter/main` commit `928964b` recorded the readiness
   checkpoint.
+- `praxis-config-starter/main` commit `1bf718d` recorded the latest Neon-backed
+  runtime gates in the operational release checklist.
 - `praxis-api-quickstart/main` commit `8dc827f` added the strict vector runtime
   smoke gate.
 - `praxis-api-quickstart/main` commit `5fa9b69` recorded the operational rollout
@@ -92,6 +94,8 @@ scripts/verify-domain-knowledge-change-set-runtime.sh
 
 The revert proof observed:
 
+- add change set `e8c156b2-82b0-4b44-88a6-5771cf597b95`;
+- revert change set `086659a3-9c8d-4774-961d-71f42663f7f2`;
 - vector document count `1` after `add_evidence`;
 - authoring retrieval present after add;
 - vector document count `0` after revert;
@@ -113,6 +117,8 @@ scripts/verify-domain-knowledge-change-set-runtime.sh
 
 The supersession proof observed:
 
+- add change set `9b0eb8b4-7cb8-435b-a688-f311afb998a9`;
+- supersession/revert change set `c73ea4dd-ed1a-41e5-afee-836ed6141536`;
 - original evidence vector document count `1` after add;
 - replacement evidence vector document count `1` after add;
 - original evidence vector document count `0` after supersession;
@@ -121,6 +127,9 @@ The supersession proof observed:
   active;
 - `supersessionChecked=true`;
 - `projectKnowledgeVectorRetrievalChecked=true`.
+
+The backend used for this local proof was stopped after the smokes, and
+`http://localhost:8099/actuator/health` no longer responded.
 
 No GitHub Actions, Maven Central publication, npm publication or hosted smoke
 was used for this checkpoint.

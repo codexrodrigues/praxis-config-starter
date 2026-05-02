@@ -53,12 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persistence and `PgVectorStore`.
 - Quickstart strict vector revert smoke passed with
   `REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true`, proving vector document
-  count `1` after `add_evidence`, vector document count `0` after revert and no
-  authoring retrieval after revert.
+  count `1` after `add_evidence`, authoring retrieval present after add, vector
+  document count `0` after revert and no authoring retrieval after revert.
 - Quickstart strict vector supersession smoke passed with
   `REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true` and
   `REQUIRE_EVIDENCE_SUPERSESSION=true`, proving the original evidence vector
-  document is removed while replacement evidence remains active.
+  document is removed while replacement evidence and authoring retrieval remain
+  active.
 - No GitHub Actions, Maven Central publication, npm publication or hosted smoke
   was used for this Unreleased checkpoint.
 
