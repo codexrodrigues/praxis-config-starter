@@ -851,8 +851,12 @@ Evidencia acumulada:
   aprovacao.
 
 Proximo passo recomendado:
-- consolidar checklist de readiness/release e cockpit/docs antes de abrir uma
-  nova familia de materializacoes ou publicar novo corte remoto.
+- checkpoint de readiness/release consolidado em
+  `docs/ai/release-readiness-2026-05-02-runtime-enforcement-consumer.md` e
+  `docs/ai/runtime-enforcement-consumer-release-checklist-2026-05-02.md`.
+- antes de abrir uma nova familia de materializacoes ou publicar novo corte
+  remoto, consolidar cockpit/docs publicos para explicar a matriz provada de
+  `form_config`, `backend_validation`, `workflow_action` e `approval_policy`.
 
 ## Regras operacionais para qualquer PR desta trilha
 

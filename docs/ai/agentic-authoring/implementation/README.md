@@ -56,9 +56,12 @@ checkpoint Vector RAG fechado localmente e nao publicado. Esse slice tambem
 passou por prova browser focal local: prompt governado com stream indisponivel
 falha fechado para cockpit de Shared Rules, sem chamar `intent-resolution`,
 `page-preview` ou `page-apply`. Em seguida, a prova de runtime consumidor
-tambem passou localmente: uma decisao governada foi materializada como
+tambem fechou localmente: uma decisao governada foi materializada como
 `form_config` aplicada no backend canonico e consumida por
-`/funcionarios-form-demo` via browser real. Antes de ampliar
+`/funcionarios-form-demo` via browser real, e as projecoes
+`backend_validation`, `workflow_action` e `approval_policy` bloquearam comandos
+reais no quickstart com `409 Conflict`. O checkpoint de readiness/release desse
+slice esta documentado e nao autoriza publicacao por si so. Antes de ampliar
 operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
 essa semantica de revert/supersede sem deletar evidencia ou expor payload bruto.
 
@@ -81,9 +84,11 @@ essa semantica de revert/supersede sem deletar evidencia ou expor payload bruto.
 15. [project-knowledge-vector-rag-release-checklist-2026-05-02.md](../../project-knowledge-vector-rag-release-checklist-2026-05-02.md)
 16. [12-page-builder-stream-first-routing-plan.md](./12-page-builder-stream-first-routing-plan.md)
 17. [13-runtime-enforcement-consumer-proof-plan.md](./13-runtime-enforcement-consumer-proof-plan.md)
-17. [01-current-state-and-target.md](./01-current-state-and-target.md)
-18. [02-implementation-backlog.md](./02-implementation-backlog.md)
-19. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+18. [release-readiness-2026-05-02-runtime-enforcement-consumer.md](../../release-readiness-2026-05-02-runtime-enforcement-consumer.md)
+19. [runtime-enforcement-consumer-release-checklist-2026-05-02.md](../../runtime-enforcement-consumer-release-checklist-2026-05-02.md)
+20. [01-current-state-and-target.md](./01-current-state-and-target.md)
+21. [02-implementation-backlog.md](./02-implementation-backlog.md)
+22. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -119,7 +124,12 @@ decisao em passos operacionais para um futuro RC autorizado, sem gastar Actions
 durante iteracao normal. `12-page-builder-stream-first-routing-plan.md`
 registra o proximo slice ativo: inventariar o Page Builder e tornar o stream do
 backend o caminho principal para authoring de componente/pagina, enquanto
-prompts governados falham fechados para handoffs canonicos. Os documentos
+prompts governados falham fechados para handoffs canonicos.
+`13-runtime-enforcement-consumer-proof-plan.md`,
+`release-readiness-2026-05-02-runtime-enforcement-consumer.md` e
+`runtime-enforcement-consumer-release-checklist-2026-05-02.md` fecham a prova
+local de runtime enforcement consumidor e definem os gates antes de qualquer
+release futuro. Os documentos
 anteriores continuam uteis como historico e diagnostico, mas devem ser
 interpretados pela direcao atual: Page Builder authora componentes/paginas,
 decisoes compartilhadas de negocio devem seguir por
