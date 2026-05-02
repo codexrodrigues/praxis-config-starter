@@ -620,7 +620,9 @@ foi adicionado como retrieval candidato opt-in via
 desligado. Hits vetoriais sao usados apenas para ranquear concept keys; os
 conceitos sao recarregados por tenant/environment e continuam sujeitos ao
 re-check final de lifecycle, curation, AI visibility, escopo, kind e evidencia
-`active` em `AgenticAuthoringProjectKnowledgeService`.
+`active` em `AgenticAuthoringProjectKnowledgeService`. O recarregamento canonico
+fetches `sourceRelease` para manter a projecao segura equivalente ao caminho
+repository-backed.
 
 ### Item 36. Provar runtime local-first
 
@@ -634,6 +636,17 @@ re-check final de lifecycle, curation, AI visibility, escopo, kind e evidencia
   sem banco local improvisado;
 - resultado registra active -> revert/supersede -> ausencia de influencia;
 - nenhuma GitHub Action e usada antes do gate de fase/release.
+
+Status: concluido em 2026-05-02 para prova local contra Neon. O quickstart foi
+empacotado contra o starter local, executado com vector store habilitado,
+`PRAXIS_PROJECT_KNOWLEDGE_RAG_PUBLICATION_ENABLED=true` e
+`PRAXIS_PROJECT_KNOWLEDGE_RAG_RETRIEVAL_ENABLED=true`. O smoke com
+`REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true` confirmou publicacao derivada,
+retrieval autoral apos `add_evidence`, remocao do documento vetorial apos revert
+puro e ausencia de influencia. A variante com
+`REQUIRE_EVIDENCE_SUPERSESSION=true` confirmou remocao da evidencia antiga,
+retencao da substituta ativa e Project Knowledge ainda recuperavel. Nenhuma
+GitHub Action foi usada.
 
 ## Regras operacionais para qualquer PR desta trilha
 

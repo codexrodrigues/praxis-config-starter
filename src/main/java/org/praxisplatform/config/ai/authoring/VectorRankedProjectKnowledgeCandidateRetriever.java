@@ -56,7 +56,7 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
         if (conceptKeys.isEmpty()) {
             return List.of();
         }
-        List<DomainKnowledgeConcept> concepts = conceptRepository.findByTenantIdAndEnvironmentAndConceptKeyIn(
+        List<DomainKnowledgeConcept> concepts = conceptRepository.findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
                 query.tenantId(),
                 query.environment(),
                 conceptKeys);

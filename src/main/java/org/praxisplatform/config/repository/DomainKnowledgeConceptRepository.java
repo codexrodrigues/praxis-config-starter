@@ -26,6 +26,18 @@ public interface DomainKnowledgeConceptRepository extends JpaRepository<DomainKn
         left join fetch c.sourceRelease
         where c.tenantId = :tenantId
           and c.environment = :environment
+          and c.conceptKey in :conceptKeys
+    """)
+    List<DomainKnowledgeConcept> findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
+            @Param("tenantId") String tenantId,
+            @Param("environment") String environment,
+            @Param("conceptKeys") List<String> conceptKeys);
+
+    @Query("""
+        select c from DomainKnowledgeConcept c
+        left join fetch c.sourceRelease
+        where c.tenantId = :tenantId
+          and c.environment = :environment
           and c.lifecycle = 'active'
           and c.curationStatus = 'approved'
           and c.aiVisibility in ('allow', 'mask', 'summarize_only')

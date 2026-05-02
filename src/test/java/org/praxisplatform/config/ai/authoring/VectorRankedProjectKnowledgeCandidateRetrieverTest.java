@@ -40,7 +40,7 @@ class VectorRankedProjectKnowledgeCandidateRetrieverTest {
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
         when(ragVectorStoreService.search(eq("human-resources human-resources.funcionarios concept project_preference governance_constraint"), eq(6), any()))
                 .thenReturn(List.of(secondHit, firstHit));
-        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKeyIn(
+        when(conceptRepository.findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
                 eq("tenant-a"),
                 eq("dev"),
                 eq(List.of("knowledge:second", "knowledge:first"))))
@@ -88,7 +88,7 @@ class VectorRankedProjectKnowledgeCandidateRetrieverTest {
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
         when(ragVectorStoreService.search(any(), any(Integer.class), any()))
                 .thenReturn(List.of(document("knowledge:missing")));
-        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKeyIn(
+        when(conceptRepository.findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
                 eq("tenant-a"),
                 eq("dev"),
                 eq(List.of("knowledge:missing"))))

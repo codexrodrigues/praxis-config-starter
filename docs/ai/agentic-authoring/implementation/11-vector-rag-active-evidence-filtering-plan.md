@@ -412,14 +412,51 @@ Implementation result:
 - vector hits contribute only concept keys/provenance, then canonical
   `DomainKnowledgeConcept` rows are reloaded by tenant/environment;
 - vector ranking order is preserved after canonical row reload;
+- canonical concept reload fetches `sourceRelease`, matching the
+  repository-backed path and avoiding lazy-load failures during safe projection;
 - final influence still depends on `AgenticAuthoringProjectKnowledgeService`,
   which re-checks lifecycle, curation, AI visibility, scope, kind and active
   evidence before adding anything to `contextHints.projectKnowledge`;
 - context/resource scope is intentionally not a hard vector filter, so global
   Project Knowledge can still be discovered and then filtered canonically.
 
-Next implementation step: extend the quickstart runtime smoke to run a local
-vector-enabled proof with both
+### Slice 8 - Local Vector-Enabled Runtime Proof
+
+Objective:
+
+- prove the opt-in vector publication and opt-in vector-ranked candidate
+  retrieval path with real quickstart HTTP/SSE and Neon.
+
+Observed result on 2026-05-02:
+
+- installed local `praxis-config-starter` with `mvn -q -DskipTests install`;
+- packaged `praxis-api-quickstart` against the local starter artifact with
+  `mvn -q clean package -DskipTests -Dpraxis.config.version=0.1.0-rc.5`;
+- started quickstart on `http://localhost:8099` against Neon with
+  `PRAXIS_AI_RAG_VECTOR_STORE_ENABLED=true`,
+  `PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED=false`,
+  `PRAXIS_PROJECT_KNOWLEDGE_RAG_PUBLICATION_ENABLED=true` and
+  `PRAXIS_PROJECT_KNOWLEDGE_RAG_RETRIEVAL_ENABLED=true`;
+- confirmed `PgVectorStore` initialized on the configured `vector_store` table;
+- first vector-enabled smoke with
+  `REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true` proved:
+  active evidence publishes one derived `project_knowledge` vector document,
+  authoring retrieves the governed concept after `add_evidence`, plain
+  `revert_evidence` removes the derived document and later authoring retrieval
+  excludes the concept;
+- supersession vector-enabled smoke with
+  `REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true` and
+  `REQUIRE_EVIDENCE_SUPERSESSION=true` proved:
+  original and replacement evidence publish derived documents after
+  `add_evidence`, supersession removes the original document, retains the
+  replacement document and authoring keeps the concept retrievable through the
+  active replacement evidence;
+- no GitHub Actions were used.
+
+Next implementation step: keep the vector-enabled path opt-in and prepare the
+phase gate/release notes. Do not enable Project Knowledge vector retrieval by
+default until the quickstart smoke is part of the canonical release checklist
+and the published host has the same starter cut.
 `praxis.project-knowledge.rag-publication.enabled=true` and
 `praxis.project-knowledge.rag-retrieval.enabled=true`, then prove
 active -> revert/supersede -> absence of influence against Neon without using
