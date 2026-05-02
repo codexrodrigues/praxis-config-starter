@@ -99,6 +99,86 @@ Observed:
   installed starter override;
 - no Maven Central publication or GitHub Actions were used.
 
+Neon-backed vector runtime gates passed after local package:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+
+PORT=8099 \
+PROVIDER=openai \
+STREAM_TIMEOUT_SECONDS=180 \
+PRAXIS_AI_RAG_VECTOR_STORE_ENABLED=true \
+PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED=false \
+PRAXIS_PROJECT_KNOWLEDGE_RAG_PUBLICATION_ENABLED=true \
+PRAXIS_PROJECT_KNOWLEDGE_RAG_RETRIEVAL_ENABLED=true \
+tools/local-e2e/start-quickstart-local-e2e.sh
+```
+
+Observed:
+
+- quickstart started on `http://localhost:8099`;
+- Neon-backed config datasource was used;
+- `PgVectorStore` initialized on `vector_store`;
+- backend was stopped after the smokes and `http://localhost:8099/actuator/health`
+  no longer responded.
+
+Vector revert smoke:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+
+BACKEND_URL=http://localhost:8099 \
+TENANT_ID=desenv \
+ENVIRONMENT=local \
+REQUIRE_CHANGE_SET_TIMELINE=true \
+REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true \
+AUTHORING_STREAM_MAX_TIME=180 \
+scripts/verify-domain-knowledge-change-set-runtime.sh
+```
+
+Observed:
+
+- add change set `e8c156b2-82b0-4b44-88a6-5771cf597b95`;
+- revert change set `086659a3-9c8d-4774-961d-71f42663f7f2`;
+- vector document count was `1` after `add_evidence`;
+- authoring retrieval was present after add with `retrievalCount=2`;
+- authoring retrieval was absent after revert with `retrievalCount=0`;
+- vector document count for the original evidence was `0` after revert;
+- final output included `projectKnowledgeVectorRetrievalChecked=true`;
+- lifecycle included `project-knowledge-vector-index-confirmed-after-add` and
+  `project-knowledge-vector-index-absent-after-revert`.
+
+Vector supersession smoke:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+
+BACKEND_URL=http://localhost:8099 \
+TENANT_ID=desenv \
+ENVIRONMENT=local \
+REQUIRE_CHANGE_SET_TIMELINE=true \
+REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true \
+REQUIRE_EVIDENCE_SUPERSESSION=true \
+AUTHORING_STREAM_MAX_TIME=180 \
+scripts/verify-domain-knowledge-change-set-runtime.sh
+```
+
+Observed:
+
+- add change set `9b0eb8b4-7cb8-435b-a688-f311afb998a9`;
+- supersession/revert change set `c73ea4dd-ed1a-41e5-afee-836ed6141536`;
+- original evidence vector document count was `1` after add;
+- replacement evidence vector document count was `1` after add;
+- authoring retrieval was present after add with `retrievalCount=2`;
+- authoring retrieval remained present after supersession with
+  `retrievalCount=2`;
+- original evidence vector document count was `0` after supersession;
+- replacement evidence vector document count remained `1` after supersession;
+- final output included `supersessionChecked=true` and
+  `projectKnowledgeVectorRetrievalChecked=true`;
+- lifecycle included `project-knowledge-vector-index-confirmed-after-add` and
+  `project-knowledge-vector-index-retained-for-replacement`.
+
 ## Stop Conditions
 
 Do not publish if any of these are true:
