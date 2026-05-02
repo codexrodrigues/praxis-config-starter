@@ -49,10 +49,12 @@ mutavel para `llmOperational` e sem publicar novo Maven/npm. Em 2026-05-02, o
 checkpoint opt-in de Project Knowledge Vector RAG tambem foi provado
 localmente: publicacao derivada no `vector_store`, ranking vetorial apenas como
 candidate retrieval, reload canonico com `sourceRelease`, revert removendo
-influencia e supersession preservando apenas a evidencia substituta ativa. A
-proxima capacidade deve ser planejada separadamente antes de novos tipos de
-escrita, sem promover `delete_*` por atalho nem transformar indice vetorial em
-fonte primaria.
+influencia e supersession preservando apenas a evidencia substituta ativa. O
+proximo slice escolhido e tornar o Page Builder stream-first para authoring de
+componente/pagina e fail-closed para decisoes semanticas governadas, mantendo o
+checkpoint Vector RAG fechado localmente e nao publicado. Antes de ampliar
+operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
+essa semantica de revert/supersede sem deletar evidencia ou expor payload bruto.
 
 ## Ordem de leitura
 
@@ -71,9 +73,10 @@ fonte primaria.
 13. [release-readiness-2026-05-02-project-knowledge-vector-rag.md](../../release-readiness-2026-05-02-project-knowledge-vector-rag.md)
 14. [release-decision-2026-05-02-project-knowledge-vector-rag.md](../../release-decision-2026-05-02-project-knowledge-vector-rag.md)
 15. [project-knowledge-vector-rag-release-checklist-2026-05-02.md](../../project-knowledge-vector-rag-release-checklist-2026-05-02.md)
-16. [01-current-state-and-target.md](./01-current-state-and-target.md)
-17. [02-implementation-backlog.md](./02-implementation-backlog.md)
-18. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+16. [12-page-builder-stream-first-routing-plan.md](./12-page-builder-stream-first-routing-plan.md)
+17. [01-current-state-and-target.md](./01-current-state-and-target.md)
+18. [02-implementation-backlog.md](./02-implementation-backlog.md)
+19. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -106,9 +109,10 @@ mas Maven Central so deve ser usado com autorizacao explicita, consumidor
 nomeado e um gate remoto unico de fechamento.
 `project-knowledge-vector-rag-release-checklist-2026-05-02.md` transforma essa
 decisao em passos operacionais para um futuro RC autorizado, sem gastar Actions
-durante iteracao normal. Antes de ampliar operacoes alem de
-`add_evidence`/`revert_evidence`, a plataforma deve preservar essa semantica de
-revert/supersede sem deletar evidencia ou expor payload bruto. Os documentos
+durante iteracao normal. `12-page-builder-stream-first-routing-plan.md`
+registra o proximo slice ativo: inventariar o Page Builder e tornar o stream do
+backend o caminho principal para authoring de componente/pagina, enquanto
+prompts governados falham fechados para handoffs canonicos. Os documentos
 anteriores continuam uteis como historico e diagnostico, mas devem ser
 interpretados pela direcao atual: Page Builder authora componentes/paginas,
 decisoes compartilhadas de negocio devem seguir por

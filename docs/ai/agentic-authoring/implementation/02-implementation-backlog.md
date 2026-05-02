@@ -518,6 +518,9 @@ Plano detalhado:
 Plano detalhado:
 [11-vector-rag-active-evidence-filtering-plan.md](./11-vector-rag-active-evidence-filtering-plan.md)
 
+Status: checkpoint source-level fechado localmente em 2026-05-02; nao
+publicado. Proximo passo nao e Maven Central, mas sim Fase 10.
+
 Status: planejada em 2026-05-01 apos a prova runtime de supersession.
 
 Slice 1 concluido em 2026-05-01: o teste focal
@@ -647,6 +650,61 @@ puro e ausencia de influencia. A variante com
 `REQUIRE_EVIDENCE_SUPERSESSION=true` confirmou remocao da evidencia antiga,
 retencao da substituta ativa e Project Knowledge ainda recuperavel. Nenhuma
 GitHub Action foi usada.
+
+## Fase 10 - Page Builder stream-first e fail-closed governado
+
+Plano detalhado:
+[12-page-builder-stream-first-routing-plan.md](./12-page-builder-stream-first-routing-plan.md)
+
+Status: selecionada como proximo slice de plataforma em 2026-05-02.
+
+### Item 37. Inventariar entry points de authoring do Page Builder
+
+**Objetivo**
+- mapear onde o Page Builder usa stream, onde ainda usa fallback sincrono e
+  quais prompts devem falhar fechados para handoff governado.
+
+**Definition of Done**
+- services/componentes Angular e runners E2E atuais estao nomeados;
+- nenhum contrato backend novo e criado antes do inventario;
+- fallback atual fica documentado por rota de authoring.
+
+### Item 38. Tornar stream o caminho primario para componente/pagina
+
+**Objetivo**
+- fazer o fluxo selecionado do Page Builder iniciar pelo backend turn stream
+  para authoring de artefato de pagina/componente.
+
+**Definition of Done**
+- stream start/probe/replay/cancel permanecem funcionais;
+- fallback legado fica explicito e limitado;
+- progresso exibido vem de eventos backend, nao de execucao inventada no
+  cliente.
+
+### Item 39. Falhar fechado para prompts governados
+
+**Objetivo**
+- impedir que prompts de regra, compliance, validacao, elegibilidade,
+  aprovacao ou decisao semantica reutilizavel caiam para preview/apply local.
+
+**Definition of Done**
+- prompt governado retorna handoff canonico;
+- UI explica bloqueio/fallback indisponivel;
+- nenhuma business rule e criada como tool local do Page Builder;
+- nenhum payload bruto, prompt, condicao ou materializacao aparece no cockpit
+  comum.
+
+### Item 40. Provar em browser local
+
+**Objetivo**
+- criar ou reutilizar uma lane local que prove stream-first e fail-closed
+  governado no navegador real.
+
+**Definition of Done**
+- browser E2E passa localmente;
+- quickstart/UI sobem e encerram limpos;
+- docs registram comando e evidencia;
+- GitHub Actions continuam reservadas para gate de fase/release.
 
 ## Regras operacionais para qualquer PR desta trilha
 
