@@ -656,7 +656,12 @@ GitHub Action foi usada.
 Plano detalhado:
 [12-page-builder-stream-first-routing-plan.md](./12-page-builder-stream-first-routing-plan.md)
 
-Status: selecionada como proximo slice de plataforma em 2026-05-02.
+Status: concluida como checkpoint local/remoto em 2026-05-02. O fechamento
+foi consolidado no `praxis-ui-angular` PR #96
+(`codex/page-builder-governed-human-flow` -> `main`), com merge squash
+`a38877cb` apos build do PR verde. O build automatico de `main` disparado pelo
+merge ficou em acompanhamento separado como gate remoto de fechamento; nao houve
+rerun nem workflow manual durante a iteracao.
 
 ### Item 37. Inventariar entry points de authoring do Page Builder
 
@@ -734,6 +739,38 @@ servicos ja ativos em `http://localhost:4003`: `1 passed`. A lane gerenciada
 `run-shared-rule-stream-fallback-cockpit-local.sh` foi criada; a primeira
 tentativa foi interrompida apos instalar o starter localmente porque o wrapper
 ficou silencioso antes de abrir as portas isoladas `8100/4085`.
+
+### Fechamento UX governado do Page Builder
+
+Status: fechado em 2026-05-02 no `praxis-ui-angular` PR #96.
+
+Evidencia acumulada:
+- o cockpit Shared Rules permanece visivel e acionavel em layouts estreitos;
+- quick replies governados continuam clicaveis apos rota fail-closed;
+- stream start travado ou indisponivel possui timeout/fallback seguro;
+- intencoes genericas de tela pedem confirmacao em vez de escolher superficie
+  concreta cedo demais;
+- pedidos humanos que abandonam formulario e pedem busca/detalhe sao
+  direcionados para `workflow_action_policy`;
+- a matriz de enforcement runtime fica visivel no cockpit;
+- o E2E focal cobre uma simulacao humana sem keyword de campo: o usuario pede
+  para filtrar "pelos dados do empregado", sem citar `CPF`, `nome` ou campos
+  especificos.
+
+Validacao local documentada no PR:
+- specs focais do Page Builder e turn flow;
+- `npx playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts --grep "humano troca formulario"`;
+- `npx playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts --grep "Shared-rule handoff"`;
+- `npx ng build praxis-page-builder`;
+- `git diff --check`.
+
+Diretriz de teste adicionada:
+- quando o objetivo for validar assertividade do fluxo agentic/LLM, as
+  simulacoes devem imitar humanos que nao conhecem campos nem o negocio. Evitar
+  palavras-chave fortes como `CPF` quando elas nao forem o objeto explicito do
+  teste; preferir pedidos vagos e realistas, como "filtrar pelos dados do
+  empregado", e validar se a plataforma guia didaticamente para a decisao
+  canonica correta.
 
 ## Fase 11 - Runtime enforcement consumidor
 

@@ -395,7 +395,18 @@ The slice is complete when a real local browser proves all of these:
 
 ## Recommended Next Action
 
-Close this local checkpoint with `[skip ci]` commits, then start the next
-platform slice from runtime enforcement evidence: prove that published governed
-decisions materialize into runtime consumers without letting Page Builder become
-the source of truth.
+This local checkpoint was closed in `praxis-ui-angular` PR #96 on 2026-05-02.
+The PR merged the governed Page Builder human workflow handoff slice into
+`main` after the PR build passed.
+
+Next action after this checkpoint:
+
+- treat Page Builder cockpit/runtime UX as closed unless a named regression is
+  found;
+- keep human-flow E2E prompts realistic and field-agnostic when testing LLM
+  assertiveness, avoiding strong keywords such as `CPF` unless the scenario is
+  explicitly about privacy/LGPD;
+- consolidate public docs/examples around the proven runtime enforcement matrix
+  (`form_config`, `backend_validation`, `workflow_action`, `approval_policy`);
+- only use GitHub Actions again as a phase/release gate or when a failure is
+  specific to the GitHub runner/secrets environment.

@@ -61,9 +61,15 @@ tambem fechou localmente: uma decisao governada foi materializada como
 `/funcionarios-form-demo` via browser real, e as projecoes
 `backend_validation`, `workflow_action` e `approval_policy` bloquearam comandos
 reais no quickstart com `409 Conflict`. O checkpoint de readiness/release desse
-slice esta documentado e nao autoriza publicacao por si so. Antes de ampliar
-operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
-essa semantica de revert/supersede sem deletar evidencia ou expor payload bruto.
+slice esta documentado e nao autoriza publicacao por si so. O fechamento
+posterior do cockpit/runtime UX do Page Builder tambem foi integrado no
+`praxis-ui-angular` PR #96: o cockpit cobre o handoff humano governado para
+`workflow_action_policy`, incluindo simulacao humana sem keywords fortes de
+campo como `CPF`. A partir desse checkpoint, os E2Es que medem assertividade do
+fluxo agentic devem preferir prompts vagos e didaticos, representando usuarios
+que nao conhecem os campos nem o negocio. Antes de ampliar operacoes alem de
+`add_evidence`/`revert_evidence`, a plataforma deve preservar essa semantica de
+revert/supersede sem deletar evidencia ou expor payload bruto.
 
 ## Ordem de leitura
 
