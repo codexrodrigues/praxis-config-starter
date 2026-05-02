@@ -735,6 +735,35 @@ servicos ja ativos em `http://localhost:4003`: `1 passed`. A lane gerenciada
 tentativa foi interrompida apos instalar o starter localmente porque o wrapper
 ficou silencioso antes de abrir as portas isoladas `8100/4085`.
 
+## Fase 11 - Runtime enforcement consumidor
+
+Plano detalhado:
+[13-runtime-enforcement-consumer-proof-plan.md](./13-runtime-enforcement-consumer-proof-plan.md)
+
+Status: checkpoint local concluido em 2026-05-02.
+
+### Item 41. Provar materializacao aplicada em consumidor runtime
+
+**Objetivo**
+- demonstrar que uma decisao semantica governada em `domain-rules` vira
+  materializacao aplicada e e consumida por um runtime oficial sem copiar a
+  regra para o `FormConfig`.
+
+**Definition of Done**
+- backend cria, simula, aprova, ativa e aplica materializacao;
+- browser abre o consumidor runtime e carrega materializacoes aplicadas pela API
+  real;
+- UI exibe o efeito derivado;
+- GitHub Actions, npm e Maven Central nao sao usados.
+
+Status: concluido localmente. `verify-domain-rules-runtime.sh` retornou
+`shared-rule-runtime-ready` para `funcionarios-form-demo` e o Playwright
+`funcionarios-form-demo-domain-rules.playwright.spec.ts` passou com `1 passed`
+contra `http://localhost:4003`, consumindo o quickstart local em
+`http://localhost:8088`. A lane versionada
+`tools/local-e2e/run-dynamic-form-domain-rules-runtime-local.sh` foi adicionada
+em `praxis-ui-angular` e tambem passou end-to-end localmente.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.

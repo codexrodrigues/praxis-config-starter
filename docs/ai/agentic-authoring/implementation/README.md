@@ -55,7 +55,10 @@ componente/pagina e fail-closed para decisoes semanticas governadas, mantendo o
 checkpoint Vector RAG fechado localmente e nao publicado. Esse slice tambem
 passou por prova browser focal local: prompt governado com stream indisponivel
 falha fechado para cockpit de Shared Rules, sem chamar `intent-resolution`,
-`page-preview` ou `page-apply`. Antes de ampliar
+`page-preview` ou `page-apply`. Em seguida, a prova de runtime consumidor
+tambem passou localmente: uma decisao governada foi materializada como
+`form_config` aplicada no backend canonico e consumida por
+`/funcionarios-form-demo` via browser real. Antes de ampliar
 operacoes alem de `add_evidence`/`revert_evidence`, a plataforma deve preservar
 essa semantica de revert/supersede sem deletar evidencia ou expor payload bruto.
 
@@ -77,6 +80,7 @@ essa semantica de revert/supersede sem deletar evidencia ou expor payload bruto.
 14. [release-decision-2026-05-02-project-knowledge-vector-rag.md](../../release-decision-2026-05-02-project-knowledge-vector-rag.md)
 15. [project-knowledge-vector-rag-release-checklist-2026-05-02.md](../../project-knowledge-vector-rag-release-checklist-2026-05-02.md)
 16. [12-page-builder-stream-first-routing-plan.md](./12-page-builder-stream-first-routing-plan.md)
+17. [13-runtime-enforcement-consumer-proof-plan.md](./13-runtime-enforcement-consumer-proof-plan.md)
 17. [01-current-state-and-target.md](./01-current-state-and-target.md)
 18. [02-implementation-backlog.md](./02-implementation-backlog.md)
 19. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
