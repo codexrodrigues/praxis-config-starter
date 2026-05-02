@@ -153,6 +153,10 @@ zero:
 - `praxis-api-quickstart`, `praxisui-http-examples` e
   `scripts/workspace/run-local-readiness-lane.sh` ja contem corpus e lanes
   locais para provar domain-rules, timeline, cockpit e runtime enforcement.
+- A prova local de `backend_validation` ja demonstrou que uma decisao governada
+  publicada em `domain-rules` pode ser consumida pelo quickstart para bloquear
+  um comando real com `409 Conflict`, desde que o host ativo esteja empacotado
+  com o starter correto e a origem configurada para `/api/praxis/config/**`.
 
 ## Invariantes canonicos
 

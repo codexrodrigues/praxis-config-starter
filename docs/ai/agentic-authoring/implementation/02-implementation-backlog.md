@@ -764,6 +764,33 @@ contra `http://localhost:4003`, consumindo o quickstart local em
 `tools/local-e2e/run-dynamic-form-domain-rules-runtime-local.sh` foi adicionada
 em `praxis-ui-angular` e tambem passou end-to-end localmente.
 
+### Item 42. Provar enforcement `backend_validation` sem UI
+
+**Objetivo**
+- demonstrar que uma decisao semantica governada em `domain-rules` pode virar
+  materializacao aplicada de validacao backend e bloquear um comando real no
+  quickstart.
+
+**Definition of Done**
+- definicao `validation` aprovada e publicada;
+- publicacao deriva materializacao aplicada `backend_validation` com
+  `kind=resource_validation_policy`;
+- comando mutavel em `POST /api/procurement/purchase-orders` e rejeitado com
+  `409 Conflict`;
+- prova local nao usa GitHub Actions, npm nem Maven Central.
+
+Status: concluido localmente em 2026-05-02. O quickstart foi empacotado com
+`./mvnw -q -DskipTests package` e o jar gerado embutiu
+`praxis-config-starter-0.1.0-rc.37.jar`. A lane
+`scripts/verify-domain-rules-backend-validation-runtime.sh` foi executada
+contra `http://localhost:8091` com `ORIGIN=http://localhost:4003`, publicou a
+decisao governada para `procurement.purchase-orders`, aplicou uma
+materializacao `backend_validation` e confirmou rejeicao do comando com
+`rejectedWith: 409`. Durante a investigacao, um processo antigo em
+`http://localhost:8088` ainda carregava `praxis-config-starter-0.1.0-rc.5` e
+gerou falsos `500`; validar a versao embutida do jar ativo antes de diagnosticar
+drift semantico.
+
 ## Regras operacionais para qualquer PR desta trilha
 
 - Nao misturar Fase 1 e Fase 4 no mesmo PR.

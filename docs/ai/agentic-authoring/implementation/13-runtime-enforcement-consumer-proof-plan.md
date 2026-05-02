@@ -75,6 +75,43 @@ BACKEND_URL=http://localhost:8088 \
 - `praxis-dynamic-form` rendered the derived LGPD/GDPR guidance after the CPF
   field was filled.
 
+## Backend Validation Proof
+
+Non-UI runtime enforcement was also proven locally on 2026-05-02 with the
+quickstart rebuilt against `praxis-config-starter:0.1.0-rc.37`.
+
+Command:
+
+```bash
+BACKEND_URL=http://localhost:8091 \
+ORIGIN=http://localhost:4003 \
+scripts/verify-domain-rules-backend-validation-runtime.sh
+```
+
+Evidence:
+
+- The quickstart jar was rebuilt locally with `./mvnw -q -DskipTests package`;
+  the packaged artifact embedded `praxis-config-starter-0.1.0-rc.37.jar`.
+- An isolated quickstart process was started on `8091` with
+  `APP_SECURITY_CONFIG_ORIGIN_RESTRICTION_ALLOWED_ORIGINS=http://localhost:4003`
+  so `/api/praxis/config/**` accepted the smoke origin.
+- The smoke created an approved governed `validation` definition for
+  `procurement.purchase-orders`.
+- `/api/praxis/config/domain-rules/publications` published the definition and
+  applied one `backend_validation` materialization with
+  `targetArtifactType=resource-validation`, `targetArtifactKey=procurement.purchase-orders`
+  and `kind=resource_validation_policy`.
+- The authenticated purchase-order command was rejected by the runtime with
+  `409 Conflict`, proving that the command side consumed the applied
+  materialization instead of duplicating the business rule locally.
+
+Operational note:
+
+- A stale local quickstart jar on `8088` still embedded
+  `praxis-config-starter-0.1.0-rc.5` and produced false `500` failures during
+  procurement probes. Before treating a runtime failure as semantic drift,
+  verify the packaged starter version in the active jar.
+
 ## Acceptance Criteria
 
 - The runtime consumer reads applied materializations from the canonical
@@ -87,8 +124,8 @@ BACKEND_URL=http://localhost:8088 \
 
 ## Recommended Next Action
 
-Extend enforcement evidence from visual guidance into one non-UI runtime
-surface, preferably `backend_validation` or `workflow_action`, using the same
-local-first discipline. The goal is to prove an applied semantic decision blocks
-or permits an actual runtime command, while keeping the rule definition and
-materialization lifecycle canonical in `domain-rules`.
+Extend the same local-first proof discipline to `workflow_action` and then
+`approval_policy`, prioritizing command-side enforcement evidence over new UI
+surface. The next slice should prove that an applied governed decision blocks or
+requires approval for an existing operational action while keeping the rule
+definition and materialization lifecycle canonical in `domain-rules`.
