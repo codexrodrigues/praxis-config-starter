@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Governed Domain Knowledge evidence lifecycle for active, reverted and
+  superseded evidence states.
+- Governed `revert_evidence` change-set validation, transactional apply and
+  safe timeline events.
+- Optional replacement evidence handling through
+  `revert_evidence + replacementEvidenceKey`, preserving beta semantics without
+  introducing a separate `supersede_evidence` operation type.
+- Active-evidence filtering for Project Knowledge authoring retrieval so
+  reverted or superseded original evidence no longer influences future AI turns.
+- Opt-in Project Knowledge derived-index publication into the configured vector
+  store, disabled by default.
+- Opt-in Project Knowledge vector-ranked candidate retrieval for agentic
+  authoring, disabled by default.
+- Vector metadata for Project Knowledge derived documents, including tenant,
+  environment, concept and evidence lifecycle fields used by runtime smokes.
+- Release-readiness, release-decision and release-checklist documentation for
+  the Project Knowledge Vector RAG checkpoint.
+
+### Changed
+- Project Knowledge retrieval now treats Domain Knowledge as the canonical source
+  of truth and vector search as candidate ranking only.
+- Vector-ranked Project Knowledge candidates are reloaded from canonical Domain
+  Knowledge with `sourceRelease` before safe projection building.
+- Project Knowledge RAG publication and retrieval remain opt-in beta paths and
+  must not be enabled implicitly by host applications.
+
+### Fixed
+- Prevented inactive, reverted or superseded original evidence from remaining
+  eligible for Project Knowledge authoring influence.
+- Fixed vector-ranked Project Knowledge retrieval reloading concepts without
+  `sourceRelease`, which could otherwise fail safe projection building outside
+  an active persistence session.
+- Ensured Project Knowledge vector lifecycle behavior removes reverted evidence
+  documents and keeps replacement evidence documents only when the replacement
+  remains active.
+
+### Validated
+- Focal starter tests passed for Domain Knowledge lifecycle validation, Project
+  Knowledge active-evidence filtering, vector index publication, vector-ranked
+  retrieval and RAG metadata.
+- `praxis-api-quickstart` packaged against the locally installed starter without
+  Maven Central publication and proved the vector path with Neon-backed
+  persistence and `PgVectorStore`.
+- Quickstart strict vector revert smoke passed with
+  `REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true`, proving vector document
+  count `1` after `add_evidence`, vector document count `0` after revert and no
+  authoring retrieval after revert.
+- Quickstart strict vector supersession smoke passed with
+  `REQUIRE_PROJECT_KNOWLEDGE_VECTOR_RETRIEVAL=true` and
+  `REQUIRE_EVIDENCE_SUPERSESSION=true`, proving the original evidence vector
+  document is removed while replacement evidence remains active.
+- No GitHub Actions, Maven Central publication, npm publication or hosted smoke
+  was used for this Unreleased checkpoint.
+
 ## [0.1.0-rc.8] - 2026-04-22
 
 ### Added
