@@ -60,10 +60,10 @@ class AgenticAuthoringIntentResolverServiceTest {
                 List.of("api-metadata", "semantic-retrieval"));
         AgenticAuthoringCandidate employeeCollectionCandidate = new AgenticAuthoringCandidate(
                 "/api/human-resources/funcionarios",
-                "get",
-                "/schemas/filtered?path=/api/human-resources/funcionarios/all&operation=get&schemaType=response",
-                "/api/human-resources/funcionarios/all",
-                "get",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
                 1.0d,
                 "api_metadata collection retrieval",
                 List.of("api-metadata", "semantic-retrieval"));
@@ -140,6 +140,122 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.gate().status()).isEqualTo("eligible");
+    }
+
+    @Test
+    void resolvesEmployeeDashboardAsReadOrientedPageWhenUserDoesNotKnowFields() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "preciso de um painel pra acompanhar pessoas da empresa, ver um resumo geral e alguns indicadores, mas eu nao sei quais informacoes existem",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_dashboard");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("post");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response");
+    }
+
+    @Test
+    void detachesFromCurrentFormWhenUserPivotsToEmployeeMasterDetail() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "funcionarios-form");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-dynamic-form");
+        ObjectNode inputs = definition.putObject("inputs");
+        inputs.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        inputs.put("submitUrl", "/api/human-resources/funcionarios");
+        inputs.put("submitMethod", "post");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "nao era isso, eu nao quero cadastrar agora; quero uma lista de empregados e abrir detalhes sem saber os campos",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                "funcionarios-form",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_master_detail");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("post");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response");
+    }
+
+    @Test
+    void resolvesHumanEmployeeSearchAndOpenDetailsPromptAsMasterDetailWithoutKeywordSyntax() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero uma tela para procurar empregados, ver uma lista e abrir os detalhes de cada pessoa quando selecionar, mas eu nao sei quais dados existem",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_master_detail");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response");
+        assertThat(result.warnings()).contains("deterministic-employee-master-detail-create-applied");
+    }
+
+    @Test
+    void keepsEmployeeMasterDetailCanonicalWithoutCallingLlmWhenIntentIsAlreadyClear() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quero uma tela com busca de empregados, lista e painel de detalhes ao selecionar uma pessoa.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_master_detail");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response");
+        assertThat(result.assistantMessage()).contains("master-detail").doesNotContain("dashboard");
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-fallback-deterministic",
+                        "deterministic-employee-master-detail-create-applied");
+        Mockito.verifyNoInteractions(llmIntentResolver);
     }
 
     @Test
@@ -1590,7 +1706,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "/api/human-resources/folhas-pagamento");
         assertThat(result.candidates())
                 .extracting(AgenticAuthoringCandidate::operation)
-                .containsExactly("post", "get");
+                .containsExactly("post", "post");
         assertThat(result.gate().status()).isEqualTo("clarification_required");
         assertThat(result.failureCodes())
                 .containsExactly(
@@ -1601,7 +1717,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains(
                         "O que voce quer fazer com esse tema: visualizar, criar, alterar ou abrir um detalhe?",
                         "Voce quer criar ou alterar formulario, tabela, dashboard, stepper ou outro componente?",
-                        "Encontrei recursos proximos: /api/human-resources/vw-analytics-folha-pagamento (POST), /api/human-resources/folhas-pagamento (GET). Qual deles voce quer usar?");
+                        "Encontrei recursos proximos: /api/human-resources/vw-analytics-folha-pagamento (POST), /api/human-resources/folhas-pagamento (POST). Qual deles voce quer usar?");
     }
 
     @Test
@@ -1622,7 +1738,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.artifactKind()).isEqualTo("table");
         assertThat(result.changeKind()).isEqualTo("recommend_table_visualization");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
-        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("post");
         assertThat(result.gate().status()).isEqualTo("clarification_required");
         assertThat(result.failureCodes()).containsExactly("intent-confirmation-required");
         assertThat(result.assistantMessage()).contains("melhores opcoes");
@@ -1690,7 +1806,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.artifactKind()).isEqualTo("table");
         assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
-        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("post");
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.clarificationQuestions()).isEmpty();
@@ -2350,8 +2466,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.assistantMessage())
                 .contains("Encontrei mais de uma fonte de dados possivel para este dashboard")
                 .contains("Escolha a API que melhor representa o recorte de negocio")
-                .contains("/api/human-resources/vw-analytics-folha-pagamento/all")
-                .contains("/api/operations/vw-analytics-incidentes/all");
+                .contains("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by")
+                .contains("/api/operations/vw-analytics-incidentes/stats/group-by");
         assertThat(result.clarificationQuestions().get(0))
                 .contains("/api/human-resources/vw-analytics-folha-pagamento")
                 .contains("/api/operations/vw-analytics-incidentes");
@@ -2362,7 +2478,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "resource-api-operations-vw-analytics-incidentes");
         AgenticAuthoringQuickReply firstReply = result.quickReplies().get(0);
         assertThat(firstReply.description())
-                .isEqualTo("GET /api/human-resources/vw-analytics-folha-pagamento/all");
+                .isEqualTo("POST /api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(firstReply.icon()).isEqualTo("query_stats");
         assertThat(firstReply.tone()).isEqualTo("analytics");
         assertThat(firstReply.contextHints().path("resourcePath").asText())
@@ -2527,9 +2643,9 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("table");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/beneficios");
-        assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("post");
         assertThat(result.selectedCandidate().schemaUrl())
-                .isEqualTo("/schemas/filtered?path=/api/human-resources/beneficios/all&operation=get&schemaType=response");
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/beneficios/filter/cursor&operation=post&schemaType=response");
         assertThat(result.selectedCandidate().evidence()).contains("api-metadata");
         assertThat(result.gate().status()).isEqualTo("eligible");
     }

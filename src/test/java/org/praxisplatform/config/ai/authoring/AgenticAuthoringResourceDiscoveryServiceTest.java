@@ -75,7 +75,12 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.quickReplies().get(0).prompt())
                 .isEqualTo("Usar /api/human-resources/vw-analytics-folha-pagamento como fonte de dados.");
         assertThat(result.quickReplies().get(0).description())
-                .isEqualTo("GET /api/human-resources/vw-analytics-folha-pagamento/all");
+                .isEqualTo("POST /api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        assertThat(result.candidates().get(0).submitUrl())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        assertThat(result.candidates().get(0).submitMethod()).isEqualTo("post");
+        assertThat(result.candidates().get(0).schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response");
         assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.quickReplies().get(0).contextHints().path("artifactKind").asText())
@@ -136,10 +141,62 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.candidates()).hasSize(1);
         assertThat(result.candidates().get(0).resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.candidates().get(0).submitUrl())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        assertThat(result.candidates().get(0).submitMethod()).isEqualTo("post");
         assertThat(result.candidates().get(0).evidence())
                 .contains("semantic-retrieval")
                 .doesNotContain("lexical-fallback");
         verify(repository, never()).findAll();
+    }
+
+    @Test
+    void searchDoesNotExposeAllEndpointsAsGovernedAuthoringChoices() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios/all",
+                        "GET",
+                        "funcionarios",
+                        "Listar todos funcionarios",
+                        "Endpoint legado sem paginacao para demos",
+                        "listAllFuncionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "POST",
+                        "funcionarios",
+                        "Filtrar funcionarios com cursor",
+                        "Consulta governada e paginada para telas corporativas de busca e detalhe.",
+                        "filterFuncionariosCursor",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "quero procurar empregados e abrir detalhes",
+                        null,
+                        "page",
+                        5));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::submitUrl)
+                .containsExactly("/api/human-resources/funcionarios/filter/cursor");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::description)
+                .noneMatch(description -> description.contains("/all"));
     }
 
     @Test

@@ -551,7 +551,10 @@ public class AgenticAuthoringPreviewService {
                 && !"remove".equals(intentResolution.operationKind())) {
             failures.add("intent-resolution-operation-must-be-create-modify-or-remove");
         }
-        if (!"form".equals(intentResolution.artifactKind())) {
+        if (!"form".equals(intentResolution.artifactKind())
+                && !"dashboard".equals(intentResolution.artifactKind())
+                && !"page".equals(intentResolution.artifactKind())
+                && !"table".equals(intentResolution.artifactKind())) {
             failures.add("intent-resolution-artifact-must-be-form");
         }
         return List.copyOf(failures);

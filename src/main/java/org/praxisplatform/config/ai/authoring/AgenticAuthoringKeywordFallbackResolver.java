@@ -77,6 +77,12 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (prefersPayrollDashboardRecommendation(prompt)) {
             return "dashboard";
         }
+        if (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt)) {
+            return "page";
+        }
+        if (isExplicitDashboardPrompt(prompt)) {
+            return "dashboard";
+        }
         if (containsAny(prompt, "formulario", "form", "campo", "campos", "cadastrar", "cadastro", "abrir chamado")) {
             return "form";
         }
@@ -92,9 +98,6 @@ final class AgenticAuthoringKeywordFallbackResolver {
         }
         if (target != null && "praxis-chart".equals(target.componentId())
                 && ("modify".equals(resolveOperationKind(prompt)) || chartCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
-            return "dashboard";
-        }
-        if (isExplicitDashboardPrompt(prompt)) {
             return "dashboard";
         }
         if (isTablePrompt(prompt)) {
@@ -174,6 +177,10 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if ("create".equals(operationKind) && "dashboard".equals(artifactKind)
                 && containsAny(prompt, "drill down", "drill-down", "drilldown", "detalhar", "detalhe", "aprofundar")) {
             return "create_chart_drilldown";
+        }
+        if ("create".equals(operationKind) && "page".equals(artifactKind)
+                && (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt))) {
+            return "create_master_detail";
         }
         if ("create".equals(operationKind)) {
             return "create_artifact";
@@ -258,6 +265,21 @@ final class AgenticAuthoringKeywordFallbackResolver {
     private boolean isExplicitDashboardPrompt(String prompt) {
         return containsAny(prompt, "dashboard", "painel", "grafico", "graficos", "chart", "charts",
                 "kpi", "indicador", "indicadores", "drill down", "drill-down", "drilldown");
+    }
+
+    private boolean isMasterDetailPrompt(String prompt) {
+        return containsAny(prompt,
+                "master detail", "master-detail", "mestre detalhe", "mestre-detalhe",
+                "lista e detalhe", "lista com detalhe", "abrir detalhes", "abrir detalhe",
+                "ver detalhes", "ver detalhe", "area de detalhe", "detalhe lateral",
+                "painel de detalhes", "painel lateral", "detalhes ao selecionar",
+                "detalhes quando selecionar");
+    }
+
+    private boolean isReadDetailPagePrompt(String prompt) {
+        return containsAny(prompt, "acompanhar", "consultar", "buscar", "encontrar", "ver", "mostrar", "visualizar")
+                && containsAny(prompt, "detalhe", "detalhes", "informacoes", "dados")
+                && !containsAny(prompt, "cadastro", "cadastrar", "salvar", "gravar", "preencher", "formulario");
     }
 
     private boolean isTablePrompt(String prompt) {

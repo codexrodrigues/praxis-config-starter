@@ -80,6 +80,10 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (selectedResourceDashboard.isPresent()) {
             return selectedResourceDashboard;
         }
+        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceMasterDetail = selectedResourceMasterDetail(request);
+        if (selectedResourceMasterDetail.isPresent()) {
+            return selectedResourceMasterDetail;
+        }
         if (supportsChartDrillDown(request)) {
             PayrollBreakdown breakdown = resolvePayrollBreakdown(request.userPrompt());
             return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
@@ -270,6 +274,19 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 emptyCompiledFormPatch()));
     }
 
+    private Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceMasterDetail(AgenticAuthoringPlanRequest request) {
+        if (!supportsSelectedResourceMasterDetail(request)) {
+            return Optional.empty();
+        }
+        AgenticAuthoringCandidate candidate = request.intentResolution().selectedCandidate();
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:selected-resource-master-detail"),
+                selectedResourceMasterDetailPlan(candidate),
+                emptyCompiledFormPatch()));
+    }
+
     private Optional<AgenticAuthoringUiCompositionPlanResult> selectedPayrollTable(AgenticAuthoringPlanRequest request) {
         if (!supportsSelectedPayrollTable(request)) {
             return Optional.empty();
@@ -307,6 +324,22 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 && "dashboard".equals(intent.artifactKind())
                 && ("create_artifact".equals(intent.changeKind())
                 || "create_dashboard".equals(intent.changeKind()))
+                && candidate.resourcePath() != null
+                && !candidate.resourcePath().isBlank();
+    }
+
+    private boolean supportsSelectedResourceMasterDetail(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.intentResolution() == null
+                || request.intentResolution().selectedCandidate() == null) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
+        return intent.valid()
+                && "create".equals(intent.operationKind())
+                && "page".equals(intent.artifactKind())
+                && ("create_master_detail".equals(intent.changeKind())
+                || "create_artifact".equals(intent.changeKind()))
                 && candidate.resourcePath() != null
                 && !candidate.resourcePath().isBlank();
     }
@@ -357,6 +390,37 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         return plan;
     }
 
+    private ObjectNode selectedResourceMasterDetailPlan(AgenticAuthoringCandidate candidate) {
+        String widgetKey = resourceWidgetKey(candidate.resourcePath()).replace("-table", "");
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.put("layoutPreset", "resource-master-detail");
+
+        ObjectNode values = plan.putObject("state").putObject("values");
+        values.putNull("selectedItem");
+
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "96px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        canvas.put("collisionPolicy", "block");
+        ObjectNode items = canvas.putObject("items");
+        addCanvasItem(items, widgetKey + "-master", 1, 1, 7, 7);
+        addCanvasItem(items, widgetKey + "-detail", 8, 1, 5, 7);
+
+        ArrayNode widgets = plan.putArray("widgets");
+        addSelectedResourceTable(widgets, candidate, widgetKey + "-master");
+        addSelectedResourceDetail(widgets, candidate, widgetKey + "-detail");
+
+        ArrayNode bindings = plan.putArray("bindings");
+        addTableRowClickStateBinding(bindings, widgetKey + "-master");
+        addSelectedResourceDetailBinding(bindings, widgetKey + "-detail");
+        return plan;
+    }
+
     private void addSelectedResourceTable(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", widgetKey);
@@ -380,6 +444,65 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode text = document.putArray("nodes").addObject();
         text.put("type", "text");
         text.put("text", "Dashboard criado para " + titleFromResourcePath(candidate.resourcePath()) + ".");
+    }
+
+    private void addSelectedResourceDetail(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", widgetKey);
+        widget.put("componentId", "praxis-rich-content");
+        widget.put("role", "detail");
+        ObjectNode document = widget.putObject("inputs").putObject("document");
+        document.put("kind", "praxis.rich-content.document");
+        document.put("version", "1.0.0");
+        ObjectNode text = document.putArray("nodes").addObject();
+        text.put("type", "text");
+        text.put("text", "Selecione um item em " + titleFromResourcePath(candidate.resourcePath())
+                + " para revisar os detalhes disponiveis.");
+    }
+
+    private void addSelectedResourceDetailBinding(ArrayNode bindings, String targetWidget) {
+        ObjectNode binding = baseBinding(bindings, "state.selectedItem->" + targetWidget + ".document", "state-read");
+        ObjectNode from = binding.putObject("from");
+        from.put("kind", "state");
+        from.put("path", "selectedItem");
+        ObjectNode to = binding.putObject("to");
+        to.put("kind", "component-port");
+        to.put("widget", targetWidget);
+        to.put("port", "document");
+        to.put("direction", "input");
+        binding.putObject("condition").putArray("!!").addObject().put("var", "state.selectedItem");
+        ObjectNode transform = binding.putObject("transform");
+        transform.put("kind", "template");
+        transform.put("id", "selected-item-detail-document");
+        transform.put("inputSource", "payload");
+        ObjectNode template = transform.putObject("template");
+        template.put("kind", "praxis.rich-content.document");
+        template.put("version", "1.0.0");
+        ObjectNode node = template.putArray("nodes").addObject();
+        node.put("type", "text");
+        node.put("text", "Dados do item selecionado:\n"
+                + "Nome: ${current.nomeCompleto}\n"
+                + "Cargo: ${current.cargoNome}\n"
+                + "Departamento: ${current.departamentoNome}\n"
+                + "Email: ${current.email}");
+        addMetadata(binding, "rich-content");
+    }
+
+    private void addTableRowClickStateBinding(ArrayNode bindings, String sourceWidget) {
+        ObjectNode binding = baseBinding(bindings, sourceWidget + ".rowClick->state.selectedItem", "state-write");
+        ObjectNode from = binding.putObject("from");
+        from.put("kind", "component-port");
+        from.put("widget", sourceWidget);
+        from.put("port", "rowClick");
+        from.put("direction", "output");
+        ObjectNode to = binding.putObject("to");
+        to.put("kind", "state");
+        to.put("path", "selectedItem");
+        ObjectNode transform = binding.putObject("transform");
+        transform.put("kind", "pick-path");
+        transform.put("id", "pick-selected-row");
+        transform.put("path", "payload.row");
+        addMetadata(binding, "state");
     }
 
     private String resourceWidgetKey(String resourcePath) {
@@ -1188,10 +1311,20 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
             String statePath,
             String transformId,
             String payloadPath) {
+        addPickStateBinding(bindings, id, "department-master", statePath, transformId, payloadPath);
+    }
+
+    private void addPickStateBinding(
+            ArrayNode bindings,
+            String id,
+            String sourceWidget,
+            String statePath,
+            String transformId,
+            String payloadPath) {
         ObjectNode binding = baseBinding(bindings, id, "state-write");
         ObjectNode from = binding.putObject("from");
         from.put("kind", "component-port");
-        from.put("widget", "department-master");
+        from.put("widget", sourceWidget);
         from.put("port", "itemSelect");
         from.put("direction", "output");
         ObjectNode to = binding.putObject("to");

@@ -158,14 +158,15 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     private AgenticAuthoringCandidate toCandidate(ApiSearchResult result, String artifactKind) {
         String operation = result.getMethod().toLowerCase(Locale.ROOT);
         String submitUrl = canonicalSubmitUrl(result.getPath(), operation, artifactKind);
+        String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(result.getPath());
         double score = Math.max(0.45d, Math.min(0.98d, result.getSimilarityScore()));
         return new AgenticAuthoringCandidate(
                 resourcePath,
-                operation,
-                schemaUrl(submitUrl, operation),
+                submitMethod,
+                schemaUrl(submitUrl, submitMethod),
                 submitUrl,
-                operation,
+                submitMethod,
                 score,
                 "api_metadata semantic retrieval",
                 List.of("api-metadata", "semantic-retrieval", "schema-available", "actions-probe-pending"));
@@ -197,13 +198,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         score = Math.min(0.98d, score);
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
         String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
+        String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         return new ScoredCandidate(new AgenticAuthoringCandidate(
                 resourcePath,
-                operation,
-                schemaUrl(submitUrl, operation),
+                submitMethod,
+                schemaUrl(submitUrl, submitMethod),
                 submitUrl,
-                operation,
+                submitMethod,
                 score,
                 "api_metadata lexical match",
                 List.of("api-metadata", "lexical-fallback", "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending")),
@@ -232,13 +234,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         score = Math.max(0d, Math.min(0.90d, score));
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
         String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
+        String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         return new ScoredCandidate(new AgenticAuthoringCandidate(
                 resourcePath,
-                operation,
-                schemaUrl(submitUrl, operation),
+                submitMethod,
+                schemaUrl(submitUrl, submitMethod),
                 submitUrl,
-                operation,
+                submitMethod,
                 score,
                 "api_metadata broad artifact discovery",
                 List.of("api-metadata", "broad-artifact-discovery", "schema-probe-pending", "actions-probe-pending")),
@@ -256,6 +259,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 && !normalizedPath.endsWith("/surfaces")
                 && !normalizedPath.contains("/surfaces/")
                 && !normalizedPath.contains("{")
+                && !normalizedPath.endsWith("/all")
                 && !normalizedPath.endsWith("/by-ids")
                 && !normalizedPath.endsWith("/options")
                 && !normalizedPath.contains("/options/")
@@ -290,7 +294,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             if (analyticsLike) {
                 adjustment -= 0.14d;
             }
-            if (path.endsWith("/all") || path.endsWith("/filter")) {
+            if (path.endsWith("/filter") || path.endsWith("/filter/cursor")) {
                 adjustment += 0.18d;
             }
             if (path.endsWith("/all") || path.endsWith("/by-ids") || path.contains("/{")) {
@@ -331,6 +335,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             expanded.append(" alerta alertas socorro incidente incidentes equipamento equipamentos")
                     .append(" operacional triagem ocorrencia ocorrencias");
         }
+        if (containsAny(normalizedPrompt, "empregado", "empregados", "pessoa", "pessoas", "colaborador", "colaboradores")) {
+            expanded.append(" funcionario funcionarios colaborador colaboradores pessoa pessoas recursos humanos");
+        }
         return expanded.toString();
     }
 
@@ -350,7 +357,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if ("table".equals(artifactKind)) {
             return null;
         }
-        if ("dashboard".equals(artifactKind)) {
+        if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
             return null;
         }
         if ("unknown".equals(artifactKind)) {
@@ -371,11 +378,13 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return "";
         }
         String normalized = normalizePath(path);
-        if ("get".equalsIgnoreCase(operation) && !isKnownCollectionOperation(normalized) && !normalized.contains("/{")) {
-            return normalized + "/all";
+        if ("dashboard".equals(artifactKind) && !isKnownCollectionOperation(normalized) && !normalized.contains("/{")) {
+            return normalized + "/stats/group-by";
         }
-        if ("table".equals(artifactKind) && !isKnownCollectionOperation(normalized) && !normalized.contains("/{")) {
-            return normalized + "/all";
+        if (("table".equals(artifactKind) || "page".equals(artifactKind) || "unknown".equals(artifactKind))
+                && !isKnownCollectionOperation(normalized)
+                && !normalized.contains("/{")) {
+            return normalized + "/filter/cursor";
         }
         return normalized;
     }
@@ -397,12 +406,18 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private boolean isKnownCollectionOperation(String path) {
-        return path.endsWith("/all")
-                || path.endsWith("/filter")
+        return path.endsWith("/filter")
                 || path.endsWith("/filter/cursor")
                 || path.endsWith("/stats/group-by")
                 || path.endsWith("/stats/timeseries")
                 || path.endsWith("/stats/distribution");
+    }
+
+    private String canonicalSubmitMethod(String submitUrl, String operation) {
+        if (isReadProjectionOperation(submitUrl, "post")) {
+            return "post";
+        }
+        return operation;
     }
 
     private boolean isReadProjectionOperation(String submitUrl, String operation) {

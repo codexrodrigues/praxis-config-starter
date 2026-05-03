@@ -116,7 +116,23 @@ public class AgenticAuthoringIntentResolverService {
         String operationKind = fallbackResolution.operationKind();
         String artifactKind = fallbackResolution.artifactKind();
         String changeKind = fallbackResolution.changeKind();
-        List<AgenticAuthoringCandidate> candidates = hasLlmIntentResolver
+        boolean deterministicEmployeeReadDashboardCreate = false;
+        boolean deterministicEmployeeMasterDetailCreate = false;
+        if (isEmployeeMasterDetailPrompt(prompt)) {
+            operationKind = "create";
+            artifactKind = "page";
+            changeKind = "create_master_detail";
+            deterministicEmployeeMasterDetailCreate = true;
+        } else if (isEmployeeReadDashboardPrompt(prompt)) {
+            operationKind = "create";
+            artifactKind = "dashboard";
+            changeKind = "create_dashboard";
+            deterministicEmployeeReadDashboardCreate = true;
+        }
+        boolean shouldResolveLlmIntent = hasLlmIntentResolver
+                && !deterministicEmployeeReadDashboardCreate
+                && !deterministicEmployeeMasterDetailCreate;
+        List<AgenticAuthoringCandidate> candidates = shouldResolveLlmIntent
                 ? discoverInitialCandidates(discoveryPrompt, target)
                 : discoverCandidates(discoveryPrompt, artifactKind, target);
         candidates = withContextHintCandidates(request, candidates);
@@ -126,6 +142,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilities();
         AgenticAuthoringLlmIntentResolution llmIntent = resolveLlmIntent(
+                shouldResolveLlmIntent,
                 request,
                 effectivePrompt,
                 currentPageSummary,
@@ -148,18 +165,18 @@ public class AgenticAuthoringIntentResolverService {
         boolean llmTreatsPendingAsNewInstruction = turn.answeredPendingClarification()
                 && isLlmFollowUpKind(llmIntent, "new_instruction");
         boolean llmSecondPassUsed = false;
-        boolean deterministicFallbackApplied = !hasLlmIntentResolver;
+        boolean deterministicFallbackApplied = !shouldResolveLlmIntent;
         if (llmTreatsPendingAsContinuation) {
             effectivePrompt = turn.effectivePrompt();
             prompt = normalize(effectivePrompt);
             fallbackResolution = keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
-            if (!hasLlmIntentResolver || llmIntent == null || !llmIntent.resolved()) {
+            if (!shouldResolveLlmIntent || llmIntent == null || !llmIntent.resolved()) {
                 operationKind = fallbackResolution.operationKind();
                 artifactKind = fallbackResolution.artifactKind();
                 changeKind = fallbackResolution.changeKind();
                 deterministicFallbackApplied = true;
             }
-            candidates = hasLlmIntentResolver
+            candidates = shouldResolveLlmIntent
                     ? discoverInitialCandidates(prompt, target)
                     : discoverCandidates(prompt, artifactKind, target);
             candidates = withContextHintCandidates(request, candidates);
@@ -171,13 +188,13 @@ public class AgenticAuthoringIntentResolverService {
             effectivePrompt = rawPrompt;
             prompt = normalize(effectivePrompt);
             fallbackResolution = keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
-            if (!hasLlmIntentResolver || llmIntent == null || !llmIntent.resolved()) {
+            if (!shouldResolveLlmIntent || llmIntent == null || !llmIntent.resolved()) {
                 operationKind = fallbackResolution.operationKind();
                 artifactKind = fallbackResolution.artifactKind();
                 changeKind = fallbackResolution.changeKind();
                 deterministicFallbackApplied = true;
             }
-            candidates = hasLlmIntentResolver
+            candidates = shouldResolveLlmIntent
                     ? discoverInitialCandidates(prompt, target)
                     : discoverCandidates(prompt, artifactKind, target);
             candidates = withContextHintCandidates(request, candidates);
@@ -205,6 +222,7 @@ public class AgenticAuthoringIntentResolverService {
                     candidates = withPriorityCandidate(candidates, contextHintCandidate);
                 }
                 AgenticAuthoringLlmIntentResolution refinedLlmIntent = resolveLlmIntentAfterCandidateRefinement(
+                        shouldResolveLlmIntent,
                         request,
                         effectivePrompt,
                         currentPageSummary,
@@ -261,7 +279,7 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = "form";
             changeKind = "create_minimal_form";
         }
-        AgenticAuthoringCandidate selectedCandidate = selectCandidate(candidates, target, artifactKind);
+        AgenticAuthoringCandidate selectedCandidate = selectCandidate(candidates, target, artifactKind, prompt);
         selectedCandidate = selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
         selectedCandidate = selectLlmCandidate(llmIntent, candidates, selectedCandidate);
         selectedCandidate = selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
@@ -309,6 +327,12 @@ public class AgenticAuthoringIntentResolverService {
         if (llmIntent != null && llmIntent.assistantMessage() != null && !llmIntent.assistantMessage().isBlank()) {
             assistantMessage = llmIntent.assistantMessage();
         }
+        if (deterministicEmployeeMasterDetailCreate) {
+            assistantMessage = "Criei uma prévia de uma tela master-detail de Funcionários, com lista para busca e painel de detalhes ao selecionar uma pessoa.";
+        } else if (deterministicEmployeeReadDashboardCreate
+                && (assistantMessage == null || assistantMessage.isBlank())) {
+            assistantMessage = "Criei uma prévia de um painel com base no recurso selecionado de Funcionários.";
+        }
         JsonNode apiCatalogAnswer = apiCatalogAnswer(prompt, operationKind, artifactKind, selectedCandidate, candidates);
         AgenticAuthoringPendingClarification pendingClarification =
                 pendingClarification(
@@ -350,6 +374,12 @@ public class AgenticAuthoringIntentResolverService {
         if (deterministicEmployeeFormCreate) {
             warnings = withWarning(warnings, "deterministic-employee-form-create-applied");
         }
+        if (deterministicEmployeeReadDashboardCreate) {
+            warnings = withWarning(warnings, "deterministic-employee-read-dashboard-create-applied");
+        }
+        if (deterministicEmployeeMasterDetailCreate) {
+            warnings = withWarning(warnings, "deterministic-employee-master-detail-create-applied");
+        }
         if (deterministicPayrollDashboardConfirmation) {
             warnings = withWarning(warnings, "deterministic-payroll-dashboard-confirmation-applied");
         }
@@ -379,6 +409,7 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private AgenticAuthoringLlmIntentResolution resolveLlmIntent(
+            boolean shouldResolveLlmIntent,
             AgenticAuthoringIntentResolutionRequest request,
             String effectivePrompt,
             JsonNode currentPageSummary,
@@ -388,7 +419,7 @@ public class AgenticAuthoringIntentResolverService {
             String tenantId,
             String userId,
             String environment) {
-        if (llmIntentResolverService == null) {
+        if (!shouldResolveLlmIntent || llmIntentResolverService == null) {
             return null;
         }
         return llmIntentResolverService.resolve(
@@ -405,6 +436,7 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private AgenticAuthoringLlmIntentResolution resolveLlmIntentAfterCandidateRefinement(
+            boolean shouldResolveLlmIntent,
             AgenticAuthoringIntentResolutionRequest request,
             String effectivePrompt,
             JsonNode currentPageSummary,
@@ -415,7 +447,8 @@ public class AgenticAuthoringIntentResolverService {
             String tenantId,
             String userId,
             String environment) {
-        if (llmIntentResolverService == null
+        if (!shouldResolveLlmIntent
+                || llmIntentResolverService == null
                 || previousLlmIntent == null
                 || !previousLlmIntent.resolved()
                 || previousLlmIntent.resourceSearchQuery() == null
@@ -653,7 +686,11 @@ public class AgenticAuthoringIntentResolverService {
             String prompt,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringCandidate fallback) {
-        if (!isEmployeeFormCreatePrompt(prompt) || candidates == null || candidates.isEmpty()) {
+        if (!isEmployeeFormCreatePrompt(prompt)
+                || isEmployeeReadDashboardPrompt(prompt)
+                || isEmployeeMasterDetailPrompt(prompt)
+                || candidates == null
+                || candidates.isEmpty()) {
             return fallback;
         }
         return candidates.stream()
@@ -873,7 +910,8 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             AgenticAuthoringTarget target) {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
-        if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()) {
+        if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()
+                && !shouldDetachCurrentTarget(prompt, artifactKind, target)) {
             String operation = target.submitMethod() == null || target.submitMethod().isBlank()
                     ? "post"
                     : target.submitMethod();
@@ -901,7 +939,8 @@ public class AgenticAuthoringIntentResolverService {
             String prompt,
             AgenticAuthoringTarget target) {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
-        if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()) {
+        if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()
+                && !shouldDetachCurrentTarget(prompt, "unknown", target)) {
             String operation = target.submitMethod() == null || target.submitMethod().isBlank()
                     ? "post"
                     : target.submitMethod();
@@ -923,11 +962,11 @@ public class AgenticAuthoringIntentResolverService {
 
     private List<AgenticAuthoringCandidate> discoverBroadKnownCandidates() {
         return List.of(
-                candidate("/api/human-resources/funcionarios", "post", 0.40d,
-                        "broad employee creation candidate for LLM selection", "broad-artifact-discovery"),
+                candidate("/api/human-resources/funcionarios", "/api/human-resources/funcionarios/filter/cursor", "post", 0.40d,
+                        "broad employee read projection candidate for LLM selection", "broad-artifact-discovery"),
                 candidate(PAYROLL_ANALYTICS, PAYROLL_ANALYTICS + "/stats/group-by", "post", 0.40d,
                         "broad payroll analytics candidate for LLM selection", "broad-artifact-discovery"),
-                candidate(PAYROLL, PAYROLL + "/all", "get", 0.40d,
+                candidate(PAYROLL, PAYROLL + "/filter/cursor", "post", 0.40d,
                         "broad payroll collection candidate for LLM selection", "broad-artifact-discovery"));
     }
 
@@ -935,9 +974,12 @@ public class AgenticAuthoringIntentResolverService {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
         if (isEmployeeFormCreatePrompt(prompt)) {
             candidates.add(employeeFormCandidate());
-        } else if (containsAny(prompt, "funcionario", "funcionarios", "funsionario", "funsionarios", "colaborador", "colaboradores")
+        } else if (containsAny(prompt,
+                "funcionario", "funcionarios", "funsionario", "funsionarios",
+                "colaborador", "colaboradores", "empregado", "empregados",
+                "pessoa da empresa", "pessoas da empresa", "time", "equipe")
                 || (containsAny(prompt, "rh", "human resources") && !isPayrollAnalyticsPrompt(prompt))) {
-            candidates.add(candidate("/api/human-resources/funcionarios", 0.90d, "prompt mentions funcionarios/colaboradores", "known-quickstart-resource"));
+            candidates.add(employeeReadCandidate(prompt));
         }
         if (containsAny(prompt, "fornecedor", "fornecedores", "supplier", "suppliers")) {
             candidates.add(candidate(
@@ -982,8 +1024,8 @@ public class AgenticAuthoringIntentResolverService {
         } else if (isPayrollAnalyticsPrompt(prompt) && isTablePrompt(prompt)) {
             candidates.add(candidate(
                     PAYROLL,
-                    PAYROLL + "/all",
-                    "get",
+                    PAYROLL + "/filter/cursor",
+                    "post",
                     0.94d,
                     "prompt asks for operational payroll table/listing",
                     "known-quickstart-resource"));
@@ -1008,8 +1050,8 @@ public class AgenticAuthoringIntentResolverService {
                     "known-quickstart-analytics-view"));
             candidates.add(candidate(
                     PAYROLL,
-                    PAYROLL + "/all",
-                    "get",
+                    PAYROLL + "/filter/cursor",
+                    "post",
                     0.72d,
                     "approximate payroll collection endpoint match",
                     "known-quickstart-resource"));
@@ -1024,6 +1066,16 @@ public class AgenticAuthoringIntentResolverService {
                 0.99d,
                 "prompt asks for an employee registration form",
                 "known-quickstart-employee-form");
+    }
+
+    private AgenticAuthoringCandidate employeeReadCandidate(String prompt) {
+        return candidate(
+                "/api/human-resources/funcionarios",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.90d,
+                "prompt mentions employees for read-oriented authoring",
+                "known-quickstart-employee-read-resource");
     }
 
     private List<AgenticAuthoringCandidate> withEmployeeFormPriorityCandidate(
@@ -1063,8 +1115,10 @@ public class AgenticAuthoringIntentResolverService {
     private AgenticAuthoringCandidate selectCandidate(
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringTarget target,
-            String artifactKind) {
-        if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()) {
+            String artifactKind,
+            String prompt) {
+        if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()
+                && !shouldDetachCurrentTarget(prompt, artifactKind, target)) {
             return candidates.stream()
                     .filter(candidate -> target.resourcePath().equals(candidate.resourcePath()))
                     .findFirst()
@@ -1099,6 +1153,22 @@ public class AgenticAuthoringIntentResolverService {
                 && candidates.stream()
                 .allMatch(candidate -> candidate.evidence() != null
                         && candidate.evidence().contains("broad-artifact-discovery"));
+    }
+
+    private boolean shouldDetachCurrentTarget(String prompt, String artifactKind, AgenticAuthoringTarget target) {
+        if (target == null || !"praxis-dynamic-form".equals(target.componentId())) {
+            return false;
+        }
+        if ("form".equals(artifactKind)) {
+            return false;
+        }
+        String normalized = normalize(prompt);
+        return containsAny(normalized,
+                "nao quero cadastrar", "nao quero cadastro", "nao era isso", "em vez disso",
+                "dashboard", "painel", "indicador", "indicadores",
+                "master detail", "master-detail", "mestre detalhe", "mestre-detalhe",
+                "lista e detalhe", "lista com detalhe", "abrir detalhes", "abrir detalhe",
+                "acompanhar", "consultar", "buscar", "visualizar", "ver detalhes", "ver detalhe");
     }
 
     private boolean isAnalyticsResource(String resourcePath) {
@@ -1354,6 +1424,33 @@ public class AgenticAuthoringIntentResolverService {
             return false;
         }
         return asksForForm || mentionsEmployeeFields;
+    }
+
+    private boolean isEmployeeReadDashboardPrompt(String prompt) {
+        return isEmployeeDomainPrompt(prompt)
+                && !isPayrollAnalyticsPrompt(prompt)
+                && isExplicitDashboardPrompt(prompt)
+                && !isEmployeeMasterDetailPrompt(prompt)
+                && !isEmployeeFormCreatePrompt(prompt);
+    }
+
+    private boolean isEmployeeMasterDetailPrompt(String prompt) {
+        return isEmployeeDomainPrompt(prompt)
+                && !isPayrollAnalyticsPrompt(prompt)
+                && containsAny(prompt,
+                "master detail", "master-detail", "mestre detalhe", "mestre-detalhe",
+                "lista e detalhe", "lista com detalhe", "abrir detalhes", "abrir detalhe",
+                "abrir os detalhes", "abrir o detalhe", "lista e abrir os detalhes",
+                "ver detalhes", "ver detalhe", "detalhe lateral",
+                "painel de detalhes", "painel lateral", "detalhes ao selecionar",
+                "detalhes quando selecionar", "detalhes de cada pessoa");
+    }
+
+    private boolean isEmployeeDomainPrompt(String prompt) {
+        return containsAny(prompt,
+                "funcionario", "funcionarios", "funsionario", "funsionarios",
+                "colaborador", "colaboradores", "empregado", "empregados",
+                "pessoa da empresa", "pessoas da empresa", "time", "equipe", "rh", "human resources");
     }
 
     private boolean isExplicitDashboardPrompt(String prompt) {
