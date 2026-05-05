@@ -127,9 +127,7 @@ final class AgenticAuthoringDomainCatalogHints {
                 || prompt.contains("inactive")
                 || prompt.contains("inativo"))
                 && (prompt.contains("selecao")
-                || prompt.contains("selecion")
-                || prompt.contains("fornecedor")
-                || prompt.contains("supplier")))) {
+                || prompt.contains("selecion")))) {
             return "shared_rule_authoring";
         }
         return "";
@@ -157,9 +155,7 @@ final class AgenticAuthoringDomainCatalogHints {
                 || prompt.contains("inativo")
                 || prompt.contains("inactive"))
                 && (prompt.contains("selecao")
-                || prompt.contains("selecion")
-                || prompt.contains("fornecedor")
-                || prompt.contains("supplier"))) {
+                || prompt.contains("selecion"))) {
             return "selection_eligibility";
         }
         return "";

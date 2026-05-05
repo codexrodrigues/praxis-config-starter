@@ -16,13 +16,15 @@ final class AgenticAuthoringConversationTurnOrchestrator {
             pending = inferPendingClarification(conversationMessages, conversationMessages == null ? 0 : conversationMessages.size());
         }
         String effectivePrompt = effectivePrompt(prompt, pending);
+        boolean answeredPendingClarification = pending != null
+                && (!effectivePrompt.equals(prompt) || carriesPendingConfirmation(prompt, pending));
         return new AgenticAuthoringConversationTurn(
                 prompt,
                 effectivePrompt,
                 pending == null ? "" : trim(pending.sourcePrompt()),
                 pending == null ? "" : trim(pending.assistantMessage()),
                 pending == null || pending.questions() == null ? List.of() : List.copyOf(pending.questions()),
-                pending != null && !effectivePrompt.equals(prompt));
+                answeredPendingClarification);
     }
 
     private String effectivePrompt(String prompt, AgenticAuthoringPendingClarification pendingClarification) {
@@ -186,7 +188,18 @@ final class AgenticAuthoringConversationTurnOrchestrator {
             return false;
         }
         return normalized.contains("/api/")
-                || normalized.matches(".*\\b(sim|confirmo|confirmar|escolho|escolher|seguir|fazer|use|usar|usando|mantenha|preserve|preservar|opcao|opcoes|primeira|segunda|terceira|com base|exatamente)\\b.*");
+                || normalized.matches(".*\\b(confirmed|confirmado|confirmada|confirmo|confirmar|sim|escolho|escolher|seguir|fazer|use|usar|usando|mantenha|preserve|preservar|opcao|opcoes|primeira|segunda|terceira|com base|exatamente|gerar previa|gerar pre visualizacao)\\b.*");
+    }
+
+    private boolean carriesPendingConfirmation(
+            String prompt,
+            AgenticAuthoringPendingClarification pendingClarification) {
+        String sourcePrompt = normalize(pendingClarification == null ? null : pendingClarification.sourcePrompt());
+        String normalizedPrompt = normalize(prompt);
+        return !sourcePrompt.isBlank()
+                && normalizedPrompt.contains(sourcePrompt)
+                && (normalizedPrompt.contains("confirmed:")
+                || isContinuationClarificationAnswer(prompt, pendingClarification));
     }
 
     private static String trim(String value) {

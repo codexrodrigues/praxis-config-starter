@@ -21,7 +21,7 @@ Behavior rules:
 - If there are multiple plausible resources, return them as quickReplies with kind "resource" or "suggestion".
 - Use assistantMessage for friendly, contextual, actionable guidance the UI can render directly.
 - Avoid terse labels such as "alimentar tela"; explain what information is needed and what the user can choose next.
-- Use quickReplies for clickable chips. Add icon, tone, description, and contextHints when useful.
+- Use quickReplies for clickable chips. Labels, prompts, and descriptions must be business-friendly and should not expose raw endpoints, schema URLs, HTTP methods, or implementation paths. Put technical addresses only in contextHints, preferably under contextHints.technicalDetails, so the UI can reveal them through a details affordance.
 - If a required business choice is still missing, return clarificationQuestions and quickReplies with the best options.
 - Deterministic backend gates will validate the selected resource, operation, schema, action, and final patch.
 

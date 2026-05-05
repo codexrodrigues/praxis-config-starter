@@ -1,0 +1,36 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.component-capability-catalog",
+  "componentId": "praxis-filter",
+  "capabilities": [
+    {
+      "id": "praxis-filter.search-fields.recommend@0.1.0",
+      "changeKind": "recommend_search_fields",
+      "triggerTerms": ["buscar", "procurar", "pesquisar", "encontrar", "localizar", "consulta", "consultar", "filtrar", "filtro"],
+      "fieldAliases": [],
+      "examples": [
+        {
+          "prompt": "Quero buscar registros sem saber quais campos existem.",
+          "intent": "Guiar a escolha de campos pesquisaveis a partir do schema do recurso, sem exigir que o usuario conheca nomes tecnicos.",
+          "configHints": ["componentId=praxis-filter", "alwaysVisibleFields derivados de /schemas/filtered", "selectedFieldIds sugeridos didaticamente"]
+        }
+      ]
+    },
+    {
+      "id": "praxis-filter.search-to-table.connect@0.1.0",
+      "changeKind": "connect_filter_to_results",
+      "triggerTerms": ["buscar e listar", "buscar e ver", "procurar e ver", "filtrar tabela", "resultado", "resultados", "detalhes", "detalhe"],
+      "fieldAliases": [
+        { "field": "requestSearch", "aliases": ["pesquisar", "buscar", "procurar", "filtrar"] },
+        { "field": "queryContext", "aliases": ["resultado", "resultados", "lista", "tabela", "detalhes"] }
+      ],
+      "examples": [
+        {
+          "prompt": "Quero buscar registros e depois ver os detalhes.",
+          "intent": "Compor praxis-filter, praxis-table e uma area de detalhe, ligando requestSearch do filtro ao queryContext da tabela.",
+          "configHints": ["outputs.requestSearch -> table.inputs.queryContext", "table.rowClick -> state.selectedItem", "state.selectedItem -> detail.document"]
+        }
+      ]
+    }
+  ]
+}

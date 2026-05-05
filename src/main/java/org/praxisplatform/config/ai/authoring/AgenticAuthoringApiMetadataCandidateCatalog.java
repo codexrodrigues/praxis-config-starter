@@ -3,9 +3,11 @@ package org.praxisplatform.config.ai.authoring;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.domain.ApiMetadata;
@@ -44,7 +46,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         List<AgenticAuthoringCandidate> semanticCandidates = new SemanticCandidateRetriever().retrieve(context);
         if (!semanticCandidates.isEmpty()) {
-            return semanticCandidates;
+            List<String> tokens = meaningfulTokens(expandDomainSynonyms(normalizedPrompt));
+            return enrichAnalyticalDashboardCandidates(semanticCandidates, normalizedPrompt, artifactKind, expectedMethod, tokens);
         }
         if (repository == null) {
             return List.of();
@@ -53,7 +56,62 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (tokens.isEmpty()) {
             return new BroadArtifactCandidateRetriever().retrieve(context);
         }
-        return new LexicalFallbackCandidateRetriever().retrieve(context.withTokens(tokens));
+        List<AgenticAuthoringCandidate> lexicalCandidates =
+                new LexicalFallbackCandidateRetriever().retrieve(context.withTokens(tokens));
+        return enrichAnalyticalDashboardCandidates(lexicalCandidates, normalizedPrompt, artifactKind, expectedMethod, tokens);
+    }
+
+    private List<AgenticAuthoringCandidate> enrichAnalyticalDashboardCandidates(
+            List<AgenticAuthoringCandidate> candidates,
+            String normalizedPrompt,
+            String artifactKind,
+            String expectedMethod,
+            List<String> tokens) {
+        if ("dashboard".equals(artifactKind)
+                && isAnalyticalBusinessQuestion(normalizedPrompt)
+                && !isOperationalAuthoringPrompt(normalizedPrompt)
+                && shouldEnrichAnalyticalDashboardCandidates(candidates)) {
+            List<AgenticAuthoringCandidate> enriched = new ArrayList<>(candidates);
+            enriched.addAll(discoverAnalyticalProjectionCandidates(artifactKind, expectedMethod, tokens));
+            return enriched.stream()
+                    .collect(LinkedHashMap<String, AgenticAuthoringCandidate>::new,
+                            (map, candidate) -> map.putIfAbsent(candidate.resourcePath(), candidate),
+                            Map::putAll)
+                    .values()
+                    .stream()
+                    .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                    .toList();
+        }
+        return candidates;
+    }
+
+    private boolean shouldEnrichAnalyticalDashboardCandidates(List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return true;
+        }
+        return candidates.stream()
+                .noneMatch(candidate -> isAnalyticsResource(candidate.resourcePath())
+                        && candidate.score() >= 0.80d);
+    }
+
+    private List<AgenticAuthoringCandidate> discoverAnalyticalProjectionCandidates(
+            String artifactKind,
+            String expectedMethod,
+            List<String> tokens) {
+        if (repository == null || !"dashboard".equals(artifactKind)) {
+            return List.of();
+        }
+        return repository.findAll().stream()
+                .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
+                .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
+                .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
+                .filter(metadata -> isAnalyticsResource(baseResourcePath(metadata.getPath())))
+                .map(metadata -> toScoredCandidate(metadata, expectedMethod, artifactKind, tokens))
+                .filter(scored -> scored.score() >= 0.36d)
+                .sorted(CandidateRankingPolicy.byScoreDescending())
+                .limit(8)
+                .map(ScoredCandidate::candidate)
+                .toList();
     }
 
     private List<AgenticAuthoringCandidate> discoverBroadCandidates(String artifactKind, String expectedMethod) {
@@ -177,12 +235,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             String expectedMethod,
             String artifactKind,
             List<String> tokens) {
-        String endpointText = normalize(String.join(" ",
-                valueOrEmpty(metadata.getPath()),
-                valueOrEmpty(metadata.getTags()),
-                valueOrEmpty(metadata.getSummary()),
-                valueOrEmpty(metadata.getDescription()),
-                valueOrEmpty(metadata.getOperationId())));
+        String endpointText = searchableText(metadata);
         double score = expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()) ? 0.34d : 0.20d;
         int matches = 0;
         for (String token : tokens) {
@@ -196,6 +249,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         score += artifactScoreAdjustment(artifactKind, endpointText, normalize(metadata.getPath()));
         score = Math.min(0.98d, score);
+        score += dashboardOperationScoreAdjustment(artifactKind, normalize(metadata.getPath()), tokens);
+        score = Math.max(0d, Math.min(0.99d, score));
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
         String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
@@ -216,12 +271,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             ApiMetadata metadata,
             String expectedMethod,
             String artifactKind) {
-        String endpointText = normalize(String.join(" ",
-                valueOrEmpty(metadata.getPath()),
-                valueOrEmpty(metadata.getTags()),
-                valueOrEmpty(metadata.getSummary()),
-                valueOrEmpty(metadata.getDescription()),
-                valueOrEmpty(metadata.getOperationId())));
+        String endpointText = searchableText(metadata);
         String path = normalize(metadata.getPath());
         double score = expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()) ? 0.36d : 0.20d;
         score += artifactScoreAdjustment(artifactKind, endpointText, path);
@@ -265,8 +315,63 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 && !normalizedPath.contains("/options/")
                 && !normalizedPath.endsWith("/batch")
                 && !normalizedPath.contains("/batch/")
+                && !normalizedPath.endsWith("/export")
+                && !normalizedPath.contains("/export/")
                 && !normalizedPath.endsWith("/locate")
                 && !normalizedPath.contains("/locate/");
+    }
+
+    private double dashboardOperationScoreAdjustment(String artifactKind, String path, List<String> tokens) {
+        if (!"dashboard".equals(artifactKind) || path == null || path.isBlank()) {
+            return 0d;
+        }
+        if (path.endsWith("/stats/group-by") && hasGroupingToken(tokens)) {
+            return 0.10d;
+        }
+        if (path.endsWith("/stats/timeseries") && !hasTemporalToken(tokens)) {
+            return -0.08d;
+        }
+        if (path.endsWith("/stats/distribution") && !hasDistributionToken(tokens)) {
+            return -0.05d;
+        }
+        return 0d;
+    }
+
+    private boolean hasGroupingToken(List<String> tokens) {
+        return tokens != null && tokens.stream().anyMatch(token -> containsAny(token,
+                "area", "areas", "setor", "setores", "departamento", "departamentos",
+                "grupo", "agrupamento", "categoria", "categorias", "recorte"));
+    }
+
+    private boolean hasTemporalToken(List<String> tokens) {
+        return tokens != null && tokens.stream().anyMatch(token -> containsAny(token,
+                "tempo", "temporal", "serie", "series", "evolucao", "historico",
+                "mes", "mensal", "competencia", "periodo", "data"));
+    }
+
+    private boolean hasDistributionToken(List<String> tokens) {
+        return tokens != null && tokens.stream().anyMatch(token -> containsAny(token,
+                "distribuicao", "faixa", "faixas", "histograma", "dispersao"));
+    }
+
+    private String searchableText(ApiMetadata metadata) {
+        if (metadata == null) {
+            return "";
+        }
+        return normalize(String.join(" ",
+                valueOrEmpty(metadata.getPath()),
+                valueOrEmpty(metadata.getTags()),
+                valueOrEmpty(metadata.getSummary()),
+                valueOrEmpty(metadata.getDescription()),
+                valueOrEmpty(metadata.getOperationId()),
+                valueOrEmpty(metadata.getRequestSchema()),
+                valueOrEmpty(metadata.getResponseSchema()),
+                valueOrEmpty(metadata.getParameters())));
+    }
+
+    private boolean isAnalyticsResource(String resourcePath) {
+        String normalized = resourcePath == null ? "" : resourcePath.toLowerCase(Locale.ROOT);
+        return normalized.contains("analytics") || normalized.contains("/vw-") || normalized.contains("/stats/");
     }
 
     private double artifactScoreAdjustment(String artifactKind, String endpointText, String path) {
@@ -338,7 +443,32 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (containsAny(normalizedPrompt, "empregado", "empregados", "pessoa", "pessoas", "colaborador", "colaboradores")) {
             expanded.append(" funcionario funcionarios colaborador colaboradores pessoa pessoas recursos humanos");
         }
+        if (isAnalyticalBusinessQuestion(normalizedPrompt)
+                && !isOperationalAuthoringPrompt(normalizedPrompt)
+                && containsAny(normalizedPrompt, "recebe", "recebem", "ganha", "ganham", "ganho",
+                "remuneracao", "remuneracoes", "remunerado", "remunerados",
+                "salario", "salarios", "pagamento", "pagamentos")) {
+            expanded.append(" salario salarios remuneracao remuneracoes pagamento pagamentos folha valor valores");
+        }
+        if (containsAny(normalizedPrompt, "setor", "setores", "area", "areas")) {
+            expanded.append(" departamento departamentos setor setores area areas grupo agrupamento");
+        }
         return expanded.toString();
+    }
+
+    private boolean isAnalyticalBusinessQuestion(String normalizedPrompt) {
+        return containsAny(normalizedPrompt,
+                "entender", "compreender", "analisar", "analise", "comparar", "compare",
+                "comparativo", "ranking", "rank", "top", "maior", "maiores", "menor", "menores",
+                "por setor", "por departamento", "por area", "agrup", "grupo", "recorte",
+                "indicador", "indicadores", "metric", "metrica", "total", "media");
+    }
+
+    private boolean isOperationalAuthoringPrompt(String normalizedPrompt) {
+        return containsAny(normalizedPrompt,
+                "formulario", "form", "campo", "campos", "cadastro", "cadastrar",
+                "tabela", "lista", "listagem", "operacional", "registrar",
+                "salvar", "gravar", "preencher", "editar", "alterar", "adicione", "adicionar");
     }
 
     private boolean containsAny(String value, String... tokens) {

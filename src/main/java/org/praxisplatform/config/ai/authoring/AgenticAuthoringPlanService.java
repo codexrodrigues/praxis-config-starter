@@ -52,16 +52,6 @@ public class AgenticAuthoringPlanService {
         }
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         effectiveRequest = withEffectivePrompt(effectiveRequest);
-        JsonNode referencePlan = referenceMinimalFormPlan(effectiveRequest);
-        if (referencePlan != null) {
-            List<String> failures = validator.validate(referencePlan, effectiveRequest.intentResolution());
-            return new AgenticAuthoringPlanResult(
-                    failures.isEmpty(),
-                    failures,
-                    warnings(effectiveRequest.intentResolution()),
-                    referencePlan
-            );
-        }
         JsonNode plan = providerManagementService.generateJson(
                 minimalFormPlanPrompt(effectiveRequest),
                 AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
@@ -84,62 +74,6 @@ public class AgenticAuthoringPlanService {
                 warnings(effectiveRequest.intentResolution()),
                 plan
         );
-    }
-
-    private JsonNode referenceMinimalFormPlan(AgenticAuthoringPlanRequest request) {
-        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
-        if (intent == null
-                || intent.selectedCandidate() == null
-                || !"create".equals(intent.operationKind())
-                || !"form".equals(intent.artifactKind())
-                || !"create_minimal_form".equals(intent.changeKind())
-                || !"/api/human-resources/funcionarios".equals(intent.selectedCandidate().resourcePath())) {
-            return null;
-        }
-        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
-        ObjectNode plan = objectMapper.createObjectNode();
-        plan.put("version", "1.0.0");
-        plan.put("profileId", "create-minimal-form");
-        plan.put("targetApp", intent.targetApp());
-        plan.put("targetComponentId", intent.targetComponentId());
-        plan.put("apiUseCaseResolutionRef", "intent-resolution:" + candidate.resourcePath());
-        plan.put("fieldSelectionPlanRef", candidate.schemaUrl());
-        plan.put("submitActionRef", submitActionRef(candidate));
-        ArrayNode fields = plan.putArray("fields");
-        addField(fields, "nomeCompleto", "Nome completo", "input", true);
-        addField(fields, "cpf", "CPF", "cpfCnpjInput", true);
-        addField(fields, "email", "Email", "email", true);
-        addField(fields, "telefone", "Telefone", "phone", true);
-        addField(fields, "dataNascimento", "Data de nascimento", "date", true);
-        addField(fields, "salario", "Salario", "currency", true);
-        addField(fields, "dataAdmissao", "Data de admissao", "date", true);
-        addField(fields, "ativo", "Ativo", "checkbox", true);
-        addField(fields, "cargoId", "Cargo", "select", true);
-        addField(fields, "departamentoId", "Departamento", "select", true);
-        ObjectNode clarification = plan.putObject("clarificationNeed");
-        clarification.put("needed", false);
-        clarification.put("code", "none");
-        clarification.putArray("questions");
-        plan.putArray("sourceRefs")
-                .add("intent-resolution")
-                .add(candidate.schemaUrl())
-                .add(candidate.submitUrl());
-        return plan;
-    }
-
-    private void addField(ArrayNode fields, String name, String label, String controlType, boolean required) {
-        ObjectNode field = fields.addObject();
-        field.put("name", name);
-        field.put("label", label);
-        field.put("controlType", controlType);
-        field.put("required", required);
-    }
-
-    private String submitActionRef(AgenticAuthoringCandidate candidate) {
-        String method = candidate.submitMethod() == null || candidate.submitMethod().isBlank()
-                ? candidate.operation()
-                : candidate.submitMethod();
-        return (method == null ? "POST" : method.toUpperCase()) + " " + candidate.submitUrl();
     }
 
     private JsonNode completeDeterministicEditPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {

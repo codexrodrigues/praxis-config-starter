@@ -33,11 +33,7 @@ final class AgenticAuthoringCandidateProvenancePolicy {
                 || hasEvidence(candidates, "quick-reply-context")) {
             return CONTEXT_HINT;
         }
-        if (hasEvidence(candidates, "explicit-resource-path")
-                || hasEvidence(candidates, "known-quickstart-resource")
-                || hasEvidence(candidates, "known-quickstart-procurement-resource")
-                || hasEvidence(candidates, "known-quickstart-analytics-view")
-                || hasEvidence(candidates, "known-quickstart-employee-form")) {
+        if (hasEvidence(candidates, "explicit-resource-path")) {
             return DETERMINISTIC_OVERRIDE;
         }
         if (hasEvidence(candidates, "api-metadata")) {

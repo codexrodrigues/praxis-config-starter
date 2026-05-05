@@ -10,9 +10,9 @@
       "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Renomeie a tabela para Folha por funcionario.",
+          "prompt": "Renomeie a tabela para Resultados da consulta.",
           "intent": "Alterar o titulo visivel da tabela sem trocar fonte de dados.",
-          "configHints": ["inputs.title=Folha por funcionario", "preservar columns e resourcePath"]
+          "configHints": ["inputs.title=Resultados da consulta", "preservar columns e resourcePath"]
         }
       ]
     },
@@ -20,21 +20,12 @@
       "id": "praxis-table.column.format.currency-brl@0.1.0",
       "changeKind": "set_column_format",
       "triggerTerms": ["formatar", "formate", "formatacao", "moeda", "reais", "brl"],
-      "fieldAliases": [
-        { "field": "id", "aliases": ["codigo", "identificador"] },
-        { "field": "ano", "aliases": ["ano", "exercicio"] },
-        { "field": "mes", "aliases": ["mes", "competencia"] },
-        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
-        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] },
-        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido"] },
-        { "field": "dataPagamento", "aliases": ["data pagamento", "data de pagamento"] },
-        { "field": "funcionarioId", "aliases": ["funcionario", "colaborador"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Formate salario liquido em reais.",
+          "prompt": "Formate a coluna numerica selecionada como moeda.",
           "intent": "Aplicar formatacao monetaria a uma coluna numerica.",
-          "configHints": ["columns.salarioLiquido.format=currency", "columns.salarioLiquido.currency=BRL"]
+          "configHints": ["columns.<schemaField>.format=currency", "columns.<schemaField>.currency=<hostCurrency>"]
         }
       ]
     },
@@ -42,21 +33,12 @@
       "id": "praxis-table.column.visibility@0.1.0",
       "changeKind": "set_column_visibility",
       "triggerTerms": ["ocultar", "oculte", "esconder", "esconda"],
-      "fieldAliases": [
-        { "field": "id", "aliases": ["codigo", "identificador"] },
-        { "field": "ano", "aliases": ["ano", "exercicio"] },
-        { "field": "mes", "aliases": ["mes", "competencia"] },
-        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
-        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] },
-        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido"] },
-        { "field": "dataPagamento", "aliases": ["data pagamento", "data de pagamento"] },
-        { "field": "funcionarioId", "aliases": ["funcionario", "colaborador"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
           "prompt": "Oculte a coluna de identificador.",
           "intent": "Esconder coluna mantendo o dado disponivel no dataset.",
-          "configHints": ["columns.id.visible=false", "nao remover resourcePath nem schema"]
+          "configHints": ["columns.<schemaField>.visible=false", "nao remover resourcePath nem schema"]
         }
       ]
     },
@@ -64,21 +46,12 @@
       "id": "praxis-table.column.order@0.1.0",
       "changeKind": "set_column_order",
       "triggerTerms": ["mover", "mova", "reordenar", "reordene", "primeira", "inicio"],
-      "fieldAliases": [
-        { "field": "id", "aliases": ["codigo", "identificador"] },
-        { "field": "ano", "aliases": ["ano", "exercicio"] },
-        { "field": "mes", "aliases": ["mes", "competencia"] },
-        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
-        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] },
-        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido"] },
-        { "field": "dataPagamento", "aliases": ["data pagamento", "data de pagamento"] },
-        { "field": "funcionarioId", "aliases": ["funcionario", "colaborador"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Mova salario liquido para a primeira coluna.",
+          "prompt": "Mova a coluna selecionada para a primeira posicao.",
           "intent": "Reordenar colunas sem alterar contrato de dados.",
-          "configHints": ["columns order startsWith salarioLiquido", "preservar definicoes das demais colunas"]
+          "configHints": ["columns order startsWith <schemaField>", "preservar definicoes das demais colunas"]
         }
       ]
     }

@@ -728,6 +728,9 @@ public class AgenticAuthoringTurnEngine {
             if (needsClarification(intentResolution)) {
                 return new AgenticAuthoringTurnRoute("needs_clarification", false);
             }
+            if (!allowsMaterializedPreview(intentResolution)) {
+                return new AgenticAuthoringTurnRoute("advisory_authoring", false);
+            }
             return new AgenticAuthoringTurnRoute("component_authoring", true);
         }
 
@@ -747,6 +750,16 @@ public class AgenticAuthoringTurnEngine {
                 return false;
             }
             return "clarification_required".equals(intentResolution.gate().status());
+        }
+
+        private boolean allowsMaterializedPreview(AgenticAuthoringIntentResolutionResult intentResolution) {
+            if (intentResolution == null) {
+                return false;
+            }
+            String operationKind = safeLower(intentResolution.operationKind());
+            return "create".equals(operationKind)
+                    || "modify".equals(operationKind)
+                    || "remove".equals(operationKind);
         }
 
         private boolean hasComponentAuthoringSignal(

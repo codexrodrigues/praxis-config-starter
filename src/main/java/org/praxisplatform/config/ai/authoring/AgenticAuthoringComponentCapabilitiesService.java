@@ -9,6 +9,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private final AgenticAuthoringFormCapabilityCatalog formCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringTableCapabilityCatalog tableCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringChartCapabilityCatalog chartCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
+    private final AgenticAuthoringFilterCapabilityCatalog filterCatalog = AgenticAuthoringFilterCapabilityCatalog.INSTANCE;
 
     public AgenticAuthoringComponentCapabilitiesResult listCapabilities() {
         return new AgenticAuthoringComponentCapabilitiesResult(
@@ -16,7 +17,8 @@ public class AgenticAuthoringComponentCapabilitiesService {
                 List.of(
                         toCatalog(formCatalog.componentId(), formCatalog.version(), formCatalog.capabilities()),
                         toCatalog(tableCatalog.componentId(), tableCatalog.version(), tableCatalog.capabilities()),
-                        toCatalog(chartCatalog.componentId(), chartCatalog.version(), chartCatalog.capabilities())));
+                        toCatalog(chartCatalog.componentId(), chartCatalog.version(), chartCatalog.capabilities()),
+                        toCatalog(filterCatalog.componentId(), filterCatalog.version(), filterCatalog.capabilities())));
     }
 
     private AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog toCatalog(

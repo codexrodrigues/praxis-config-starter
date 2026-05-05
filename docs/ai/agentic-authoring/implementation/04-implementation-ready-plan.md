@@ -761,6 +761,48 @@ Manual browser inspection target:
 - UI: `http://localhost:4003`
 - route: `http://localhost:4003/page-builder-ia`
 
+For manual browser inspection, keep the lane local-first but avoid accidentally
+testing the local UI against the hosted Render backend. Start the UI with an
+explicit proxy target:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+
+PAX_PROXY_TARGET=http://127.0.0.1:8088 \
+PAX_FILES_PROXY_TARGET=http://127.0.0.1:8088 \
+npm run start
+```
+
+Start the quickstart with the Neon configuration already present in the project
+and only the local browser/security flags needed for the smoke. Do not use
+`SPRING_PROFILES_ACTIVE=dev` for this lane, because that profile can switch the
+API datasource to a local PostgreSQL instance:
+
+```bash
+cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+
+APP_SECURITY_CSRF_DISABLE=true \
+APP_SECURITY_READ_OPEN=true \
+APP_SECURITY_CONFIG_ORIGIN_RESTRICTION_ALLOWED_ORIGINS='http://localhost:4003,http://127.0.0.1:4003,http://localhost:4200,http://127.0.0.1:4200' \
+CORS_ALLOWED_ORIGINS='http://localhost:4003,http://127.0.0.1:4003,http://localhost:4200,http://127.0.0.1:4200' \
+PRAXIS_AI_SECURITY_CORPORATE_MODE=false \
+PRAXIS_AI_SECURITY_LOCAL_DEFAULT_TENANT=desenv \
+PRAXIS_AI_SECURITY_LOCAL_DEFAULT_USER_ID=local-browser-user \
+PRAXIS_AI_SECURITY_LOCAL_DEFAULT_ENVIRONMENT=local \
+mvn spring-boot:run
+```
+
+Sanity check for the governed dashboard prompt lane:
+
+- Prompt: `quero entender quem recebe mais na empresa e comparar por setor`.
+- Expected first turn: assistant resolves an analytical intent and offers a
+  governed confirmation such as `Sim, preparar dashboard`.
+- Expected preview: `praxis-chart` and `praxis-table` are materialized from the
+  analytical resource and the table loads through the corporate `POST /filter`
+  contract, not through `/all`.
+- If the table initially shows `Erro ao carregar dados`, first verify the proxy
+  target and backend security flags before changing the platform contract.
+
 Use GitHub Actions only as a phase-closing gate or release/publication gate.
 
 Before the full browser gate, prefer focal local checks for the changed layer:

@@ -73,9 +73,9 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .isEqualTo("resource-api-human-resources-vw-analytics-folha-pagamento");
         assertThat(result.quickReplies().get(0).label()).isEqualTo("analytics folha pagamento");
         assertThat(result.quickReplies().get(0).prompt())
-                .isEqualTo("Usar /api/human-resources/vw-analytics-folha-pagamento como fonte de dados.");
+                .isEqualTo("Usar analytics folha pagamento como fonte de dados do painel.");
         assertThat(result.quickReplies().get(0).description())
-                .isEqualTo("POST /api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+                .isEqualTo("Fonte candidata para alimentar o painel.");
         assertThat(result.candidates().get(0).submitUrl())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(result.candidates().get(0).submitMethod()).isEqualTo("post");
@@ -83,6 +83,8 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response");
         assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.quickReplies().get(0).contextHints().path("technicalDetails").path("submitUrl").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(result.quickReplies().get(0).contextHints().path("artifactKind").asText())
                 .isEqualTo("dashboard");
         assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("schemaVersion").asText())
@@ -148,6 +150,129 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .contains("semantic-retrieval")
                 .doesNotContain("lexical-fallback");
         verify(repository, never()).findAll();
+    }
+
+    @Test
+    void semanticRetrievalIsEnrichedWithAnalyticsProjectionForAnalyticalDashboardPrompts() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        when(retrievalService.searchApiMetadata(
+                "quero ver quem recebe mais e comparar por area",
+                null,
+                null,
+                8))
+                .thenReturn(List.of(ApiSearchResult.builder()
+                        .path("/api/human-resources/funcionarios")
+                        .method("POST")
+                        .summary("Cadastrar funcionario")
+                        .similarityScore(0.62d)
+                        .build()));
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "human-resources,funcionarios,funcionario,colaboradores",
+                        "Cadastrar funcionario",
+                        "Cadastro operacional de funcionarios.",
+                        "createFuncionario",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "GET",
+                        "human-resources,analytics,folha,pagamento,salario,salarios,departamento",
+                        "Analytics de folha de pagamento",
+                        "Visao analitica para rankings, comparacoes e dashboards por departamento.",
+                        "listVwAnalyticsFolhaPagamento",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService),
+                        objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "quero ver quem recebe mais e comparar por area",
+                        null,
+                        "dashboard",
+                        5));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .contains("/api/human-resources/vw-analytics-folha-pagamento")
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.candidates().get(0).resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.candidates().get(0).submitUrl())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+    }
+
+    @Test
+    void analyticalComparisonPrefersGroupByAndExcludesExportEndpoints() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries",
+                        "POST",
+                        "human-resources,analytics,folha,pagamento,salario,competencia",
+                        "Time-series stats sobre analytics da folha",
+                        "Serie temporal de folha de pagamento por competencia.",
+                        "timeSeriesStats",
+                        "{\"fields\":[{\"name\":\"field\",\"type\":\"string\"},{\"name\":\"metrics\",\"type\":\"array\"}]}",
+                        "{\"fields\":[{\"name\":\"salarioLiquido\",\"type\":\"number\"},{\"name\":\"competencia\",\"type\":\"string\"}]}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                        "POST",
+                        "human-resources,analytics,folha,pagamento,salario,departamento",
+                        "Group-by stats sobre analytics da folha",
+                        "Agrupa folha de pagamento para comparacoes e rankings por departamento ou area.",
+                        "groupByStats",
+                        "{\"fields\":[{\"name\":\"groupBy\",\"type\":\"string\"},{\"name\":\"metrics\",\"type\":\"array\"}]}",
+                        "{\"fields\":[{\"name\":\"departamento\",\"type\":\"string\"},{\"name\":\"salarioLiquido\",\"type\":\"number\"}]}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/vw-analytics-folha-pagamento/export",
+                        "POST",
+                        "human-resources,analytics,folha,pagamento,export",
+                        "Exportar colecao",
+                        "Exporta dados da colecao.",
+                        "exportCollection",
+                        "{\"fields\":[{\"name\":\"format\",\"type\":\"string\"}]}",
+                        "{\"fields\":[{\"name\":\"downloadUrl\",\"type\":\"string\"}]}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "quero ver quem recebe mais e comparar por area",
+                        null,
+                        "dashboard",
+                        5));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.candidates().get(0).submitUrl())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::submitUrl)
+                .noneMatch(url -> url.contains("/export"));
     }
 
     @Test

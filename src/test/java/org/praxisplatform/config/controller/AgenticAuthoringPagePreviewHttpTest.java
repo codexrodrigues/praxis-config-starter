@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -240,6 +242,46 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("uiCompositionPlan").path("bindings")).hasSize(3);
         assertThat(body.path("warnings")).extracting(JsonNode::asText)
                 .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
+    }
+
+    @Test
+    void pagePreviewRejectsDashboardFallbackToMinimalFormWhenNoUiCompositionProviderHandlesIt() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of());
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Crie um dashboard com ranking dos maiores valores da empresa.");
+        request.set("intentResolution", dashboardIntentForRankingResource());
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isFalse();
+        assertThat(body.path("failureCodes")).extracting(JsonNode::asText)
+                .contains("intent-resolution-artifact-requires-ui-composition-plan");
+        assertThat(body.path("minimalFormPlan").isObject()).isFalse();
+        verify(planService, never()).generateMinimalFormPlan(any(), isNull(), isNull(), isNull());
     }
 
     @Test
@@ -934,6 +976,37 @@ class AgenticAuthoringPagePreviewHttpTest {
         gate.put("version", "candidate-eligibility@0.1.0");
         gate.put("status", "eligible");
         gate.putArray("messages");
+        intent.putArray("clarificationQuestions");
+        intent.putArray("warnings");
+        intent.putArray("failureCodes");
+        intent.putObject("currentPageSummary");
+        return intent;
+    }
+
+    private ObjectNode dashboardIntentForRankingResource() {
+        ObjectNode intent = objectMapper.createObjectNode();
+        intent.put("valid", true);
+        intent.put("operationKind", "create");
+        intent.put("artifactKind", "dashboard");
+        intent.put("changeKind", "create_dashboard");
+        intent.put("authoringProfile", "ui-composition-plan@0.1.0");
+        intent.put("targetApp", "praxis-ui-angular");
+        intent.put("targetComponentId", "praxis-dynamic-page-builder");
+        ObjectNode candidate = intent.putObject("selectedCandidate");
+        candidate.put("resourcePath", "/api/human-resources/vw-ranking-reputacao");
+        candidate.put("operation", "post");
+        candidate.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/vw-ranking-reputacao/filter/cursor&operation=post&schemaType=response");
+        candidate.put("submitUrl", "/api/human-resources/vw-ranking-reputacao/filter/cursor");
+        candidate.put("submitMethod", "POST");
+        candidate.put("score", 0.79d);
+        candidate.put("reason", "api_metadata lexical match");
+        candidate.putArray("evidence").add("api-metadata");
+        intent.putArray("candidates").add(candidate.deepCopy());
+        ObjectNode gate = intent.putObject("gate");
+        gate.put("gateId", "candidate-eligibility@0.1.0");
+        gate.put("status", "eligible");
+        gate.putArray("messages");
+        intent.putArray("quickReplies");
         intent.putArray("clarificationQuestions");
         intent.putArray("warnings");
         intent.putArray("failureCodes");

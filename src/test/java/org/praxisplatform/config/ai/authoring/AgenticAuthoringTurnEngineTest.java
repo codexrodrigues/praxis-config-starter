@@ -590,6 +590,32 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void advisoryExplorationRouteSkipsPreviewUntilUserConfirmsMaterialization() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(advisoryDashboardIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("quero ver quem recebe mais e comparar por area"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("advisory_authoring");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("assistantMessage").asText())
+                            .contains("preparar um dashboard");
+                    org.assertj.core.api.Assertions.assertThat(node.path("canApply").asBoolean()).isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("quickReplies").isArray()).isTrue();
+                });
+        verify(previewService, never()).preview(any(), any(), any(), any());
+    }
+
+    @Test
     void invokesResourceDiscoveryToolThroughEngineAndResolvesIntentWithCandidates() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -894,6 +920,46 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(),
                 List.of("resource-candidate-required"),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult advisoryDashboardIntent() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento&operation=get&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "GET",
+                0.95,
+                "analytics resource selected from governed context",
+                List.of("domain-catalog-context"));
+        AgenticAuthoringQuickReply quickReply = new AgenticAuthoringQuickReply(
+                "confirm-dashboard",
+                "confirmation",
+                "Gerar previa governada",
+                "Confirmed: criar dashboard com analytics folha pagamento",
+                "Cria uma pre-visualizacao governada antes de salvar ou materializar.",
+                "dashboard",
+                "primary",
+                objectMapper.createObjectNode());
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "explore",
+                "dashboard",
+                "recommend_dashboard_visualization",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                "quero ver quem recebe mais e comparar por area",
+                "Posso preparar um dashboard com ranking e comparacao por area.",
+                List.of(quickReply),
+                List.of(),
+                List.of(),
+                List.of(),
                 objectMapper.createObjectNode());
     }
 

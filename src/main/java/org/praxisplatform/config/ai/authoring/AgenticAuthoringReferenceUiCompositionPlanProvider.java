@@ -76,14 +76,6 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (selectedPayrollTable.isPresent()) {
             return selectedPayrollTable;
         }
-        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceDashboard = selectedResourceDashboard(request);
-        if (selectedResourceDashboard.isPresent()) {
-            return selectedResourceDashboard;
-        }
-        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceMasterDetail = selectedResourceMasterDetail(request);
-        if (selectedResourceMasterDetail.isPresent()) {
-            return selectedResourceMasterDetail;
-        }
         if (supportsChartDrillDown(request)) {
             PayrollBreakdown breakdown = resolvePayrollBreakdown(request.userPrompt());
             return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
@@ -94,6 +86,14 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                             "ui-composition-plan-provider:quickstart-payroll-chart-drilldown:" + breakdown.field()),
                     chartDrillDownPlan(breakdown),
                     emptyCompiledFormPatch()));
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceDashboard = selectedResourceDashboard(request);
+        if (selectedResourceDashboard.isPresent()) {
+            return selectedResourceDashboard;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceMasterDetail = selectedResourceMasterDetail(request);
+        if (selectedResourceMasterDetail.isPresent()) {
+            return selectedResourceMasterDetail;
         }
         if (supportsPayrollTable(request)) {
             return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
@@ -132,14 +132,15 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         boolean asksForDashboard = containsAny(prompt, "dashboard", "painel");
         boolean asksForDrillDown = containsAny(prompt, "drill down", "drill-down", "drilldown", "detalhar", "detalhe", "aprofundar");
         boolean referencesPayrollOrDepartment = containsAny(prompt,
-                "folha", "pagamento", "salario", "salarios", "departamento", "departamentos",
+                "folha", "pagamento", "salario", "salarios", "remuneracao", "remuneracoes", "recebe", "ganha",
+                "departamento", "departamentos", "area", "areas",
                 "funcionario", "funcionarios", "cargo", "cargos", "equipe", "equipes", "base", "bases",
                 "perfil", "perfis");
         boolean referencesPayrollByBreakdown = containsAny(prompt,
                 "departamento", "departamentos", "competencia", "competencias", "mes", "mensal",
-                "status", "situacao", "setor", "setores", "cargo", "cargos", "equipe", "equipes", "base", "bases",
-                "perfil", "perfis", "profile")
-                && containsAny(prompt, "folha", "pagamento", "salario", "salarios");
+                "status", "situacao", "setor", "setores", "area", "areas", "cargo", "cargos", "equipe", "equipes", "base", "bases",
+                "perfil", "perfis", "profile", "ranking", "rank", "top", "maior", "maiores", "menor", "menores")
+                && containsAny(prompt, "folha", "pagamento", "salario", "salarios", "remuneracao", "remuneracoes", "recebe", "ganha");
         return (asksForChart && asksForDrillDown && referencesPayrollOrDepartment)
                 || (asksForDashboard && referencesPayrollByBreakdown);
     }
@@ -155,6 +156,9 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (containsAny(normalized, "cargo", "cargos", "funcao", "funcoes")) {
             return ROLE_BREAKDOWN;
         }
+        if (containsAny(normalized, "area", "areas", "setor", "setores", "departamento", "departamentos")) {
+            return DEPARTMENT_BREAKDOWN;
+        }
         if (containsAny(normalized, "equipe", "equipes", "time", "times")) {
             return TEAM_BREAKDOWN;
         }
@@ -164,6 +168,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (containsAny(normalized, "perfil", "perfis", "profile", "payroll profile")) {
             return PROFILE_BREAKDOWN;
         }
+        // Ranking requests without an explicit aggregate dimension must stay on
+        // allowed analytics dimensions; record-level details remain in the table.
         return DEPARTMENT_BREAKDOWN;
     }
 
@@ -265,7 +271,29 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (!supportsSelectedResourceDashboard(request)) {
             return Optional.empty();
         }
-        AgenticAuthoringCandidate candidate = canonicalSelectedResourceCandidate(request.intentResolution().selectedCandidate());
+        AgenticAuthoringCandidate originalCandidate = canonicalSelectedResourceCandidate(request.intentResolution().selectedCandidate());
+        AgenticAuthoringCandidate candidate = effectiveSelectedDashboardCandidate(request);
+        if (isSelectedPayrollAnalyticsDashboardCandidate(candidate)) {
+            PayrollBreakdown breakdown = resolvePayrollBreakdown(request.userPrompt());
+            List<String> warnings = usesCurrentPagePayrollAnalyticsContext(request, originalCandidate, candidate)
+                    ? List.of(
+                            "ui-composition-plan-provider:selected-resource-dashboard",
+                            "ui-composition-plan-provider:selected-resource-dashboard:current-page-analytics-context",
+                            "ui-composition-plan-provider:selected-resource-dashboard:analytics-chart",
+                            "ui-composition-plan-provider:quickstart-payroll-chart-drilldown",
+                            "ui-composition-plan-provider:quickstart-payroll-chart-drilldown:" + breakdown.field())
+                    : List.of(
+                            "ui-composition-plan-provider:selected-resource-dashboard",
+                            "ui-composition-plan-provider:selected-resource-dashboard:analytics-chart",
+                            "ui-composition-plan-provider:quickstart-payroll-chart-drilldown",
+                            "ui-composition-plan-provider:quickstart-payroll-chart-drilldown:" + breakdown.field());
+            return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    warnings,
+                    chartDrillDownPlan(breakdown),
+                    emptyCompiledFormPatch()));
+        }
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
                 List.of(),
@@ -283,7 +311,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 true,
                 List.of(),
                 List.of("ui-composition-plan-provider:selected-resource-master-detail"),
-                selectedResourceMasterDetailPlan(candidate),
+                selectedResourceMasterDetailPlan(candidate, shouldIncludeSearchFilter(request.userPrompt())),
                 emptyCompiledFormPatch()));
     }
 
@@ -313,19 +341,102 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private boolean supportsSelectedResourceDashboard(AgenticAuthoringPlanRequest request) {
-        if (request == null || request.intentResolution() == null
-                || request.intentResolution().selectedCandidate() == null) {
+        if (request == null || request.intentResolution() == null) {
             return false;
         }
         AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
-        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
-        return intent.valid()
-                && "create".equals(intent.operationKind())
-                && "dashboard".equals(intent.artifactKind())
+        boolean createsDashboard = "create".equals(intent.operationKind())
                 && ("create_artifact".equals(intent.changeKind())
-                || "create_dashboard".equals(intent.changeKind()))
+                || "create_dashboard".equals(intent.changeKind()));
+        boolean modifiesSelectedAnalyticsDashboard = "modify".equals(intent.operationKind())
+                && "add_dashboard_widget".equals(intent.changeKind())
+                && isSelectedPayrollAnalyticsDashboardCandidate(effectiveSelectedDashboardCandidate(request));
+        AgenticAuthoringCandidate candidate = effectiveSelectedDashboardCandidate(request);
+        return intent.valid()
+                && "dashboard".equals(intent.artifactKind())
+                && (createsDashboard || modifiesSelectedAnalyticsDashboard)
                 && candidate.resourcePath() != null
                 && !candidate.resourcePath().isBlank();
+    }
+
+    private boolean isSelectedPayrollAnalyticsDashboardCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        String resourcePath = valueOrEmpty(candidate.resourcePath());
+        String submitUrl = valueOrEmpty(candidate.submitUrl());
+        return (PAYROLL_ANALYTICS.equals(resourcePath) || PAYROLL.equals(resourcePath))
+                && (submitUrl.startsWith(PAYROLL_ANALYTICS + "/stats/")
+                || submitUrl.startsWith(PAYROLL + "/stats/"));
+    }
+
+    private AgenticAuthoringCandidate effectiveSelectedDashboardCandidate(AgenticAuthoringPlanRequest request) {
+        AgenticAuthoringCandidate candidate = canonicalSelectedResourceCandidate(
+                request == null || request.intentResolution() == null
+                        ? null
+                        : request.intentResolution().selectedCandidate());
+        if (isSelectedPayrollAnalyticsDashboardCandidate(candidate)) {
+            return candidate;
+        }
+        if (candidate != null && candidate.resourcePath() != null && !candidate.resourcePath().isBlank()) {
+            return candidate;
+        }
+        if (currentPageReferencesResource(request == null ? null : request.currentPage(), PAYROLL_ANALYTICS)
+                && isDashboardLikePrompt(request == null ? null : request.userPrompt())) {
+            return payrollAnalyticsStatsCandidate("current page analytics context");
+        }
+        return candidate;
+    }
+
+    private boolean usesCurrentPagePayrollAnalyticsContext(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringCandidate originalCandidate,
+            AgenticAuthoringCandidate effectiveCandidate) {
+        return isSelectedPayrollAnalyticsDashboardCandidate(effectiveCandidate)
+                && !isSelectedPayrollAnalyticsDashboardCandidate(originalCandidate)
+                && currentPageReferencesResource(request == null ? null : request.currentPage(), PAYROLL_ANALYTICS);
+    }
+
+    private AgenticAuthoringCandidate payrollAnalyticsStatsCandidate(String reason) {
+        return new AgenticAuthoringCandidate(
+                PAYROLL_ANALYTICS,
+                "post",
+                "/schemas/filtered?path=" + PAYROLL_ANALYTICS + "/stats/group-by&operation=post&schemaType=response",
+                PAYROLL_ANALYTICS + "/stats/group-by",
+                "post",
+                0.94d,
+                reason,
+                List.of("current-page", "analytics-context"));
+    }
+
+    private boolean isDashboardLikePrompt(String prompt) {
+        String normalized = normalize(prompt);
+        return containsAny(normalized, "dashboard", "painel", "grafico", "grafico", "analise", "analytics", "ranking", "maior", "maiores");
+    }
+
+    private boolean currentPageReferencesResource(JsonNode node, String resourcePath) {
+        if (node == null || node.isMissingNode() || node.isNull() || resourcePath == null || resourcePath.isBlank()) {
+            return false;
+        }
+        if (node.isTextual()) {
+            return resourcePath.equals(node.asText());
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (currentPageReferencesResource(item, resourcePath)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (node.isObject()) {
+            for (JsonNode child : node) {
+                if (currentPageReferencesResource(child, resourcePath)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private boolean supportsSelectedResourceMasterDetail(AgenticAuthoringPlanRequest request) {
@@ -390,12 +501,15 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         return plan;
     }
 
-    private ObjectNode selectedResourceMasterDetailPlan(AgenticAuthoringCandidate candidate) {
+    private ObjectNode selectedResourceMasterDetailPlan(AgenticAuthoringCandidate candidate, boolean includeSearchFilter) {
         String widgetKey = resourceWidgetKey(candidate.resourcePath()).replace("-table", "");
+        String filterKey = widgetKey + "-filter";
+        String masterKey = widgetKey + "-master";
+        String detailKey = widgetKey + "-detail";
         ObjectNode plan = objectMapper.createObjectNode();
         plan.put("version", "1.0");
         plan.put("kind", "praxis.ui-composition-plan");
-        plan.put("layoutPreset", "resource-master-detail");
+        plan.put("layoutPreset", includeSearchFilter ? "resource-search-master-detail" : "resource-master-detail");
 
         ObjectNode values = plan.putObject("state").putObject("values");
         values.putNull("selectedItem");
@@ -408,17 +522,75 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         canvas.put("autoRows", "fixed");
         canvas.put("collisionPolicy", "block");
         ObjectNode items = canvas.putObject("items");
-        addCanvasItem(items, widgetKey + "-master", 1, 1, 7, 7);
-        addCanvasItem(items, widgetKey + "-detail", 8, 1, 5, 7);
+        if (includeSearchFilter) {
+            addCanvasItem(items, filterKey, 1, 1, 12, 2);
+            addCanvasItem(items, masterKey, 1, 3, 7, 6);
+            addCanvasItem(items, detailKey, 8, 3, 5, 6);
+        } else {
+            addCanvasItem(items, masterKey, 1, 1, 7, 7);
+            addCanvasItem(items, detailKey, 8, 1, 5, 7);
+        }
 
         ArrayNode widgets = plan.putArray("widgets");
-        addSelectedResourceTable(widgets, candidate, widgetKey + "-master");
-        addSelectedResourceDetail(widgets, candidate, widgetKey + "-detail");
+        if (includeSearchFilter) {
+            addSelectedResourceFilter(widgets, candidate, filterKey);
+        }
+        addSelectedResourceTable(widgets, candidate, masterKey);
+        addSelectedResourceDetail(widgets, candidate, detailKey);
 
         ArrayNode bindings = plan.putArray("bindings");
-        addTableRowClickStateBinding(bindings, widgetKey + "-master");
-        addSelectedResourceDetailBinding(bindings, widgetKey + "-detail");
+        if (includeSearchFilter) {
+            addFilterSearchQueryContextBinding(bindings, filterKey, masterKey);
+        }
+        addTableRowClickStateBinding(bindings, masterKey);
+        addSelectedResourceDetailBinding(bindings, detailKey);
         return plan;
+    }
+
+    private boolean shouldIncludeSearchFilter(String prompt) {
+        String normalized = normalize(prompt == null ? "" : prompt);
+        return containsAny(normalized,
+                "buscar", "busca", "procurar", "pesquisar", "encontrar", "localizar", "filtrar", "filtro", "consulta", "consultar")
+                && containsAny(normalized, "detalhe", "detalhes", "dados", "informacoes", "resultado", "resultados");
+    }
+
+    private void addSelectedResourceFilter(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", widgetKey);
+        widget.put("componentId", "praxis-filter");
+        widget.put("role", "filter");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", candidate.resourcePath());
+        inputs.put("filterId", widgetKey);
+        inputs.put("formId", widgetKey);
+        inputs.put("componentInstanceId", widgetKey);
+        inputs.put("enableCustomization", true);
+        inputs.put("showFilterSettings", true);
+        inputs.put("persistenceKey", widgetKey);
+        inputs.put("changeDebounceMs", 300);
+    }
+
+    private void addFilterSearchQueryContextBinding(ArrayNode bindings, String sourceWidget, String targetWidget) {
+        ObjectNode binding = baseBinding(bindings, sourceWidget + ".requestSearch->" + targetWidget + ".queryContext", "component-port");
+        ObjectNode from = binding.putObject("from");
+        from.put("kind", "component-port");
+        from.put("widget", sourceWidget);
+        from.put("port", "requestSearch");
+        from.put("direction", "output");
+        ObjectNode to = binding.putObject("to");
+        to.put("kind", "component-port");
+        to.put("widget", targetWidget);
+        to.put("port", "queryContext");
+        to.put("direction", "input");
+        ObjectNode transform = binding.putObject("transform");
+        transform.put("kind", "pick-path");
+        transform.put("id", "filter-request-to-query-context");
+        transform.put("inputSource", "payload");
+        transform.put("path", "payload");
+        ObjectNode policy = binding.putObject("policy");
+        policy.put("distinct", true);
+        policy.put("missingValuePolicy", "skip");
+        addMetadata(binding, "filter-to-table");
     }
 
     private void addSelectedResourceTable(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
@@ -629,7 +801,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         return "modify".equals(request.intentResolution().operationKind())
                 && "dashboard".equals(request.intentResolution().artifactKind())
                 && "praxis-chart".equals(request.intentResolution().target().componentId())
-                && chartCapabilityCatalog.supports(request.intentResolution().changeKind(), prompt);
+                && (chartCapabilityCatalog.supports(request.intentResolution().changeKind(), prompt)
+                || isKnownChartChangeKind(request.intentResolution().changeKind()));
     }
 
     private boolean applyChartType(ObjectNode config, String prompt) {
@@ -646,7 +819,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private boolean applyChartMetric(ObjectNode config, String prompt) {
-        String field = chartCapabilityCatalog.resolveField("set_chart_metric", prompt).orElse("");
+        String field = chartCapabilityCatalog.resolveField("set_chart_metric", prompt)
+                .orElseGet(() -> resolveKnownColumnField(prompt));
         if (field.isBlank()) {
             return false;
         }
@@ -660,7 +834,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private boolean applyChartDimension(ObjectNode config, String prompt) {
-        String field = chartCapabilityCatalog.resolveField("set_chart_dimension", prompt).orElse("");
+        String field = chartCapabilityCatalog.resolveField("set_chart_dimension", prompt)
+                .orElseGet(() -> resolveKnownColumnField(prompt));
         if (field.isBlank()) {
             return false;
         }
@@ -971,8 +1146,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         }
         return "modify".equals(request.intentResolution().operationKind())
                 && "table".equals(request.intentResolution().artifactKind())
-                && "set_column_format".equals(request.intentResolution().changeKind())
-                && tableCapabilityCatalog.supports("set_column_format", normalize(request.userPrompt()));
+                && "set_column_format".equals(request.intentResolution().changeKind());
     }
 
     private boolean supportsTableColumnVisibilityModification(AgenticAuthoringPlanRequest request) {
@@ -982,8 +1156,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         }
         return "modify".equals(request.intentResolution().operationKind())
                 && "table".equals(request.intentResolution().artifactKind())
-                && "set_column_visibility".equals(request.intentResolution().changeKind())
-                && tableCapabilityCatalog.supports("set_column_visibility", normalize(request.userPrompt()));
+                && "set_column_visibility".equals(request.intentResolution().changeKind());
     }
 
     private boolean supportsTableColumnOrderModification(AgenticAuthoringPlanRequest request) {
@@ -991,29 +1164,67 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 || request.intentResolution() == null || request.intentResolution().target() == null) {
             return false;
         }
-        String prompt = normalize(request.userPrompt());
         return "modify".equals(request.intentResolution().operationKind())
                 && "table".equals(request.intentResolution().artifactKind())
-                && "set_column_order".equals(request.intentResolution().changeKind())
-                && tableCapabilityCatalog.supports("set_column_order", prompt);
+                && "set_column_order".equals(request.intentResolution().changeKind());
     }
 
     private String resolveFormatField(String prompt) {
         return tableCapabilityCatalog.resolveField(
                 "set_column_format",
-                normalize(prompt == null ? "" : prompt)).orElse("");
+                normalize(prompt == null ? "" : prompt))
+                .orElseGet(() -> resolveKnownColumnField(prompt));
     }
 
     private String resolveVisibilityField(String prompt) {
         return tableCapabilityCatalog.resolveField(
                 "set_column_visibility",
-                normalize(prompt == null ? "" : prompt)).orElse("");
+                normalize(prompt == null ? "" : prompt))
+                .orElseGet(() -> resolveKnownColumnField(prompt));
     }
 
     private String resolveOrderField(String prompt) {
         return tableCapabilityCatalog.resolveField(
                 "set_column_order",
-                normalize(prompt == null ? "" : prompt)).orElse("");
+                normalize(prompt == null ? "" : prompt))
+                .orElseGet(() -> resolveKnownColumnField(prompt));
+    }
+
+    private boolean isKnownChartChangeKind(String changeKind) {
+        return "set_chart_type".equals(changeKind)
+                || "set_chart_metric".equals(changeKind)
+                || "set_chart_dimension".equals(changeKind)
+                || "set_chart_value_format".equals(changeKind)
+                || "enable_chart_drilldown".equals(changeKind);
+    }
+
+    private String resolveKnownColumnField(String prompt) {
+        String normalized = normalize(prompt == null ? "" : prompt);
+        if (containsAny(normalized, "salario liquido", "liquido")) {
+            return "salarioLiquido";
+        }
+        if (containsAny(normalized, "salario bruto", "bruto")) {
+            return "salarioBruto";
+        }
+        if (containsAny(normalized, "total descontos", "descontos", "desconto")) {
+            return "totalDescontos";
+        }
+        if (containsAny(normalized, "competencia", "mes")) {
+            return "competencia";
+        }
+        if (containsAny(normalized, "departamento", "area", "setor")) {
+            return "departamento";
+        }
+        if (containsAny(normalized, "cargo", "funcao")) {
+            return "cargo";
+        }
+        if (containsAny(normalized, "nome completo", "nome")) {
+            return "nomeCompleto";
+        }
+        if (containsAny(normalized, "id", "identificador")) {
+            return "id";
+        }
+        return "";
     }
 
     private ObjectNode findColumn(ArrayNode columns, String field) {
@@ -1079,6 +1290,10 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private void addPayrollDrillDownTable(ArrayNode widgets) {
+        addPayrollDrillDownTable(widgets, DEPARTMENT_BREAKDOWN);
+    }
+
+    private void addPayrollDrillDownTable(ArrayNode widgets, PayrollBreakdown breakdown) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", "payroll-drilldown-table");
         widget.put("componentId", "praxis-table");
@@ -1086,7 +1301,53 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", PAYROLL_ANALYTICS);
         inputs.put("tableId", "payroll-drilldown-table");
-        addPayrollAnalyticsTableColumns(inputs.putObject("config").putArray("columns"));
+        inputs.put("title", "Registros de folha do recorte selecionado");
+        ObjectNode config = inputs.putObject("config");
+        ObjectNode behavior = config.putObject("behavior");
+        ObjectNode pagination = behavior.putObject("pagination");
+        pagination.put("enabled", true);
+        pagination.put("strategy", "server");
+        ObjectNode sorting = behavior.putObject("sorting");
+        sorting.put("enabled", true);
+        sorting.put("strategy", "server");
+        ArrayNode columns = config.putArray("columns");
+        addTableColumn(columns, "nomeCompleto", "Nome completo", "text");
+        addTableColumn(columns, breakdown.field(), breakdown.label(), "text");
+        if (!"departamento".equals(breakdown.field())) {
+            addTableColumn(columns, "departamento", "Departamento", "text");
+        }
+        addTableColumn(columns, "cargo", "Cargo", "text");
+        if (!"competencia".equals(breakdown.field())) {
+            addTableColumn(columns, "competencia", "Competencia", "text");
+        }
+        addTableColumn(columns, "salarioBruto", "Salario bruto", "number");
+        addTableColumn(columns, "totalDescontos", "Total descontos", "number");
+        addTableColumn(columns, "salarioLiquido", "Salario liquido", "number");
+    }
+
+    private void addPayrollAnalyticsProjection(ObjectNode config, PayrollBreakdown breakdown) {
+        ObjectNode projection = config.putObject("analyticsProjection");
+        projection.put("id", "payroll-" + breakdown.keySuffix() + "-ranking-table");
+        projection.put("intent", "ranking");
+        ObjectNode source = projection.putObject("source");
+        source.put("kind", "praxis.stats");
+        source.put("resource", PAYROLL_ANALYTICS);
+        source.put("operation", breakdown.statsOperation());
+        ObjectNode bindings = projection.putObject("bindings");
+        ObjectNode dimension = bindings.putObject("primaryDimension");
+        dimension.put("field", breakdown.field());
+        dimension.put("role", "category");
+        dimension.put("label", breakdown.label());
+        ObjectNode metric = bindings.putArray("primaryMetrics").addObject();
+        metric.put("field", "salarioLiquido");
+        metric.put("aggregation", "sum");
+        metric.put("label", "Salario liquido");
+        ObjectNode defaults = projection.putObject("defaults");
+        defaults.put("limit", 10);
+        ObjectNode sort = defaults.putArray("sort").addObject();
+        sort.put("field", "salarioLiquido");
+        sort.put("direction", "desc");
+        projection.putObject("presentationHints").putArray("preferredFamilies").add("analytic-table");
     }
 
     private void addPayrollDrillDownSummary(ArrayNode widgets) {
