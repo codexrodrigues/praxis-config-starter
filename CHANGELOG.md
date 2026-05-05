@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Governed `praxis-filter` component authoring capability catalog so semantic
+  page composition can materialize search/filter widgets from read/search
+  intent without hard-coding UI-only aliases.
 - Governed Domain Knowledge evidence lifecycle for active, reverted and
   superseded evidence states.
 - Governed `revert_evidence` change-set validation, transactional apply and
@@ -48,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
+- Focal agentic authoring tests passed for filter capability catalog loading,
+  component capability exposure and search/master-detail page composition.
+- Prepared local `0.1.0-rc.38` Maven alignment for downstream quickstart
+  packaging without Maven Central publication.
 - Focal starter tests passed for Domain Knowledge lifecycle validation, Project
   Knowledge active-evidence filtering, vector index publication, vector-ranked
   retrieval and RAG metadata.

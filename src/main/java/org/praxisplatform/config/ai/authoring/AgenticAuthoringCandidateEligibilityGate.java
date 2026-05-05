@@ -28,8 +28,12 @@ public class AgenticAuthoringCandidateEligibilityGate {
         boolean targetlessDashboardAddition = "modify".equals(operationKind)
                 && "dashboard".equals(artifactKind)
                 && "add_dashboard_widget".equals(changeKind);
+        boolean targetlessDashboardFilterControls = "modify".equals(operationKind)
+                && "dashboard".equals(artifactKind)
+                && isDashboardFilterChange(changeKind);
         if (("modify".equals(operationKind) || "remove".equals(operationKind) || "connect".equals(operationKind))
-                && !targetlessDashboardAddition) {
+                && !targetlessDashboardAddition
+                && !targetlessDashboardFilterControls) {
             if (target == null || target.widgetKey() == null || target.widgetKey().isBlank()) {
                 messages.add("target-widget-required");
             }
@@ -43,5 +47,12 @@ public class AgenticAuthoringCandidateEligibilityGate {
         }
         String status = messages.isEmpty() ? "eligible" : "clarification_required";
         return new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", status, List.copyOf(messages));
+    }
+
+    private boolean isDashboardFilterChange(String changeKind) {
+        return "add_filter".equals(changeKind)
+                || "add_filters".equals(changeKind)
+                || "add_filter_controls".equals(changeKind)
+                || "connect_filter_to_results".equals(changeKind);
     }
 }

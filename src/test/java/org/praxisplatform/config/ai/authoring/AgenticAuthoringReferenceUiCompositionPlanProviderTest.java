@@ -86,9 +86,21 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(table.path("componentId").asText()).isEqualTo("praxis-table");
         assertThat(table.path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(table.path("inputs").path("config").has("analyticsProjection")).isFalse();
+        assertThat(table.path("inputs").path("config").path("behavior").path("pagination").path("strategy").asText())
+                .isEqualTo("server");
+        assertThat(table.path("inputs").path("config").path("behavior").path("sorting").path("strategy").asText())
+                .isEqualTo("server");
         assertThat(table.path("inputs").path("config").path("columns"))
                 .extracting(column -> column.path("field").asText())
-                .contains("salarioBruto", "totalDescontos", "salarioLiquido");
+                .containsExactly(
+                        "nomeCompleto",
+                        "departamento",
+                        "cargo",
+                        "competencia",
+                        "salarioBruto",
+                        "totalDescontos",
+                        "salarioLiquido");
         assertThat(plan.path("bindings")).hasSize(3);
         assertThat(plan.path("bindings")).extracting(binding -> binding.path("id").asText())
                 .contains(
@@ -128,6 +140,28 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
     }
 
     @Test
+    void returnsPayrollRankingDashboardUiCompositionPlanForTopSalaryPrompt() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie o dashboard com ranking dos 10 maiores salarios.",
+                null,
+                null,
+                null));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        JsonNode chart = plan.path("widgets").get(0);
+        JsonNode chartConfig = chart.path("inputs").path("config");
+        assertThat(chart.path("key").asText()).isEqualTo("payroll-by-department-chart");
+        assertThat(chartConfig.path("title").asText()).isEqualTo("Folha por departamento");
+        assertThat(chartConfig.path("axes").path("x").path("field").asText()).isEqualTo("departamento");
+        assertThat(chartConfig.path("series").get(0).path("categoryField").asText()).isEqualTo("departamento");
+        assertThat(chartConfig.path("dataSource").path("query").path("statsRequest").path("field").asText())
+                .isEqualTo("departamento");
+        assertThat(chartConfig.path("dataSource").path("query").path("statsRequest").path("limit").asInt())
+                .isEqualTo(10);
+    }
+
+    @Test
     void returnsPayrollDashboardUiCompositionPlanForConfirmedCompetenceBreakdown() {
         Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Crie um dashboard Confirmed: folha de pagamento Confirmed: por competencia",
@@ -164,6 +198,12 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         JsonNode tableFilterBinding = findBinding(plan.path("bindings"),
                 "state.selectedCompetence->payroll-drilldown-table.queryContext");
         assertThat(tableFilterBinding.path("transform").path("field").asText()).isEqualTo("competencia");
+        JsonNode table = plan.path("widgets").get(1);
+        assertThat(table.path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(table.path("inputs").path("config").path("columns"))
+                .extracting(column -> column.path("field").asText())
+                .contains("nomeCompleto", "competencia", "salarioBruto", "totalDescontos", "salarioLiquido");
     }
 
     @Test
@@ -507,6 +547,62 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
     }
 
     @Test
+    void returnsSelectedAnalyticsDashboardPlanForHumanDashboardWidgetIntent() {
+        JsonNode currentPage = generatedPayrollDashboardTablePageWithoutColumns();
+
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um dashboard novo para comparar os maiores valores por departamento.",
+                null,
+                null,
+                null,
+                currentPage,
+                dashboardWidgetAdditionIntent()));
+
+        assertThat(result).isPresent();
+        AgenticAuthoringUiCompositionPlanResult planResult = result.orElseThrow();
+        assertThat(planResult.compiledFormPatch().path("patch").isObject()).isTrue();
+        assertThat(planResult.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
+        assertThat(planResult.uiCompositionPlan().path("widgets"))
+                .extracting(widget -> widget.path("componentId").asText())
+                .containsExactly("praxis-chart", "praxis-table", "praxis-rich-content");
+        assertThat(planResult.warnings())
+                .contains(
+                        "ui-composition-plan-provider:selected-resource-dashboard",
+                        "ui-composition-plan-provider:selected-resource-dashboard:analytics-chart",
+                        "ui-composition-plan-provider:quickstart-payroll-chart-drilldown")
+                .doesNotContain("ui-composition-plan-provider:quickstart-dashboard-widget-addition");
+    }
+
+    @Test
+    void honorsSelectedDashboardCandidateWhenCurrentPageHasAnotherAnalyticsContext() {
+        JsonNode currentPage = generatedPayrollDashboardTablePageWithoutColumns();
+
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um novo painel para eu enxergar os maiores valores por area e conseguir detalhar os registros.",
+                null,
+                null,
+                null,
+                currentPage,
+                selectedDashboardIntent(
+                        "/api/human-resources/vw-perfil-heroi",
+                        "/api/human-resources/vw-perfil-heroi/filter",
+                        "create_dashboard")));
+
+        assertThat(result).isPresent();
+        AgenticAuthoringUiCompositionPlanResult planResult = result.orElseThrow();
+        JsonNode plan = planResult.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-dashboard");
+        assertThat(plan.path("widgets"))
+                .extracting(widget -> widget.path("componentId").asText())
+                .containsExactly("praxis-table", "praxis-rich-content");
+        assertThat(plan.path("widgets").get(0).path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+        assertThat(planResult.warnings())
+                .contains("ui-composition-plan-provider:selected-resource-dashboard")
+                .doesNotContain("ui-composition-plan-provider:selected-resource-dashboard:current-page-analytics-context");
+    }
+
+    @Test
     void returnsCompiledPagePatchForSelectedChartMetricDimensionFormatAndDrilldownModifications() {
         JsonNode currentPage = payrollChartPage();
 
@@ -621,10 +717,85 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                         "create_dashboard")));
 
         assertThat(result).isPresent();
-        assertThat(result.orElseThrow().warnings())
-                .contains("ui-composition-plan-provider:selected-resource-dashboard");
-        assertThat(result.orElseThrow().uiCompositionPlan().path("layoutPreset").asText())
-                .isEqualTo("resource-dashboard");
+        AgenticAuthoringUiCompositionPlanResult planResult = result.orElseThrow();
+        assertThat(planResult.warnings())
+                .contains(
+                        "ui-composition-plan-provider:selected-resource-dashboard",
+                        "ui-composition-plan-provider:selected-resource-dashboard:analytics-chart",
+                        "ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
+        JsonNode plan = planResult.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
+        assertThat(plan.path("widgets"))
+                .extracting(widget -> widget.path("componentId").asText())
+                .containsExactly("praxis-chart", "praxis-table", "praxis-rich-content");
+        assertThat(plan.path("widgets").get(0).path("inputs").path("config")
+                .path("dataSource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(plan.path("widgets").get(0).path("inputs").path("config")
+                .path("dataSource").path("query").path("statsPath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+    }
+
+    @Test
+    void returnsChartFirstDashboardForConfirmedPayrollStatsCandidate() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um dashboard governado\n\nConfirmed: usar /api/human-resources/folhas-pagamento via /api/human-resources/folhas-pagamento/stats/group-by",
+                null,
+                null,
+                null,
+                null,
+                selectedDashboardIntent(
+                        "/api/human-resources/folhas-pagamento",
+                        "/api/human-resources/folhas-pagamento/stats/group-by",
+                        "create_dashboard")));
+
+        assertThat(result).isPresent();
+        AgenticAuthoringUiCompositionPlanResult planResult = result.orElseThrow();
+        assertThat(planResult.warnings())
+                .contains(
+                        "ui-composition-plan-provider:selected-resource-dashboard",
+                        "ui-composition-plan-provider:selected-resource-dashboard:analytics-chart");
+        JsonNode plan = planResult.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
+        assertThat(plan.path("widgets").get(0).path("componentId").asText()).isEqualTo("praxis-chart");
+        assertThat(plan.path("widgets").get(1).path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(plan.path("widgets").get(0).path("inputs").path("config")
+                .path("dataSource").path("query").path("statsPath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+    }
+
+    @Test
+    void includesPraxisFilterWhenMasterDetailPromptAsksForSearchBeforeDetails() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero buscar pelos dados do empregado e depois ver detalhes sem saber quais campos usar",
+                null,
+                null,
+                null,
+                null,
+                selectedMasterDetailIntent()));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-search-master-detail");
+        assertThat(plan.path("widgets"))
+                .extracting(widget -> widget.path("componentId").asText())
+                .containsExactly("praxis-filter", "praxis-table", "praxis-rich-content");
+        JsonNode filter = plan.path("widgets").get(0);
+        assertThat(filter.path("key").asText()).isEqualTo("human-resources-funcionarios-filter");
+        assertThat(filter.path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(filter.path("inputs").path("showFilterSettings").asBoolean()).isTrue();
+        assertThat(plan.path("bindings"))
+                .extracting(binding -> binding.path("id").asText())
+                .contains(
+                        "human-resources-funcionarios-filter.requestSearch->human-resources-funcionarios-master.queryContext",
+                        "human-resources-funcionarios-master.rowClick->state.selectedItem",
+                        "state.selectedItem->human-resources-funcionarios-detail.document");
+        JsonNode filterBinding = findBinding(plan.path("bindings"),
+                "human-resources-funcionarios-filter.requestSearch->human-resources-funcionarios-master.queryContext");
+        assertThat(filterBinding.path("from").path("port").asText()).isEqualTo("requestSearch");
+        assertThat(filterBinding.path("to").path("port").asText()).isEqualTo("queryContext");
+        assertThat(filterBinding.path("transform").path("kind").asText()).isEqualTo("pick-path");
     }
 
     @Test
@@ -789,6 +960,33 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                         "POST",
                         0.94d,
                         "user selected a dashboard resource candidate",
+                        java.util.List.of("quick-reply")),
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                new ObjectMapper().createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult selectedMasterDetailIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_master_detail",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        0.94d,
+                        "user selected an employee resource candidate",
                         java.util.List.of("quick-reply")),
                 java.util.List.of(),
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),

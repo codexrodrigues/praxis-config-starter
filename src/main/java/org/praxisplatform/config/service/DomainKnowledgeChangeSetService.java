@@ -17,7 +17,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
 import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
@@ -35,13 +34,14 @@ import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 @ConditionalOnBean({
         DomainKnowledgeChangeSetRepository.class,
         DomainKnowledgeConceptRepository.class,
@@ -62,6 +62,40 @@ public class DomainKnowledgeChangeSetService {
     private final DomainKnowledgeChangeSetValidator validator;
     private final ObjectMapper objectMapper;
     private final ProjectKnowledgeDerivedIndexService projectKnowledgeDerivedIndexService;
+
+    @Autowired
+    public DomainKnowledgeChangeSetService(
+            DomainKnowledgeChangeSetRepository repository,
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            DomainKnowledgeChangeSetValidator validator,
+            ObjectMapper objectMapper,
+            ObjectProvider<ProjectKnowledgeDerivedIndexService> projectKnowledgeDerivedIndexService) {
+        this(
+                repository,
+                conceptRepository,
+                evidenceRepository,
+                validator,
+                objectMapper,
+                projectKnowledgeDerivedIndexService.getIfAvailable(NoopProjectKnowledgeDerivedIndexService::new));
+    }
+
+    DomainKnowledgeChangeSetService(
+            DomainKnowledgeChangeSetRepository repository,
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            DomainKnowledgeChangeSetValidator validator,
+            ObjectMapper objectMapper,
+            ProjectKnowledgeDerivedIndexService projectKnowledgeDerivedIndexService) {
+        this.repository = repository;
+        this.conceptRepository = conceptRepository;
+        this.evidenceRepository = evidenceRepository;
+        this.validator = validator;
+        this.objectMapper = objectMapper;
+        this.projectKnowledgeDerivedIndexService = projectKnowledgeDerivedIndexService == null
+                ? new NoopProjectKnowledgeDerivedIndexService()
+                : projectKnowledgeDerivedIndexService;
+    }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainKnowledgeChangeSetResponse create(

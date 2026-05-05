@@ -74,7 +74,13 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isApiCatalogQuestion(prompt)) {
             return "api_catalog";
         }
-        if (prefersPayrollDashboardRecommendation(prompt)) {
+        if (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt)) {
+            return "page";
+        }
+        if (isExplicitDashboardPrompt(prompt)) {
+            return "dashboard";
+        }
+        if (isAnalyticalVisualizationIntent(prompt)) {
             return "dashboard";
         }
         if (containsAny(prompt, "formulario", "form", "campo", "campos", "cadastrar", "cadastro", "abrir chamado")) {
@@ -94,16 +100,10 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 && ("modify".equals(resolveOperationKind(prompt)) || chartCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
             return "dashboard";
         }
-        if (isExplicitDashboardPrompt(prompt)) {
-            return "dashboard";
-        }
         if (isTablePrompt(prompt)) {
             return "table";
         }
-        if (isDashboardWidgetAdditionPrompt(prompt) && isPayrollAnalyticsPrompt(prompt)) {
-            return "dashboard";
-        }
-        if (prefersPayrollDashboardRecommendation(prompt)) {
+        if (isDashboardWidgetAdditionPrompt(prompt)) {
             return "dashboard";
         }
         if (containsAny(prompt, "stepper", "etapa", "etapas", "passo", "passos")) {
@@ -175,6 +175,10 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 && containsAny(prompt, "drill down", "drill-down", "drilldown", "detalhar", "detalhe", "aprofundar")) {
             return "create_chart_drilldown";
         }
+        if ("create".equals(operationKind) && "page".equals(artifactKind)
+                && (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt))) {
+            return "create_master_detail";
+        }
         if ("create".equals(operationKind)) {
             return "create_artifact";
         }
@@ -214,6 +218,10 @@ final class AgenticAuthoringKeywordFallbackResolver {
 
     private boolean isExplicitCreateConfirmation(String prompt) {
         return containsAny(prompt,
+                "confirmed: criar",
+                "confirmed: create",
+                "confirmado: criar",
+                "confirmado: crie",
                 "sim, crie",
                 "sim crie",
                 "pode criar",
@@ -236,9 +244,32 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 "ver", "visao", "mostrar", "mostre");
     }
 
-    private boolean isPayrollAnalyticsPrompt(String prompt) {
-        return containsAny(prompt, "folha", "pagamento", "pagamentos", "salario", "salarios",
-                "departamento", "departamentos");
+    private boolean isAnalyticalVisualizationIntent(String prompt) {
+        if (isApiCatalogQuestion(prompt)) {
+            return false;
+        }
+        if (containsAny(prompt, "nao sei", "não sei", "quais informacoes existem", "quais informações existem")) {
+            return false;
+        }
+        if (containsAny(prompt,
+                "como visualizar", "melhor forma", "antes de criar", "ainda nao sei",
+                "quais opcoes", "que opcoes", "compare alternativas", "devo usar",
+                "faz mais sentido", "me oriente", "oriente")) {
+            return false;
+        }
+        boolean wantsAnalysis = containsAny(prompt,
+                "entender", "compreender", "analisar", "analise", "acompanhar",
+                "comparar", "compare", "comparativo", "visualizar", "mostrar", "mostre",
+                "ver", "visao");
+        boolean hasAnalyticalShape = containsAny(prompt,
+                "por", "agrup", "grupo", "segment", "recorte", "area", "categoria",
+                "ranking", "rank", "top", "maior", "maiores", "menor", "menores",
+                "total", "totais", "media", "medias", "evolucao", "historico",
+                "distribuicao", "indicador", "indicadores", "kpi", "metric", "metrica");
+        boolean writeOrRecordIntent = containsAny(prompt,
+                "cadastro", "cadastrar", "salvar", "gravar", "preencher",
+                "formulario", "campo", "campos", "editar", "alterar");
+        return wantsAnalysis && hasAnalyticalShape && !writeOrRecordIntent;
     }
 
     private boolean isDashboardWidgetAdditionPrompt(String prompt) {
@@ -246,18 +277,24 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 && containsAny(prompt, "widget", "componente", "resumo", "executivo", "kpi", "indicador", "indicadores");
     }
 
-    private boolean prefersPayrollDashboardRecommendation(String prompt) {
-        return isPayrollAnalyticsPrompt(prompt)
-                && containsAny(prompt, "melhor forma", "como visualizar", "visualizar informacoes",
-                "visualizar informacao", "ver", "visao", "mostrar", "mostre", "analisar", "analise",
-                "recomendar", "recomende", "recomendacao", "recomendacoes", "opcao", "opcoes",
-                "alternativa", "alternativas", "orientar", "oriente", "me oriente", "faz mais sentido",
-                "devo usar", "comparar", "compare", "comparativo");
-    }
-
     private boolean isExplicitDashboardPrompt(String prompt) {
         return containsAny(prompt, "dashboard", "painel", "grafico", "graficos", "chart", "charts",
                 "kpi", "indicador", "indicadores", "drill down", "drill-down", "drilldown");
+    }
+
+    private boolean isMasterDetailPrompt(String prompt) {
+        return containsAny(prompt,
+                "master detail", "master-detail", "mestre detalhe", "mestre-detalhe",
+                "lista e detalhe", "lista com detalhe", "abrir detalhes", "abrir detalhe",
+                "ver detalhes", "ver detalhe", "area de detalhe", "detalhe lateral",
+                "painel de detalhes", "painel lateral", "detalhes ao selecionar",
+                "detalhes quando selecionar");
+    }
+
+    private boolean isReadDetailPagePrompt(String prompt) {
+        return containsAny(prompt, "acompanhar", "consultar", "buscar", "encontrar", "ver", "mostrar", "visualizar")
+                && containsAny(prompt, "detalhe", "detalhes", "informacoes", "dados")
+                && !containsAny(prompt, "cadastro", "cadastrar", "salvar", "gravar", "preencher", "formulario");
     }
 
     private boolean isTablePrompt(String prompt) {

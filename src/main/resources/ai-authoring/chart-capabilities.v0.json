@@ -14,7 +14,7 @@
       ],
       "examples": [
         {
-          "prompt": "Troque o grafico para barras por departamento.",
+          "prompt": "Troque o grafico para barras pela dimensao selecionada.",
           "intent": "Alterar o tipo visual do chart mantendo a mesma fonte de dados.",
           "configHints": ["inputs.type=bar", "preservar resourcePath e data bindings existentes"]
         }
@@ -24,16 +24,12 @@
       "id": "praxis-chart.metric.set@0.1.0",
       "changeKind": "set_chart_metric",
       "triggerTerms": ["metrica", "metric", "medida", "eixo y", "serie", "series"],
-      "fieldAliases": [
-        { "field": "salarioLiquido", "aliases": ["salario liquido", "liquido", "folha liquida"] },
-        { "field": "salarioBruto", "aliases": ["salario bruto", "bruto"] },
-        { "field": "totalDescontos", "aliases": ["total descontos", "descontos"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Use salario liquido como metrica principal.",
+          "prompt": "Use o campo numerico selecionado como metrica principal.",
           "intent": "Selecionar o campo numerico que alimenta a serie do grafico.",
-          "configHints": ["inputs.metricField=salarioLiquido", "manter dimensionField atual quando existir"]
+          "configHints": ["inputs.metricField=<schemaNumericField>", "manter dimensionField atual quando existir"]
         }
       ]
     },
@@ -41,16 +37,12 @@
       "id": "praxis-chart.dimension.set@0.1.0",
       "changeKind": "set_chart_dimension",
       "triggerTerms": ["dimensao", "dimension", "eixo x", "agrupar", "agrupe"],
-      "fieldAliases": [
-        { "field": "departamento", "aliases": ["departamento", "departamentos"] },
-        { "field": "competencia", "aliases": ["competencia", "mes", "ano"] },
-        { "field": "funcionario", "aliases": ["funcionario", "colaborador"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Agrupe o grafico por departamento.",
+          "prompt": "Agrupe o grafico por uma categoria disponivel no schema.",
           "intent": "Definir a dimensao usada no eixo ou agrupamento.",
-          "configHints": ["inputs.dimensionField=departamento", "preferir campos categoricos"]
+          "configHints": ["inputs.dimensionField=<schemaCategoricalField>", "preferir campos categoricos"]
         }
       ]
     },
@@ -79,9 +71,9 @@
       ],
       "examples": [
         {
-          "prompt": "Ao clicar em um departamento, filtre a tabela de detalhes.",
+          "prompt": "Ao clicar em uma categoria, filtre a tabela de detalhes.",
           "intent": "Publicar selecao do chart para outro componente da pagina.",
-          "configHints": ["outputs.selectionChange=departamento", "page.connections chart -> table queryContext"]
+          "configHints": ["outputs.selectionChange=<schemaCategoricalField>", "page.connections chart -> table queryContext"]
         }
       ]
     }

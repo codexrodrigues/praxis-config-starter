@@ -7,12 +7,10 @@
       "id": "praxis-dynamic-form.field.add-local@0.1.0",
       "changeKind": "add_field",
       "triggerTerms": ["adicionar", "adicione", "incluir", "inclua", "acrescentar", "acrescente"],
-      "fieldAliases": [
-        { "field": "observacaoInterna", "aliases": ["observacao interna", "observacaointerna", "observacao"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Adicione um campo local de observacao interna.",
+          "prompt": "Adicione um campo local de anotacao.",
           "intent": "Criar campo auxiliar no formulario sem enviar ao backend.",
           "configHints": ["field.source=local", "field.transient=true", "submitPolicy.includeInPayload=false"]
         }
@@ -22,15 +20,12 @@
       "id": "praxis-dynamic-form.field.relabel@0.1.0",
       "changeKind": "rename_or_relabel",
       "triggerTerms": ["renomear", "renomeie", "label", "rotulo", "titulo"],
-      "fieldAliases": [
-        { "field": "nomeCompleto", "aliases": ["nome completo", "nome do funcionario", "nome funcionario"] },
-        { "field": "nome", "aliases": ["nome", "nome completo do colaborador"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Renomeie o campo nome para Nome completo.",
+          "prompt": "Renomeie o campo selecionado para um rotulo mais claro.",
           "intent": "Alterar apenas o rotulo visivel preservando o campo de dados.",
-          "configHints": ["field.name preservado", "field.label=Nome completo"]
+          "configHints": ["field.name preservado", "field.label=<novoRotulo>"]
         }
       ]
     },
@@ -38,14 +33,10 @@
       "id": "praxis-dynamic-form.field.remove-local@0.1.0",
       "changeKind": "remove_field",
       "triggerTerms": ["remover", "remova", "remove", "excluir", "exclua", "apagar", "apague", "retirar", "retire", "campo", "campos"],
-      "fieldAliases": [
-        { "field": "observacaoInterna", "aliases": ["observacao interna", "observacaointerna", "observacao"] },
-        { "field": "nome", "aliases": ["nome"] },
-        { "field": "nomeCompleto", "aliases": ["nome completo", "nome do funcionario", "nome funcionario"] }
-      ],
+      "fieldAliases": [],
       "examples": [
         {
-          "prompt": "Remova o campo local de observacao interna.",
+          "prompt": "Remova o campo local selecionado.",
           "intent": "Remover somente campos criados localmente pelo autor.",
           "configHints": ["permitir remocao quando field.source=local", "bloquear remocao de campo vindo do schema remoto"]
         }

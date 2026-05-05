@@ -258,6 +258,11 @@ public class AgenticAuthoringPreviewService {
             return "";
         }
         String resourceLabel = titleFromResourcePath(candidate.resourcePath());
+        if (containsComponent(uiCompositionPlan, "praxis-chart")) {
+            return "Criei uma pre-visualizacao de dashboard analitico usando \"" + resourceLabel
+                    + "\" como fonte governada. O grafico foi conectado ao recorte analitico e a tabela de detalhe "
+                    + "pode apoiar a validacao dos dados antes de salvar a pagina.";
+        }
         if (containsComponent(uiCompositionPlan, "praxis-table")) {
             return "Criei uma pre-visualizacao usando \"" + resourceLabel
                     + "\" como fonte de dados. A tabela foi conectada ao recurso e ja pode carregar schema/dados. "
@@ -551,8 +556,17 @@ public class AgenticAuthoringPreviewService {
                 && !"remove".equals(intentResolution.operationKind())) {
             failures.add("intent-resolution-operation-must-be-create-modify-or-remove");
         }
-        if (!"form".equals(intentResolution.artifactKind())) {
+        if (!"form".equals(intentResolution.artifactKind())
+                && !"dashboard".equals(intentResolution.artifactKind())
+                && !"page".equals(intentResolution.artifactKind())
+                && !"table".equals(intentResolution.artifactKind())) {
             failures.add("intent-resolution-artifact-must-be-form");
+        }
+        if (!"form".equals(intentResolution.artifactKind())
+                && ("create".equals(intentResolution.operationKind())
+                || "modify".equals(intentResolution.operationKind())
+                || "remove".equals(intentResolution.operationKind()))) {
+            failures.add("intent-resolution-artifact-requires-ui-composition-plan");
         }
         return List.copyOf(failures);
     }

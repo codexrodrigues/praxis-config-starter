@@ -110,6 +110,7 @@ public class AgenticAuthoringResourceDiscoveryService {
                     contextHints.put("schemaUrl", candidate.schemaUrl());
                     contextHints.put("submitMethod", candidate.submitMethod());
                     contextHints.put("artifactKind", artifactKind);
+                    contextHints.set("technicalDetails", technicalDetails(candidate));
                     AgenticAuthoringDomainCatalogHints.enrich(
                             contextHints,
                             candidate,
@@ -123,8 +124,8 @@ public class AgenticAuthoringResourceDiscoveryService {
                             quickReplyId(candidate, duplicatedResourcePath),
                             "suggestion",
                             candidateLabel(candidate),
-                            "Usar " + candidate.resourcePath() + " como fonte de dados.",
-                            candidateDescription(candidate),
+                            candidatePrompt(candidate, artifactKind),
+                            candidateDescription(candidate, artifactKind),
                             candidateIcon(candidate),
                             candidateTone(candidate),
                             contextHints);
@@ -160,10 +161,38 @@ public class AgenticAuthoringResourceDiscoveryService {
                 .replace("-", " ");
     }
 
-    private String candidateDescription(AgenticAuthoringCandidate candidate) {
-        String method = valueOrDefault(candidate.submitMethod(), candidate.operation()).toUpperCase(Locale.ROOT);
-        String submitUrl = valueOrDefault(candidate.submitUrl(), candidate.resourcePath());
-        return method + " " + submitUrl;
+    private String candidatePrompt(AgenticAuthoringCandidate candidate, String artifactKind) {
+        String label = candidateLabel(candidate);
+        if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
+            return "Usar " + label + " como fonte de dados do painel.";
+        }
+        if ("table".equals(artifactKind)) {
+            return "Usar " + label + " como fonte de dados da tabela.";
+        }
+        if ("form".equals(artifactKind)) {
+            return "Usar " + label + " como operacao de formulario.";
+        }
+        return "Usar " + label + " como fonte de dados.";
+    }
+
+    private String candidateDescription(AgenticAuthoringCandidate candidate, String artifactKind) {
+        String path = valueOrDefault(candidate.resourcePath(), "");
+        return switch (artifactKind) {
+            case "dashboard", "page" -> "Fonte candidata para alimentar o painel.";
+            case "table" -> "Fonte candidata para alimentar a tabela.";
+            case "form" -> "Operacao candidata para o formulario.";
+            default -> "Fonte candidata encontrada no catalogo.";
+        };
+    }
+
+    private ObjectNode technicalDetails(AgenticAuthoringCandidate candidate) {
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("resourcePath", valueOrDefault(candidate.resourcePath(), ""));
+        details.put("submitUrl", valueOrDefault(candidate.submitUrl(), candidate.resourcePath()));
+        details.put("submitMethod", valueOrDefault(candidate.submitMethod(), candidate.operation()).toUpperCase(Locale.ROOT));
+        details.put("operation", valueOrDefault(candidate.operation(), ""));
+        details.put("schemaUrl", valueOrDefault(candidate.schemaUrl(), ""));
+        return details;
     }
 
     private String candidateIcon(AgenticAuthoringCandidate candidate) {

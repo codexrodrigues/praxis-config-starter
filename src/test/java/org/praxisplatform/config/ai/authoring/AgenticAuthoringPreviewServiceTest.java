@@ -328,6 +328,58 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewReturnsSelectedResourceMasterDetailPlanInsteadOfRejectingNonFormArtifact() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma tela com lista de funcionarios e detalhe lateral",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                selectedMasterDetailIntent());
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("intent-resolution-artifact-must-be-form");
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-master-detail");
+        assertThat(result.uiCompositionPlan().path("widgets")).hasSize(2);
+        JsonNode bindings = result.uiCompositionPlan().path("bindings");
+        assertThat(bindings).hasSize(2);
+        assertThat(bindings.path(0).path("from").path("kind").asText()).isEqualTo("component-port");
+        assertThat(bindings.path(0).path("from").path("widget").asText()).isEqualTo("human-resources-funcionarios-master");
+        assertThat(bindings.path(0).path("from").path("port").asText()).isEqualTo("rowClick");
+        assertThat(bindings.path(0).path("to").path("kind").asText()).isEqualTo("state");
+        assertThat(bindings.path(0).path("to").path("path").asText()).isEqualTo("selectedItem");
+        assertThat(bindings.path(0).path("transform").path("path").asText()).isEqualTo("payload.row");
+        assertThat(bindings.path(1).path("from").path("kind").asText()).isEqualTo("state");
+        assertThat(bindings.path(1).path("from").path("path").asText()).isEqualTo("selectedItem");
+        assertThat(bindings.path(1).path("to").path("kind").asText()).isEqualTo("component-port");
+        assertThat(bindings.path(1).path("to").path("widget").asText()).isEqualTo("human-resources-funcionarios-detail");
+        JsonNode detailTemplate = bindings.path(1).path("transform").path("template");
+        assertThat(detailTemplate.path("kind").asText()).isEqualTo("praxis.rich-content.document");
+        assertThat(detailTemplate.path("version").asText()).isEqualTo("1.0.0");
+        assertThat(detailTemplate.path("nodes").path(0).path("type").asText()).isEqualTo("text");
+        assertThat(detailTemplate.path("nodes").path(0).path("text").asText())
+                .contains("Dados do item selecionado")
+                .contains("${current.nomeCompleto}")
+                .contains("${current.cargoNome}")
+                .contains("${current.departamentoNome}")
+                .contains("${current.email}");
+        assertThat(detailTemplate.toString()).doesNotContain("{{state.selectedItem}}");
+        assertThat(detailTemplate.toString()).doesNotContain("${payload}");
+        assertThat(bindings.path(1).has("source")).isFalse();
+        assertThat(bindings.path(1).has("target")).isFalse();
+        assertThat(result.warnings()).contains(
+                "ui-composition-plan-provider:selected-resource-master-detail",
+                "compiled-form-patch-materialized-by-page-builder");
+    }
+
+    @Test
     void previewUsesLlmSynthesizedAssistantMessageWhenAvailable() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie um dashboard Confirmed: usar /api/human-resources/vw-ranking-reputacao",
@@ -473,6 +525,33 @@ class AgenticAuthoringPreviewServiceTest {
                         "POST",
                         0.94d,
                         "user selected a dashboard resource candidate",
+                        List.of("quick-reply")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult selectedMasterDetailIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_master_detail",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        0.90d,
+                        "user selected an employee read resource candidate",
                         List.of("quick-reply")),
                 List.of(),
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
