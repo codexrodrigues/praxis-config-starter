@@ -260,8 +260,8 @@ public class AgenticAuthoringPreviewService {
         String resourceLabel = titleFromResourcePath(candidate.resourcePath());
         if (containsComponent(uiCompositionPlan, "praxis-chart")) {
             return "Criei uma pre-visualizacao de dashboard analitico usando \"" + resourceLabel
-                    + "\" como fonte governada. O grafico foi conectado ao recorte analitico e a tabela de detalhe "
-                    + "pode apoiar a validacao dos dados antes de salvar a pagina.";
+                    + "\" como fonte governada. O grafico foi conectado ao recorte analitico e a lista de detalhe "
+                    + "em cards ricos pode apoiar a validacao dos dados antes de salvar a pagina.";
         }
         if (containsComponent(uiCompositionPlan, "praxis-table")) {
             return "Criei uma pre-visualizacao usando \"" + resourceLabel

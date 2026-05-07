@@ -436,6 +436,45 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewMessageDescribesChartDrilldownDetailAsRichList() throws Exception {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("layoutPreset", "chart-drilldown-dashboard");
+        ArrayNode widgets = plan.putArray("widgets");
+        widgets.addObject().put("key", "payroll-by-department-chart").put("componentId", "praxis-chart");
+        widgets.addObject().put("key", "payroll-drilldown-list").put("componentId", "praxis-list");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.putObject("patch");
+        AgenticAuthoringUiCompositionPlanProvider provider = request -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:chart-drilldown-dashboard"),
+                        plan,
+                        compiledFormPatch));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider))
+                .preview(new AgenticAuthoringPlanRequest(
+                        "Crie dashboard de folha com grafico e lista rica de detalhe",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        payrollAnalyticsDashboardIntent()),
+                        "tenant",
+                        "user",
+                        "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.assistantMessage())
+                .contains("lista de detalhe em cards ricos")
+                .doesNotContain("tabela de detalhe");
+    }
+
+    @Test
     void previewReturnsSelectedResourceMasterDetailPlanInsteadOfRejectingNonFormArtifact() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie uma tela com lista de funcionarios e detalhe lateral",
@@ -629,6 +668,33 @@ class AgenticAuthoringPreviewServiceTest {
                         0.94d,
                         "user selected a dashboard resource candidate",
                         List.of("quick-reply")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched payroll analytics",
+                        List.of("payroll", "analytics")),
                 List.of(),
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
                 List.of(),

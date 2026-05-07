@@ -514,7 +514,7 @@ class AgenticAuthoringPagePreviewHttpTest {
                 .containsExactly(
                         "payroll-executive-dashboard",
                         "payroll-department-drilldown",
-                        "payroll-detail-table");
+                        "payroll-rich-detail-list");
         assertThat(body.path("pendingClarification").path("questions")).extracting(JsonNode::asText)
                 .containsExactly("Posso criar um dashboard usando o recurso de negocio selecionado?");
     }

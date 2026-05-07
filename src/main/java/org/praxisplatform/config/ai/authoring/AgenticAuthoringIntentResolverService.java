@@ -2376,20 +2376,20 @@ public class AgenticAuthoringIntentResolverService {
                                 "Retorna graficos e indicadores segmentados por departamento ou area relacionada.",
                                 "Clique para gerar a previa com recorte departamental.")),
                 new AgenticAuthoringQuickReply(
-                        "payroll-detail-table",
+                        "payroll-rich-detail-list",
                         "confirm",
-                        "Tabela de detalhe",
+                        "Lista rica de detalhe",
                         AgenticAuthoringConversationPrompt.appendConfirmation(
                                 effectivePrompt,
-                                "criar tabela de auditoria da folha de pagamento"),
-                        "Mostra linhas operacionais para conferir descontos, salario bruto e salario liquido.",
-                        "table_view",
+                                "criar lista rica de auditoria da folha de pagamento"),
+                        "Mostra cards operacionais com chips, icones e valores formatados para explicar o recorte.",
+                        "view_list",
                         "neutral",
                         withQuickReplyPresentation(
                                 contextHints.deepCopy(),
-                                "Indicada quando a prioridade e auditar registros, conferir valores e explicar excecoes.",
-                                "Retorna uma lista detalhada com campos operacionais para validacao e investigacao.",
-                                "Clique para gerar a previa em formato de tabela.")));
+                                "Indicada quando a prioridade e auditar pessoas/registros, conferir valores e entender excecoes sem perder contexto visual.",
+                                "Retorna uma List em cards ricos com campos operacionais, chips de perfil, icones de contexto e formatacao amigavel.",
+                                "Clique para gerar a previa com lista rica vinculada aos graficos.")));
     }
 
     private boolean hasExplicitContextHintResource(AgenticAuthoringCandidate selectedCandidate) {
