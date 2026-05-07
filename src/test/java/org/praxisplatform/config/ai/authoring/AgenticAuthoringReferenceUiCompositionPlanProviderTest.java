@@ -59,7 +59,8 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(canvas.path("items").path("payroll-by-department-chart").path("colSpan").asInt()).isEqualTo(12);
         assertThat(canvas.path("items").path("payroll-drilldown-list").path("colSpan").asInt()).isEqualTo(8);
         assertThat(canvas.path("items").path("payroll-drilldown-summary").path("col").asInt()).isEqualTo(9);
-        assertThat(plan.path("widgets")).hasSize(3);
+        assertThat(canvas.path("items").path("payroll-drilldown-overview").path("row").asInt()).isEqualTo(1);
+        assertThat(plan.path("widgets")).hasSize(4);
         JsonNode chart = plan.path("widgets").get(0);
         assertThat(chart.path("key").asText()).isEqualTo("payroll-by-department-chart");
         assertThat(chart.path("componentId").asText()).isEqualTo("praxis-chart");
@@ -138,7 +139,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(result).isPresent();
         JsonNode plan = result.orElseThrow().uiCompositionPlan();
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
-        assertThat(plan.path("widgets")).hasSize(3);
+        assertThat(plan.path("widgets")).hasSize(4);
         assertThat(plan.path("widgets").get(0).path("componentId").asText()).isEqualTo("praxis-chart");
         assertThat(plan.path("widgets").get(0).path("inputs").path("config").path("dataSource").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
@@ -158,7 +159,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         JsonNode plan = result.orElseThrow().uiCompositionPlan();
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(plan.path("widgets")).extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content", "praxis-rich-content");
 
         JsonNode chartConfig = plan.path("widgets").get(0).path("inputs").path("config");
         assertThat(chartConfig.path("axes").path("x").path("field").asText()).isEqualTo("departamento");
@@ -177,6 +178,10 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(listConfig.path("templating").path("limit").path("expr").asText()).contains("BRL:pt-BR");
         assertThat(listConfig.path("templating").path("features")).hasSize(3);
         assertThat(listConfig.path("expansion").path("sections")).hasSize(2);
+        assertThat(plan.path("widgets").get(3).path("key").asText()).isEqualTo("payroll-drilldown-overview");
+        assertThat(plan.path("widgets").get(3).path("inputs").path("document").path("nodes"))
+                .extracting(node -> node.path("text").asText())
+                .anyMatch(text -> text.contains("Painel de folha pronto para decisao"));
 
         assertThat(plan.path("bindings")).extracting(binding -> binding.path("id").asText())
                 .contains(
@@ -216,7 +221,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         JsonNode chart = plan.path("widgets").get(0);
         JsonNode chartConfig = chart.path("inputs").path("config");
         assertThat(chart.path("key").asText()).isEqualTo("payroll-by-department-chart");
-        assertThat(chartConfig.path("title").asText()).isEqualTo("Folha por departamento");
+        assertThat(chartConfig.path("title").asText()).isEqualTo("Custo liquido da folha por departamento");
         assertThat(chartConfig.path("axes").path("x").path("field").asText()).isEqualTo("departamento");
         assertThat(chartConfig.path("series").get(0).path("categoryField").asText()).isEqualTo("departamento");
         assertThat(chartConfig.path("dataSource").path("query").path("statsRequest").path("field").asText())
@@ -328,7 +333,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         JsonNode plan = result.orElseThrow().uiCompositionPlan();
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(plan.path("widgets")).extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content", "praxis-rich-content");
         assertThat(plan.path("bindings")).extracting(binding -> binding.path("id").asText())
                 .contains(
                         "payroll-by-department-chart.selectionChange->state.selectedDepartment",
@@ -626,7 +631,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(planResult.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(planResult.uiCompositionPlan().path("widgets"))
                 .extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content", "praxis-rich-content");
         assertThat(planResult.warnings())
                 .contains(
                         "ui-composition-plan-provider:selected-resource-dashboard",
@@ -789,7 +794,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(plan.path("widgets"))
                 .extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content", "praxis-rich-content");
         assertThat(plan.path("widgets").get(0).path("inputs").path("config")
                 .path("dataSource").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");

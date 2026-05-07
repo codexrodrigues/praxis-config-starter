@@ -2355,6 +2355,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         addPayrollDrillDownChart(widgets, breakdown);
         addPayrollDrillDownList(widgets, breakdown);
         addPayrollDrillDownSummary(widgets, breakdown);
+        addPayrollDrillDownOverview(widgets, breakdown);
 
         ArrayNode bindings = plan.putArray("bindings");
         addChartSelectionStateBinding(bindings, breakdown);
@@ -2376,9 +2377,10 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         canvas.put("autoRows", "fixed");
         canvas.put("collisionPolicy", "block");
         ObjectNode items = canvas.putObject("items");
-        addCanvasItem(items, breakdown.chartKey(), 1, 1, 12, 4);
-        addCanvasItem(items, PAYROLL_DRILLDOWN_DETAIL_KEY, 1, 5, 8, 7);
-        addCanvasItem(items, "payroll-drilldown-summary", 9, 5, 4, 2);
+        addCanvasItem(items, "payroll-drilldown-overview", 1, 1, 12, 2);
+        addCanvasItem(items, breakdown.chartKey(), 1, 3, 12, 4);
+        addCanvasItem(items, PAYROLL_DRILLDOWN_DETAIL_KEY, 1, 7, 8, 7);
+        addCanvasItem(items, "payroll-drilldown-summary", 9, 7, 4, 3);
     }
 
     private void addCanvasItem(ObjectNode items, String key, int col, int row, int colSpan, int rowSpan) {
@@ -2685,6 +2687,21 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         addPayrollDrillDownChart(widgets, DEPARTMENT_BREAKDOWN);
     }
 
+    private void addPayrollDrillDownOverview(ArrayNode widgets, PayrollBreakdown breakdown) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "payroll-drilldown-overview");
+        widget.put("componentId", "praxis-rich-content");
+        widget.put("role", "overview");
+        ObjectNode document = widget.putObject("inputs").putObject("document");
+        document.put("kind", "praxis.rich-content.document");
+        document.put("version", "1.0.0");
+        ArrayNode nodes = document.putArray("nodes");
+        addRichTextNode(nodes, "Painel de folha pronto para decisao: total liquido em BRL por "
+                + breakdown.label().toLowerCase(Locale.ROOT)
+                + ", ranking detalhado de pessoas e contexto operacional do registro selecionado.");
+        addRichTextNode(nodes, "Use o grafico para encontrar concentracoes de custo, clique em uma barra para filtrar a lista e abra um card para revisar valores, perfil, equipe e composicao da folha.");
+    }
+
     private void addPayrollDrillDownChart(ArrayNode widgets, PayrollBreakdown breakdown) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", breakdown.chartKey());
@@ -2693,7 +2710,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode config = widget.putObject("inputs").putObject("config");
         config.put("id", breakdown.chartKey());
         config.put("type", breakdown.chartType());
-        config.put("title", "Folha por " + breakdown.label().toLowerCase(Locale.ROOT));
+        config.put("title", "Custo liquido da folha por " + breakdown.label().toLowerCase(Locale.ROOT));
         ObjectNode axes = config.putObject("axes");
         axes.putObject("x").put("field", breakdown.field()).put("label", breakdown.label()).put("type", "category");
         axes.putObject("y")
@@ -2744,6 +2761,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         inputs.put("enableCustomization", true);
         ObjectNode config = inputs.putObject("config");
         config.put("title", "Detalhes do recorte selecionado");
+        config.put("description", "Cards ricos com valores em BRL, perfil da folha, equipe, universo e contexto expandido do item.");
         ObjectNode dataSource = config.putObject("dataSource");
         dataSource.put("resourcePath", PAYROLL_ANALYTICS);
         dataSource.putArray("sort").add("salarioLiquido,desc");
@@ -2880,9 +2898,17 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode document = widget.putObject("inputs").putObject("document");
         document.put("kind", "praxis.rich-content.document");
         document.put("version", "1.0.0");
-        ObjectNode text = document.putArray("nodes").addObject();
-        text.put("type", "text");
-        text.put("text", "Clique em uma barra do grafico para detalhar a folha daquele recorte.");
+        ArrayNode nodes = document.putArray("nodes");
+        addRichTextNode(nodes, "Como ler este painel");
+        addRichTextNode(nodes, "1. O grafico mostra salario liquido agregado em BRL.");
+        addRichTextNode(nodes, "2. A lista responde ao clique no grafico e mostra os registros que explicam o recorte.");
+        addRichTextNode(nodes, "3. Expanda um card para ver valores formatados, composicao da folha e contexto do funcionario.");
+    }
+
+    private void addRichTextNode(ArrayNode nodes, String text) {
+        ObjectNode node = nodes.addObject();
+        node.put("type", "text");
+        node.put("text", text);
     }
 
     private void configureGroupByStatsQuery(ObjectNode config, String dimensionField, String metricField) {
