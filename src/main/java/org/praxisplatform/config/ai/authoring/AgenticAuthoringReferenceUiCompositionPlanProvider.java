@@ -2725,7 +2725,6 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         widget.put("componentId", "praxis-list");
         widget.put("role", "detail");
         ObjectNode inputs = widget.putObject("inputs");
-        inputs.put("resourcePath", PAYROLL_ANALYTICS);
         inputs.put("listId", PAYROLL_DRILLDOWN_DETAIL_KEY);
         inputs.put("componentInstanceId", PAYROLL_DRILLDOWN_DETAIL_KEY);
         inputs.put("configPersistenceStrategy", "input-first");

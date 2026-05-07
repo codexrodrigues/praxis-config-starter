@@ -85,8 +85,8 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                 .isEqualTo("payroll-drilldown-list");
         JsonNode list = plan.path("widgets").get(1);
         assertThat(list.path("componentId").asText()).isEqualTo("praxis-list");
-        assertThat(list.path("inputs").path("resourcePath").asText())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(list.path("inputs").has("resourcePath")).isFalse();
+        assertThat(list.path("inputs").path("listId").asText()).isEqualTo("payroll-drilldown-list");
         JsonNode listConfig = list.path("inputs").path("config");
         assertThat(listConfig.path("title").asText()).isEqualTo("Detalhes do recorte selecionado");
         assertThat(listConfig.path("dataSource").path("resourcePath").asText())
@@ -198,8 +198,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                 "state.selectedCompetence->payroll-drilldown-list.queryContext");
         assertThat(listFilterBinding.path("transform").path("field").asText()).isEqualTo("competencia");
         JsonNode list = plan.path("widgets").get(1);
-        assertThat(list.path("inputs").path("resourcePath").asText())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(list.path("inputs").has("resourcePath")).isFalse();
         assertThat(list.path("inputs").path("config").path("templating").path("secondary").path("expr").asText())
                 .contains("Competencia: ${item.competencia}");
     }
