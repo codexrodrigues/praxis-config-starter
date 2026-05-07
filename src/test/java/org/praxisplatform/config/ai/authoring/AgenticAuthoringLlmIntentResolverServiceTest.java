@@ -15,6 +15,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
@@ -31,10 +32,11 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     @Test
     void resolveSendsStructuredContextBundleAndToolCatalogToProvider() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
         when(providerManagementService.generateJson(
                 promptCaptor.capture(),
                 any(AiJsonSchema.class),
-                any(),
+                configCaptor.capture(),
                 eq("tenant"),
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
@@ -105,7 +107,10 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("\"searchApiResources\"");
         assertThat(prompt).contains("/api/praxis/config/ai/authoring/resource-candidates");
         assertThat(prompt).contains("Avoid terse labels such as \"alimentar tela\"");
+        assertThat(prompt).contains("Keep assistantMessage concise");
+        assertThat(prompt).contains("contextHints.presentation.bestFor");
         assertThat(prompt).contains("resourceSearchQuery");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(3600);
     }
 
     @Test
@@ -206,6 +211,59 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("visibility=mask");
         assertThat(prompt).contains("trainingUse=deny");
         assertThat(prompt).contains("Treat this block as governed semantic grounding");
+    }
+
+    @Test
+    void resolveCapsLongAssistantMessageReturnedByProvider() throws Exception {
+        String longMessage = "Area de dados recomendada. ".repeat(80);
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "explore",
+                  "artifactKind": "api_catalog",
+                  "changeKind": "resource_discovery_for_indicators",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": "indicadores para dashboard",
+                  "followUpKind": "none",
+                  "assistantMessage": "%s",
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """.formatted(longMessage)));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "quais dados posso usar para graficos?",
+                                "page-builder",
+                                "praxis-dynamic-page-builder",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "quais dados posso usar para graficos?",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.assistantMessage()).hasSizeLessThanOrEqualTo(700);
+        assertThat(result.assistantMessage()).endsWith("...");
     }
 
     @Test

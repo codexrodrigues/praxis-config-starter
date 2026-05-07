@@ -1,6 +1,7 @@
 package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.isNull;
@@ -129,10 +130,10 @@ class AgenticAuthoringControllerTest {
                 List.of(),
                 List.of(),
                 List.of("resource-candidates-empty"));
-        when(resourceDiscoveryService.search(request)).thenReturn(expected);
+        when(resourceDiscoveryService.search(same(request), any())).thenReturn(expected);
 
         ResponseEntity<AgenticAuthoringResourceCandidatesResult> response =
-                controller().searchResourceCandidates(request);
+                controller().searchResourceCandidates(request, null, null, null, null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isSameAs(expected);

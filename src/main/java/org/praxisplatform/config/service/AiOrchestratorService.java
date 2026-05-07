@@ -27,6 +27,11 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.prompts.AiPromptTemplates;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.domain.AiThread;
@@ -191,6 +196,9 @@ public class AiOrchestratorService {
     @Autowired(required = false)
     private DomainCatalogPromptContextService domainCatalogPromptContextService;
 
+    @Autowired(required = false)
+    private AgenticAuthoringPreviewService agenticAuthoringPreviewService;
+
     public AiOrchestratorResponse generatePatch(
             AiOrchestratorRequest request,
             String requestBaseUrl,
@@ -242,6 +250,16 @@ public class AiOrchestratorService {
             frontendConfig = withRagRelease(frontendConfig, request.getRagReleaseId());
             EmbeddingService.EmbeddingCallConfig embeddingConfig =
                     resolveEmbeddingCallConfig(tenantId, userId, environment);
+
+        AiOrchestratorResponse pageBuilderPreviewResponse = tryHandlePageBuilderLocalEditorialAuthoring(
+                request,
+                context,
+                tenantId,
+                userId,
+                environment);
+        if (pageBuilderPreviewResponse != null) {
+            return finalizeResponse(pageBuilderPreviewResponse, memoryContext);
+        }
 
         AiOrchestratorResponse createFlowResponse = tryHandleCreateFlow(
                 request,
@@ -425,6 +443,7 @@ public class AiOrchestratorService {
                 columnOptions,
                 configCategories,
                 componentCategories,
+                isTable,
                 warnings);
         intent = enforceFormatIntentWhenFieldExists(
                 intent,
@@ -548,7 +567,18 @@ public class AiOrchestratorService {
                             true), memoryContext);
                 }
             }
-            if (canBypassClarification(intent, componentActions)) {
+            if (shouldDeferComponentClarificationToActionPlan(
+                    intent,
+                    request,
+                    componentActions,
+                    authoringManifest)) {
+                intent.setNeedsClarification(false);
+                intent.setMissingContext(null);
+                if (intent.getOptions() != null && !intent.getOptions().isEmpty()) {
+                    intent.setOptions(null);
+                }
+                warnings.add("Clarificacao de classificacao adiada para action plan manifest-backed.");
+            } else if (canBypassClarification(intent, componentActions)) {
                 intent.setNeedsClarification(false);
                 intent.setMissingContext(null);
                 if (intent.getOptions() != null && !intent.getOptions().isEmpty()) {
@@ -757,15 +787,47 @@ public class AiOrchestratorService {
                     embeddingConfig,
                     tenantId,
                     environment);
+            if (isActionPlanEmpty(actionPlan)) {
+                AiActionPlan fallbackComponentPlan = deriveFallbackComponentActionPlan(
+                        request,
+                        componentActions,
+                        targetCandidates,
+                        authoringManifest);
+                if (fallbackComponentPlan != null) {
+                    actionPlan = fallbackComponentPlan;
+                    warnings.add("componentEditPlan inferido deterministicamente para pedido simples manifest-backed.");
+                }
+            }
+            actionPlan = completeManifestBackedActionPlanInputs(
+                    actionPlan,
+                    request,
+                    targetCandidates,
+                    currentState,
+                    authoringManifest,
+                    warnings);
             actionPlan = applyActionPlanDefaults(actionPlan, componentActions);
+            actionPlan = suppressLocalEditorialResourceBindingActions(actionPlan, request, warnings);
             ActionPlanClarification clarification = resolveActionPlanClarification(
                     actionPlan,
                     componentActions,
-                    targetOptions);
+                    targetOptions,
+                    authoringManifest);
             if (clarification != null) {
                 return finalizeResponse(clarification(clarification.message, clarification.options), memoryContext);
             }
             createOnlyPlan = isCreateOnlyPlan(actionPlan, componentActions);
+            JsonNode manifestBackedPlan = buildComponentEditPlanFromActionPlan(actionPlan, authoringManifest);
+            if (manifestBackedPlan != null && manifestBackedPlan.isObject()) {
+                ObjectNode planResult = objectMapper.createObjectNode();
+                planResult.set("componentEditPlan", manifestBackedPlan);
+                planResult.put(
+                        "explanation",
+                        "Plano de edicao gerado a partir do action plan e validado pelo authoringManifest.");
+                warnings.add("componentEditPlan gerado a partir do action plan manifest-backed.");
+                return finalizeResponse(
+                        componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                        memoryContext);
+            }
         }
 
         String scope = normalizeScope(intent.getScope());
@@ -1060,6 +1122,22 @@ public class AiOrchestratorService {
 
         JsonNode normalizedPatch = normalizePatch(
                 request.getComponentId(), patchNode);
+        JsonNode manifestBackedPatchPlan = buildComponentEditPlanFromPatch(
+                request.getComponentId(),
+                normalizedPatch,
+                authoringManifest,
+                warnings);
+        if (manifestBackedPatchPlan != null && manifestBackedPatchPlan.isObject()) {
+            ObjectNode planResult = objectMapper.createObjectNode();
+            planResult.set("componentEditPlan", manifestBackedPatchPlan);
+            planResult.put(
+                    "explanation",
+                    "Patch de componente convertido para componentEditPlan validado pelo authoringManifest.");
+            warnings.add("componentEditPlan gerado a partir de patch manifest-backed.");
+            return finalizeResponse(
+                    componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                    memoryContext);
+        }
         SanitizeResult sanitizeResult = sanitizePatch(
                 normalizedPatch,
                 filteredCaps,
@@ -2661,10 +2739,913 @@ public class AiOrchestratorService {
         return new ArrayList<>(options);
     }
 
+    private boolean isActionPlanEmpty(AiActionPlan actionPlan) {
+        return actionPlan == null
+                || actionPlan.getActions() == null
+                || actionPlan.getActions().isEmpty();
+    }
+
+    private AiActionPlan deriveFallbackComponentActionPlan(
+            AiOrchestratorRequest request,
+            List<ComponentAction> actionCatalog,
+            ArrayNode targetCandidates,
+            JsonNode authoringManifest) {
+        if (request == null
+                || actionCatalog == null
+                || actionCatalog.isEmpty()
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return null;
+        }
+        if (hasComponentAction(actionCatalog, "field.local.add")
+                && findManifestOperation(authoringManifest, "field.local.add") != null
+                && looksLikeDynamicFormInlineFieldAuthoringPrompt(request, authoringManifest)) {
+            AiActionPlan fieldPlan = buildDynamicFormLocalFieldActionPlan(prompt);
+            if (fieldPlan != null) {
+                return fieldPlan;
+            }
+        }
+        if (!hasComponentAction(actionCatalog, "tab.add")
+                || findManifestOperation(authoringManifest, "tab.add") == null
+                || !looksLikeSafeTabCreationPrompt(prompt)
+                || looksLikeDestructiveComponentPrompt(prompt)) {
+            return null;
+        }
+        TabDraft draft = inferTabDraft(prompt);
+        if (draft == null || isBlank(draft.id) || isBlank(draft.textLabel)
+                || targetCandidateAlreadyExists(targetCandidates, draft.id, draft.textLabel)) {
+            return null;
+        }
+        ObjectNode params = objectMapper.createObjectNode();
+        params.put("id", draft.id);
+        params.put("textLabel", draft.textLabel);
+        return AiActionPlan.builder()
+                .actions(List.of(AiActionPlan.Action.builder()
+                        .type("tab.add")
+                        .params(params)
+                        .build()))
+                .build();
+    }
+
+    private AiActionPlan completeManifestBackedActionPlanInputs(
+            AiActionPlan actionPlan,
+            AiOrchestratorRequest request,
+            ArrayNode targetCandidates,
+            JsonNode currentState,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        if (actionPlan == null
+                || actionPlan.getActions() == null
+                || actionPlan.getActions().isEmpty()
+                || request == null
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return actionPlan;
+        }
+        Map<String, JsonNode> operationsById = indexManifestOperations(authoringManifest, new ArrayList<>());
+        TabDraft explicitTabDraft = inferExplicitTabDraft(request.getUserPrompt());
+        String explicitCreatedTabId = explicitTabDraft != null
+                && actionPlanContainsManifestOperation(actionPlan, operationsById, "tab.add")
+                && !targetCandidateAlreadyExists(targetCandidates, explicitTabDraft.id, explicitTabDraft.textLabel)
+                ? explicitTabDraft.id
+                : null;
+        boolean completed = false;
+        if (explicitCreatedTabId != null
+                && !actionPlanContainsManifestOperation(actionPlan, operationsById, "tab.content.set")
+                && findManifestOperation(authoringManifest, "tab.content.set") != null
+                && looksLikeTabCreationWithInlineContentPrompt(request.getUserPrompt())) {
+            ArrayNode inferredContent = inferInlineTabContentFields(request.getUserPrompt());
+            if (inferredContent != null && !inferredContent.isEmpty()) {
+                ObjectNode params = objectMapper.createObjectNode();
+                params.set("content", inferredContent);
+                List<AiActionPlan.Action> actions = new ArrayList<>(actionPlan.getActions());
+                actions.add(AiActionPlan.Action.builder()
+                        .type("tab.content.set")
+                        .target(explicitCreatedTabId)
+                        .params(params)
+                        .build());
+                actionPlan.setActions(actions);
+                completed = true;
+                if (warnings != null) {
+                    warnings.add("tab.content.set inferido para conteudo solicitado junto da nova aba.");
+                }
+            }
+        }
+        if (looksLikeDynamicFormInlineFieldAuthoringPrompt(request, authoringManifest)
+                && findManifestOperation(authoringManifest, "field.local.add") != null
+                && !actionPlanContainsManifestOperation(actionPlan, operationsById, "field.local.add")) {
+            AiActionPlan inferredFieldsPlan = buildDynamicFormLocalFieldActionPlan(request.getUserPrompt());
+            if (inferredFieldsPlan != null && inferredFieldsPlan.getActions() != null && !inferredFieldsPlan.getActions().isEmpty()) {
+                actionPlan.setActions(inferredFieldsPlan.getActions());
+                completed = true;
+                if (warnings != null) {
+                    warnings.add("field.local.add inferido para campos solicitados no formulario.");
+                }
+            }
+        }
+        for (AiActionPlan.Action action : actionPlan.getActions()) {
+            if (action == null || isBlank(action.getType())) {
+                continue;
+            }
+            JsonNode manifestOperation = operationsById.get(action.getType());
+            if (manifestOperation == null) {
+                manifestOperation = operationsById.get(normalizeActionKey(action.getType()));
+            }
+            if (manifestOperation == null) {
+                continue;
+            }
+            String operationId = textOrNull(manifestOperation.get("operationId"));
+            if ("tab.add".equals(operationId)
+                    && looksLikeCurrentTabContentPrompt(request.getUserPrompt())
+                    && findManifestOperation(authoringManifest, "tab.content.set") != null) {
+                action.setType("tab.content.set");
+                manifestOperation = findManifestOperation(authoringManifest, "tab.content.set");
+                operationId = "tab.content.set";
+                if (warnings != null) {
+                    warnings.add("tab.add evitado para pedido de conteudo na aba atual; usando tab.content.set.");
+                }
+            }
+            if ("tab.content.set".equals(operationId)
+                    && looksLikeCurrentTabContentPrompt(request.getUserPrompt())
+                    && isCurrentTabTargetAlias(action.getTarget())) {
+                String activeTarget = resolveActiveTabsTargetId(currentState);
+                if (activeTarget != null && !activeTarget.isBlank()) {
+                    action.setTarget(activeTarget);
+                    if (warnings != null) {
+                        warnings.add("Alvo tab.content.set resolvido para a aba ativa do estado atual.");
+                    }
+                }
+            }
+            if ("tab.content.set".equals(operationId)
+                    && explicitCreatedTabId != null
+                    && !explicitCreatedTabId.equals(action.getTarget())) {
+                action.setTarget(explicitCreatedTabId);
+                if (warnings != null) {
+                    warnings.add("Alvo tab.content.set alinhado a aba explicitamente criada no pedido humano.");
+                }
+            }
+            ObjectNode params = ensureParamsObject(action.getParams());
+            normalizeRequiredInputAliases(params, manifestOperation);
+            if ("tab.content.set".equals(operationId)) {
+                if (normalizeTabContentSetParams(params, request.getUserPrompt(), warnings)) {
+                    completed = true;
+                }
+                action.setParams(params);
+            }
+            if ("tab.add".equals(operationId) && explicitTabDraft != null && explicitCreatedTabId != null) {
+                params.put("id", explicitTabDraft.id);
+                params.put("textLabel", explicitTabDraft.textLabel);
+                action.setParams(params);
+                completed = true;
+                if (warnings != null) {
+                    warnings.add("tab.add respeitou rotulo explicito do pedido humano.");
+                }
+                continue;
+            }
+            if (hasRequiredInputFields(params, manifestOperation)) {
+                action.setParams(params);
+                continue;
+            }
+            if (!"tab.add".equals(operationId)
+                    || !looksLikeSafeTabCreationPrompt(request.getUserPrompt())
+                    || looksLikeDestructiveComponentPrompt(request.getUserPrompt())) {
+                action.setParams(params);
+                continue;
+            }
+            TabDraft draft = inferTabDraft(request.getUserPrompt());
+            if (draft == null
+                    || isBlank(draft.id)
+                    || isBlank(draft.textLabel)
+                    || targetCandidateAlreadyExists(targetCandidates, draft.id, draft.textLabel)) {
+                action.setParams(params);
+                continue;
+            }
+            if (isMissingInputField(params, "id")) {
+                params.put("id", draft.id);
+            }
+            if (isMissingInputField(params, "textLabel")) {
+                params.put("textLabel", draft.textLabel);
+            }
+            action.setParams(params);
+            completed = true;
+        }
+        if (completed && warnings != null) {
+            warnings.add("componentEditPlan completou campos obrigatorios seguros a partir do pedido humano e authoringManifest.");
+        }
+        return actionPlan;
+    }
+
+    private boolean actionPlanContainsManifestOperation(
+            AiActionPlan actionPlan, Map<String, JsonNode> operationsById, String expectedOperationId) {
+        if (actionPlan == null || actionPlan.getActions() == null || operationsById == null
+                || isBlank(expectedOperationId)) {
+            return false;
+        }
+        for (AiActionPlan.Action action : actionPlan.getActions()) {
+            if (action == null || isBlank(action.getType())) {
+                continue;
+            }
+            JsonNode manifestOperation = operationsById.get(action.getType());
+            if (manifestOperation == null) {
+                manifestOperation = operationsById.get(normalizeActionKey(action.getType()));
+            }
+            if (expectedOperationId.equals(textOrNull(manifestOperation != null
+                    ? manifestOperation.get("operationId")
+                    : null))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean looksLikeDynamicFormInlineFieldAuthoringPrompt(
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest) {
+        if (request == null || authoringManifest == null || !authoringManifest.isObject()) {
+            return false;
+        }
+        String componentId = firstNonBlankText(authoringManifest, "componentId");
+        if (!"praxis-dynamic-form".equals(componentId)
+                && !"praxis-dynamic-form".equals(request.getComponentId())) {
+            return false;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return false;
+        }
+        String normalized = normalizeSearchPhrase(prompt);
+        boolean fieldAuthoringSignal = normalized.contains("formulario")
+                || normalized.contains(" form ")
+                || normalized.contains("cadastrar")
+                || normalized.contains("cadastro")
+                || normalized.contains("registrar")
+                || normalized.contains("campos")
+                || normalized.contains("fields");
+        return fieldAuthoringSignal && !extractInlineContentFieldLabels(prompt).isEmpty();
+    }
+
+    private AiActionPlan buildDynamicFormLocalFieldActionPlan(String prompt) {
+        ArrayNode fields = inferInlineTabContentFields(prompt);
+        if (fields == null || fields.isEmpty()) {
+            return null;
+        }
+        List<AiActionPlan.Action> actions = new ArrayList<>();
+        for (JsonNode field : fields) {
+            if (field == null || !field.isObject()) {
+                continue;
+            }
+            String name = textOrNull(field.get("name"));
+            String label = textOrNull(field.get("label"));
+            if (isBlank(name) || isBlank(label)) {
+                continue;
+            }
+            ObjectNode params = objectMapper.createObjectNode();
+            params.put("name", name);
+            params.put("label", label);
+            params.put("controlType", textOrNull(field.get("controlType")) != null
+                    ? textOrNull(field.get("controlType"))
+                    : "input");
+            params.put("source", "local");
+            params.put("transient", false);
+            params.put("submitPolicy", "include");
+            actions.add(AiActionPlan.Action.builder()
+                    .type("field.local.add")
+                    .params(params)
+                    .build());
+        }
+        return actions.isEmpty() ? null : AiActionPlan.builder().actions(actions).build();
+    }
+
+    private boolean looksLikeTabCreationWithInlineContentPrompt(String prompt) {
+        String normalized = normalizeSearchPhrase(prompt);
+        return (normalized.contains("nova aba")
+                || normalized.contains("adicionar aba")
+                || normalized.contains("criar aba")
+                || normalized.contains("criar uma aba")
+                || normalized.contains("crie aba")
+                || normalized.contains("crie uma aba")
+                || normalized.contains("new tab")
+                || normalized.contains("add tab")
+                || normalized.contains("create tab"))
+                && (normalized.contains("formulario")
+                || normalized.contains("form")
+                || normalized.contains("campos")
+                || normalized.contains("fields")
+                || normalized.contains("registrar")
+                || normalized.contains("record")
+                || normalized.contains("capturar")
+                || normalized.contains("capture"));
+    }
+
+    private ArrayNode inferInlineTabContentFields(String prompt) {
+        List<String> labels = extractInlineContentFieldLabels(prompt);
+        if (labels.isEmpty()) {
+            return null;
+        }
+        ArrayNode content = objectMapper.createArrayNode();
+        for (String label : labels) {
+            String fieldName = fieldNameFromLabel(label);
+            if (isBlank(fieldName)) {
+                continue;
+            }
+            ObjectNode field = content.addObject();
+            field.put("name", fieldName);
+            field.put("label", label);
+            field.put("controlType", inferControlTypeForInlineContentField(label));
+        }
+        return content.isEmpty() ? null : content;
+    }
+
+    private boolean normalizeTabContentSetParams(ObjectNode params, String prompt, List<String> warnings) {
+        if (params == null) {
+            return false;
+        }
+        boolean changed = false;
+        JsonNode contentNode = params.get("content");
+        boolean contentIsUsableArray = contentNode != null && contentNode.isArray() && !contentNode.isEmpty();
+        ArrayNode fieldLikeWidgets = fieldLikeWidgetsAsTabContent(params.get("widgets"));
+        ArrayNode inferredContent = null;
+        if (!contentIsUsableArray && fieldLikeWidgets != null && !fieldLikeWidgets.isEmpty()) {
+            params.set("content", fieldLikeWidgets);
+            params.remove("widgets");
+            changed = true;
+            if (warnings != null) {
+                warnings.add("tab.content.set normalizou widgets com formato de campo para DynamicFieldMetadata[].");
+            }
+        } else if (contentNode != null && !contentNode.isArray()) {
+            params.remove("content");
+            changed = true;
+            if (warnings != null) {
+                warnings.add("tab.content.set removeu content nao estruturado antes da materializacao.");
+            }
+        }
+        contentNode = params.get("content");
+        contentIsUsableArray = contentNode != null && contentNode.isArray() && !contentNode.isEmpty();
+        if (!contentIsUsableArray && looksLikeTabCreationWithInlineContentPrompt(prompt)) {
+            inferredContent = inferInlineTabContentFields(prompt);
+            if (inferredContent != null && !inferredContent.isEmpty()) {
+                params.set("content", inferredContent);
+                changed = true;
+                if (warnings != null) {
+                    warnings.add("tab.content.set inferiu DynamicFieldMetadata[] para conteudo inline solicitado.");
+                }
+            }
+        }
+        return changed;
+    }
+
+    private ArrayNode fieldLikeWidgetsAsTabContent(JsonNode widgets) {
+        if (widgets == null || !widgets.isArray() || widgets.isEmpty()) {
+            return null;
+        }
+        ArrayNode content = objectMapper.createArrayNode();
+        for (JsonNode widget : widgets) {
+            if (widget == null || !widget.isObject() || !looksLikeFieldLikeWidget(widget)) {
+                return null;
+            }
+            String label = firstNonBlankText(widget, "label", "textLabel", "title", "name", "field", "key");
+            String name = firstNonBlankText(widget, "name", "field", "key");
+            if (isBlank(name)) {
+                name = fieldNameFromLabel(label);
+            }
+            if (isBlank(label)) {
+                label = name;
+            }
+            if (isBlank(name) || isBlank(label)) {
+                return null;
+            }
+            ObjectNode field = content.addObject();
+            field.put("name", name);
+            field.put("label", label);
+            field.put("controlType", normalizeInlineContentControlType(firstNonBlankText(widget, "controlType", "type"), label));
+            copyNodeField(widget, field, "options");
+            copyNodeField(widget, field, "optionSource");
+            copyNodeField(widget, field, "validators");
+            copyNodeField(widget, field, "required");
+        }
+        return content.isEmpty() ? null : content;
+    }
+
+    private boolean looksLikeFieldLikeWidget(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return false;
+        }
+        boolean hasFieldSignal = !isBlank(firstNonBlankText(node, "label", "textLabel", "title", "name", "field", "key"));
+        boolean hasWidgetSignal = !isBlank(firstNonBlankText(node, "id", "component", "componentId", "selector"))
+                || node.has("inputs")
+                || node.has("outputs");
+        return hasFieldSignal && !hasWidgetSignal;
+    }
+
+    private String normalizeInlineContentControlType(String rawType, String label) {
+        String normalized = normalizeSearchToken(rawType);
+        if (normalized.isBlank()) {
+            return inferControlTypeForInlineContentField(label);
+        }
+        if (normalized.equals("text") || normalized.equals("string")) {
+            return "input";
+        }
+        if (normalized.equals("textarea")
+                || normalized.equals("date")
+                || normalized.equals("select")
+                || normalized.equals("input")) {
+            return normalized;
+        }
+        return inferControlTypeForInlineContentField(label);
+    }
+
+    private String firstNonBlankText(JsonNode node, String... fields) {
+        if (node == null || fields == null) {
+            return null;
+        }
+        for (String field : fields) {
+            String value = textOrNull(node.get(field));
+            if (!isBlank(value)) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private List<String> extractInlineContentFieldLabels(String prompt) {
+        if (isBlank(prompt)) {
+            return List.of();
+        }
+        String raw = prompt.trim();
+        String searchable = normalizeSearchPhrasePreservingPunctuation(raw);
+        int start = lastPositiveIndex(
+                searchable.indexOf("registrar "),
+                searchable.indexOf("cadastrar "),
+                searchable.indexOf("cadastro "),
+                searchable.indexOf("record "),
+                searchable.indexOf("capturar "),
+                searchable.indexOf("capture "),
+                searchable.indexOf("campos "),
+                searchable.indexOf("fields "));
+        if (start < 0) {
+            return List.of();
+        }
+        String normalizedTail = searchable.substring(Math.min(start, searchable.length()))
+                .replaceFirst("(?i)^(registrar|cadastrar|cadastro|record|capturar|capture|campos|fields)\\s+", "")
+                .replaceFirst("(?i)^os\\s+campos\\s+", "")
+                .replaceFirst("(?i)^the\\s+fields\\s+", "");
+        int end = firstPositiveIndex(
+                normalizedTail.indexOf(" para "),
+                normalizedTail.indexOf(" so "),
+                normalizedTail.indexOf(" na aba "),
+                normalizedTail.indexOf(" in the tab "));
+        if (end >= 0) {
+            normalizedTail = normalizedTail.substring(0, end);
+        }
+        String[] parts = normalizedTail
+                .replaceAll("(?i)\\s+(e|and)\\s+", ",")
+                .split(",");
+        List<String> labels = new ArrayList<>();
+        for (String part : parts) {
+            String label = trimInlineFieldLabel(part);
+            if (!label.isBlank() && labels.stream()
+                    .noneMatch(existing -> normalizeSearchToken(existing).equals(normalizeSearchToken(label)))) {
+                labels.add(label);
+            }
+        }
+        return labels;
+    }
+
+    private int lastPositiveIndex(int... values) {
+        int out = -1;
+        if (values == null) {
+            return out;
+        }
+        for (int value : values) {
+            if (value >= 0 && value > out) {
+                out = value;
+            }
+        }
+        return out;
+    }
+
+    private String trimInlineFieldLabel(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim()
+                .replaceFirst("(?i)^(o|a|os|as|um|uma|the)\\s+", "")
+                .replaceAll("[\\s\\p{Punct}]+$", "")
+                .replaceAll("\\s+", " ");
+    }
+
+    private String fieldNameFromLabel(String label) {
+        String slug = slugifyComponentId(label);
+        if (isBlank(slug)) {
+            return null;
+        }
+        String[] parts = slug.split("-");
+        StringBuilder name = new StringBuilder(parts[0]);
+        for (int i = 1; i < parts.length; i++) {
+            if (parts[i].isBlank()) {
+                continue;
+            }
+            name.append(Character.toUpperCase(parts[i].charAt(0))).append(parts[i].substring(1));
+        }
+        return name.toString();
+    }
+
+    private String inferControlTypeForInlineContentField(String label) {
+        String normalized = normalizeSearchToken(label);
+        if (normalized.contains("data")
+                || normalized.contains("date")
+                || normalized.contains("prazo")
+                || normalized.contains("deadline")) {
+            return "date";
+        }
+        if (normalized.contains("status")
+                || normalized.contains("situacao")
+                || normalized.contains("state")) {
+            return "select";
+        }
+        if (normalized.contains("descricao")
+                || normalized.contains("description")
+                || normalized.contains("observacao")
+                || normalized.contains("notes")) {
+            return "textarea";
+        }
+        return "input";
+    }
+
+    private boolean isCurrentTabTargetAlias(String target) {
+        String normalized = normalizeSearchToken(target);
+        return normalized.isBlank()
+                || normalized.equals("current")
+                || normalized.equals("active")
+                || normalized.equals("selected")
+                || normalized.equals("current tab")
+                || normalized.equals("active tab")
+                || normalized.equals("selected tab")
+                || normalized.equals("aba atual")
+                || normalized.equals("aba selecionada")
+                || normalized.equals("nesta aba")
+                || normalized.equals("nessa aba");
+    }
+
+    private String resolveActiveTabsTargetId(JsonNode currentState) {
+        JsonNode config = currentState;
+        if (config != null && config.isObject() && config.get("config") != null && config.get("config").isObject()) {
+            config = config.get("config");
+        }
+        if (config == null || !config.isObject()) {
+            return null;
+        }
+        JsonNode links = config.at("/nav/links");
+        if (links != null && links.isArray() && !links.isEmpty()) {
+            int selectedIndex = intOrDefault(config.at("/nav/selectedIndex"), 0);
+            JsonNode active = selectedIndex >= 0 && selectedIndex < links.size() ? links.get(selectedIndex) : links.get(0);
+            String id = textOrNull(active != null ? active.get("id") : null);
+            if (id != null && !id.isBlank()) {
+                return id;
+            }
+        }
+        JsonNode tabs = config.get("tabs");
+        if (tabs != null && tabs.isArray() && !tabs.isEmpty()) {
+            int selectedIndex = intOrDefault(config.at("/group/selectedIndex"), intOrDefault(config.get("selectedIndex"), 0));
+            JsonNode active = selectedIndex >= 0 && selectedIndex < tabs.size() ? tabs.get(selectedIndex) : tabs.get(0);
+            String id = textOrNull(active != null ? active.get("id") : null);
+            if (id != null && !id.isBlank()) {
+                return id;
+            }
+        }
+        return null;
+    }
+
+    private int intOrDefault(JsonNode node, int fallback) {
+        return node != null && node.isInt() ? node.asInt() : fallback;
+    }
+
+    private boolean hasRequiredInputFields(ObjectNode input, JsonNode manifestOperation) {
+        JsonNode required = manifestOperation != null ? manifestOperation.at("/inputSchema/required") : null;
+        if (required == null || !required.isArray() || required.isEmpty()) {
+            return true;
+        }
+        for (JsonNode requiredNode : required) {
+            String field = textOrNull(requiredNode);
+            if (field != null && !field.isBlank() && isMissingInputField(input, field)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isMissingInputField(ObjectNode input, String field) {
+        if (input == null || field == null || field.isBlank() || !input.has(field)) {
+            return true;
+        }
+        JsonNode value = input.get(field);
+        return value == null || value.isNull() || isBlankTextNode(value);
+    }
+
+    private boolean hasComponentAction(List<ComponentAction> actionCatalog, String actionId) {
+        if (actionCatalog == null || actionCatalog.isEmpty() || isBlank(actionId)) {
+            return false;
+        }
+        String normalized = normalizeActionKey(actionId);
+        for (ComponentAction action : actionCatalog) {
+            if (action != null && normalized.equals(normalizeActionKey(action.id))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean looksLikeSafeTabCreationPrompt(String prompt) {
+        String normalized = normalizeSearchToken(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        if (looksLikeCurrentTabContentPrompt(normalized)) {
+            return false;
+        }
+        boolean wantsCreate = normalized.contains("crie")
+                || normalized.contains("criar")
+                || normalized.contains("adicione")
+                || normalized.contains("adicionar")
+                || normalized.contains("inclua")
+                || normalized.contains("incluir")
+                || normalized.contains("preciso")
+                || normalized.contains("quero");
+        boolean wantsTabLikeArea = normalized.contains("aba")
+                || normalized.contains("tab")
+                || normalized.contains("parte")
+                || normalized.contains("area")
+                || normalized.contains("secao")
+                || normalized.contains("separada")
+                || normalized.contains("separado");
+        return wantsCreate && wantsTabLikeArea;
+    }
+
+    private boolean looksLikeCurrentTabContentPrompt(String normalizedPrompt) {
+        String normalized = normalizeSearchToken(normalizedPrompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean referencesCurrentTab = normalized.contains("nesta aba")
+                || normalized.contains("nessa aba")
+                || normalized.contains("na aba atual")
+                || normalized.contains("aba atual")
+                || normalized.contains("aba selecionada")
+                || normalized.contains("dentro da aba")
+                || normalized.contains("neste tab")
+                || normalized.contains("nesse tab")
+                || normalized.contains("current tab")
+                || normalized.contains("selected tab")
+                || normalized.contains("inside tab");
+        boolean wantsContent = normalized.contains("lista")
+                || normalized.contains("listagem")
+                || normalized.contains("tabela")
+                || normalized.contains("formulario")
+                || normalized.contains("form")
+                || normalized.contains("campo")
+                || normalized.contains("campos")
+                || normalized.contains("widget")
+                || normalized.contains("componente")
+                || normalized.contains("conteudo")
+                || normalized.contains("painel")
+                || normalized.contains("grafico")
+                || normalized.contains("dashboard");
+        return referencesCurrentTab && wantsContent;
+    }
+
+    private boolean looksLikeDestructiveComponentPrompt(String prompt) {
+        String normalized = normalizeSearchToken(prompt);
+        return normalized.contains("remover")
+                || normalized.contains("remova")
+                || normalized.contains("excluir")
+                || normalized.contains("exclua")
+                || normalized.contains("deletar")
+                || normalized.contains("delete")
+                || normalized.contains("limpar")
+                || normalized.contains("recriar");
+    }
+
+    private TabDraft inferTabDraft(String prompt) {
+        TabDraft explicit = inferExplicitTabDraft(prompt);
+        if (explicit != null) {
+            return explicit;
+        }
+        String normalized = normalizeSearchToken(prompt);
+        String label;
+        if ((normalized.contains("documento") || normalized.contains("documentos"))
+                && (normalized.contains("observacao") || normalized.contains("observacoes")
+                || normalized.contains("anotacao") || normalized.contains("anotacoes"))) {
+            label = "Documentos e observacoes";
+        } else if (normalized.contains("documento") || normalized.contains("documentos")
+                || normalized.contains("arquivo") || normalized.contains("arquivos")) {
+            label = "Documentos";
+        } else if (normalized.contains("observacao") || normalized.contains("observacoes")
+                || normalized.contains("anotacao") || normalized.contains("anotacoes")) {
+            label = "Observacoes";
+        } else {
+            label = extractGenericTabLabel(prompt);
+        }
+        if (isBlank(label)) {
+            return null;
+        }
+        String id = slugifyComponentId(label);
+        return isBlank(id) ? null : new TabDraft(id, label);
+    }
+
+    private TabDraft inferExplicitTabDraft(String prompt) {
+        String label = extractExplicitTabLabel(prompt);
+        if (isBlank(label)) {
+            return null;
+        }
+        String id = slugifyComponentId(label);
+        return isBlank(id) ? null : new TabDraft(id, label);
+    }
+
+    private String extractExplicitTabLabel(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        List<String> patterns = List.of(
+                "\\b(?:nova|novo|crie|criar|adicione|adicionar)?\\s*(?:aba|tab)\\s+(?:chamada|chamado|intitulada|intitulado|nomeada|nomeado)\\s+(.+)$",
+                "\\b(?:aba|tab)\\s+(?:com\\s+nome|de\\s+nome)\\s+(.+)$",
+                "\\b(?:new\\s+)?tab\\s+(?:called|named|titled)\\s+(.+)$");
+        for (String pattern : patterns) {
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.UNICODE_CASE)
+                    .matcher(prompt);
+            if (!matcher.find()) {
+                continue;
+            }
+            String label = trimExplicitTabLabel(matcher.group(1));
+            if (!isBlank(label)) {
+                return label;
+            }
+        }
+        return null;
+    }
+
+    private String trimExplicitTabLabel(String rawLabel) {
+        if (isBlank(rawLabel)) {
+            return null;
+        }
+        String label = rawLabel
+                .replaceAll("^[\"'`]+|[\"'`]+$", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+        String normalized = " " + Normalizer.normalize(label, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT) + " ";
+        List<String> delimiters = List.of(
+                " com um ",
+                " com uma ",
+                " com o ",
+                " com a ",
+                " contendo ",
+                " para ",
+                " que ",
+                " where ",
+                " with a ",
+                " with an ",
+                " with the ",
+                " containing ",
+                " to ");
+        int end = label.length();
+        for (String delimiter : delimiters) {
+            int index = normalized.indexOf(delimiter);
+            if (index >= 0) {
+                end = Math.min(end, Math.max(0, index));
+            }
+        }
+        int punctuationEnd = firstPositiveIndex(label, ".", ",", ";", ":");
+        if (punctuationEnd >= 0) {
+            end = Math.min(end, punctuationEnd);
+        }
+        label = label.substring(0, Math.min(label.length(), end))
+                .replaceAll("^[\"'`]+|[\"'`]+$", "")
+                .trim();
+        return label.length() >= 3 ? label : null;
+    }
+
+    private int firstPositiveIndex(String text, String... needles) {
+        if (text == null || needles == null) {
+            return -1;
+        }
+        int first = -1;
+        for (String needle : needles) {
+            int index = text.indexOf(needle);
+            if (index >= 0 && (first < 0 || index < first)) {
+                first = index;
+            }
+        }
+        return first;
+    }
+
+    private int firstPositiveIndex(int... indexes) {
+        if (indexes == null) {
+            return -1;
+        }
+        int first = -1;
+        for (int index : indexes) {
+            if (index >= 0 && (first < 0 || index < first)) {
+                first = index;
+            }
+        }
+        return first;
+    }
+
+    private String extractGenericTabLabel(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String cleaned = Normalizer.normalize(prompt, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replaceAll("[^A-Za-z0-9 ]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        String[] markers = new String[] {
+                " para acompanhar ",
+                " para controlar ",
+                " para registrar ",
+                " para ",
+                " sobre ",
+                " de "
+        };
+        String lowered = " " + cleaned.toLowerCase(Locale.ROOT) + " ";
+        String candidate = cleaned;
+        for (String marker : markers) {
+            int index = lowered.indexOf(marker);
+            if (index >= 0) {
+                candidate = cleaned.substring(Math.min(cleaned.length(), index + marker.trim().length())).trim();
+                break;
+            }
+        }
+        candidate = candidate
+                .replaceAll("(?i)\\b(nova|novo|parte|separada|separado|area|secao|aba|tab|importante|importantes)\\b", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (candidate.length() > 36) {
+            candidate = candidate.substring(0, 36).trim();
+        }
+        if (candidate.length() < 3) {
+            return "Nova secao";
+        }
+        String[] words = candidate.toLowerCase(Locale.ROOT).split("\\s+");
+        StringJoiner joiner = new StringJoiner(" ");
+        for (String word : words) {
+            if (word.isBlank()) {
+                continue;
+            }
+            joiner.add(Character.toUpperCase(word.charAt(0)) + word.substring(1));
+        }
+        return joiner.toString();
+    }
+
+    private String slugifyComponentId(String label) {
+        if (isBlank(label)) {
+            return null;
+        }
+        String normalized = Normalizer.normalize(label, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("^-+|-+$", "");
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private boolean targetCandidateAlreadyExists(ArrayNode targetCandidates, String id, String label) {
+        if (targetCandidates == null || !targetCandidates.isArray()) {
+            return false;
+        }
+        String normalizedId = normalizeText(id);
+        String normalizedLabel = normalizeText(label);
+        for (JsonNode group : targetCandidates) {
+            JsonNode items = group != null ? group.get("items") : null;
+            if (items == null || !items.isArray()) {
+                continue;
+            }
+            for (JsonNode item : items) {
+                String candidate = extractCandidateLabel(item);
+                if (candidate == null || candidate.isBlank()) {
+                    continue;
+                }
+                String normalizedCandidate = normalizeText(candidate);
+                if (normalizedCandidate.equals(normalizedId) || normalizedCandidate.equals(normalizedLabel)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private ActionPlanClarification resolveActionPlanClarification(
             AiActionPlan actionPlan,
             List<ComponentAction> actionCatalog,
-            List<String> targetOptions) {
+            List<String> targetOptions,
+            JsonNode authoringManifest) {
         if (actionPlan == null) {
             return null;
         }
@@ -2701,8 +3682,18 @@ public class AiOrchestratorService {
             for (AiActionPlan.Action action : actionPlan.getActions()) {
                 if (action == null) continue;
                 ComponentAction def = actionById.get(normalizeActionKey(action.getType()));
+                if (isManifestActionComplete(action, authoringManifest)) {
+                    continue;
+                }
                 RenderedActionPatch rendered = renderActionPatch(def, action);
                 if (rendered == null || rendered.missingTokens.isEmpty()) {
+                    continue;
+                }
+                List<String> missingTokens = filterManifestOptionalMissingTokens(
+                        action.getType(),
+                        rendered.missingTokens,
+                        authoringManifest);
+                if (missingTokens.isEmpty()) {
                     continue;
                 }
                 if (action.getType() != null && !clearTargetsByType.isEmpty()) {
@@ -2716,21 +3707,12 @@ public class AiOrchestratorService {
                         }
                     }
                 }
-                String message = buildMissingActionMessage(action.getType(), rendered.missingTokens);
+                String message = buildMissingActionMessage(action.getType(), missingTokens);
                 List<String> options = List.of();
-                System.out.println("DEBUG: Clarification check for " + action.getType());
-                System.out.println("DEBUG: Missing tokens: " + rendered.missingTokens);
-                if (def.params != null) {
-                    System.out.println("DEBUG: Action params count: " + def.params.size());
-                    def.params.forEach(p -> System.out.println("DEBUG: Param " + p.name + " opts: " + p.options));
-                } else {
-                    System.out.println("DEBUG: Action params is null");
-                }
-
-                if (rendered.missingTokens.contains("target")) {
+                if (missingTokens.contains("target")) {
                     options = targetOptions;
-                } else if (!rendered.missingTokens.isEmpty()) {
-                    String firstMissing = rendered.missingTokens.get(0);
+                } else if (!missingTokens.isEmpty()) {
+                    String firstMissing = missingTokens.get(0);
                     if (firstMissing.startsWith("params.") && def.params != null) {
                         String paramName = firstMissing.substring(7);
                         for (ActionParam p : def.params) {
@@ -2745,6 +3727,139 @@ public class AiOrchestratorService {
             }
         }
         return null;
+    }
+
+    private boolean isManifestActionComplete(AiActionPlan.Action action, JsonNode authoringManifest) {
+        JsonNode operation = findManifestOperation(authoringManifest, action != null ? action.getType() : null);
+        if (operation == null) {
+            return false;
+        }
+        JsonNode targetRequired = operation.at("/target/required");
+        if (targetRequired != null
+                && targetRequired.isBoolean()
+                && targetRequired.asBoolean()
+                && trimToNull(action.getTarget()) == null) {
+            return false;
+        }
+        ObjectNode input = buildComponentEditPlanInput(action, operation);
+        JsonNode required = operation.at("/inputSchema/required");
+        if (required != null && required.isArray()) {
+            for (JsonNode requiredFieldNode : required) {
+                String requiredField = textOrNull(requiredFieldNode);
+                if (requiredField == null || requiredField.isBlank()) {
+                    continue;
+                }
+                JsonNode value = input.get(requiredField);
+                if (value == null || value.isNull() || isBlankTextNode(value)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private AiActionPlan suppressLocalEditorialResourceBindingActions(
+            AiActionPlan actionPlan,
+            AiOrchestratorRequest request,
+            List<String> warnings) {
+        if (actionPlan == null || actionPlan.getActions() == null || actionPlan.getActions().isEmpty()) {
+            return actionPlan;
+        }
+        if (!isLocalEditorialNoResourcePrompt(request != null ? request.getUserPrompt() : null)) {
+            return actionPlan;
+        }
+        List<AiActionPlan.Action> keptActions = new ArrayList<>();
+        List<String> removedActions = new ArrayList<>();
+        for (AiActionPlan.Action action : actionPlan.getActions()) {
+            String type = normalizeActionKey(action != null ? action.getType() : null);
+            if ("datasource.resourcepath.set".equals(type)
+                    || "data.resource.bind".equals(type)
+                    || "datasourceconfig.set".equals(type)) {
+                removedActions.add(action.getType());
+                continue;
+            }
+            keptActions.add(action);
+        }
+        if (removedActions.isEmpty()) {
+            return actionPlan;
+        }
+        if (warnings != null) {
+            warnings.add("resource-binding-actions-suppressed-for-local-editorial:"
+                    + String.join(",", removedActions));
+        }
+        return AiActionPlan.builder()
+                .actions(keptActions)
+                .ambiguities(actionPlan.getAmbiguities())
+                .contextRequest(actionPlan.getContextRequest())
+                .message(actionPlan.getMessage())
+                .build();
+    }
+
+    private boolean isLocalEditorialNoResourcePrompt(String prompt) {
+        String normalized = normalizeLoose(prompt);
+        if (normalized == null || normalized.isBlank()) {
+            return false;
+        }
+        boolean localEditorial = containsAny(normalized,
+                "conteudo local",
+                "conteudo editorial",
+                "local/editorial",
+                "local editorial",
+                "editorial local",
+                "dados locais",
+                "local data",
+                "localdata",
+                "demo",
+                "demonstracao");
+        boolean noResource = containsAny(normalized,
+                "sem api",
+                "sem api real",
+                "sem schema",
+                "sem schema externo",
+                "sem endpoint",
+                "nao conecte api",
+                "nao usar api",
+                "nao use api",
+                "sem conectar api");
+        return localEditorial && noResource;
+    }
+
+    private List<String> filterManifestOptionalMissingTokens(
+            String actionType,
+            List<String> missingTokens,
+            JsonNode authoringManifest) {
+        if (missingTokens == null || missingTokens.isEmpty()) {
+            return List.of();
+        }
+        if (!missingTokens.contains("target")
+                || !isManifestTargetOptional(authoringManifest, actionType)) {
+            return missingTokens;
+        }
+        List<String> filtered = new ArrayList<>(missingTokens);
+        filtered.removeIf("target"::equals);
+        return filtered;
+    }
+
+    private boolean isManifestTargetOptional(JsonNode authoringManifest, String actionType) {
+        JsonNode operation = findManifestOperation(authoringManifest, actionType);
+        if (operation == null) {
+            return false;
+        }
+        JsonNode required = operation.at("/target/required");
+        return required != null && required.isBoolean() && !required.asBoolean();
+    }
+
+    private JsonNode findManifestOperation(JsonNode authoringManifest, String actionType) {
+        if (authoringManifest == null || !authoringManifest.isObject()
+                || actionType == null || actionType.isBlank()) {
+            return null;
+        }
+        Map<String, JsonNode> operationsById = indexManifestOperations(authoringManifest, new ArrayList<>());
+        JsonNode operation = operationsById.get(actionType);
+        if (operation == null) {
+            operation = operationsById.get(normalizeActionKey(actionType));
+        }
+        return operation;
     }
 
     private ActionPlanCoverage applyActionPlanCoverage(
@@ -2804,6 +3919,387 @@ public class AiOrchestratorService {
             merged = mergePatchNodes(merged, rendered.patch);
         }
         return new ActionPlanPatchResult(merged, missingActions, missingTokens);
+    }
+
+    private JsonNode buildComponentEditPlanFromActionPlan(
+            AiActionPlan actionPlan,
+            JsonNode authoringManifest) {
+        if (actionPlan == null
+                || actionPlan.getActions() == null
+                || actionPlan.getActions().isEmpty()
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return null;
+        }
+        Map<String, JsonNode> operationsById = indexManifestOperations(authoringManifest, new ArrayList<>());
+        if (operationsById.isEmpty()) {
+            return null;
+        }
+        ArrayNode operations = objectMapper.createArrayNode();
+        for (AiActionPlan.Action action : actionPlan.getActions()) {
+            if (action == null || action.getType() == null || action.getType().isBlank()) {
+                return null;
+            }
+            JsonNode manifestOperation = operationsById.get(action.getType());
+            if (manifestOperation == null) {
+                manifestOperation = operationsById.get(normalizeActionKey(action.getType()));
+            }
+            if (manifestOperation == null) {
+                return null;
+            }
+            ObjectNode operation = objectMapper.createObjectNode();
+            operation.put("operationId", textOrNull(manifestOperation.get("operationId")));
+            ObjectNode target = buildComponentEditPlanTarget(action, manifestOperation);
+            if (target != null && !target.isEmpty()) {
+                operation.set("target", target);
+            }
+            ObjectNode input = buildComponentEditPlanInput(action, manifestOperation);
+            if (input != null && !input.isEmpty()) {
+                operation.set("input", input);
+            }
+            operations.add(operation);
+        }
+        if (operations.isEmpty()) {
+            return null;
+        }
+        ObjectNode componentEditPlan = objectMapper.createObjectNode();
+        componentEditPlan.put("schemaVersion", "praxis-component-edit-plan.v1");
+        componentEditPlan.put("componentId", textOrNull(authoringManifest.get("componentId")));
+        componentEditPlan.set("operations", operations);
+        return componentEditPlan;
+    }
+
+    private JsonNode buildComponentEditPlanFromPatch(
+            String componentId,
+            JsonNode patch,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        if (!"praxis-list".equals(componentId)
+                || patch == null
+                || !patch.isObject()
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return null;
+        }
+        Map<String, JsonNode> operationsById = indexManifestOperations(authoringManifest, new ArrayList<>());
+        if (operationsById.isEmpty()) {
+            return null;
+        }
+        ArrayNode operations = objectMapper.createArrayNode();
+        appendListPatchOperation(
+                operations,
+                operationsById,
+                "data.local.set",
+                inputWith("data", patch.at("/dataSource/data")));
+        appendListPatchOperation(
+                operations,
+                operationsById,
+                "item.primaryText.set",
+                normalizeListTemplatePatchInput(
+                        patch.at("/templating/primary"),
+                        "item.primaryText.set",
+                        warnings));
+        appendListPatchOperation(
+                operations,
+                operationsById,
+                "item.secondaryText.set",
+                normalizeListTemplatePatchInput(
+                        patch.at("/templating/secondary"),
+                        "item.secondaryText.set",
+                        warnings));
+        appendListPatchOperation(
+                operations,
+                operationsById,
+                "layout.density.set",
+                objectFieldsOnly(patch.get("layout")));
+        appendListPatchOperation(
+                operations,
+                operationsById,
+                "selection.mode.set",
+                inputWith("mode", firstPresent(patch.at("/selection/mode"), patch.at("/selection/type"))));
+        appendListPatchOperation(
+                operations,
+                operationsById,
+                "ui.toolbar.configure",
+                objectFieldsOnly(patch.get("ui")));
+        if (operations.isEmpty()) {
+            return null;
+        }
+        ObjectNode componentEditPlan = objectMapper.createObjectNode();
+        componentEditPlan.put("schemaVersion", "praxis-component-edit-plan.v1");
+        componentEditPlan.put("componentId", textOrNull(authoringManifest.get("componentId")));
+        componentEditPlan.set("operations", operations);
+        if (warnings != null) {
+            warnings.add("praxis-list patch livre convertido para componentEditPlan manifest-backed.");
+        }
+        return componentEditPlan;
+    }
+
+    private void appendListPatchOperation(
+            ArrayNode operations,
+            Map<String, JsonNode> operationsById,
+            String operationId,
+            ObjectNode input) {
+        if (operations == null
+                || operationsById == null
+                || !operationsById.containsKey(operationId)
+                || input == null
+                || input.isEmpty()) {
+            return;
+        }
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", operationId);
+        operation.set("input", input);
+        operations.add(operation);
+    }
+
+    private ObjectNode inputWith(String fieldName, JsonNode value) {
+        if (fieldName == null
+                || fieldName.isBlank()
+                || value == null
+                || value.isMissingNode()
+                || value.isNull()) {
+            return null;
+        }
+        ObjectNode input = objectMapper.createObjectNode();
+        input.set(fieldName, value);
+        return input;
+    }
+
+    private ObjectNode objectFieldsOnly(JsonNode value) {
+        if (value == null || !value.isObject() || value.isEmpty()) {
+            return null;
+        }
+        return ((ObjectNode) value).deepCopy();
+    }
+
+    private ObjectNode normalizeListTemplatePatchInput(
+            JsonNode template,
+            String operationId,
+            List<String> warnings) {
+        ObjectNode input = objectFieldsOnly(template);
+        if (input == null || input.isEmpty()) {
+            return null;
+        }
+        if (isUnboundListTemplateExpression(input.get("expr"))) {
+            if (warnings != null && operationId != null && !operationId.isBlank()) {
+                warnings.add("list-template-patch-dropped:unbound-expression:" + operationId);
+            }
+            return null;
+        }
+        if (input.has("expr") && !input.has("type")) {
+            input.put("type", "text");
+        }
+        return input;
+    }
+
+    private boolean isUnboundListTemplateExpression(JsonNode expression) {
+        String expr = textOrNull(expression);
+        if (expr == null || expr.isBlank()) {
+            return false;
+        }
+        String normalized = normalizeToken(expr);
+        if (normalized.contains("item.")) {
+            return false;
+        }
+        if (normalized.startsWith("item")) {
+            return false;
+        }
+        return !normalized.contains("${");
+    }
+
+    private JsonNode firstPresent(JsonNode first, JsonNode second) {
+        if (first != null && !first.isMissingNode() && !first.isNull()) {
+            return first;
+        }
+        return second;
+    }
+
+    private JsonNode firstPresent(JsonNode object, String... fields) {
+        if (object == null || !object.isObject() || fields == null) {
+            return null;
+        }
+        for (String field : fields) {
+            JsonNode value = object.get(field);
+            if (value != null && !value.isMissingNode() && !value.isNull() && !isBlankTextNode(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private ObjectNode buildComponentEditPlanTarget(
+            AiActionPlan.Action action,
+            JsonNode manifestOperation) {
+        String targetValue = trimToNull(action.getTarget());
+        if (targetValue == null) {
+            return null;
+        }
+        ObjectNode target = objectMapper.createObjectNode();
+        String targetKind = textOrNull(manifestOperation.at("/target/kind"));
+        if (targetKind != null && !targetKind.isBlank()) {
+            target.put("kind", targetKind);
+        }
+        target.put("id", targetValue);
+        return target;
+    }
+
+    private ObjectNode buildComponentEditPlanInput(
+            AiActionPlan.Action action,
+            JsonNode manifestOperation) {
+        ObjectNode input = objectMapper.createObjectNode();
+        if (action.getParams() != null && action.getParams().isObject()) {
+            action.getParams().fields().forEachRemaining(entry -> input.set(entry.getKey(), entry.getValue()));
+        }
+        JsonNode value = action.getValue();
+        if (value == null || value.isNull() || isBlankTextNode(value)) {
+            normalizeRequiredInputAliases(input, manifestOperation);
+            return input;
+        }
+        String requiredField = firstRequiredInputField(manifestOperation);
+        if (requiredField != null && !requiredField.isBlank() && !input.has(requiredField)) {
+            input.set(requiredField, value);
+            normalizeRequiredInputAliases(input, manifestOperation);
+            return input;
+        }
+        if (!input.has("value")) {
+            input.set("value", value);
+        }
+        normalizeRequiredInputAliases(input, manifestOperation);
+        return input;
+    }
+
+    private void normalizeRequiredInputAliases(ObjectNode input, JsonNode manifestOperation) {
+        if (input == null || manifestOperation == null || !manifestOperation.isObject()) {
+            return;
+        }
+        JsonNode required = manifestOperation.at("/inputSchema/required");
+        if (required == null || !required.isArray() || required.isEmpty()) {
+            return;
+        }
+        for (JsonNode requiredNode : required) {
+            String requiredField = textOrNull(requiredNode);
+            if (requiredField == null || requiredField.isBlank() || input.has(requiredField)) {
+                continue;
+            }
+            JsonNode nestedValue = findRequiredInputAlias(input, requiredField);
+            if (nestedValue != null && !nestedValue.isNull() && !isBlankTextNode(nestedValue)) {
+                input.set(requiredField, nestedValue);
+            }
+        }
+    }
+
+    private JsonNode findRequiredInputAlias(JsonNode input, String requiredField) {
+        if (input == null || requiredField == null || requiredField.isBlank()) {
+            return null;
+        }
+        for (String alias : requiredInputAliases(requiredField)) {
+            JsonNode value = findFieldInTree(input, alias, 0);
+            if (value != null) {
+                return value;
+            }
+        }
+
+        if ("id".equals(requiredField)) {
+            for (String labelAlias : requiredInputAliases("textLabel")) {
+                JsonNode labelValue = findFieldInTree(input, labelAlias, 0);
+                String label = textOrNull(labelValue);
+                String slug = slugifyComponentId(label);
+                if (slug != null && !slug.isBlank()) {
+                    return objectMapper.getNodeFactory().textNode(slug);
+                }
+            }
+        }
+        return null;
+    }
+
+    private List<String> requiredInputAliases(String requiredField) {
+        if ("textLabel".equals(requiredField)) {
+            return List.of(
+                    "textLabel",
+                    "label",
+                    "title",
+                    "nome",
+                    "name",
+                    "rotulo",
+                    "rótulo",
+                    "descricao",
+                    "descrição",
+                    "text",
+                    "displayName",
+                    "display_label",
+                    "displayLabel");
+        }
+        if ("id".equals(requiredField)) {
+            return List.of(
+                    "id",
+                    "key",
+                    "identifier",
+                    "identificador",
+                    "slug",
+                    "code",
+                    "codigo",
+                    "código");
+        }
+        if ("data".equals(requiredField)) {
+            return List.of(
+                    "data",
+                    "items",
+                    "itens",
+                    "examples",
+                    "exemplos",
+                    "records",
+                    "rows",
+                    "list",
+                    "lista",
+                    "localData",
+                    "dadosLocais");
+        }
+        return List.of(requiredField);
+    }
+
+    private JsonNode findFieldInTree(JsonNode node, String field, int depth) {
+        if (node == null || field == null || field.isBlank() || depth > 8) {
+            return null;
+        }
+        if (node.isObject()) {
+            JsonNode direct = node.get(field);
+            if (direct != null && !direct.isNull() && !isBlankTextNode(direct)) {
+                return direct;
+            }
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                JsonNode nestedValue = findFieldInTree(entry.getValue(), field, depth + 1);
+                if (nestedValue != null) {
+                    return nestedValue;
+                }
+            }
+            return null;
+        }
+        if (node.isArray() && node.size() <= 12) {
+            for (JsonNode item : node) {
+                JsonNode nestedValue = findFieldInTree(item, field, depth + 1);
+                if (nestedValue != null) {
+                    return nestedValue;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String firstRequiredInputField(JsonNode manifestOperation) {
+        JsonNode required = manifestOperation.at("/inputSchema/required");
+        if (required == null || !required.isArray() || required.isEmpty()) {
+            return null;
+        }
+        for (JsonNode candidate : required) {
+            String field = textOrNull(candidate);
+            if (field != null && !field.isBlank()) {
+                return field;
+            }
+        }
+        return null;
     }
 
     private AiActionPlan applyActionPlanDefaults(
@@ -2919,6 +4415,19 @@ public class AiOrchestratorService {
     private ObjectNode ensureParamsObject(JsonNode params) {
         if (params instanceof ObjectNode obj) {
             return obj;
+        }
+        if (params != null && params.isTextual()) {
+            String raw = params.asText();
+            if (raw != null && !raw.isBlank()) {
+                try {
+                    JsonNode parsed = objectMapper.readTree(raw);
+                    if (parsed instanceof ObjectNode parsedObject) {
+                        return parsedObject;
+                    }
+                } catch (Exception ignored) {
+                    // Keep the authoring flow resilient: invalid textual params fall back to an empty object.
+                }
+            }
         }
         ObjectNode out = objectMapper.createObjectNode();
         if (params != null && params.isObject()) {
@@ -4381,6 +5890,47 @@ public class AiOrchestratorService {
                 || ids.contains("HIDE_TOOLBAR");
     }
 
+    private boolean shouldDeferComponentClarificationToActionPlan(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            List<ComponentAction> actionCatalog,
+            JsonNode authoringManifest) {
+        if (intent == null
+                || request == null
+                || actionCatalog == null
+                || actionCatalog.isEmpty()
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return false;
+        }
+        if (COMPONENT_ID_TABLE.equals(request.getComponentId())) {
+            return false;
+        }
+        List<String> missing = intent.getMissingContext();
+        if (missing == null || missing.isEmpty()) {
+            return false;
+        }
+        if (hasMissingResourceContext(missing)) {
+            return false;
+        }
+        return missing.stream()
+                .map(this::normalizeMissingKey)
+                .noneMatch(this::isBlockingPreActionPlanMissingKey);
+    }
+
+    private boolean isBlockingPreActionPlanMissingKey(String key) {
+        if (key == null || key.isBlank()) {
+            return false;
+        }
+        return "formatintent".equals(key)
+                || key.contains("badge")
+                || key.contains("resourcepath")
+                || key.contains("resource")
+                || key.contains("endpoint")
+                || key.contains("dataset")
+                || key.contains("schema");
+    }
+
     private boolean shouldIgnoreIntentPlanQuestions(
             AiIntentClassification intent,
             IntentPlan plan,
@@ -4575,6 +6125,30 @@ public class AiOrchestratorService {
         String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}+", "");
         return normalizeText(normalized);
+    }
+
+    private String normalizeSearchPhrase(String value) {
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim()
+                .replaceAll("\\s+", " ");
+    }
+
+    private String normalizeSearchPhrasePreservingPunctuation(String value) {
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9,.;]+", " ")
+                .trim()
+                .replaceAll("\\s+", " ");
     }
 
     private String normalizeText(String value) {
@@ -5121,6 +6695,7 @@ public class AiOrchestratorService {
             List<String> columnOptions,
             List<String> configCategories,
             List<String> componentCategories,
+            boolean requireColumnTargets,
             List<String> warnings) {
         if (intent == null) return null;
         String category = normalizeCategory(intent.getCategory());
@@ -5179,7 +6754,7 @@ public class AiOrchestratorService {
 
         boolean needsColumnTarget = requiresExistingColumnTarget(intentType)
                 || ("format".equalsIgnoreCase(category) && !isBlank(category));
-        if (needsColumnTarget) {
+        if (requireColumnTargets && needsColumnTarget) {
             String targetField = intent.getTargetField();
             if (isBlank(targetField)) {
                 addMissing(missing, "column");
@@ -5314,11 +6889,84 @@ public class AiOrchestratorService {
                         request != null ? request.getComponentId() : null);
             }
             if (missing.contains("column")) {
+                if (isTabsComponent(request)) {
+                    return "Qual aba ou item das abas devo ajustar?";
+                }
                 return "Qual coluna devo usar?";
             }
-            return "Preciso de mais contexto para continuar: " + String.join(", ", missing) + ".";
+            return buildMissingContextClarificationMessage(missing, request);
         }
         return "Preciso de mais detalhes para continuar.";
+    }
+
+    private String buildMissingContextClarificationMessage(
+            List<String> missing,
+            AiOrchestratorRequest request) {
+        if (missing == null || missing.isEmpty()) {
+            return "Preciso de mais detalhes para continuar.";
+        }
+        if (isTabsComponent(request)) {
+            if (missing.stream()
+                    .map(this::normalizeMissingKey)
+                    .anyMatch(key -> key.contains("preferredlabel") || key.contains("label"))) {
+                return "Qual nome devo usar para essa nova aba?";
+            }
+            return "Que detalhe devo considerar para organizar essa area?";
+        }
+        List<String> labels = new ArrayList<>();
+        for (String item : missing) {
+            String label = missingContextLabel(item);
+            if (label != null && !label.isBlank() && !labels.contains(label)) {
+                labels.add(label);
+            }
+        }
+        if (labels.isEmpty()) {
+            return "Preciso de mais detalhes para continuar.";
+        }
+        if (labels.size() == 1) {
+            return "Preciso confirmar " + labels.get(0) + " antes de continuar.";
+        }
+        return "Preciso confirmar estes pontos antes de continuar: "
+                + String.join(", ", labels)
+                + ".";
+    }
+
+    private String missingContextLabel(String key) {
+        String normalized = normalizeMissingKey(key);
+        if (normalized.isBlank()) {
+            return null;
+        }
+        if (normalized.contains("preferredlabel") || normalized.equals("label")) {
+            return "o nome que voce prefere";
+        }
+        if (normalized.contains("fieldsrequired") || normalized.contains("requiredfields")) {
+            return "quais campos sao obrigatorios";
+        }
+        if (normalized.contains("attachment")) {
+            return "se a area precisa de anexos";
+        }
+        if (normalized.contains("visibility") || normalized.contains("permission")) {
+            return "quem pode ver ou editar";
+        }
+        if (normalized.contains("category")) {
+            return "o tipo de ajuste";
+        }
+        if (normalized.contains("target")) {
+            return "o alvo do ajuste";
+        }
+        if (normalized.contains("value")) {
+            return "o valor desejado";
+        }
+        return "mais detalhes sobre " + key.replace('_', ' ').replace('-', ' ');
+    }
+
+    private boolean isTabsComponent(AiOrchestratorRequest request) {
+        if (request == null) return false;
+        String componentId = request.getComponentId();
+        String componentType = request.getComponentType();
+        return "praxis-tabs".equalsIgnoreCase(componentId)
+                || "tabs".equalsIgnoreCase(componentType)
+                || "praxis-tabs".equalsIgnoreCase(componentType);
     }
 
     private ClarificationPayload buildColumnClarificationPayload(
@@ -5649,6 +7297,126 @@ public class AiOrchestratorService {
         return clarification("Escolha uma opção válida para continuar.", List.of());
     }
 
+    private AiOrchestratorResponse tryHandlePageBuilderLocalEditorialAuthoring(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (agenticAuthoringPreviewService == null
+                || request == null
+                || !isPageBuilder(request.getComponentId())
+                || !shouldRoutePageBuilderLocalEditorialPrompt(request.getUserPrompt())) {
+            return null;
+        }
+        try {
+            AgenticAuthoringIntentResolutionResult intentResolution =
+                    new AgenticAuthoringIntentResolutionResult(
+                            true,
+                            isCreateTemplatePrompt(request.getUserPrompt()) ? "compose" : "modify",
+                            "page",
+                            "create",
+                            "page-builder",
+                            "praxis-ui-angular",
+                            firstNonBlank(request.getComponentId(), "praxis-page-builder"),
+                            null,
+                            null,
+                            List.of(),
+                            new AgenticAuthoringGateResult("page-builder-local-editorial", "passed", List.of()),
+                            request.getUserPrompt(),
+                            null,
+                            List.of(),
+                            List.of(),
+                            List.of("ai-patch-routed-to-agentic-authoring-preview"),
+                            List.of(),
+                            context == null ? MissingNode.getInstance() : context.getCurrentState());
+            AgenticAuthoringPreviewResult preview = agenticAuthoringPreviewService.preview(
+                    new AgenticAuthoringPlanRequest(
+                            request.getUserPrompt(),
+                            null,
+                            null,
+                            null,
+                            context == null ? request.getCurrentState() : context.getCurrentState(),
+                            intentResolution,
+                            request.getSessionId() == null ? null : request.getSessionId().toString(),
+                            request.getClientTurnId() == null ? null : request.getClientTurnId().toString(),
+                            null,
+                            null,
+                            null,
+                            request.getContextHints()),
+                    tenantId,
+                    userId,
+                    environment);
+            if (preview == null || !preview.valid() || preview.uiCompositionPlan() == null
+                    || preview.uiCompositionPlan().isMissingNode()) {
+                return null;
+            }
+            ObjectNode componentEditPlan = objectMapper.createObjectNode();
+            componentEditPlan.put("schemaVersion", "praxis-component-edit-plan.v1");
+            componentEditPlan.put("componentId", firstNonBlank(request.getComponentId(), "praxis-page-builder"));
+            componentEditPlan.set("uiCompositionPlan", preview.uiCompositionPlan());
+            List<String> warnings = new ArrayList<>(
+                    preview.warnings() == null ? List.of() : preview.warnings());
+            warnings.add("ai-patch-routed-to-agentic-authoring-preview");
+            String message = firstNonBlank(
+                    preview.assistantMessage(),
+                    "Plano de composição pronto para revisão.");
+            return AiOrchestratorResponse.builder()
+                    .type("patch")
+                    .componentEditPlan(componentEditPlan)
+                    .message(message)
+                    .explanation(message)
+                    .warnings(List.copyOf(new LinkedHashSet<>(warnings)))
+                    .build();
+        } catch (Exception ex) {
+            log.warn("[AiOrchestratorService] page-builder local editorial preview fallback failed", ex);
+            return null;
+        }
+    }
+
+    private boolean shouldRoutePageBuilderLocalEditorialPrompt(String prompt) {
+        String normalized = normalizeLoose(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean localEditorial = containsAny(normalized,
+                "conteudo local",
+                "conteudo editorial",
+                "local editorial",
+                "editorial local",
+                "sem api real",
+                "sem schema externo",
+                "sem regra de negocio",
+                "sem criar regra",
+                "demonstracao",
+                "demo");
+        boolean pageComposition = containsAny(normalized, "tab", "tabs", "aba", "abas")
+                && containsAny(normalized, "formulario", "form")
+                && containsAny(normalized, "crud", "registros", "lista", "cards", "relacionamento", "relacionamentos");
+        return localEditorial && pageComposition;
+    }
+
+    private String normalizeLoose(String value) {
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT);
+    }
+
+    private boolean containsAny(String value, String... terms) {
+        if (value == null || terms == null) {
+            return false;
+        }
+        for (String term : terms) {
+            if (term != null && !term.isBlank() && value.contains(term)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private AiOrchestratorResponse buildWidgetStepResponse(
             AiOrchestratorRequest request,
             AiContextDTO context) {
@@ -5970,11 +7738,12 @@ public class AiOrchestratorService {
             return null;
         }
         int limit = Math.max(DEFAULT_VARIANT_SEARCH_LIMIT, 6);
-        List<AiRegistryTemplateSearchResult> results = templateService.searchTemplates(
+        List<AiRegistryTemplateSearchResult> results = safeSearchTemplates(
                 prompt,
                 componentId,
                 limit,
-                embeddingConfig);
+                embeddingConfig,
+                null);
         if (results == null || results.isEmpty()) {
             return null;
         }
@@ -6598,7 +8367,10 @@ public class AiOrchestratorService {
             return false;
         }
         String normalized = componentId.trim().toLowerCase(Locale.ROOT);
-        return normalized.contains("gridster-page") || normalized.contains("dynamic-gridster-page");
+        return normalized.contains("gridster-page")
+                || normalized.contains("dynamic-gridster-page")
+                || normalized.contains("dynamic-page")
+                || normalized.contains("page-builder");
     }
 
     private boolean isCreateTableRequest(AiOrchestratorRequest request) {
@@ -8780,11 +10552,12 @@ public class AiOrchestratorService {
         if (!variantKeys.isEmpty()) {
             int limit = Math.max(DEFAULT_VARIANT_SEARCH_LIMIT, variantKeys.size());
             List<AiRegistryTemplateSearchResult> results =
-                    templateService.searchTemplatesByPrefix(
+                    safeSearchTemplatesByPrefix(
                             request.getUserPrompt(),
                             componentId + ":",
                             limit,
-                            embeddingConfig);
+                            embeddingConfig,
+                            warnings);
             AiRegistryTemplateSearchResult selected = selectVariantCandidate(results, variantKeys);
             if (selected != null && selected.getSimilarityScore() >= VARIANT_SIMILARITY_THRESHOLD) {
                 AiRegistryTemplateRecord variant = loadTemplateRecord(selected.getComponentId(), warnings);
@@ -8804,6 +10577,58 @@ public class AiOrchestratorService {
         }
 
         return new TemplateSelection(baseTemplate, warnings);
+    }
+
+    private List<AiRegistryTemplateSearchResult> safeSearchTemplates(
+            String prompt,
+            String componentId,
+            int limit,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            List<String> warnings) {
+        try {
+            return templateService.searchTemplates(prompt, componentId, limit, embeddingConfig);
+        } catch (IllegalStateException ex) {
+            return handleOptionalTemplateSearchFailure("template-search", componentId, ex, warnings);
+        }
+    }
+
+    private List<AiRegistryTemplateSearchResult> safeSearchTemplatesByPrefix(
+            String prompt,
+            String registryKeyPrefix,
+            int limit,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            List<String> warnings) {
+        try {
+            return templateService.searchTemplatesByPrefix(prompt, registryKeyPrefix, limit, embeddingConfig);
+        } catch (IllegalStateException ex) {
+            return handleOptionalTemplateSearchFailure("template-variant-search", registryKeyPrefix, ex, warnings);
+        }
+    }
+
+    private List<AiRegistryTemplateSearchResult> handleOptionalTemplateSearchFailure(
+            String stage,
+            String scope,
+            IllegalStateException ex,
+            List<String> warnings) {
+        String message = rootCauseMessage(ex);
+        log.warn("[AiOrchestratorService] Optional {} skipped for scope={} because embeddings are unavailable: {}",
+                stage,
+                scope,
+                message);
+        if (warnings != null) {
+            warnings.add(stage + "-degraded: embeddings unavailable");
+        }
+        return List.of();
+    }
+
+    private String rootCauseMessage(Throwable throwable) {
+        Throwable cursor = throwable;
+        while (cursor != null && cursor.getCause() != null) {
+            cursor = cursor.getCause();
+        }
+        return cursor != null && cursor.getMessage() != null
+                ? cursor.getMessage()
+                : "unknown";
     }
 
     private List<CreateTemplateOption> buildCreateTemplateOptions(
@@ -13798,19 +15623,21 @@ public class AiOrchestratorService {
             AiOrchestratorRequest request,
             List<String> warnings,
             JsonNode authoringManifest) {
-        JsonNode componentEditPlan = result.get("componentEditPlan");
+        List<String> responseWarnings = warnings == null ? new ArrayList<>() : new ArrayList<>(warnings);
+        JsonNode componentEditPlan = normalizeComponentEditPlanForAuthoringManifest(
+                result.get("componentEditPlan"),
+                authoringManifest,
+                responseWarnings);
         List<String> validationFailures = validateComponentEditPlanAgainstAuthoringManifest(
                 componentEditPlan,
                 authoringManifest);
         if (!validationFailures.isEmpty()) {
-            List<String> responseWarnings = warnings == null ? new ArrayList<>() : new ArrayList<>(warnings);
             responseWarnings.add("component-edit-plan-rejected-by-authoring-manifest");
             return errorWithWarnings(
                     "componentEditPlan invalido para o authoringManifest: "
                             + String.join("; ", validationFailures),
                     responseWarnings);
         }
-        List<String> responseWarnings = warnings == null ? new ArrayList<>() : new ArrayList<>(warnings);
         if (authoringManifest != null && authoringManifest.isObject()) {
             responseWarnings.add("component-edit-plan-validated-by-authoring-manifest");
         }
@@ -13822,6 +15649,549 @@ public class AiOrchestratorService {
                 .explanation(textOrNull(result.get("explanation")))
                 .warnings(responseWarnings.isEmpty() ? null : List.copyOf(responseWarnings))
                 .build();
+    }
+
+    private JsonNode normalizeComponentEditPlanForAuthoringManifest(
+            JsonNode componentEditPlan,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        if (componentEditPlan == null
+                || !componentEditPlan.isObject()
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return componentEditPlan;
+        }
+        Map<String, JsonNode> operationsById = indexManifestOperations(authoringManifest, new ArrayList<>());
+        if (operationsById.isEmpty()) {
+            return componentEditPlan;
+        }
+        Map<String, String> operationAliasesByNormalizedId = indexManifestOperationAliases(operationsById);
+        JsonNode operations = componentEditPlan.get("operations");
+        if (operations != null && operations.isArray()) {
+            int declaredCount = 0;
+            for (JsonNode operation : operations) {
+                String operationId = resolveComponentEditPlanOperationId(
+                        componentEditPlanOperationId(operation),
+                        operation,
+                        operationsById,
+                        operationAliasesByNormalizedId);
+                if (operationId != null) {
+                    declaredCount++;
+                }
+            }
+            if (declaredCount == 0) {
+                return componentEditPlan;
+            }
+            ObjectNode normalizedPlan = ((ObjectNode) componentEditPlan).deepCopy();
+            ArrayNode normalizedOperations = objectMapper.createArrayNode();
+            for (JsonNode operation : operations) {
+                String rawOperationId = componentEditPlanOperationId(operation);
+                String operationId = resolveComponentEditPlanOperationId(
+                        rawOperationId,
+                        operation,
+                        operationsById,
+                        operationAliasesByNormalizedId);
+                JsonNode manifestOperation = operationId == null ? null : operationsById.get(operationId);
+                if (manifestOperation == null) {
+                    if (warnings != null) {
+                        warnings.add("component-edit-plan-operation-dropped:not-declared:" + (rawOperationId == null ? "<missing>" : rawOperationId));
+                    }
+                    continue;
+                }
+                JsonNode normalizedOperation = normalizeComponentEditPlanOperationId(
+                        operation,
+                        rawOperationId,
+                        operationId,
+                        warnings);
+                JsonNode normalizedTargetOperation = normalizeComponentEditPlanOperationTarget(
+                        normalizedOperation,
+                        manifestOperation,
+                        warnings);
+                if (isIrrecoverablyIncompleteComponentEditPlanOperation(normalizedTargetOperation, manifestOperation)) {
+                    if (warnings != null) {
+                        warnings.add("component-edit-plan-operation-dropped:missing-required-contract:" + operationId);
+                    }
+                    continue;
+                }
+                normalizedOperations.add(normalizedTargetOperation);
+            }
+            normalizedPlan.set("operations", normalizedOperations);
+            return normalizedPlan;
+        }
+
+        String rawOperationId = componentEditPlanOperationId(componentEditPlan);
+        String operationId = resolveComponentEditPlanOperationId(
+                rawOperationId,
+                componentEditPlan,
+                operationsById,
+                operationAliasesByNormalizedId);
+        JsonNode manifestOperation = operationId == null ? null : operationsById.get(operationId);
+        if (manifestOperation == null) {
+            return componentEditPlan;
+        }
+        JsonNode normalizedOperation = normalizeComponentEditPlanOperationId(
+                componentEditPlan,
+                rawOperationId,
+                operationId,
+                warnings);
+        return normalizeComponentEditPlanOperationTarget(normalizedOperation, manifestOperation, warnings);
+    }
+
+    private Map<String, String> indexManifestOperationAliases(Map<String, JsonNode> operationsById) {
+        Map<String, String> aliasOwners = new LinkedHashMap<>();
+        Map<String, Boolean> ambiguousAliases = new LinkedHashMap<>();
+        operationsById.forEach((operationId, operation) -> {
+            for (String alias : componentEditPlanOperationAliases(operationId, operation)) {
+                String normalizedAlias = normalizeComponentEditPlanOperationAlias(alias);
+                if (normalizedAlias == null || normalizedAlias.isBlank()) {
+                    continue;
+                }
+                String previousOwner = aliasOwners.putIfAbsent(normalizedAlias, operationId);
+                if (previousOwner != null && !previousOwner.equals(operationId)) {
+                    ambiguousAliases.put(normalizedAlias, true);
+                }
+            }
+        });
+        ambiguousAliases.keySet().forEach(aliasOwners::remove);
+        return aliasOwners;
+    }
+
+    private List<String> componentEditPlanOperationAliases(String operationId, JsonNode operation) {
+        if (operationId == null || operationId.isBlank() || operation == null || !operation.isObject()) {
+            return List.of();
+        }
+        List<String> aliases = new ArrayList<>();
+        String resolver = textOrNull(operation.at("/target/resolver"));
+        String targetKind = textOrNull(operation.at("/target/kind"));
+        if (operationId.endsWith(".set")) {
+            if (resolver != null && !resolver.isBlank()) {
+                aliases.add(resolver);
+                aliases.add(resolver + "-set");
+                aliases.add(resolver + ".set");
+            }
+            if (targetKind != null && !targetKind.isBlank()) {
+                aliases.add(targetKind);
+                aliases.add(targetKind + "-set");
+                aliases.add(targetKind + ".set");
+            }
+        } else if (operationId.endsWith(".configure")) {
+            if (resolver != null && !resolver.isBlank()) {
+                aliases.add(resolver);
+                aliases.add(resolver + "-configure");
+                aliases.add(resolver + ".configure");
+            }
+            if (targetKind != null && !targetKind.isBlank()) {
+                aliases.add(targetKind);
+                aliases.add(targetKind + "-configure");
+                aliases.add(targetKind + ".configure");
+            }
+        }
+        return aliases;
+    }
+
+    private String resolveComponentEditPlanOperationId(
+            String rawOperationId,
+            JsonNode operation,
+            Map<String, JsonNode> operationsById,
+            Map<String, String> operationAliasesByNormalizedId) {
+        if (rawOperationId == null || rawOperationId.isBlank()) {
+            return null;
+        }
+        if (operationsById.containsKey(rawOperationId)) {
+            return rawOperationId;
+        }
+        String normalizedAlias = normalizeComponentEditPlanOperationAlias(rawOperationId);
+        String resolved = operationAliasesByNormalizedId.get(normalizedAlias);
+        if (resolved != null) {
+            return resolved;
+        }
+        return resolveAmbiguousComponentEditPlanOperationId(normalizedAlias, operation, operationsById);
+    }
+
+    private String resolveAmbiguousComponentEditPlanOperationId(
+            String normalizedAlias,
+            JsonNode operation,
+            Map<String, JsonNode> operationsById) {
+        JsonNode input = componentEditPlanOperationInput(operation);
+        if (input == null || !input.isObject()) {
+            return null;
+        }
+        if (isComponentEditPlanLocalDataIntent(normalizedAlias, input)
+                && operationsById.containsKey("data.local.set")) {
+            return "data.local.set";
+        }
+        if (isComponentEditPlanLayoutIntent(normalizedAlias, input)
+                && operationsById.containsKey("layout.density.set")) {
+            return "layout.density.set";
+        }
+        if (!"datasourceconfig".equals(normalizedAlias)) {
+            return null;
+        }
+        if (input.get("data") != null && input.get("data").isArray()
+                && operationsById.containsKey("data.local.set")) {
+            return "data.local.set";
+        }
+        if (textOrNull(input.get("resourcePath")) != null
+                && operationsById.containsKey("data.resource.bind")) {
+            return "data.resource.bind";
+        }
+        return null;
+    }
+
+    private boolean isComponentEditPlanLocalDataIntent(String normalizedAlias, JsonNode input) {
+        if (normalizedAlias != null
+                && (normalizedAlias.contains("item")
+                || normalizedAlias.contains("items")
+                || normalizedAlias.contains("example")
+                || normalizedAlias.contains("examples")
+                || normalizedAlias.contains("localdata")
+                || normalizedAlias.contains("dadoslocais"))) {
+            return true;
+        }
+        if (input == null || !input.isObject()) {
+            return false;
+        }
+        return firstPresent(input, "data", "items", "itens", "examples", "exemplos", "records", "rows") != null;
+    }
+
+    private boolean isComponentEditPlanLayoutIntent(String normalizedAlias, JsonNode input) {
+        if (normalizedAlias != null
+                && (normalizedAlias.contains("layout")
+                || normalizedAlias.contains("card")
+                || normalizedAlias.contains("cards")
+                || normalizedAlias.contains("tile")
+                || normalizedAlias.contains("tiles"))) {
+            return true;
+        }
+        if (input == null || !input.isObject()) {
+            return false;
+        }
+        return firstPresent(input, "variant", "density", "itemSpacing", "lines", "dividers", "model") != null;
+    }
+
+    private JsonNode componentEditPlanOperationInput(JsonNode operation) {
+        if (operation == null || !operation.isObject()) {
+            return null;
+        }
+        JsonNode input = operation.get("input");
+        if (input == null || input.isNull()) {
+            input = operation.get("params");
+        }
+        if (input == null || input.isNull()) {
+            input = operation.get("parameters");
+        }
+        if (input == null || input.isNull()) {
+            input = operation.get("value");
+        }
+        return input;
+    }
+
+    private String normalizeComponentEditPlanOperationAlias(String operationId) {
+        if (operationId == null) {
+            return null;
+        }
+        return operationId.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
+    }
+
+    private JsonNode normalizeComponentEditPlanOperationId(
+            JsonNode operation,
+            String rawOperationId,
+            String canonicalOperationId,
+            List<String> warnings) {
+        if (!(operation instanceof ObjectNode operationObject)
+                || rawOperationId == null
+                || canonicalOperationId == null
+                || rawOperationId.equals(canonicalOperationId)) {
+            return operation;
+        }
+        ObjectNode normalized = operationObject.deepCopy();
+        normalized.put("operationId", canonicalOperationId);
+        normalized.remove("changeKind");
+        inferLayoutInputFromOperationAlias(normalized, rawOperationId, canonicalOperationId);
+        if (warnings != null) {
+            warnings.add("component-edit-plan-operation-id-normalized:" + rawOperationId + ":" + canonicalOperationId);
+        }
+        return normalized;
+    }
+
+    private void inferLayoutInputFromOperationAlias(
+            ObjectNode operation,
+            String rawOperationId,
+            String canonicalOperationId) {
+        if (operation == null
+                || rawOperationId == null
+                || !"layout.density.set".equals(canonicalOperationId)) {
+            return;
+        }
+        String normalizedAlias = normalizeComponentEditPlanOperationAlias(rawOperationId);
+        if (normalizedAlias == null || normalizedAlias.isBlank()) {
+            return;
+        }
+        ObjectNode input = operation.get("input") instanceof ObjectNode inputObject
+                ? inputObject.deepCopy()
+                : objectMapper.createObjectNode();
+        boolean changed = false;
+        if (!input.has("variant")) {
+            String variant = inferLayoutVariant(normalizedAlias);
+            if (variant != null) {
+                input.put("variant", variant);
+                changed = true;
+                if (("cards".equals(variant) || "tiles".equals(variant)) && !input.has("lines")) {
+                    input.put("lines", 2);
+                }
+            }
+        }
+        if (!input.has("density")) {
+            String density = inferLayoutDensity(normalizedAlias);
+            if (density != null) {
+                input.put("density", density);
+                changed = true;
+            }
+        }
+        if (changed) {
+            operation.set("input", input);
+        }
+    }
+
+    private String inferLayoutVariant(String normalizedAlias) {
+        if (normalizedAlias == null) {
+            return null;
+        }
+        if (normalizedAlias.contains("cards") || normalizedAlias.contains("card")) {
+            return "cards";
+        }
+        if (normalizedAlias.contains("tiles") || normalizedAlias.contains("tile")) {
+            return "tiles";
+        }
+        if (normalizedAlias.contains("list")) {
+            return "list";
+        }
+        return null;
+    }
+
+    private String inferLayoutDensity(String normalizedAlias) {
+        if (normalizedAlias == null) {
+            return null;
+        }
+        if (normalizedAlias.contains("compact")) {
+            return "compact";
+        }
+        if (normalizedAlias.contains("comfortable")) {
+            return "comfortable";
+        }
+        if (normalizedAlias.contains("default")) {
+            return "default";
+        }
+        return null;
+    }
+
+    private String componentEditPlanOperationId(JsonNode operation) {
+        if (operation == null || !operation.isObject()) {
+            return null;
+        }
+        String operationId = textOrNull(operation.get("operationId"));
+        if (operationId == null || operationId.isBlank()) {
+            operationId = textOrNull(operation.get("changeKind"));
+        }
+        return operationId;
+    }
+
+    private JsonNode normalizeComponentEditPlanOperationTarget(
+            JsonNode operation,
+            JsonNode manifestOperation,
+            List<String> warnings) {
+        if (!(operation instanceof ObjectNode operationObject)
+                || manifestOperation == null
+                || !manifestOperation.isObject()) {
+            return operation;
+        }
+        ObjectNode normalized = operationObject.deepCopy();
+        String operationId = componentEditPlanOperationId(normalized);
+        String expectedKind = textOrNull(manifestOperation.at("/target/kind"));
+        JsonNode target = normalized.get("target");
+        if (expectedKind != null && !expectedKind.isBlank() && target != null && target.isObject()) {
+            ObjectNode normalizedTarget = ((ObjectNode) target).deepCopy();
+            String currentKind = textOrNull(normalizedTarget.get("kind"));
+            if (currentKind == null || !expectedKind.equals(currentKind)) {
+                normalizedTarget.put("kind", expectedKind);
+                normalized.set("target", normalizedTarget);
+                if (warnings != null) {
+                    warnings.add("component-edit-plan-target-kind-normalized:" + operationId + ":" + expectedKind);
+                }
+            }
+        }
+        normalizeComponentEditPlanOperationInputAliases(normalized, manifestOperation, warnings);
+        inferComponentEditPlanOperationTargetFromInput(normalized, manifestOperation, warnings);
+        return normalized;
+    }
+
+    private void inferComponentEditPlanOperationTargetFromInput(
+            ObjectNode operation,
+            JsonNode manifestOperation,
+            List<String> warnings) {
+        if (operation == null || manifestOperation == null || !manifestOperation.isObject()) {
+            return;
+        }
+        if (operation.get("target") != null && operation.get("target").isObject()) {
+            return;
+        }
+        String operationId = componentEditPlanOperationId(operation);
+        String resolver = textOrNull(manifestOperation.at("/target/resolver"));
+        String expectedKind = textOrNull(manifestOperation.at("/target/kind"));
+        if (!"template.slot.set".equals(operationId)
+                || !"list-template-slot".equals(resolver)
+                || expectedKind == null
+                || expectedKind.isBlank()) {
+            return;
+        }
+        JsonNode mergedInput = componentEditPlanOperationInput(operation, manifestOperation);
+        String slot = textOrNull(mergedInput != null ? mergedInput.get("slot") : null);
+        if (slot == null || slot.isBlank()) {
+            return;
+        }
+        ObjectNode target = objectMapper.createObjectNode();
+        target.put("kind", expectedKind);
+        target.put("slot", slot);
+        operation.set("target", target);
+        if (warnings != null) {
+            warnings.add("component-edit-plan-target-inferred:" + operationId + ":" + slot);
+        }
+    }
+
+    private boolean isIrrecoverablyIncompleteComponentEditPlanOperation(
+            JsonNode planOperation,
+            JsonNode manifestOperation) {
+        if (planOperation == null
+                || !planOperation.isObject()
+                || manifestOperation == null
+                || !manifestOperation.isObject()) {
+            return false;
+        }
+        JsonNode manifestTarget = manifestOperation.get("target");
+        if (manifestTarget != null && manifestTarget.isObject()) {
+            boolean targetRequired = !manifestTarget.has("required") || manifestTarget.path("required").asBoolean(true);
+            JsonNode planTarget = planOperation.get("target");
+            if (targetRequired && (planTarget == null || !planTarget.isObject())) {
+                return true;
+            }
+        }
+        JsonNode required = manifestOperation.at("/inputSchema/required");
+        if (required == null || !required.isArray() || required.isEmpty()) {
+            return false;
+        }
+        JsonNode input = componentEditPlanOperationInput(planOperation, manifestOperation);
+        if (input == null || !input.isObject()) {
+            return true;
+        }
+        for (JsonNode field : required) {
+            String fieldName = field.asText(null);
+            if (fieldName != null && !fieldName.isBlank() && !input.has(fieldName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void normalizeComponentEditPlanOperationInputAliases(
+            ObjectNode operation,
+            JsonNode manifestOperation,
+            List<String> warnings) {
+        if (operation == null || manifestOperation == null || !manifestOperation.isObject()) {
+            return;
+        }
+        JsonNode required = manifestOperation.at("/inputSchema/required");
+        if (required == null || !required.isArray() || required.isEmpty()) {
+            return;
+        }
+        ObjectNode input = operation.get("input") instanceof ObjectNode inputObject
+                ? inputObject.deepCopy()
+                : objectMapper.createObjectNode();
+        boolean changed = false;
+        for (JsonNode requiredNode : required) {
+            String requiredField = textOrNull(requiredNode);
+            if (requiredField == null || requiredField.isBlank() || input.has(requiredField)) {
+                continue;
+            }
+            JsonNode itemValue = inferSingleLocalDataItemInput(input, manifestOperation, requiredField);
+            if (itemValue != null) {
+                input.set(requiredField, itemValue);
+                changed = true;
+                continue;
+            }
+            JsonNode aliasValue = findRequiredInputAlias(operation, requiredField);
+            if (aliasValue != null && !aliasValue.isNull() && !isBlankTextNode(aliasValue)) {
+                input.set(requiredField, aliasValue);
+                changed = true;
+            }
+        }
+        if (!input.has("type")
+                && input.has("expr")
+                && input.get("expr").isTextual()
+                && manifestTemplateTypeAllowsText(manifestOperation)) {
+            input.put("type", "text");
+            changed = true;
+        }
+        if (changed) {
+            operation.set("input", input);
+            String operationId = componentEditPlanOperationId(operation);
+            if (warnings != null && operationId != null && !operationId.isBlank()) {
+                warnings.add("component-edit-plan-input-normalized:" + operationId);
+            }
+        }
+    }
+
+    private JsonNode inferSingleLocalDataItemInput(
+            ObjectNode input,
+            JsonNode manifestOperation,
+            String requiredField) {
+        if (input == null
+                || manifestOperation == null
+                || !"data".equals(requiredField)
+                || !"data.local.set".equals(textOrNull(manifestOperation.get("operationId")))
+                || !looksLikeLocalListItem(input)) {
+            return null;
+        }
+        ArrayNode data = objectMapper.createArrayNode();
+        data.add(input.deepCopy());
+        return data;
+    }
+
+    private boolean looksLikeLocalListItem(JsonNode input) {
+        if (input == null || !input.isObject()) {
+            return false;
+        }
+        for (String field : List.of(
+                "name",
+                "nome",
+                "title",
+                "titulo",
+                "título",
+                "label",
+                "rotulo",
+                "rótulo")) {
+            JsonNode value = input.get(field);
+            if (value != null && !value.isNull() && !isBlankTextNode(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean manifestTemplateTypeAllowsText(JsonNode manifestOperation) {
+        if (manifestOperation == null || !manifestOperation.isObject()) {
+            return false;
+        }
+        JsonNode typeSchema = manifestOperation.at("/inputSchema/properties/type");
+        JsonNode enumValues = typeSchema.get("enum");
+        if (enumValues == null || !enumValues.isArray()) {
+            return false;
+        }
+        for (JsonNode value : enumValues) {
+            if ("text".equals(textOrNull(value))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<String> validateComponentEditPlanAgainstAuthoringManifest(
@@ -13966,7 +16336,7 @@ public class AiOrchestratorService {
             }
         }
         validateInputSchemaRequiredFields(
-                componentEditPlanOperationInput(planOperation),
+                componentEditPlanOperationInput(planOperation, manifestOperation),
                 manifestOperation.at("/inputSchema/required"),
                 path,
                 operationId,
@@ -13986,7 +16356,7 @@ public class AiOrchestratorService {
         }
     }
 
-    private JsonNode componentEditPlanOperationInput(JsonNode planOperation) {
+    private JsonNode componentEditPlanOperationInput(JsonNode planOperation, JsonNode manifestOperation) {
         ObjectNode merged = objectMapper.createObjectNode();
         planOperation.fields().forEachRemaining(entry -> {
             if (!List.of("input", "params", "payload", "arguments", "data", "rule", "target").contains(entry.getKey())) {
@@ -14010,6 +16380,7 @@ public class AiOrchestratorService {
             }
         }
         normalizeVisualBlockGuidanceOperationInput(planOperation, merged);
+        normalizeRequiredInputAliases(merged, manifestOperation);
         return merged.isEmpty() ? planOperation : merged;
     }
 
@@ -15073,6 +17444,16 @@ public class AiOrchestratorService {
         private ActionPlanClarification(String message, List<String> options) {
             this.message = message;
             this.options = options != null ? options : List.of();
+        }
+    }
+
+    private static final class TabDraft {
+        private final String id;
+        private final String textLabel;
+
+        private TabDraft(String id, String textLabel) {
+            this.id = id;
+            this.textLabel = textLabel;
         }
     }
 

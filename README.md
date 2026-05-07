@@ -242,6 +242,10 @@ During component registry ingestion, `authoringManifest` is validated when prese
 
 During `/api/praxis/config/ai/patch` orchestration, the projected manifest is also promoted into the prompt as the canonical authoring contract. If a model returns `componentEditPlan`, the backend validates the plan against the manifest before handing it to preview/apply: operations must exist in the manifest, operation targets must match the declared resolver contract, required `inputSchema` fields must be present, referenced validators must be declared and destructive operations must carry explicit confirmation.
 
+Manifest-backed normalization may recover safe, canonical omissions before validation, such as inferring a `template.slot.set` target from the declared `input.slot` for list template slots. It may also drop incomplete declared operations when the rest of the plan is valid, preserving explicit warnings for review. For local/editorial prompts that explicitly say not to use a real API, schema or endpoint, resource-binding actions such as `dataSource.resourcePath.set` are suppressed instead of asking for a `resourcePath`.
+
+Local/editorial component refinements are also resolved as targeted UI composition when the request already carries a selected widget or component id. In that case, the intent resolver keeps the artifact anchored to the selected component, bypasses stale domain-catalog resource selection and does not route table/form/list refinements to shared-rule authoring just because the prompt mentions visual SLA/status labels.
+
 The backend does not redefine component semantics. Operations with `compile-domain-patch` are returned as explicit compiler boundaries so a component-specific compiler can be added after that component manifest passes semantic approval.
 
 ### AI registry bootstrap

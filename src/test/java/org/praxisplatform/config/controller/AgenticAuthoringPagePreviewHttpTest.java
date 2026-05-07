@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiMetadataCandidateCatalog;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCandidate;
@@ -39,6 +40,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringQuickReply;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
+import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.springframework.http.MediaType;
@@ -52,6 +55,38 @@ class AgenticAuthoringPagePreviewHttpTest {
     private Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private AgenticAuthoringIntentResolverService quickstartIntentResolver() {
+        ApiMetadataRepository repository = mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "POST",
+                        "human-resources,folha,pagamento,pagamentos,salario,salarios,departamento,competencia,analytics,dashboard,ranking",
+                        "Analytics de folha de pagamento",
+                        "Visao analitica de folha de pagamento para dashboards, rankings, comparacoes, KPIs e graficos por departamento.",
+                        null,
+                        null,
+                        null,
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/folhas-pagamento",
+                        "POST",
+                        "human-resources,folha,pagamento,pagamentos,salario,salarios,operacional,tabela,listagem",
+                        "Folhas de pagamento",
+                        "Registros operacionais de folha para tabelas, listagens e conferencias.",
+                        null,
+                        null,
+                        null,
+                        "[]",
+                        "{}",
+                        null)));
+        return new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+    }
 
     @Test
     void componentCapabilitiesReturnsExecutableCatalogs() throws Exception {
@@ -75,7 +110,7 @@ class AgenticAuthoringPagePreviewHttpTest {
         JsonNode body = objectMapper.readTree(response);
         assertThat(body.path("version").asText()).isEqualTo("0.1.0");
         assertThat(body.path("catalogs")).extracting(node -> node.path("componentId").asText())
-                .containsExactly("praxis-dynamic-form", "praxis-table", "praxis-chart");
+                .containsExactly("praxis-dynamic-form", "praxis-table", "praxis-chart", "praxis-filter");
         JsonNode formCatalog = body.path("catalogs").get(0);
         assertThat(formCatalog.path("capabilities")).extracting(node -> node.path("changeKind").asText())
                 .containsExactly("add_field", "rename_or_relabel", "remove_field");
@@ -85,7 +120,7 @@ class AgenticAuthoringPagePreviewHttpTest {
     void resourceCandidatesEndpointReturnsToolPayload() throws Exception {
         AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
                 mock(AgenticAuthoringResourceDiscoveryService.class);
-        when(resourceDiscoveryService.search(any()))
+        when(resourceDiscoveryService.search(any(), any()))
                 .thenReturn(new AgenticAuthoringResourceCandidatesResult(
                         true,
                         "searchApiResources",
@@ -289,7 +324,7 @@ class AgenticAuthoringPagePreviewHttpTest {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
                 mock(AgenticAuthoringArtifactSource.class),
-                new AgenticAuthoringIntentResolverService(objectMapper),
+                quickstartIntentResolver(),
                 mock(AgenticAuthoringPlanService.class),
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),
@@ -389,7 +424,7 @@ class AgenticAuthoringPagePreviewHttpTest {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
                 mock(AgenticAuthoringArtifactSource.class),
-                new AgenticAuthoringIntentResolverService(objectMapper),
+                quickstartIntentResolver(),
                 mock(AgenticAuthoringPlanService.class),
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),
@@ -444,7 +479,7 @@ class AgenticAuthoringPagePreviewHttpTest {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
                 mock(AgenticAuthoringArtifactSource.class),
-                new AgenticAuthoringIntentResolverService(objectMapper),
+                quickstartIntentResolver(),
                 mock(AgenticAuthoringPlanService.class),
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),
@@ -481,7 +516,7 @@ class AgenticAuthoringPagePreviewHttpTest {
                         "payroll-department-drilldown",
                         "payroll-detail-table");
         assertThat(body.path("pendingClarification").path("questions")).extracting(JsonNode::asText)
-                .containsExactly("Posso criar um dashboard de folha de pagamento com grafico por departamento, indicadores e detalhamento?");
+                .containsExactly("Posso criar um dashboard usando o recurso de negocio selecionado?");
     }
 
     @Test

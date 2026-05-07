@@ -39,8 +39,23 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     public List<AgenticAuthoringCandidate> discover(String normalizedPrompt, String artifactKind) {
+        return discover(normalizedPrompt, artifactKind, null, null, null);
+    }
+
+    public List<AgenticAuthoringCandidate> discover(
+            String normalizedPrompt,
+            String artifactKind,
+            String tenantId,
+            String environment,
+            String releaseId) {
         String expectedMethod = expectedMethod(artifactKind);
-        RetrievalContext context = new RetrievalContext(normalizedPrompt, artifactKind, expectedMethod);
+        RetrievalContext context = new RetrievalContext(
+                normalizedPrompt,
+                artifactKind,
+                expectedMethod,
+                tenantId,
+                environment,
+                releaseId);
         if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
             return repository == null ? List.of() : new BroadArtifactCandidateRetriever().retrieve(context);
         }
@@ -140,13 +155,25 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     private List<AgenticAuthoringCandidate> discoverWithRetrievalService(
             String normalizedPrompt,
             String artifactKind,
-            String expectedMethod) {
+            String expectedMethod,
+            String tenantId,
+            String environment,
+            String releaseId) {
         if (retrievalService == null) {
             return List.of();
         }
         try {
             String method = expectedMethod == null ? null : expectedMethod.toUpperCase(Locale.ROOT);
-            return retrievalService.searchApiMetadata(normalizedPrompt, method, null, 8).stream()
+            return retrievalService.searchApiMetadata(
+                            normalizedPrompt,
+                            method,
+                            null,
+                            8,
+                            null,
+                            tenantId,
+                            environment,
+                            releaseId)
+                    .stream()
                     .filter(result -> result.getPath() != null && result.getMethod() != null)
                     .filter(result -> isRenderableBusinessEndpoint(result.getPath()))
                     .map(result -> toCandidate(result, artifactKind))
@@ -169,7 +196,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return discoverWithRetrievalService(
                     context.normalizedPrompt(),
                     context.artifactKind(),
-                    context.expectedMethod());
+                    context.expectedMethod(),
+                    context.tenantId(),
+                    context.environment(),
+                    context.releaseId());
         }
     }
 
@@ -585,11 +615,20 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             String normalizedPrompt,
             String artifactKind,
             String expectedMethod,
+            String tenantId,
+            String environment,
+            String releaseId,
             List<String> tokens
     ) {
 
-        private RetrievalContext(String normalizedPrompt, String artifactKind, String expectedMethod) {
-            this(normalizedPrompt, artifactKind, expectedMethod, List.of());
+        private RetrievalContext(
+                String normalizedPrompt,
+                String artifactKind,
+                String expectedMethod,
+                String tenantId,
+                String environment,
+                String releaseId) {
+            this(normalizedPrompt, artifactKind, expectedMethod, tenantId, environment, releaseId, List.of());
         }
 
         private RetrievalContext withTokens(List<String> tokens) {
@@ -597,6 +636,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     normalizedPrompt,
                     artifactKind,
                     expectedMethod,
+                    tenantId,
+                    environment,
+                    releaseId,
                     tokens == null ? List.of() : List.copyOf(tokens));
         }
     }

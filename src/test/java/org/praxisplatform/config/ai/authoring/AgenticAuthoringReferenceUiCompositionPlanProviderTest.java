@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -779,7 +780,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-search-master-detail");
         assertThat(plan.path("widgets"))
                 .extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-filter", "praxis-table", "praxis-rich-content");
+                .containsExactly("praxis-filter", "praxis-table", "praxis-dynamic-form");
         JsonNode filter = plan.path("widgets").get(0);
         assertThat(filter.path("key").asText()).isEqualTo("human-resources-funcionarios-filter");
         assertThat(filter.path("inputs").path("resourcePath").asText())
@@ -790,12 +791,570 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                 .contains(
                         "human-resources-funcionarios-filter.requestSearch->human-resources-funcionarios-master.queryContext",
                         "human-resources-funcionarios-master.rowClick->state.selectedItem",
-                        "state.selectedItem->human-resources-funcionarios-detail.document");
+                        "state.selectedItem->human-resources-funcionarios-detail.resourceId");
+        JsonNode detailBinding = findBinding(plan.path("bindings"),
+                "state.selectedItem->human-resources-funcionarios-detail.resourceId");
+        assertThat(detailBinding.path("to").path("port").asText()).isEqualTo("resourceId");
+        assertThat(detailBinding.path("transform").path("kind").asText()).isEqualTo("pick-path");
+        assertThat(detailBinding.path("transform").path("path").asText()).isEqualTo("id");
         JsonNode filterBinding = findBinding(plan.path("bindings"),
                 "human-resources-funcionarios-filter.requestSearch->human-resources-funcionarios-master.queryContext");
         assertThat(filterBinding.path("from").path("port").asText()).isEqualTo("requestSearch");
         assertThat(filterBinding.path("to").path("port").asText()).isEqualTo("queryContext");
         assertThat(filterBinding.path("transform").path("kind").asText()).isEqualTo("pick-path");
+    }
+
+    @Test
+    void createsTabbedMasterDetailFormWorkspaceForSelectedResource() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "organize em abas para procurar, listar, ver detalhes e editar com formulario guiado",
+                null,
+                null,
+                null,
+                null,
+                selectedTabbedMasterDetailFormIntent()));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-tabbed-master-detail-form");
+        assertThat(plan.path("widgets")).hasSize(1);
+        JsonNode tabs = plan.path("widgets").get(0);
+        assertThat(tabs.path("componentId").asText()).isEqualTo("praxis-tabs");
+        assertThat(tabs.path("inputs").path("config").path("tabs"))
+                .extracting(tab -> tab.path("id").asText())
+                .containsExactly("search", "details", "form");
+        assertThat(tabs.path("inputs").path("config").path("tabs").path(0).path("widgets"))
+                .extracting(widget -> widget.path("id").asText())
+                .containsExactly("praxis-filter", "praxis-table");
+        assertThat(tabs.path("inputs").path("config").path("tabs").path(2).path("widgets").path(0)
+                .path("id").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(tabs.path("inputs").path("config").path("tabs").path(1).path("widgets").path(0)
+                .path("id").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(plan.path("bindings"))
+                .extracting(binding -> binding.path("id").asText())
+                .contains(
+                        "human-resources-funcionarios-workspace.human-resources-funcionarios-filter.requestSearch->human-resources-funcionarios-master.queryContext",
+                        "human-resources-funcionarios-workspace.human-resources-funcionarios-master.rowClick->state.selectedItem",
+                        "state.selectedItem->human-resources-funcionarios-workspace.human-resources-funcionarios-detail.resourceId",
+                        "state.selectedItem->human-resources-funcionarios-workspace.human-resources-funcionarios-form.initialValue");
+        JsonNode rowClick = findBinding(plan.path("bindings"),
+                "human-resources-funcionarios-workspace.human-resources-funcionarios-master.rowClick->state.selectedItem");
+        assertThat(rowClick.path("from").path("nestedPath").path(0).path("id").asText()).isEqualTo("search");
+        assertThat(rowClick.path("from").path("nestedPath").path(1).path("key").asText())
+                .isEqualTo("human-resources-funcionarios-master");
+    }
+
+    @Test
+    void createsTabbedOperationalWorkspaceWithListAndCrudWhenRequested() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "organize em abas com uma lista resumida amigavel, detalhes do item escolhido e CRUD completo para criar e editar",
+                null,
+                null,
+                null,
+                null,
+                selectedTabbedMasterDetailFormIntent()));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-tabbed-operational-workspace");
+        JsonNode tabs = plan.path("widgets").get(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs)
+                .extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Lista resumida", "Detalhes", "CRUD");
+        assertThat(tabs.path(0).path("widgets"))
+                .extracting(widget -> widget.path("id").asText())
+                .containsExactly("praxis-list");
+        assertThat(tabs.path(2).path("widgets").path(0).path("id").asText()).isEqualTo("praxis-crud");
+        assertThat(tabs.path(1).path("widgets").path(0).path("id").asText()).isEqualTo("praxis-dynamic-form");
+        JsonNode list = tabs.path(0).path("widgets").path(0);
+        assertThat(list.path("inputs").path("config").path("dataSource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        JsonNode crud = tabs.path(2).path("widgets").path(0);
+        assertThat(crud.path("inputs").path("metadata").path("resource").path("path").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(plan.path("bindings"))
+                .extracting(binding -> binding.path("id").asText())
+                .contains(
+                        "human-resources-funcionarios-workspace.human-resources-funcionarios-master.selectionChange->state.selectedItem",
+                        "state.selectedItem->human-resources-funcionarios-workspace.human-resources-funcionarios-detail.resourceId");
+        JsonNode detailResourceId = findBinding(plan.path("bindings"),
+                "state.selectedItem->human-resources-funcionarios-workspace.human-resources-funcionarios-detail.resourceId");
+        assertThat(detailResourceId.path("to").path("port").asText()).isEqualTo("resourceId");
+        assertThat(detailResourceId.path("to").path("nestedPath").path(1).path("componentType").asText())
+                .isEqualTo("praxis-dynamic-form");
+        assertThat(detailResourceId.path("transform").path("kind").asText()).isEqualTo("pick-path");
+        assertThat(detailResourceId.path("transform").path("path").asText()).isEqualTo("id");
+        JsonNode selectionChange = findBinding(plan.path("bindings"),
+                "human-resources-funcionarios-workspace.human-resources-funcionarios-master.selectionChange->state.selectedItem");
+        assertThat(selectionChange.path("from").path("nestedPath").path(1).path("componentType").asText())
+                .isEqualTo("praxis-list");
+        assertThat(selectionChange.path("transform").path("path").asText()).isEqualTo("payload.value");
+    }
+
+    @Test
+    void createsLocalEditorialTabbedWorkspaceWithFormAndListWithoutResourceCandidate() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma pagina operacional com Praxis Tabs. A primeira aba Cadastro deve conter formulario com Nome, Email e Prioridade. A segunda aba Acompanhamento deve conter lista em cards com tres solicitacoes de exemplo e status curto. Use conteudo local editorial de demonstracao, sem criar regra de negocio.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("compose", "page")));
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().warnings())
+                .contains("ui-composition-plan-provider:local-editorial-tabbed-workspace");
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("local-editorial-tabbed-workspace");
+        JsonNode tabsWidget = plan.path("widgets").path(0);
+        assertThat(tabsWidget.path("componentId").asText()).isEqualTo("praxis-tabs");
+        JsonNode tabs = tabsWidget.path("inputs").path("config").path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Cadastro", "Acompanhamento");
+        JsonNode form = tabs.path(0).path("widgets").path(0);
+        assertThat(form.path("id").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(form.path("bindingOrder")).extracting(JsonNode::asText)
+                .containsExactly("formId", "componentInstanceId", "config", "mode", "enableCustomization");
+        assertThat(form.path("inputs").has("schemaSource")).isFalse();
+        assertThat(form.path("inputs").path("config").path("fieldMetadata"))
+                .extracting(field -> field.path("label").asText())
+                .containsExactly("Nome", "Email", "Prioridade");
+        assertThat(form.path("inputs").path("config").path("sections").path(0).path("rows").path(0).path("columns").path(0).path("fields"))
+                .extracting(JsonNode::asText)
+                .containsExactly("nome", "email", "prioridade");
+        JsonNode list = tabs.path(1).path("widgets").path(0);
+        assertThat(list.path("id").asText()).isEqualTo("praxis-list");
+        assertThat(list.path("bindingOrder")).extracting(JsonNode::asText)
+                .containsExactly("listId", "componentInstanceId", "config", "configPersistenceStrategy", "enableCustomization");
+        assertThat(list.path("inputs").path("configPersistenceStrategy").asText()).isEqualTo("input-first");
+        assertThat(list.path("inputs").path("config").path("templating").path("primary").path("expr").asText())
+                .isEqualTo("${item.title}");
+        assertThat(list.path("inputs").path("config").path("dataSource").path("data"))
+                .extracting(item -> item.path("status").asText())
+                .containsExactly("Em triagem", "Aguardando revisão", "Pronto para validar");
+    }
+
+    @Test
+    void createsLocalEditorialTabbedWorkspaceWithFormCrudAndRelationshipListWhenRequested() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma pagina operacional com Praxis Tabs para solicitacoes internas. A aba Cadastro deve conter um formulario local editorial com campos Titulo, Responsavel, Prioridade e Prazo. A aba Registros deve conter um componente Praxis CRUD local editorial com tres solicitacoes ficticias e acoes visiveis de criar, editar e excluir. A aba Relacionamentos deve conter uma lista em cards relacionada aos registros com tres comentarios ficticios. Use apenas conteudo local editorial de demonstracao, sem API real, sem schema externo e sem criar regra de negocio definitiva.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("compose", "page")));
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().warnings())
+                .contains("ui-composition-plan-provider:local-editorial-tabbed-workspace");
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        JsonNode tabs = plan.path("widgets").path(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Cadastro", "Registros", "Relacionamentos");
+
+        JsonNode form = tabs.path(0).path("widgets").path(0);
+        assertThat(form.path("id").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(form.path("inputs").path("config").path("fieldMetadata"))
+                .extracting(field -> field.path("label").asText())
+                .containsExactly("Título", "Responsável", "Prioridade", "Prazo");
+        assertThat(form.path("inputs").path("config").path("sections").path(0).path("rows").path(0).path("columns").path(0).path("fields"))
+                .extracting(JsonNode::asText)
+                .containsExactly("titulo", "responsavel", "prioridade", "prazo");
+
+        JsonNode crud = tabs.path(1).path("widgets").path(0);
+        assertThat(crud.path("id").asText()).isEqualTo("praxis-crud");
+        assertThat(crud.path("bindingOrder")).extracting(JsonNode::asText)
+                .containsExactly("crudId", "componentInstanceId", "metadata", "enableCustomization");
+        JsonNode crudMetadata = crud.path("inputs").path("metadata");
+        assertThat(crudMetadata.path("component").asText()).isEqualTo("praxis-crud");
+        assertThat(crudMetadata.path("resource").has("path")).isFalse();
+        assertThat(crudMetadata.path("data")).hasSize(3);
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("display").asText())
+                .isEqualTo("buttons");
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("width").asText())
+                .isEqualTo("280px");
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("maxVisibleActions").asInt())
+                .isEqualTo(2);
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("actions"))
+                .extracting(action -> action.path("label").asText())
+                .containsExactly("Editar", "Excluir");
+        assertThat(crudMetadata.path("actions")).extracting(action -> action.path("action").asText())
+                .containsExactly("create", "edit", "delete");
+
+        JsonNode relationshipList = tabs.path(2).path("widgets").path(0);
+        assertThat(relationshipList.path("id").asText()).isEqualTo("praxis-list");
+        assertThat(relationshipList.path("inputs").path("configPersistenceStrategy").asText()).isEqualTo("input-first");
+        assertThat(relationshipList.path("inputs").path("config").path("dataSource").path("data")).hasSize(3);
+        assertThat(relationshipList.path("inputs").path("config").path("dataSource").path("data"))
+                .extracting(item -> item.path("title").asText())
+                .containsExactly(
+                        "Solicitação de acesso - comentário de triagem inicial",
+                        "Atualização cadastral - comentário do responsável",
+                        "Revisão de permissões - comentário de validação");
+    }
+
+    @Test
+    void honorsLocalEditorialCrudAndRelationshipRefinementFieldsWhenRequested() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Agora refine a pagina existente mantendo as tres abas. Na aba Registros, adicione uma coluna Categoria no CRUD e preserve as acoes Criar, Editar e Excluir. Na aba Relacionamentos, deixe os cards claramente relacionados as solicitacoes pelo titulo e inclua um campo Status do comentario. Nao use API real nem schema externo; continue como conteudo local editorial.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("modify", "table")));
+
+        assertThat(result).isPresent();
+        JsonNode tabs = result.orElseThrow().uiCompositionPlan()
+                .path("widgets").path(0).path("inputs").path("config").path("tabs");
+        JsonNode crudWidget = tabs.path(1).path("widgets").path(0);
+        assertThat(crudWidget.path("outputs").path("rowClick").asText()).isEqualTo("emit");
+        JsonNode crudMetadata = crudWidget.path("inputs").path("metadata");
+        assertThat(crudMetadata.path("table").path("columns"))
+                .extracting(column -> column.path("header").asText())
+                .containsExactly("Título", "Responsável", "Categoria", "Prioridade", "Status");
+        assertThat(crudMetadata.path("data"))
+                .extracting(item -> item.path("categoria").asText())
+                .containsExactly("Acesso", "Cadastro", "Permissões");
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("actions"))
+                .extracting(action -> action.path("label").asText())
+                .containsExactly("Editar", "Excluir");
+
+        JsonNode relationshipConfig = tabs.path(2).path("widgets").path(0).path("inputs").path("config");
+        assertThat(relationshipConfig.path("templating").path("secondary").path("expr").asText())
+                .isEqualTo("${item.commentStatus}");
+        assertThat(relationshipConfig.path("dataSource").path("data"))
+                .extracting(item -> item.path("commentStatus").asText())
+                .containsExactly(
+                        "Status do comentário: Novo",
+                        "Status do comentário: Em análise",
+                        "Status do comentário: Resolvido");
+    }
+
+    @Test
+    void honorsLocalEditorialTabbedAdjustmentVocabularyFromHumanSmoke() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Ajuste somente os pontos faltantes da pre-visualizacao local/editorial: a tabela da aba Registros deve ter exatamente quatro registros ficticios e cada linha deve mostrar as acoes Editar, Excluir e Ver detalhes. A aba Acompanhamento esta vazia; preencha-a com cards visuais de resumo por Status e Prioridade, usando contagens coerentes com os quatro registros. Nao mude para API real, nao use schema externo e nao crie regra de negocio definitiva.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("modify", "page")));
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().warnings())
+                .contains("ui-composition-plan-provider:local-editorial-tabbed-workspace");
+        assertThat(result.orElseThrow().uiCompositionPlan().path("layoutPreset").asText())
+                .isEqualTo("local-editorial-tabbed-workspace");
+    }
+
+    @Test
+    void preservesLocalEditorialCrudWorkspaceWhenRefinementMentionsRegistrosColumnsSlaAndHistory() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Refine a pagina existente, preservando as tres abas e todos os componentes ja criados. Na aba Cadastro, adicione explicitamente os campos Anexos simulados e Observacoes internas ao formulario, mantendo Titulo, Responsavel, Prioridade e Prazo. Na aba Registros, substitua a coluna Prioridade por SLA, com valores ficticios como 4h, 1 dia e 3 dias, preservando Categoria, Status e as acoes Criar, Editar e Excluir. Na aba Relacionamentos, mantenha os cards relacionados por solicitacao e acrescente dentro de cada card uma mini lista Historico com Autor, Data e Status. Continue sem API real, sem schema externo e sem regra de negocio definitiva.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("modify", "page")));
+
+        assertThat(result).isPresent();
+        JsonNode tabs = result.orElseThrow().uiCompositionPlan()
+                .path("widgets").path(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Cadastro", "Registros", "Relacionamentos");
+
+        JsonNode formConfig = tabs.path(0).path("widgets").path(0).path("inputs").path("config");
+        assertThat(formConfig.path("fieldMetadata"))
+                .extracting(field -> field.path("label").asText())
+                .containsExactly("Título", "Responsável", "Prioridade", "Prazo", "Anexos simulados", "Observações internas");
+        assertThat(formConfig.path("sections").path(0).path("rows").path(0).path("columns").path(0).path("fields"))
+                .extracting(JsonNode::asText)
+                .containsExactly("titulo", "responsavel", "prioridade", "prazo", "anexosSimulados", "observacoesInternas");
+
+        JsonNode crudMetadata = tabs.path(1).path("widgets").path(0).path("inputs").path("metadata");
+        assertThat(crudMetadata.path("table").path("columns"))
+                .extracting(column -> column.path("header").asText())
+                .containsExactly("Título", "Responsável", "Categoria", "SLA", "Status");
+        assertThat(crudMetadata.path("data"))
+                .extracting(item -> item.path("sla").asText())
+                .containsExactly("4h", "1 dia", "3 dias");
+        assertThat(crudMetadata.path("data"))
+                .extracting(item -> item.has("prioridade"))
+                .containsOnly(false);
+
+        JsonNode relationshipConfig = tabs.path(2).path("widgets").path(0).path("inputs").path("config");
+        assertThat(relationshipConfig.path("templating").path("secondary").path("expr").asText())
+                .isEqualTo("${item.historySummary}");
+        assertThat(relationshipConfig.path("dataSource").path("data"))
+                .extracting(item -> item.path("historySummary").asText())
+                .allSatisfy(summary -> assertThat(summary).contains("Histórico", "Autor", "Data", "Status"));
+        JsonNode firstHistory = relationshipConfig.path("dataSource").path("data").path(0).path("history").path(0);
+        assertThat(firstHistory.path("author").asText()).isEqualTo("Ana Souza");
+        assertThat(firstHistory.path("date").asText()).isEqualTo("2026-05-06");
+        assertThat(firstHistory.path("status").asText()).isEqualTo("Novo");
+    }
+
+    @Test
+    void renamesLocalEditorialRelationshipsTabToTrackingAndMaterializesSlaCardsWhenRequested() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Refine esta página local/editorial preservando as abas. Em Cadastro mantenha o formulário com Título, Responsável, Prioridade e Prazo. Em Registros materialize um CRUD ou lista local com colunas Item, Status, SLA e Responsável e ações Criar, Editar e Excluir. Renomeie Relacionamentos para Acompanhamento e adicione cards locais de SLA com Abertos, Em risco e Resolvidos, mantendo um histórico local em cards. Não descubra fonte de dados, não conecte API real e não use schema externo.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("modify", "page")));
+
+        assertThat(result).isPresent();
+        JsonNode tabs = result.orElseThrow().uiCompositionPlan()
+                .path("widgets").path(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Cadastro", "Registros", "Acompanhamento");
+        assertThat(tabs.path(2).path("id").asText()).isEqualTo("acompanhamento");
+
+        JsonNode crudMetadata = tabs.path(1).path("widgets").path(0).path("inputs").path("metadata");
+        assertThat(crudMetadata.path("table").path("columns"))
+                .extracting(column -> column.path("header").asText())
+                .containsExactly("Título", "Responsável", "SLA", "Status");
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("actions"))
+                .extracting(action -> action.path("label").asText())
+                .containsExactly("Editar", "Excluir");
+
+        JsonNode trackingConfig = tabs.path(2).path("widgets").path(0).path("inputs").path("config");
+        assertThat(trackingConfig.path("title").asText()).isEqualTo("Resumo de SLA");
+        assertThat(trackingConfig.path("layout").path("variant").asText()).isEqualTo("cards");
+        assertThat(trackingConfig.path("dataSource").path("data"))
+                .extracting(item -> item.path("title").asText())
+                .containsExactly("Abertos", "Em risco", "Resolvidos");
+        assertThat(trackingConfig.path("dataSource").path("data"))
+                .extracting(item -> item.path("historySummary").asText())
+                .allSatisfy(summary -> assertThat(summary).contains("Histórico local"));
+    }
+
+    @Test
+    void explicitTrackingTabWithSlaCardsDoesNotFallbackToRelationshipsLabel() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma tela local/editorial com abas. Na aba Cadastro coloque um formulário com Título, Responsável, Prioridade e Prazo. Na aba Registros coloque um componente CRUD ou lista local com colunas Item, Status, SLA e Responsável e ações Criar, Editar e Excluir. Na aba Acompanhamento adicione cards locais de SLA com Abertos, Em risco e Resolvidos e um histórico local em cards. Não descubra fonte de dados, não conecte API real e não use schema externo.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("compose", "page")));
+
+        assertThat(result).isPresent();
+        JsonNode tabs = result.orElseThrow().uiCompositionPlan()
+                .path("widgets").path(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Cadastro", "Registros", "Acompanhamento");
+        assertThat(tabs.path(2).path("id").asText()).isEqualTo("acompanhamento");
+        assertThat(tabs.path(2).path("widgets").path(0).path("inputs").path("config")
+                .path("dataSource").path("data"))
+                .extracting(item -> item.path("title").asText())
+                .containsExactly("Abertos", "Em risco", "Resolvidos");
+    }
+
+    @Test
+    void modelsComplexLocalEditorialTabsCrudSelectionAndTrackingRelationship() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Refine esta tela local/editorial mantendo as três abas. Na aba Cadastro, transforme o formulário em um cadastro avançado dentro da aba com campos Título, Responsável, Prioridade, Prazo, Categoria, SLA esperado, Descrição e Anexos simulados. Na aba Registros, mantenha um CRUD/lista local com quatro registros fictícios e colunas Item, Categoria, Status, SLA, Responsável e Última atualização; inclua ações Criar, Editar, Excluir e Ver detalhes. Quando um registro for selecionado, a aba Acompanhamento deve destacar os cards de SLA relacionados ao item selecionado e mostrar um histórico local em cards com Autor, Data, Status e Comentário. Modele o relacionamento entre Registros e Acompanhamento como estado local/seleção do Page Builder, sem API real, sem schema externo e sem descobrir fonte de dados.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("modify", "page")));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        JsonNode tabs = plan.path("widgets").path(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Cadastro", "Registros", "Acompanhamento");
+        assertThat(tabs.path(2).path("id").asText()).isEqualTo("acompanhamento");
+
+        JsonNode formConfig = tabs.path(0).path("widgets").path(0).path("inputs").path("config");
+        assertThat(formConfig.path("fieldMetadata"))
+                .extracting(field -> field.path("label").asText())
+                .containsExactly(
+                        "Título",
+                        "Responsável",
+                        "Prioridade",
+                        "Prazo",
+                        "Categoria",
+                        "SLA esperado",
+                        "Descrição",
+                        "Anexos simulados");
+
+        JsonNode crudMetadata = tabs.path(1).path("widgets").path(0).path("inputs").path("metadata");
+        assertThat(crudMetadata.path("table").path("columns"))
+                .extracting(column -> column.path("header").asText())
+                .containsExactly("Título", "Responsável", "Categoria", "SLA", "Status", "Última atualização");
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("actions"))
+                .extracting(action -> action.path("label").asText())
+                .containsExactly("Ver detalhes", "Editar", "Excluir");
+        assertThat(crudMetadata.path("data")).hasSize(4);
+        assertThat(crudMetadata.path("data"))
+                .extracting(item -> item.path("ultimaAtualizacao").asText())
+                .containsExactly("2026-05-06 09:15", "2026-05-06 10:30", "2026-05-05 16:45", "2026-05-06 11:20");
+
+        JsonNode trackingConfig = tabs.path(2).path("widgets").path(0).path("inputs").path("config");
+        assertThat(trackingConfig.path("title").asText()).isEqualTo("Resumo de SLA");
+        assertThat(trackingConfig.path("dataSource").path("data"))
+                .extracting(item -> item.path("title").asText())
+                .containsExactly("Abertos", "Em risco", "Resolvidos");
+        JsonNode firstHistory = trackingConfig.path("dataSource").path("data").path(0).path("history").path(0);
+        assertThat(firstHistory.path("author").asText()).isEqualTo("Sistema editorial");
+        assertThat(firstHistory.path("date").asText()).isEqualTo("2026-05-06");
+        assertThat(firstHistory.path("status").asText()).isEqualTo("3 solicitações");
+        assertThat(firstHistory.path("comment").asText()).contains("item selecionado");
+
+        assertThat(plan.path("state").path("values").has("selectedItem")).isTrue();
+        assertThat(plan.path("bindings"))
+                .extracting(binding -> binding.path("id").asText())
+                .containsExactly(
+                        "local-solicitacoes-workspace.local-solicitacoes-crud.rowClick->state.selectedItem",
+                        "state.selectedItem->local-solicitacoes-workspace.local-solicitacoes-relacionamentos-list.config");
+        JsonNode trackingBinding = plan.path("bindings").path(1);
+        assertThat(trackingBinding.path("to").path("port").asText()).isEqualTo("config");
+        assertThat(trackingBinding.path("transform").path("kind").asText()).isEqualTo("template");
+        assertThat(trackingBinding.path("transform").path("template").path("dataSource").path("data"))
+                .extracting(item -> item.path("title").asText())
+                .containsExactly(
+                        "Item selecionado: ${payload.titulo}",
+                        "SLA relacionado",
+                        "Histórico local");
+    }
+
+    @Test
+    void preservesUserRequestedLocalEditorialTabNamesStateAndRecordCount() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma nova variação local/editorial para uma central de chamados internos. Quero três abas: Cadastro, Fila e Detalhes. Na aba Cadastro, coloque um formulário avançado com campos Assunto, Solicitante, Área impactada, Prioridade, Canal, Prazo desejado, Descrição e Evidências simuladas. Na aba Fila, use um componente CRUD/lista local com cinco chamados fictícios e colunas Chamado, Área, Prioridade, Status, Responsável e Atualização; inclua ações Criar chamado, Atribuir, Encerrar e Ver detalhes. Modele a seleção de uma linha da Fila como estado local selectedTicket. Na aba Detalhes, mostre cards relacionados ao chamado selecionado com SLA, responsável e histórico local. Não use API real, não descubra fonte externa e materialize como decisão semântica local governada por composition.links.",
+                null,
+                null,
+                null,
+                null,
+                localEditorialTabsIntent("compose", "page")));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        JsonNode tabs = plan.path("widgets").path(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Cadastro", "Fila", "Detalhes");
+        assertThat(tabs).extracting(tab -> tab.path("id").asText())
+                .containsExactly("cadastro", "fila", "detalhes");
+
+        JsonNode formConfig = tabs.path(0).path("widgets").path(0).path("inputs").path("config");
+        assertThat(formConfig.path("fieldMetadata"))
+                .extracting(field -> field.path("label").asText())
+                .containsExactly(
+                        "Assunto",
+                        "Solicitante",
+                        "Área impactada",
+                        "Prioridade",
+                        "Canal",
+                        "Prazo desejado",
+                        "Descrição",
+                        "Evidências simuladas");
+        assertThat(formConfig.path("sections").path(0).path("rows").path(0).path("columns").path(0).path("fields"))
+                .extracting(JsonNode::asText)
+                .containsExactly(
+                        "assunto",
+                        "solicitante",
+                        "areaImpactada",
+                        "prioridade",
+                        "canal",
+                        "prazoDesejado",
+                        "descricao",
+                        "evidenciasSimuladas");
+
+        JsonNode crudMetadata = tabs.path(1).path("widgets").path(0).path("inputs").path("metadata");
+        assertThat(crudMetadata.path("table").path("columns"))
+                .extracting(column -> column.path("header").asText())
+                .containsExactly("Chamado", "Área", "Prioridade", "Status", "Responsável", "Atualização");
+        assertThat(crudMetadata.path("table").path("actions").path("row").path("actions"))
+                .extracting(action -> action.path("label").asText())
+                .containsExactly("Atribuir", "Encerrar", "Ver detalhes");
+        assertThat(crudMetadata.path("actions"))
+                .extracting(action -> action.path("label").asText())
+                .containsExactly("Criar chamado", "Atribuir", "Encerrar", "Ver detalhes");
+        assertThat(crudMetadata.path("data")).hasSize(5);
+        assertThat(crudMetadata.path("data").path(0).path("area").asText()).isEqualTo("Acesso");
+        assertThat(crudMetadata.path("data").path(0).path("prioridade").asText()).isEqualTo("Alta");
+        assertThat(crudMetadata.path("data").path(0).path("ultimaAtualizacao").asText()).isEqualTo("2026-05-06 09:15");
+
+        assertThat(plan.path("state").path("values").has("selectedTicket")).isTrue();
+        assertThat(plan.path("bindings"))
+                .extracting(binding -> binding.path("id").asText())
+                .containsExactly(
+                        "local-solicitacoes-workspace.local-solicitacoes-crud.rowClick->state.selectedTicket",
+                        "state.selectedTicket->local-solicitacoes-workspace.local-solicitacoes-relacionamentos-list.config");
+        assertThat(plan.path("bindings").path(0).path("from").path("nestedPath").path(0).path("id").asText())
+                .isEqualTo("fila");
+        assertThat(plan.path("bindings").path(1).path("to").path("nestedPath").path(0).path("id").asText())
+                .isEqualTo("detalhes");
+        assertThat(plan.path("bindings").path(1).path("condition").path("!!").path(0).path("var").asText())
+                .isEqualTo("state.selectedTicket");
+    }
+
+    @Test
+    void preservesExistingTabbedWorkspaceWhenHumanRefinementAsksToSearchAndOpenDetails() {
+        JsonNode currentWorkspace = provider.plan(new AgenticAuthoringPlanRequest(
+                        "organize em abas com uma lista resumida amigavel, detalhes do item escolhido e CRUD completo para criar e editar",
+                        null,
+                        null,
+                        null,
+                        null,
+                        selectedTabbedMasterDetailFormIntent()))
+                .orElseThrow()
+                .uiCompositionPlan();
+        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode projectKnowledge = contextHints.putObject("projectKnowledge");
+        projectKnowledge.put("schemaVersion", "praxis-agentic-authoring-project-knowledge.v1");
+        projectKnowledge.put("source", "domain_knowledge_concept");
+        projectKnowledge.put("influenceCount", 1);
+        ObjectNode knowledgeEntry = projectKnowledge.putArray("entries").addObject();
+        knowledgeEntry.put("knowledgeId", "knowledge-employee-search");
+        knowledgeEntry.put("conceptKey", "employee-search-main-data");
+        knowledgeEntry.put("kind", "business-rule");
+        knowledgeEntry.put("visibility", "safe-for-authoring");
+        knowledgeEntry.put("summary", "Use annotated employee search surfaces instead of assuming field names.");
+
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Agora quero que a tela tambem me ajude a encontrar empregados usando os dados principais da pessoa e depois abrir os detalhes sem eu precisar saber quais campos existem.",
+                null,
+                null,
+                null,
+                currentWorkspace,
+                selectedMasterDetailIntent(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-tabbed-operational-workspace");
+        JsonNode tabs = plan.path("widgets").get(0).path("inputs").path("config").path("tabs");
+        assertThat(tabs)
+                .extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Buscar e listar", "Detalhes", "CRUD");
+        assertThat(tabs.path(0).path("widgets"))
+                .extracting(widget -> widget.path("id").asText())
+                .containsExactly("praxis-filter", "praxis-table");
+        assertThat(tabs.path(2).path("widgets").path(0).path("id").asText()).isEqualTo("praxis-crud");
+        assertThat(plan.path("bindings"))
+                .extracting(binding -> binding.path("id").asText())
+                .contains(
+                        "human-resources-funcionarios-workspace.human-resources-funcionarios-filter.requestSearch->human-resources-funcionarios-master.queryContext",
+                        "human-resources-funcionarios-workspace.human-resources-funcionarios-master.rowClick->state.selectedItem",
+                        "state.selectedItem->human-resources-funcionarios-workspace.human-resources-funcionarios-detail.resourceId");
+        assertThat(plan.path("sourceRefs"))
+                .extracting(JsonNode::asText)
+                .contains(
+                        "intent-resolution",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                        "projectKnowledge:knowledge-employee-search");
+        assertThat(plan.toString()).doesNotContain("Use annotated employee search surfaces");
     }
 
     @Test
@@ -988,6 +1547,52 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                         0.94d,
                         "user selected an employee resource candidate",
                         java.util.List.of("quick-reply")),
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                new ObjectMapper().createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult selectedTabbedMasterDetailFormIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_tabbed_master_detail_form",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        0.94d,
+                        "user selected a resource candidate",
+                        java.util.List.of("quick-reply")),
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                new ObjectMapper().createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult localEditorialTabsIntent(String operationKind, String artifactKind) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                operationKind,
+                artifactKind,
+                "create_local_editorial_tabbed_workspace",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
                 java.util.List.of(),
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", java.util.List.of()),
                 java.util.List.of(),

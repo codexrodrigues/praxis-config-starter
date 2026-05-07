@@ -248,6 +248,66 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewAuditsProjectKnowledgeRefsFromUiCompositionPlanProvider() throws Exception {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode projectKnowledge = contextHints.putObject("projectKnowledge");
+        projectKnowledge.put("schemaVersion", "praxis-agentic-authoring-project-knowledge.v1");
+        projectKnowledge.put("source", "domain_knowledge_concept");
+        ObjectNode knowledgeEntry = projectKnowledge.putArray("entries").addObject();
+        knowledgeEntry.put("knowledgeId", "knowledge-ui-composition");
+        knowledgeEntry.put("conceptKey", "page-builder.employee-workspace");
+        knowledgeEntry.put("kind", "project_preference");
+        knowledgeEntry.put("visibility", "allow");
+        knowledgeEntry.put("sourceSummary", "accepted authoring turn");
+        knowledgeEntry.put("influence", "layout_preference");
+        knowledgeEntry.put("summary", "Do not leak this summary into the audit.");
+
+        ObjectNode uiCompositionPlan = objectMapper.createObjectNode();
+        uiCompositionPlan.put("version", "1.0");
+        uiCompositionPlan.put("kind", "praxis.ui-composition-plan");
+        uiCompositionPlan.putArray("sourceRefs")
+                .add("intent-resolution")
+                .add("projectKnowledge:knowledge-ui-composition");
+        uiCompositionPlan.putArray("widgets");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.put("version", "1.0.0");
+        compiledFormPatch.putObject("patch");
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:test"),
+                        uiCompositionPlan,
+                        compiledFormPatch));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider)).preview(new AgenticAuthoringPlanRequest(
+                        "Crie uma area de trabalho para empregados",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        selectedMasterDetailIntent(),
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints), "tenant", "user", "local");
+
+        JsonNode audit = result.diagnostics().projectKnowledgeAudit();
+        assertThat(audit.path("citedCount").asInt()).isEqualTo(1);
+        assertThat(audit.path("uncitedCount").asInt()).isZero();
+        assertThat(audit.path("entries").path(0).path("cited").asBoolean()).isTrue();
+        assertThat(audit.path("entries").path(0).path("sourceRefs").toString())
+                .contains("projectKnowledge:knowledge-ui-composition");
+        assertThat(audit.toString()).doesNotContain("Do not leak this summary");
+    }
+
+    @Test
     void previewProviderReceivesIntentEffectivePromptInsteadOfRecomposedPendingClarification() throws Exception {
         String rawPrompt = "Com base nisso, agora crie uma tabela operacional de folhas de pagamento";
         AtomicReference<AgenticAuthoringPlanRequest> capturedRequest = new AtomicReference<>();
@@ -293,6 +353,54 @@ class AgenticAuthoringPreviewServiceTest {
 
         assertThat(capturedRequest.get()).isNotNull();
         assertThat(capturedRequest.get().userPrompt()).isEqualTo(rawPrompt);
+    }
+
+    @Test
+    void previewProviderContextualizesShortIntentEffectivePromptWhenUserConfirmsPriorProposal() throws Exception {
+        String sourcePrompt = "Crie uma pagina operacional com Praxis Tabs. A aba Cadastro deve conter formulario local. A aba Registros deve conter Praxis CRUD local. A aba Relacionamentos deve conter lista em cards. Use conteudo local editorial de demonstracao.";
+        String confirmation = "Sim, siga e materialize a proposta agora.";
+        AtomicReference<AgenticAuthoringPlanRequest> capturedRequest = new AtomicReference<>();
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("layoutPreset", "local-editorial-tabbed-workspace");
+        plan.putArray("widgets").addObject().put("key", "local-solicitacoes-workspace").put("componentId", "praxis-tabs");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.putObject("patch");
+        AgenticAuthoringUiCompositionPlanProvider provider = request -> {
+            capturedRequest.set(request);
+            return java.util.Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    List.of("ui-composition-plan-provider:local-editorial-tabbed-workspace"),
+                    plan,
+                    compiledFormPatch));
+        };
+
+        new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider)).preview(new AgenticAuthoringPlanRequest(
+                        confirmation,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        payrollTableIntent(confirmation),
+                        "session-1",
+                        "turn-2",
+                        List.of(
+                                new AgenticAuthoringConversationMessage("m1", "user", sourcePrompt, null),
+                                new AgenticAuthoringConversationMessage(
+                                        "m2",
+                                        "assistant",
+                                        "Posso seguir com Cadastro, Registros com CRUD local e Relacionamentos em cards.",
+                                        null)),
+                        null), "tenant", "user", "local");
+
+        assertThat(capturedRequest.get()).isNotNull();
+        assertThat(capturedRequest.get().userPrompt())
+                .contains(sourcePrompt)
+                .contains(confirmation);
     }
 
     @Test
@@ -360,18 +468,13 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(bindings.path(1).path("from").path("path").asText()).isEqualTo("selectedItem");
         assertThat(bindings.path(1).path("to").path("kind").asText()).isEqualTo("component-port");
         assertThat(bindings.path(1).path("to").path("widget").asText()).isEqualTo("human-resources-funcionarios-detail");
-        JsonNode detailTemplate = bindings.path(1).path("transform").path("template");
-        assertThat(detailTemplate.path("kind").asText()).isEqualTo("praxis.rich-content.document");
-        assertThat(detailTemplate.path("version").asText()).isEqualTo("1.0.0");
-        assertThat(detailTemplate.path("nodes").path(0).path("type").asText()).isEqualTo("text");
-        assertThat(detailTemplate.path("nodes").path(0).path("text").asText())
-                .contains("Dados do item selecionado")
-                .contains("${current.nomeCompleto}")
-                .contains("${current.cargoNome}")
-                .contains("${current.departamentoNome}")
-                .contains("${current.email}");
-        assertThat(detailTemplate.toString()).doesNotContain("{{state.selectedItem}}");
-        assertThat(detailTemplate.toString()).doesNotContain("${payload}");
+        assertThat(bindings.path(1).path("to").path("port").asText()).isEqualTo("resourceId");
+        assertThat(bindings.path(1).path("transform").path("kind").asText()).isEqualTo("pick-path");
+        assertThat(bindings.path(1).path("transform").path("path").asText()).isEqualTo("id");
+        JsonNode detailWidget = result.uiCompositionPlan().path("widgets").path(1);
+        assertThat(detailWidget.path("componentId").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(detailWidget.path("inputs").path("mode").asText()).isEqualTo("view");
+        assertThat(detailWidget.path("inputs").path("resourcePath").asText()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(bindings.path(1).has("source")).isFalse();
         assertThat(bindings.path(1).has("target")).isFalse();
         assertThat(result.warnings()).contains(

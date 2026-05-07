@@ -111,6 +111,43 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
         assertThat(result).isEqualTo("fallback seguro");
     }
 
+    @Test
+    void synthesizeDoesNotClaimSelectedResourceForLocalEditorialComposition() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Criei uma prévia a partir do recurso selecionado com duas abas para o workspace operacional.");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        String result = service().synthesize(
+                localEditorialRequest(),
+                localEditorialIntent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("explicit-local-ui-composition-resource-selection-bypassed"),
+                "",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("conteudo local/editorial")
+                .doesNotContain("recurso selecionado")
+                .doesNotContain("fonte de dados");
+        org.mockito.Mockito.verify(providerManagementService).generateText(
+                promptCaptor.capture(),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        assertThat(promptCaptor.getValue()).contains("\"localEditorialComposition\" : true");
+        assertThat(promptCaptor.getValue()).contains("Do not mention selected resource");
+    }
+
     private AgenticAuthoringPreviewMessageSynthesizerService service() {
         return new AgenticAuthoringPreviewMessageSynthesizerService(providerManagementService, objectMapper);
     }
@@ -123,6 +160,16 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 "test-key",
                 null,
                 intent());
+    }
+
+    private AgenticAuthoringPlanRequest localEditorialRequest() {
+        return new AgenticAuthoringPlanRequest(
+                "Crie uma página com tabs usando conteúdo local/editorial de demonstração.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                localEditorialIntent());
     }
 
     private AgenticAuthoringIntentResolutionResult intent() {
@@ -148,6 +195,25 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
                 List.of(),
                 List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult localEditorialIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_tabbed_workspace",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                List.of(),
+                List.of("explicit-local-ui-composition-resource-selection-bypassed"),
                 List.of(),
                 objectMapper.createObjectNode());
     }

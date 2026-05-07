@@ -83,4 +83,37 @@ class AgenticAuthoringCurrentPageAnalyzerTest {
         assertThat(summary.path("structuralInspection").path("serverBindings").path(0).path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
     }
+
+    @Test
+    void exposesTabsActiveContentAsEditableContainerContext() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode tabsWidget = widgets.addObject();
+        tabsWidget.put("key", "team-workspace");
+        ObjectNode definition = tabsWidget.putObject("definition");
+        definition.put("id", "praxis-tabs");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.putObject("group").put("selectedIndex", 1);
+        var tabs = config.putArray("tabs");
+        tabs.addObject()
+                .put("id", "overview")
+                .put("textLabel", "Overview")
+                .putArray("widgets");
+        tabs.addObject()
+                .put("id", "training")
+                .put("textLabel", "Training")
+                .putArray("widgets");
+
+        var inspection = analyzer.inspect(page, "team-workspace");
+
+        assertThat(inspection.path("artifactKind").asText()).isEqualTo("container");
+        assertThat(inspection.path("componentType").asText()).isEqualTo("praxis-tabs");
+        assertThat(inspection.path("editableRegions")).extracting(node -> node.path("region").asText())
+                .containsExactly("tabs.items", "tabs.activeContent");
+        var widgetSummary = inspection.path("widgets").path(0);
+        assertThat(widgetSummary.path("selectedIndex").asInt()).isEqualTo(1);
+        assertThat(widgetSummary.path("activeTab").path("id").asText()).isEqualTo("training");
+        assertThat(widgetSummary.path("activeTab").path("label").asText()).isEqualTo("Training");
+        assertThat(widgetSummary.path("activeTab").path("widgetsCount").asInt()).isZero();
+    }
 }

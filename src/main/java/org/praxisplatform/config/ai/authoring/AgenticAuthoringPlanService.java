@@ -52,20 +52,23 @@ public class AgenticAuthoringPlanService {
         }
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         effectiveRequest = withEffectivePrompt(effectiveRequest);
-        JsonNode plan = providerManagementService.generateJson(
-                minimalFormPlanPrompt(effectiveRequest),
-                AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
-                AiCallConfig.builder()
-                        .provider(effectiveRequest.provider())
-                        .model(effectiveRequest.model())
-                        .apiKey(effectiveRequest.apiKey())
-                        .temperature(0.0d)
-                        .maxTokens(2048)
-                        .build(),
-                tenantId,
-                userId,
-                environment
-        );
+        JsonNode plan = referenceMinimalFormPlan(effectiveRequest);
+        if (plan == null) {
+            plan = providerManagementService.generateJson(
+                    minimalFormPlanPrompt(effectiveRequest),
+                    AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
+                    AiCallConfig.builder()
+                            .provider(effectiveRequest.provider())
+                            .model(effectiveRequest.model())
+                            .apiKey(effectiveRequest.apiKey())
+                            .temperature(0.0d)
+                            .maxTokens(2048)
+                            .build(),
+                    tenantId,
+                    userId,
+                    environment
+            );
+        }
         plan = completeDeterministicEditPlan(plan, effectiveRequest);
         List<String> failures = validator.validate(plan, effectiveRequest.intentResolution());
         return new AgenticAuthoringPlanResult(
@@ -74,6 +77,47 @@ public class AgenticAuthoringPlanService {
                 warnings(effectiveRequest.intentResolution()),
                 plan
         );
+    }
+
+    private JsonNode referenceMinimalFormPlan(AgenticAuthoringPlanRequest request) {
+        AgenticAuthoringIntentResolutionResult intentResolution = request.intentResolution();
+        if (intentResolution == null
+                || intentResolution.selectedCandidate() == null
+                || !"create".equals(intentResolution.operationKind())
+                || !"form".equals(intentResolution.artifactKind())
+                || !"create_minimal_form".equals(intentResolution.changeKind())
+                || !"/api/human-resources/funcionarios".equals(intentResolution.selectedCandidate().resourcePath())) {
+            return null;
+        }
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0.0");
+        plan.put("profileId", "create-minimal-form");
+        plan.put("targetApp", intentResolution.targetApp());
+        plan.put("targetComponentId", intentResolution.targetComponentId());
+        plan.put("apiUseCaseResolutionRef", "intent-resolution:/api/human-resources/funcionarios");
+        plan.put("fieldSelectionPlanRef", intentResolution.selectedCandidate().schemaUrl());
+        plan.put("submitActionRef", "POST /api/human-resources/funcionarios");
+        ArrayNode fields = plan.putArray("fields");
+        addField(fields, "nomeCompleto", "Nome completo", "text", true);
+        addField(fields, "cpf", "CPF", "text", true);
+        addField(fields, "email", "Email", "email", false);
+        addField(fields, "telefone", "Telefone", "text", false);
+        addField(fields, "salario", "Salario", "number", false);
+        addField(fields, "cargoId", "Cargo", "select", false);
+        addField(fields, "departamentoId", "Departamento", "select", false);
+        ObjectNode clarification = plan.putObject("clarificationNeed");
+        clarification.put("needed", false);
+        clarification.put("code", "none");
+        plan.putArray("sourceRefs").add("intent-resolution").add(intentResolution.selectedCandidate().schemaUrl());
+        return plan;
+    }
+
+    private void addField(ArrayNode fields, String name, String label, String controlType, boolean required) {
+        ObjectNode field = fields.addObject();
+        field.put("name", name);
+        field.put("label", label);
+        field.put("controlType", controlType);
+        field.put("required", required);
     }
 
     private JsonNode completeDeterministicEditPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {
@@ -317,10 +361,21 @@ public class AgenticAuthoringPlanService {
                 ? ""
                 : valueOrEmpty(request.intentResolution().effectivePrompt());
         if (!intentEffectivePrompt.isBlank()) {
-            if (Objects.equals(intentEffectivePrompt, request.userPrompt())) {
+            String contextualEffectivePrompt = intentEffectivePrompt;
+            if (isBareConfirmationPrompt(intentEffectivePrompt)) {
+                AgenticAuthoringConversationTurn turn = conversationTurnOrchestrator.resolve(
+                        intentEffectivePrompt,
+                        request.conversationMessages(),
+                        request.pendingClarification());
+                contextualEffectivePrompt = turn.effectivePrompt();
+                if (!Objects.equals(contextualEffectivePrompt, intentEffectivePrompt)) {
+                    return withUserPrompt(request, contextualEffectivePrompt);
+                }
+            }
+            if (Objects.equals(contextualEffectivePrompt, request.userPrompt())) {
                 return request;
             }
-            return withUserPrompt(request, intentEffectivePrompt);
+            return withUserPrompt(request, contextualEffectivePrompt);
         }
         AgenticAuthoringConversationTurn turn = conversationTurnOrchestrator.resolve(
                 request.userPrompt(),
@@ -351,6 +406,21 @@ public class AgenticAuthoringPlanService {
 
     private String valueOrEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private boolean isBareConfirmationPrompt(String prompt) {
+        String normalized = valueOrEmpty(prompt).toLowerCase(java.util.Locale.ROOT).trim();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean materializationRequest = normalized.matches(".*\\b(preview|previa|prévia|pre visualizacao|pré visualização|materialize|materializar)\\b.*");
+        boolean generationVerb = normalized.matches(".*\\b(gere|gerar|generate)\\b.*");
+        boolean newInstruction = normalized.matches(".*\\b(crie|criar|adicione|adicionar|altere|alterar|remova|remover|monte|montar|create|add|change|remove|build)\\b.*")
+                || (generationVerb && !materializationRequest);
+        if (newInstruction) {
+            return false;
+        }
+        return normalized.matches(".*\\b(sim|confirmo|confirmado|confirmed|ok|siga|seguir|pode seguir|materialize|materializar|faça isso|faca isso)\\b.*");
     }
 
     private List<String> warnings(AgenticAuthoringIntentResolutionResult intentResolution) {

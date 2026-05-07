@@ -286,6 +286,7 @@ public class AgenticAuthoringAutoConfiguration {
             AgenticAuthoringPreviewService previewService,
             AgenticAuthoringToolRegistry toolRegistry,
             ObjectProvider<AgenticAuthoringProjectKnowledgeService> projectKnowledgeService,
+            ObjectProvider<AgenticAuthoringApiCatalogConversationService> apiCatalogConversationService,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -293,7 +294,8 @@ public class AgenticAuthoringAutoConfiguration {
                 objectMapper,
                 new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
                 toolRegistry,
-                projectKnowledgeService.getIfAvailable());
+                projectKnowledgeService.getIfAvailable(),
+                apiCatalogConversationService.getIfAvailable());
     }
 
     @Bean

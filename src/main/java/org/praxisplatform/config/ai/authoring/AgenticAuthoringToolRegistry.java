@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.praxisplatform.config.service.AiPrincipalContext;
 
 public class AgenticAuthoringToolRegistry {
 
@@ -25,6 +26,10 @@ public class AgenticAuthoringToolRegistry {
     }
 
     AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+        return execute(call, null);
+    }
+
+    AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call, AiPrincipalContext principalContext) {
         if (call == null || call.name() == null || call.name().isBlank()) {
             return AgenticAuthoringToolResult.failure("", "tool-name-required", "Tool name is required.");
         }
@@ -40,7 +45,7 @@ public class AgenticAuthoringToolRegistry {
                     "Tool is not allowed for route " + safeRoute(call.routeClass()) + ".");
         }
         try {
-            return executor.execute(call);
+            return executor.execute(call, principalContext);
         } catch (Exception ex) {
             return AgenticAuthoringToolResult.failure(
                     call.name(),
@@ -64,7 +69,7 @@ public class AgenticAuthoringToolRegistry {
 
         private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
                 SEARCH_API_RESOURCES,
-                Set.of("component_authoring", "shared_rule_authoring", "mixed", "needs_clarification"),
+                Set.of("component_authoring", "shared_rule_authoring", "mixed", "needs_clarification", "advisory_authoring"),
                 "praxis-config-starter:/api/praxis/config/ai/authoring/resource-candidates",
                 "read_only",
                 "safe_grounding",
@@ -85,13 +90,20 @@ public class AgenticAuthoringToolRegistry {
 
         @Override
         public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+            return execute(call, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(
+                AgenticAuthoringToolCall call,
+                AiPrincipalContext principalContext) {
             if (!(call.payload() instanceof AgenticAuthoringResourceCandidatesRequest request)) {
                 return AgenticAuthoringToolResult.failure(
                         call.name(),
                         "tool-payload-invalid",
                         "searchApiResources requires AgenticAuthoringResourceCandidatesRequest payload.");
             }
-            AgenticAuthoringResourceCandidatesResult result = resourceDiscoveryService.search(request);
+            AgenticAuthoringResourceCandidatesResult result = resourceDiscoveryService.search(request, principalContext);
             return AgenticAuthoringToolResult.success(
                     call.name(),
                     result,

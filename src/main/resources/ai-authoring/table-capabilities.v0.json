@@ -20,7 +20,11 @@
       "id": "praxis-table.column.format.currency-brl@0.1.0",
       "changeKind": "set_column_format",
       "triggerTerms": ["formatar", "formate", "formatacao", "moeda", "reais", "brl"],
-      "fieldAliases": [],
+      "fieldAliases": [
+        { "field": "salarioLiquido", "aliases": ["salario liquido", "salarioLiquido", "liquido"] },
+        { "field": "salarioBruto", "aliases": ["salario bruto", "salarioBruto", "bruto"] },
+        { "field": "totalDescontos", "aliases": ["total de descontos", "total descontos", "descontos"] }
+      ],
       "examples": [
         {
           "prompt": "Formate a coluna numerica selecionada como moeda.",
@@ -33,7 +37,11 @@
       "id": "praxis-table.column.visibility@0.1.0",
       "changeKind": "set_column_visibility",
       "triggerTerms": ["ocultar", "oculte", "esconder", "esconda"],
-      "fieldAliases": [],
+      "fieldAliases": [
+        { "field": "salarioLiquido", "aliases": ["salario liquido", "salarioLiquido", "liquido"] },
+        { "field": "salarioBruto", "aliases": ["salario bruto", "salarioBruto", "bruto"] },
+        { "field": "totalDescontos", "aliases": ["total de descontos", "total descontos", "descontos"] }
+      ],
       "examples": [
         {
           "prompt": "Oculte a coluna de identificador.",
@@ -46,7 +54,11 @@
       "id": "praxis-table.column.order@0.1.0",
       "changeKind": "set_column_order",
       "triggerTerms": ["mover", "mova", "reordenar", "reordene", "primeira", "inicio"],
-      "fieldAliases": [],
+      "fieldAliases": [
+        { "field": "salarioLiquido", "aliases": ["salario liquido", "salarioLiquido", "liquido"] },
+        { "field": "salarioBruto", "aliases": ["salario bruto", "salarioBruto", "bruto"] },
+        { "field": "totalDescontos", "aliases": ["total de descontos", "total descontos", "descontos"] }
+      ],
       "examples": [
         {
           "prompt": "Mova a coluna selecionada para a primeira posicao.",

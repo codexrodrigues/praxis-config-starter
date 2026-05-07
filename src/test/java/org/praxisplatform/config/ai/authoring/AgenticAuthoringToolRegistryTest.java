@@ -30,7 +30,8 @@ class AgenticAuthoringToolRegistryTest {
                                     "component_authoring",
                                     "shared_rule_authoring",
                                     "mixed",
-                                    "needs_clarification");
+                                    "needs_clarification",
+                                    "advisory_authoring");
                     assertThat(definition.ownerSurface())
                             .isEqualTo("praxis-config-starter:/api/praxis/config/ai/authoring/resource-candidates");
                     assertThat(definition.sideEffectClass()).isEqualTo("read_only");

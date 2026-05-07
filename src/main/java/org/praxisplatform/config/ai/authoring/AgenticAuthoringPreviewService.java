@@ -198,7 +198,7 @@ public class AgenticAuthoringPreviewService {
                             request.intentResolution(),
                             failureCodes,
                             List.copyOf(warnings),
-                            MissingNode.getInstance(),
+                            planResult.uiCompositionPlan(),
                             planResult.compiledFormPatch() == null
                                     ? MissingNode.getInstance()
                                     : planResult.compiledFormPatch()),
@@ -330,10 +330,21 @@ public class AgenticAuthoringPreviewService {
                 ? ""
                 : value(request.intentResolution().effectivePrompt()).trim();
         if (!intentEffectivePrompt.isBlank()) {
-            if (Objects.equals(intentEffectivePrompt, request.userPrompt())) {
+            String contextualEffectivePrompt = intentEffectivePrompt;
+            if (isBareConfirmationPrompt(intentEffectivePrompt)) {
+                AgenticAuthoringConversationTurn turn = conversationTurnOrchestrator.resolve(
+                        intentEffectivePrompt,
+                        request.conversationMessages(),
+                        request.pendingClarification());
+                contextualEffectivePrompt = turn.effectivePrompt();
+                if (!Objects.equals(contextualEffectivePrompt, intentEffectivePrompt)) {
+                    return withUserPrompt(request, contextualEffectivePrompt);
+                }
+            }
+            if (Objects.equals(contextualEffectivePrompt, request.userPrompt())) {
                 return request;
             }
-            return withUserPrompt(request, intentEffectivePrompt);
+            return withUserPrompt(request, contextualEffectivePrompt);
         }
         AgenticAuthoringConversationTurn turn = conversationTurnOrchestrator.resolve(
                 request.userPrompt(),
@@ -381,6 +392,21 @@ public class AgenticAuthoringPreviewService {
         } catch (IllegalArgumentException ex) {
             return List.of();
         }
+    }
+
+    private boolean isBareConfirmationPrompt(String prompt) {
+        String normalized = value(prompt).toLowerCase(java.util.Locale.ROOT).trim();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean materializationRequest = normalized.matches(".*\\b(preview|previa|prévia|pre visualizacao|pré visualização|materialize|materializar)\\b.*");
+        boolean generationVerb = normalized.matches(".*\\b(gere|gerar|generate)\\b.*");
+        boolean newInstruction = normalized.matches(".*\\b(crie|criar|adicione|adicionar|altere|alterar|remova|remover|monte|montar|create|add|change|remove|build)\\b.*")
+                || (generationVerb && !materializationRequest);
+        if (newInstruction) {
+            return false;
+        }
+        return normalized.matches(".*\\b(sim|confirmo|confirmado|confirmed|ok|siga|seguir|pode seguir|materialize|materializar|faça isso|faca isso)\\b.*");
     }
 
     private AgenticAuthoringPreviewDiagnostics diagnostics(

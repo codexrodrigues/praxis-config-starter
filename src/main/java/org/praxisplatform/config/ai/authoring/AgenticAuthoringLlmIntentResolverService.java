@@ -22,6 +22,7 @@ public class AgenticAuthoringLlmIntentResolverService {
 
     private static final String SYSTEM_PROMPT_TEMPLATE_ID = "ai-authoring/page-builder-system-prompt.v1.md";
     private static final String SYSTEM_PROMPT_TEMPLATE = loadSystemPromptTemplate();
+    private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
@@ -75,7 +76,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .model(request.model())
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
-                            .maxTokens(1800)
+                            .maxTokens(3600)
                             .build(),
                     tenantId,
                     userId,
@@ -169,7 +170,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         String selectedResourcePath = nullableText(result, "selectedResourcePath");
         String resourceSearchQuery = nullableText(result, "resourceSearchQuery");
         String followUpKind = text(result, "followUpKind");
-        String assistantMessage = nullableText(result, "assistantMessage");
+        String assistantMessage = conciseAssistantMessage(nullableText(result, "assistantMessage"));
         if (!resolved
                 && operationKind.isBlank()
                 && artifactKind.isBlank()
@@ -221,6 +222,20 @@ public class AgenticAuthoringLlmIntentResolverService {
                     item.path("contextHints").isObject() ? item.path("contextHints") : null));
         }
         return List.copyOf(replies);
+    }
+
+    private String conciseAssistantMessage(String assistantMessage) {
+        if (assistantMessage == null || assistantMessage.length() <= MAX_ASSISTANT_MESSAGE_CHARS) {
+            return assistantMessage;
+        }
+        int cutoff = assistantMessage.lastIndexOf('.', MAX_ASSISTANT_MESSAGE_CHARS - 1);
+        if (cutoff < 240) {
+            cutoff = assistantMessage.lastIndexOf(' ', MAX_ASSISTANT_MESSAGE_CHARS - 1);
+        }
+        if (cutoff < 240) {
+            cutoff = MAX_ASSISTANT_MESSAGE_CHARS - 1;
+        }
+        return assistantMessage.substring(0, cutoff).trim() + "...";
     }
 
     private boolean isRedactedPrompt(String prompt) {
