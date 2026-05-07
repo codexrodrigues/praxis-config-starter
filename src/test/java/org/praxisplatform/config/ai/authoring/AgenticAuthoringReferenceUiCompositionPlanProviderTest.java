@@ -94,6 +94,10 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(listConfig.path("layout").path("variant").asText()).isEqualTo("cards");
         assertThat(listConfig.path("skin").path("type").asText()).isEqualTo("glass");
         assertThat(listConfig.path("templating").path("trailing").path("type").asText()).isEqualTo("chip");
+        assertThat(listConfig.path("templating").path("trailing").path("expr").asText())
+                .isEqualTo("${item.payrollProfile}");
+        assertThat(listConfig.path("templating").path("chipLabelMap").path("RND").asText())
+                .isEqualTo("Pesquisa e desenvolvimento");
         assertThat(listConfig.path("templating").path("balance").path("type").asText()).isEqualTo("currency");
         assertThat(listConfig.path("templating").path("balance").path("expr").asText()).contains("BRL:pt-BR");
         assertThat(listConfig.path("templating").path("meta").path("type").asText()).isEqualTo("date");

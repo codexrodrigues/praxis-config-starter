@@ -2459,7 +2459,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         addTableColumn(columns, "salarioBruto", "Salario bruto", "number");
         addTableColumn(columns, "totalDescontos", "Total descontos", "number");
         addTableColumn(columns, "salarioLiquido", "Salario liquido", "number");
-        addTableColumn(columns, "perfilFolha", "Perfil folha", "text");
+        addTableColumn(columns, "payrollProfile", "Perfil folha", "text");
         addTableColumn(columns, "composicaoFolha", "Composicao folha", "text");
     }
 
@@ -2764,18 +2764,24 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         templating.putObject("balance").put("type", "currency").put("expr", "${item.salarioLiquido}|BRL:pt-BR");
         templating.putObject("limit").put("type", "currency").put("expr", "${item.totalDescontos}|BRL:pt-BR");
         templating.putObject("risk").put("type", "text").put("expr", "${item.composicaoFolha}");
-        templating.putObject("trailing").put("type", "chip").put("expr", "${item.perfilFolha}");
+        templating.putObject("trailing").put("type", "chip").put("expr", "${item.payrollProfile}");
         templating.put("metaPlacement", "line");
         templating.put("metaPrefixIcon", "event");
         templating.put("statusPosition", "top-right");
         ObjectNode chipColorMap = templating.putObject("chipColorMap");
-        chipColorMap.put("Executiva", "primary");
-        chipColorMap.put("Operacional", "accent");
-        chipColorMap.put("Administrativa", "basic");
+        chipColorMap.put("EXEC", "primary");
+        chipColorMap.put("GENERAL", "basic");
+        chipColorMap.put("MEDIA", "accent");
+        chipColorMap.put("OPERATIONS", "basic");
+        chipColorMap.put("RND", "primary");
+        chipColorMap.put("SECURITY", "warn");
         ObjectNode chipLabelMap = templating.putObject("chipLabelMap");
-        chipLabelMap.put("Executiva", "Perfil executivo");
-        chipLabelMap.put("Operacional", "Perfil operacional");
-        chipLabelMap.put("Administrativa", "Perfil administrativo");
+        chipLabelMap.put("EXEC", "Executivo");
+        chipLabelMap.put("GENERAL", "Geral");
+        chipLabelMap.put("MEDIA", "Midia");
+        chipLabelMap.put("OPERATIONS", "Operacoes");
+        chipLabelMap.put("RND", "Pesquisa e desenvolvimento");
+        chipLabelMap.put("SECURITY", "Seguranca");
         ArrayNode features = templating.putArray("features");
         addListFeature(features, "account_tree", "${item.departamento}");
         addListFeature(features, "groups", "${item.equipe}");
