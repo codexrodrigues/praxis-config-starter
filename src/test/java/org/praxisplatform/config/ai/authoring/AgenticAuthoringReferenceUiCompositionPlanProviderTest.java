@@ -57,7 +57,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(canvas.path("columns").asInt()).isEqualTo(12);
         assertThat(canvas.path("rowUnit").asText()).isEqualTo("96px");
         assertThat(canvas.path("items").path("payroll-by-department-chart").path("colSpan").asInt()).isEqualTo(12);
-        assertThat(canvas.path("items").path("payroll-drilldown-table").path("colSpan").asInt()).isEqualTo(8);
+        assertThat(canvas.path("items").path("payroll-drilldown-list").path("colSpan").asInt()).isEqualTo(8);
         assertThat(canvas.path("items").path("payroll-drilldown-summary").path("col").asInt()).isEqualTo(9);
         assertThat(plan.path("widgets")).hasSize(3);
         JsonNode chart = plan.path("widgets").get(0);
@@ -82,40 +82,38 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(chartConfig.path("interactions").path("selection").asBoolean()).isTrue();
         assertThat(chartConfig.path("interactions").path("crossFilter").asBoolean()).isTrue();
         assertThat(chartConfig.path("interactions").path("eventActions").path("crossFilter").path("target").asText())
-                .isEqualTo("payroll-drilldown-table");
-        JsonNode table = plan.path("widgets").get(1);
-        assertThat(table.path("componentId").asText()).isEqualTo("praxis-table");
-        assertThat(table.path("inputs").path("resourcePath").asText())
+                .isEqualTo("payroll-drilldown-list");
+        JsonNode list = plan.path("widgets").get(1);
+        assertThat(list.path("componentId").asText()).isEqualTo("praxis-list");
+        assertThat(list.path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
-        assertThat(table.path("inputs").path("config").has("analyticsProjection")).isFalse();
-        assertThat(table.path("inputs").path("config").path("behavior").path("pagination").path("strategy").asText())
-                .isEqualTo("server");
-        assertThat(table.path("inputs").path("config").path("behavior").path("sorting").path("strategy").asText())
-                .isEqualTo("server");
-        assertThat(table.path("inputs").path("config").path("columns"))
-                .extracting(column -> column.path("field").asText())
-                .containsExactly(
-                        "nomeCompleto",
-                        "departamento",
-                        "cargo",
-                        "competencia",
-                        "salarioBruto",
-                        "totalDescontos",
-                        "salarioLiquido");
+        JsonNode listConfig = list.path("inputs").path("config");
+        assertThat(listConfig.path("title").asText()).isEqualTo("Detalhes do recorte selecionado");
+        assertThat(listConfig.path("dataSource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(listConfig.path("layout").path("variant").asText()).isEqualTo("cards");
+        assertThat(listConfig.path("skin").path("type").asText()).isEqualTo("glass");
+        assertThat(listConfig.path("templating").path("trailing").path("type").asText()).isEqualTo("chip");
+        assertThat(listConfig.path("templating").path("balance").path("type").asText()).isEqualTo("currency");
+        assertThat(listConfig.path("templating").path("balance").path("expr").asText()).contains("BRL:pt-BR");
+        assertThat(listConfig.path("templating").path("meta").path("type").asText()).isEqualTo("date");
+        assertThat(listConfig.path("templating").path("features")).hasSize(3);
+        assertThat(listConfig.path("i18n").path("locale").asText()).isEqualTo("pt-BR");
+        assertThat(listConfig.path("i18n").path("currency").asText()).isEqualTo("BRL");
         assertThat(plan.path("bindings")).hasSize(3);
         assertThat(plan.path("bindings")).extracting(binding -> binding.path("id").asText())
                 .contains(
                         "payroll-by-department-chart.selectionChange->state.selectedDepartment",
-                        "state.selectedDepartment->payroll-drilldown-table.queryContext",
+                        "state.selectedDepartment->payroll-drilldown-list.queryContext",
                         "state.selectedDepartment->payroll-drilldown-summary.document");
         JsonNode selectionBinding = findBinding(plan.path("bindings"),
                 "payroll-by-department-chart.selectionChange->state.selectedDepartment");
         assertThat(selectionBinding.path("transform").path("inputSource").asText()).isEqualTo("payload");
         assertThat(selectionBinding.path("transform").path("path").asText()).isEqualTo("filters.departamento");
-        JsonNode tableFilterBinding = findBinding(plan.path("bindings"),
-                "state.selectedDepartment->payroll-drilldown-table.queryContext");
-        assertThat(tableFilterBinding.path("transform").path("inputSource").asText()).isEqualTo("payload");
-        assertThat(tableFilterBinding.path("transform").path("valueVar").asText()).isEqualTo("payload");
+        JsonNode listFilterBinding = findBinding(plan.path("bindings"),
+                "state.selectedDepartment->payroll-drilldown-list.queryContext");
+        assertThat(listFilterBinding.path("transform").path("inputSource").asText()).isEqualTo("payload");
+        assertThat(listFilterBinding.path("transform").path("valueVar").asText()).isEqualTo("payload");
         assertThat(result.orElseThrow().warnings())
                 .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
         assertThat(result.orElseThrow().compiledFormPatch().path("patch").isObject()).isTrue();
@@ -195,16 +193,15 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(plan.path("bindings")).extracting(binding -> binding.path("id").asText())
                 .contains(
                         "payroll-by-competence-chart.selectionChange->state.selectedCompetence",
-                        "state.selectedCompetence->payroll-drilldown-table.queryContext");
-        JsonNode tableFilterBinding = findBinding(plan.path("bindings"),
-                "state.selectedCompetence->payroll-drilldown-table.queryContext");
-        assertThat(tableFilterBinding.path("transform").path("field").asText()).isEqualTo("competencia");
-        JsonNode table = plan.path("widgets").get(1);
-        assertThat(table.path("inputs").path("resourcePath").asText())
+                        "state.selectedCompetence->payroll-drilldown-list.queryContext");
+        JsonNode listFilterBinding = findBinding(plan.path("bindings"),
+                "state.selectedCompetence->payroll-drilldown-list.queryContext");
+        assertThat(listFilterBinding.path("transform").path("field").asText()).isEqualTo("competencia");
+        JsonNode list = plan.path("widgets").get(1);
+        assertThat(list.path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
-        assertThat(table.path("inputs").path("config").path("columns"))
-                .extracting(column -> column.path("field").asText())
-                .contains("nomeCompleto", "competencia", "salarioBruto", "totalDescontos", "salarioLiquido");
+        assertThat(list.path("inputs").path("config").path("templating").path("secondary").path("expr").asText())
+                .contains("Competencia: ${item.competencia}");
     }
 
     @Test
@@ -226,9 +223,9 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(chartConfig.path("dataSource").path("query").path("statsRequest").path("field").asText())
                 .isEqualTo("composicaoFolha");
-        JsonNode tableFilterBinding = findBinding(plan.path("bindings"),
-                "state.selectedPayrollStatus->payroll-drilldown-table.queryContext");
-        assertThat(tableFilterBinding.path("transform").path("field").asText()).isEqualTo("composicaoFolha");
+        JsonNode listFilterBinding = findBinding(plan.path("bindings"),
+                "state.selectedPayrollStatus->payroll-drilldown-list.queryContext");
+        assertThat(listFilterBinding.path("transform").path("field").asText()).isEqualTo("composicaoFolha");
     }
 
     @Test
@@ -250,15 +247,15 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(chartConfig.path("dataSource").path("query").path("statsRequest").path("field").asText())
                 .isEqualTo("cargo");
-        JsonNode tableFilterBinding = findBinding(plan.path("bindings"),
-                "state.selectedPayrollRole->payroll-drilldown-table.queryContext");
-        assertThat(tableFilterBinding.path("transform").path("field").asText()).isEqualTo("cargo");
+        JsonNode listFilterBinding = findBinding(plan.path("bindings"),
+                "state.selectedPayrollRole->payroll-drilldown-list.queryContext");
+        assertThat(listFilterBinding.path("transform").path("field").asText()).isEqualTo("cargo");
     }
 
     @Test
     void returnsPayrollDashboardPlanFromLongCatalogAndCapabilityPrompt() {
         Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
-                "Crie uma pagina de analise de folha de pagamento usando o catalogo de componentes: um praxis-chart com drill down por departamento e cross filter, uma praxis-table de detalhamento vinculada a selecao e um resumo lateral para explicar o departamento selecionado.",
+                "Crie uma pagina de analise de folha de pagamento usando o catalogo de componentes: um praxis-chart com drill down por departamento e cross filter, uma praxis-list de detalhamento vinculada a selecao e um resumo lateral para explicar o departamento selecionado.",
                 null,
                 null,
                 null));
@@ -267,11 +264,11 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         JsonNode plan = result.orElseThrow().uiCompositionPlan();
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(plan.path("widgets")).extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-chart", "praxis-table", "praxis-rich-content");
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
         assertThat(plan.path("bindings")).extracting(binding -> binding.path("id").asText())
                 .contains(
                         "payroll-by-department-chart.selectionChange->state.selectedDepartment",
-                        "state.selectedDepartment->payroll-drilldown-table.queryContext",
+                        "state.selectedDepartment->payroll-drilldown-list.queryContext",
                         "state.selectedDepartment->payroll-drilldown-summary.document");
         assertThat(result.orElseThrow().warnings())
                 .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
@@ -565,7 +562,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(planResult.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(planResult.uiCompositionPlan().path("widgets"))
                 .extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-chart", "praxis-table", "praxis-rich-content");
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
         assertThat(planResult.warnings())
                 .contains(
                         "ui-composition-plan-provider:selected-resource-dashboard",
@@ -728,7 +725,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(plan.path("widgets"))
                 .extracting(widget -> widget.path("componentId").asText())
-                .containsExactly("praxis-chart", "praxis-table", "praxis-rich-content");
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
         assertThat(plan.path("widgets").get(0).path("inputs").path("config")
                 .path("dataSource").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
@@ -759,7 +756,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         JsonNode plan = planResult.uiCompositionPlan();
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
         assertThat(plan.path("widgets").get(0).path("componentId").asText()).isEqualTo("praxis-chart");
-        assertThat(plan.path("widgets").get(1).path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(plan.path("widgets").get(1).path("componentId").asText()).isEqualTo("praxis-list");
         assertThat(plan.path("widgets").get(0).path("inputs").path("config")
                 .path("dataSource").path("query").path("statsPath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");

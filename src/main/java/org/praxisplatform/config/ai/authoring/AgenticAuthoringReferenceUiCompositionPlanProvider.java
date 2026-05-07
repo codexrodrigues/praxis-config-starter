@@ -25,6 +25,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     private static final String PAYROLL_ANALYTICS = "/api/human-resources/vw-analytics-folha-pagamento";
     private static final String PAYROLL = "/api/human-resources/folhas-pagamento";
     private static final String MISSION_SUMMARY = "/api/operations/vw-resumo-missoes";
+    private static final String PAYROLL_DRILLDOWN_DETAIL_KEY = "payroll-drilldown-list";
     private static final PayrollBreakdown DEPARTMENT_BREAKDOWN =
             new PayrollBreakdown("departamento", "Departamento", "department", "selectedDepartment", "group-by", "bar");
     private static final PayrollBreakdown COMPETENCE_BREAKDOWN =
@@ -2345,7 +2346,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
 
         ArrayNode widgets = plan.putArray("widgets");
         addPayrollDrillDownChart(widgets, breakdown);
-        addPayrollDrillDownTable(widgets);
+        addPayrollDrillDownList(widgets, breakdown);
         addPayrollDrillDownSummary(widgets, breakdown);
 
         ArrayNode bindings = plan.putArray("bindings");
@@ -2369,7 +2370,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         canvas.put("collisionPolicy", "block");
         ObjectNode items = canvas.putObject("items");
         addCanvasItem(items, breakdown.chartKey(), 1, 1, 12, 4);
-        addCanvasItem(items, "payroll-drilldown-table", 1, 5, 8, 7);
+        addCanvasItem(items, PAYROLL_DRILLDOWN_DETAIL_KEY, 1, 5, 8, 7);
         addCanvasItem(items, "payroll-drilldown-summary", 9, 5, 4, 2);
     }
 
@@ -2710,44 +2711,118 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         selection.putObject("mapping").put(breakdown.field(), breakdown.field());
         ObjectNode crossFilter = eventActions.putObject("crossFilter");
         crossFilter.put("action", "filter-widget");
-        crossFilter.put("target", "payroll-drilldown-table");
+        crossFilter.put("target", PAYROLL_DRILLDOWN_DETAIL_KEY);
         crossFilter.putObject("mapping").put(breakdown.field(), breakdown.field());
     }
 
-    private void addPayrollDrillDownTable(ArrayNode widgets) {
-        addPayrollDrillDownTable(widgets, DEPARTMENT_BREAKDOWN);
+    private void addPayrollDrillDownList(ArrayNode widgets) {
+        addPayrollDrillDownList(widgets, DEPARTMENT_BREAKDOWN);
     }
 
-    private void addPayrollDrillDownTable(ArrayNode widgets, PayrollBreakdown breakdown) {
+    private void addPayrollDrillDownList(ArrayNode widgets, PayrollBreakdown breakdown) {
         ObjectNode widget = widgets.addObject();
-        widget.put("key", "payroll-drilldown-table");
-        widget.put("componentId", "praxis-table");
+        widget.put("key", PAYROLL_DRILLDOWN_DETAIL_KEY);
+        widget.put("componentId", "praxis-list");
         widget.put("role", "detail");
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", PAYROLL_ANALYTICS);
-        inputs.put("tableId", "payroll-drilldown-table");
-        inputs.put("title", "Registros de folha do recorte selecionado");
+        inputs.put("listId", PAYROLL_DRILLDOWN_DETAIL_KEY);
+        inputs.put("componentInstanceId", PAYROLL_DRILLDOWN_DETAIL_KEY);
+        inputs.put("configPersistenceStrategy", "input-first");
+        inputs.put("enableCustomization", true);
         ObjectNode config = inputs.putObject("config");
-        ObjectNode behavior = config.putObject("behavior");
-        ObjectNode pagination = behavior.putObject("pagination");
-        pagination.put("enabled", true);
-        pagination.put("strategy", "server");
-        ObjectNode sorting = behavior.putObject("sorting");
-        sorting.put("enabled", true);
-        sorting.put("strategy", "server");
-        ArrayNode columns = config.putArray("columns");
-        addTableColumn(columns, "nomeCompleto", "Nome completo", "text");
-        addTableColumn(columns, breakdown.field(), breakdown.label(), "text");
-        if (!"departamento".equals(breakdown.field())) {
-            addTableColumn(columns, "departamento", "Departamento", "text");
-        }
-        addTableColumn(columns, "cargo", "Cargo", "text");
-        if (!"competencia".equals(breakdown.field())) {
-            addTableColumn(columns, "competencia", "Competencia", "text");
-        }
-        addTableColumn(columns, "salarioBruto", "Salario bruto", "number");
-        addTableColumn(columns, "totalDescontos", "Total descontos", "number");
-        addTableColumn(columns, "salarioLiquido", "Salario liquido", "number");
+        config.put("title", "Detalhes do recorte selecionado");
+        ObjectNode dataSource = config.putObject("dataSource");
+        dataSource.put("resourcePath", PAYROLL_ANALYTICS);
+        dataSource.putArray("sort").add("salarioLiquido,desc");
+        ObjectNode layout = config.putObject("layout");
+        layout.put("variant", "cards");
+        layout.put("density", "comfortable");
+        layout.put("itemSpacing", "relaxed");
+        layout.put("lines", 3);
+        layout.put("model", "standard");
+        ObjectNode rowLayout = layout.putObject("rowLayout");
+        rowLayout.put("type", "grid");
+        rowLayout.put("gap", "14px");
+        ArrayNode columns = rowLayout.putArray("columns");
+        addListRowLayoutColumn(columns, "leading", "52px");
+        addListRowLayoutColumn(columns, "identity", "1.45fr");
+        addListRowLayoutColumn(columns, "balance", "minmax(150px, auto)");
+        addListRowLayoutColumn(columns, "limit", "minmax(130px, auto)");
+        addListRowLayoutColumn(columns, "trailing", "minmax(120px, auto)");
+        ObjectNode skin = config.putObject("skin");
+        skin.put("type", "glass");
+        skin.put("radius", "20px");
+        skin.put("shadow", "0 18px 45px rgba(15, 23, 42, 0.16)");
+        ObjectNode templating = config.putObject("templating");
+        templating.putObject("leading").put("type", "icon").put("expr", "payments");
+        templating.putObject("identity").put("type", "text").put("expr", "${item.nomeCompleto}");
+        templating.putObject("primary").put("type", "text").put("expr", "${item.nomeCompleto}");
+        templating.putObject("secondary")
+                .put("type", "text")
+                .put("expr", "${item.cargo} · " + breakdown.label() + ": ${item." + breakdown.field() + "}");
+        templating.putObject("meta").put("type", "date").put("expr", "${item.dataPagamento}|pt-BR:short");
+        templating.putObject("balance").put("type", "currency").put("expr", "${item.salarioLiquido}|BRL:pt-BR");
+        templating.putObject("limit").put("type", "currency").put("expr", "${item.totalDescontos}|BRL:pt-BR");
+        templating.putObject("risk").put("type", "text").put("expr", "${item.composicaoFolha}");
+        templating.putObject("trailing").put("type", "chip").put("expr", "${item.perfilFolha}");
+        templating.put("metaPlacement", "line");
+        templating.put("metaPrefixIcon", "event");
+        templating.put("statusPosition", "top-right");
+        ObjectNode chipColorMap = templating.putObject("chipColorMap");
+        chipColorMap.put("Executiva", "primary");
+        chipColorMap.put("Operacional", "accent");
+        chipColorMap.put("Administrativa", "basic");
+        ObjectNode chipLabelMap = templating.putObject("chipLabelMap");
+        chipLabelMap.put("Executiva", "Perfil executivo");
+        chipLabelMap.put("Operacional", "Perfil operacional");
+        chipLabelMap.put("Administrativa", "Perfil administrativo");
+        ArrayNode features = templating.putArray("features");
+        addListFeature(features, "account_tree", "${item.departamento}");
+        addListFeature(features, "groups", "${item.equipe}");
+        addListFeature(features, "public", "${item.universo}");
+        templating.put("featuresVisible", true);
+        templating.put("featuresMode", "icons+labels");
+        ObjectNode interaction = config.putObject("interaction");
+        interaction.put("expandable", true);
+        interaction.put("expandTrigger", "row+icon");
+        interaction.put("expandMode", "single");
+        interaction.put("expandPlacement", "trailing");
+        ObjectNode expansion = config.putObject("expansion");
+        ArrayNode sections = expansion.putArray("sections");
+        ObjectNode metadata = sections.addObject();
+        metadata.put("id", "payroll-values");
+        metadata.put("title", "Valores formatados");
+        metadata.put("type", "metadata");
+        metadata.put("itemsExpr", "$item");
+        metadata.putObject("metadata").put("orientation", "horizontal").put("columns", 2);
+        ObjectNode context = sections.addObject();
+        context.put("id", "payroll-context");
+        context.put("title", "Contexto do registro");
+        context.put("type", "key-value");
+        context.put("itemsExpr", "$item");
+        ObjectNode rendering = expansion.putObject("rendering");
+        rendering.put("shell", "attached");
+        rendering.put("columns", 2);
+        rendering.put("gap", "12px");
+        ObjectNode i18n = config.putObject("i18n");
+        i18n.put("locale", "pt-BR");
+        i18n.put("currency", "BRL");
+        ObjectNode ui = config.putObject("ui");
+        ui.put("showSearch", true);
+        ui.put("searchField", "nomeCompleto");
+    }
+
+    private void addListRowLayoutColumn(ArrayNode columns, String slot, String width) {
+        ObjectNode column = columns.addObject();
+        column.put("slot", slot);
+        column.put("width", width);
+    }
+
+    private void addListFeature(ArrayNode features, String icon, String expr) {
+        ObjectNode feature = features.addObject();
+        feature.put("icon", icon);
+        feature.put("expr", expr);
     }
 
     private void addPayrollAnalyticsProjection(ObjectNode config, PayrollBreakdown breakdown) {
@@ -2898,13 +2973,13 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private void addChartStateQueryContextBinding(ArrayNode bindings, PayrollBreakdown breakdown) {
-        ObjectNode binding = baseBinding(bindings, "state." + breakdown.statePath() + "->payroll-drilldown-table.queryContext", "state-read");
+        ObjectNode binding = baseBinding(bindings, "state." + breakdown.statePath() + "->" + PAYROLL_DRILLDOWN_DETAIL_KEY + ".queryContext", "state-read");
         ObjectNode from = binding.putObject("from");
         from.put("kind", "state");
         from.put("path", breakdown.statePath());
         ObjectNode to = binding.putObject("to");
         to.put("kind", "component-port");
-        to.put("widget", "payroll-drilldown-table");
+        to.put("widget", PAYROLL_DRILLDOWN_DETAIL_KEY);
         to.put("port", "queryContext");
         to.put("direction", "input");
         ObjectNode condition = binding.putObject("condition");
@@ -2919,7 +2994,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         policy.put("distinct", true);
         policy.put("distinctBy", "value");
         policy.put("missingValuePolicy", "skip");
-        addMetadata(binding, "table-filter");
+        addMetadata(binding, "list-filter");
     }
 
     private void addChartStateSummaryBinding(ArrayNode bindings) {
