@@ -514,6 +514,14 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(detailWidget.path("componentId").asText()).isEqualTo("praxis-dynamic-form");
         assertThat(detailWidget.path("inputs").path("mode").asText()).isEqualTo("view");
         assertThat(detailWidget.path("inputs").path("resourcePath").asText()).isEqualTo("/api/human-resources/funcionarios");
+        JsonNode tableColumns = result.uiCompositionPlan().path("widgets").path(0)
+                .path("inputs").path("config").path("columns");
+        assertThat(tableColumns).isNotEmpty();
+        assertThat(findColumn(tableColumns, "salario").path("format").asText()).isEqualTo("BRL|symbol|2");
+        assertThat(findColumn(tableColumns, "ativo").path("renderer").path("type").asText()).isEqualTo("chip");
+        assertThat(result.assistantMessage())
+                .contains("valores formatados")
+                .contains("chips, icones e acoes por linha");
         assertThat(bindings.path(1).has("source")).isFalse();
         assertThat(bindings.path(1).has("target")).isFalse();
         assertThat(result.warnings()).contains(
@@ -824,5 +832,14 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of("keyword-fallback-applied"),
                 List.of("shared-rule-authoring-required"),
                 objectMapper.createObjectNode());
+    }
+
+    private JsonNode findColumn(JsonNode columns, String field) {
+        for (JsonNode column : columns) {
+            if (field.equals(column.path("field").asText())) {
+                return column;
+            }
+        }
+        return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
     }
 }

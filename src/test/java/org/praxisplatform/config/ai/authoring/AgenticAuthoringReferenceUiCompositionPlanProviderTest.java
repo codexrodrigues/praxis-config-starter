@@ -871,6 +871,36 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
     }
 
     @Test
+    void selectedEmployeeTableUsesRichRenderersAndBusinessFormatsByDefault() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Sou gerente de RH e quero uma tabela bonita com salario em reais, chips, icones e acoes de detalhe",
+                null,
+                null,
+                null,
+                null,
+                selectedMasterDetailIntent()));
+
+        assertThat(result).isPresent();
+        JsonNode columns = result.orElseThrow().uiCompositionPlan().path("widgets").get(0)
+                .path("inputs").path("config").path("columns");
+        assertThat(columns).hasSizeGreaterThanOrEqualTo(8);
+        JsonNode person = findColumn(columns, "nomeCompleto");
+        assertThat(person.path("renderer").path("type").asText()).isEqualTo("compose");
+        assertThat(person.path("renderer").path("compose").path("items"))
+                .extracting(item -> item.path("type").asText())
+                .containsExactly("avatar", "link");
+        JsonNode salary = findColumn(columns, "salario");
+        assertThat(salary.path("type").asText()).isEqualTo("currency");
+        assertThat(salary.path("format").asText()).isEqualTo("BRL|symbol|2");
+        JsonNode active = findColumn(columns, "ativo");
+        assertThat(active.path("renderer").path("type").asText()).isEqualTo("chip");
+        assertThat(active.path("renderer").path("chip").path("icon").asText()).isEqualTo("check_circle");
+        JsonNode actions = findColumn(columns, "actions");
+        assertThat(actions.path("renderer").path("type").asText()).isEqualTo("menu");
+        assertThat(actions.path("renderer").path("menu").path("itemsExpr").asText()).isEqualTo("row.detailActions");
+    }
+
+    @Test
     void createsTabbedMasterDetailFormWorkspaceForSelectedResource() {
         Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
                 "organize em abas para procurar, listar, ver detalhes e editar com formulario guiado",

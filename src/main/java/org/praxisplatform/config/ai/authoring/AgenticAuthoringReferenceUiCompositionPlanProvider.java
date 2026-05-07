@@ -1845,7 +1845,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         inputs.put("resourcePath", candidate.resourcePath());
         inputs.put("tableId", widgetKey);
         inputs.put("title", titleFromResourcePath(candidate.resourcePath()));
-        inputs.putObject("config").putArray("columns");
+        ArrayNode columns = inputs.putObject("config").putArray("columns");
+        materializeKnownTableColumnsIfEmpty(inputs, columns);
     }
 
     private void addNestedSelectedResourceDetail(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
@@ -1955,7 +1956,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         inputs.put("resourcePath", candidate.resourcePath());
         inputs.put("tableId", widgetKey);
         inputs.put("title", titleFromResourcePath(candidate.resourcePath()));
-        inputs.putObject("config").putArray("columns");
+        ArrayNode columns = inputs.putObject("config").putArray("columns");
+        materializeKnownTableColumnsIfEmpty(inputs, columns);
     }
 
     private void addSelectedResourceSummary(ArrayNode widgets, AgenticAuthoringCandidate candidate, String widgetKey) {
@@ -2445,31 +2447,40 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         addTableColumn(columns, "id", "ID", "number");
         addTableColumn(columns, "ano", "Ano", "number");
         addTableColumn(columns, "mes", "Mes", "number");
-        addTableColumn(columns, "salarioBruto", "Salario bruto", "number");
-        addTableColumn(columns, "totalDescontos", "Total descontos", "number");
-        addTableColumn(columns, "salarioLiquido", "Salario liquido", "number");
+        addCurrencyTableColumn(columns, "salarioBruto", "Salario bruto");
+        addCurrencyTableColumn(columns, "totalDescontos", "Total descontos");
+        addCurrencyTableColumn(columns, "salarioLiquido", "Salario liquido");
         addTableColumn(columns, "dataPagamento", "Data de pagamento", "date");
         addTableColumn(columns, "funcionarioId", "Funcionario", "number");
     }
 
     private void addPayrollAnalyticsTableColumns(ArrayNode columns) {
-        addTableColumn(columns, "nomeCompleto", "Nome completo", "text");
-        addTableColumn(columns, "universo", "Universo", "text");
+        addAvatarNameColumn(columns, "nomeCompleto", "avatarUrl");
+        addChipTableColumn(columns, "payrollProfile", "Perfil folha", "badge", "primary", "verified");
+        addCurrencyTableColumn(columns, "salarioLiquido", "Salario liquido");
+        addCurrencyTableColumn(columns, "salarioBruto", "Salario bruto");
+        addCurrencyTableColumn(columns, "totalDescontos", "Total descontos");
         addTableColumn(columns, "cargo", "Cargo", "text");
-        addTableColumn(columns, "codinome", "Codinome", "text");
-        addTableColumn(columns, "exposicaoPublica", "Exposicao publica", "boolean");
         addTableColumn(columns, "departamento", "Departamento", "text");
         addTableColumn(columns, "equipe", "Equipe", "text");
-        addTableColumn(columns, "base", "Base", "text");
-        addTableColumn(columns, "ano", "Ano", "number");
-        addTableColumn(columns, "mes", "Mes", "number");
         addTableColumn(columns, "competencia", "Competencia", "text");
         addTableColumn(columns, "dataPagamento", "Data pagamento", "date");
-        addTableColumn(columns, "salarioBruto", "Salario bruto", "number");
-        addTableColumn(columns, "totalDescontos", "Total descontos", "number");
-        addTableColumn(columns, "salarioLiquido", "Salario liquido", "number");
-        addTableColumn(columns, "payrollProfile", "Perfil folha", "text");
-        addTableColumn(columns, "composicaoFolha", "Composicao folha", "text");
+        addChipTableColumn(columns, "composicaoFolha", "Composicao folha", "chip", "accent", "analytics");
+        addIconTableColumn(columns, "exposicaoPublica", "Exposicao publica", "visibility");
+        addTableColumn(columns, "universo", "Universo", "text");
+        addTableColumn(columns, "base", "Base", "text");
+        addActionMenuColumn(columns);
+    }
+
+    private void addEmployeeTableColumns(ArrayNode columns) {
+        addAvatarNameColumn(columns, "nomeCompleto", "avatarUrl");
+        addCurrencyTableColumn(columns, "salario", "Salario");
+        addTableColumn(columns, "cargoNome", "Cargo", "text");
+        addTableColumn(columns, "departamentoNome", "Departamento", "text");
+        addChipTableColumn(columns, "ativo", "Situacao", "chip", "success", "check_circle");
+        addTableColumn(columns, "dataAdmissao", "Admissao", "date");
+        addChipTableColumn(columns, "estadoCivil", "Estado civil", "badge", "accent", "family_restroom");
+        addActionMenuColumn(columns);
     }
 
     private void addTableColumn(ArrayNode columns, String field, String header, String type) {
@@ -2477,6 +2488,90 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         column.put("field", field);
         column.put("header", header);
         column.put("type", type);
+    }
+
+    private void addCurrencyTableColumn(ArrayNode columns, String field, String header) {
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        column.put("header", header);
+        column.put("type", "currency");
+        column.put("format", "BRL|symbol|2");
+    }
+
+    private void addAvatarNameColumn(ArrayNode columns, String nameField, String avatarField) {
+        ObjectNode column = columns.addObject();
+        column.put("field", nameField);
+        column.put("header", "Pessoa");
+        column.put("type", "text");
+        ObjectNode renderer = column.putObject("renderer");
+        renderer.put("type", "compose");
+        ObjectNode compose = renderer.putObject("compose");
+        ArrayNode items = compose.putArray("items");
+        ObjectNode avatar = items.addObject();
+        avatar.put("type", "avatar");
+        ObjectNode avatarConfig = avatar.putObject("avatar");
+        avatarConfig.put("srcField", avatarField);
+        avatarConfig.put("altField", nameField);
+        avatarConfig.put("initialsField", nameField);
+        avatarConfig.put("shape", "circle");
+        avatarConfig.put("size", 32);
+        ObjectNode link = items.addObject();
+        link.put("type", "link");
+        ObjectNode linkConfig = link.putObject("link");
+        linkConfig.put("textField", nameField);
+        linkConfig.put("href", "#");
+        linkConfig.put("target", "_self");
+        ObjectNode layout = compose.putObject("layout");
+        layout.put("direction", "row");
+        layout.put("align", "center");
+        layout.put("gap", 10);
+        layout.put("ellipsis", true);
+    }
+
+    private void addChipTableColumn(
+            ArrayNode columns,
+            String field,
+            String header,
+            String rendererType,
+            String color,
+            String icon) {
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        column.put("header", header);
+        column.put("type", "text");
+        ObjectNode renderer = column.putObject("renderer");
+        renderer.put("type", rendererType);
+        ObjectNode rendererConfig = renderer.putObject(rendererType);
+        rendererConfig.put("textField", field);
+        rendererConfig.put("color", color);
+        rendererConfig.put("variant", "badge".equals(rendererType) ? "soft" : "outlined");
+        rendererConfig.put("icon", icon);
+    }
+
+    private void addIconTableColumn(ArrayNode columns, String field, String header, String icon) {
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        column.put("header", header);
+        column.put("type", "boolean");
+        ObjectNode renderer = column.putObject("renderer");
+        renderer.put("type", "icon");
+        ObjectNode iconConfig = renderer.putObject("icon");
+        iconConfig.put("name", icon);
+        iconConfig.put("color", "primary");
+        iconConfig.put("size", 18);
+        iconConfig.put("ariaLabel", header);
+    }
+
+    private void addActionMenuColumn(ArrayNode columns) {
+        ObjectNode column = columns.addObject();
+        column.put("field", "actions");
+        column.put("header", "Acoes");
+        column.put("type", "actions");
+        ObjectNode renderer = column.putObject("renderer");
+        renderer.put("type", "menu");
+        ObjectNode menu = renderer.putObject("menu");
+        menu.put("ariaLabel", "Acoes da linha");
+        menu.put("itemsExpr", "row.detailActions");
     }
 
     private Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnFormatModification(AgenticAuthoringPlanRequest request) {
@@ -2680,6 +2775,8 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
             addPayrollAnalyticsTableColumns(columns);
         } else if (PAYROLL.equals(resourcePath)) {
             addPayrollTableColumns(columns);
+        } else if (EMPLOYEES.equals(resourcePath)) {
+            addEmployeeTableColumns(columns);
         }
     }
 

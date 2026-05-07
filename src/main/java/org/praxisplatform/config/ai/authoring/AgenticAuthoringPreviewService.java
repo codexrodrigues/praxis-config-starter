@@ -264,6 +264,11 @@ public class AgenticAuthoringPreviewService {
                     + "em cards ricos pode apoiar a validacao dos dados antes de salvar a pagina.";
         }
         if (containsComponent(uiCompositionPlan, "praxis-table")) {
+            if (containsRichTableRendering(uiCompositionPlan)) {
+                return "Criei uma pre-visualizacao usando \"" + resourceLabel
+                        + "\" como fonte governada. A tabela ja nasce com colunas semanticas, valores formatados, "
+                        + "chips, icones e acoes por linha para investigar detalhes sem configurar tudo manualmente.";
+            }
             return "Criei uma pre-visualizacao usando \"" + resourceLabel
                     + "\" como fonte de dados. A tabela foi conectada ao recurso e ja pode carregar schema/dados. "
                     + "Voce pode revisar as colunas, pedir um grafico ou salvar a pagina.";
@@ -280,6 +285,28 @@ public class AgenticAuthoringPreviewService {
         for (JsonNode widget : widgets) {
             if (componentId.equals(widget.path("componentId").asText())) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsRichTableRendering(JsonNode uiCompositionPlan) {
+        JsonNode widgets = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.path("widgets");
+        if (!widgets.isArray()) {
+            return false;
+        }
+        for (JsonNode widget : widgets) {
+            if (!"praxis-table".equals(widget.path("componentId").asText())) {
+                continue;
+            }
+            JsonNode columns = widget.path("inputs").path("config").path("columns");
+            if (!columns.isArray()) {
+                continue;
+            }
+            for (JsonNode column : columns) {
+                if (column.has("renderer") || !value(column.path("format").asText()).isBlank()) {
+                    return true;
+                }
             }
         }
         return false;
