@@ -518,6 +518,62 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void promotesTargetlessBusinessDashboardPromptMisreadAsModifyToCreate() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "dashboard",
+                        "add_dashboard_widget",
+                        null,
+                        "folha pagamento custos",
+                        "new_instruction",
+                        "Vou ajustar o painel de folha.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-treated-business-dashboard-as-modify"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Sou gerente financeiro e quero entender onde estao os maiores custos da folha. "
+                        + "Nao sei quais dados existem, mas preciso de um painel bonito com graficos, "
+                        + "valores em reais e uma lista para investigar os detalhes quando algo chamar atencao.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.failureCodes()).doesNotContain("target-widget-required");
+        assertThat(result.clarificationQuestions()).doesNotContain("Qual componente existente deve ser alterado?");
+    }
+
+    @Test
     void apiCatalogDiscoveryPrioritizesRichCandidateCardsWhenResourcesWereFound() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);

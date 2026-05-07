@@ -326,6 +326,9 @@ public class AgenticAuthoringIntentResolverService {
                 operationKind = materializablePageCompositionOperation(fallbackResolution.operationKind(), prompt);
             }
             changeKind = materializablePageCompositionChangeKind(changeKind, operationKind, prompt);
+        } else if (shouldPromoteTargetlessBusinessDashboardPrompt(prompt, operationKind, artifactKind, target)) {
+            operationKind = "create";
+            changeKind = businessDashboardCreationChangeKind(prompt);
         }
         AgenticAuthoringCandidate selectedCandidate = explicitLocalUiComposition
                 ? null
@@ -813,6 +816,67 @@ public class AgenticAuthoringIntentResolverService {
                 && contextHintCandidate != null
                 && ("dashboard".equals(artifactKind) || pendingClarificationMentionsDashboard(turn))
                 && ("modify".equals(operationKind) || "unknown".equals(operationKind));
+    }
+
+    private boolean shouldPromoteTargetlessBusinessDashboardPrompt(
+            String prompt,
+            String operationKind,
+            String artifactKind,
+            AgenticAuthoringTarget target) {
+        if (target != null || !"modify".equals(operationKind) || !"dashboard".equals(artifactKind)) {
+            return false;
+        }
+        String normalized = normalize(prompt);
+        boolean asksForNewDashboardExperience = containsAny(normalized,
+                "quero",
+                "preciso",
+                "necessito",
+                "gostaria",
+                "monte",
+                "montar",
+                "crie",
+                "criar",
+                "gerar",
+                "gere")
+                && containsAny(normalized, "dashboard", "painel", "grafico", "graficos", "indicador", "indicadores");
+        boolean describesBusinessAnalysis = containsAny(normalized,
+                "entender",
+                "analisar",
+                "acompanhar",
+                "enxergar",
+                "investigar",
+                "maiores",
+                "custos",
+                "folha",
+                "pagamento",
+                "detalhes",
+                "lista");
+        boolean explicitlyTargetsExistingWidget = containsAny(normalized,
+                "componente existente",
+                "widget existente",
+                "grafico existente",
+                "painel existente",
+                "nessa tabela",
+                "neste grafico",
+                "nesse grafico",
+                "selecionado",
+                "selecionada");
+        return asksForNewDashboardExperience && describesBusinessAnalysis && !explicitlyTargetsExistingWidget;
+    }
+
+    private String businessDashboardCreationChangeKind(String prompt) {
+        return containsAny(normalize(prompt),
+                "detalhe",
+                "detalhes",
+                "investigar",
+                "abrir registros",
+                "lista",
+                "listagem",
+                "drill",
+                "drill-down",
+                "drilldown")
+                ? "create_chart_drilldown"
+                : "create_artifact";
     }
 
     private boolean answeredResourceCandidateClarification(AgenticAuthoringConversationTurn turn) {
