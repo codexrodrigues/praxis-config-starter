@@ -200,6 +200,22 @@ cd praxis-ui-angular
 
 The browser E2E requires the backend stream auth mode to be `signed-url-token`; plain header-only stream auth is not enough for browser `EventSource`.
 
+For the focused payroll dashboard + rich list persistence lane, use:
+
+```bash
+cd praxis-ui-angular
+./tools/local-e2e/run-page-builder-agentic-rich-list-local.sh
+```
+
+This narrower lane drives `/page-builder-ia`, creates a payroll chart
+drill-down through the real assistant stream, persists through
+`/api/praxis/config/ai/authoring/page-apply`, reopens the page, appends the
+executive summary widget and verifies that the saved `praxis-list` remains a
+rich card list with BRL formatting, chip metadata and governed data-source
+binding. Prefer it when the change touches chart drill-down materialization,
+rich list rendering or Page Builder apply persistence but does not require the
+broader full validation batch.
+
 For shared-rule cockpit validation, include at least one prompt that names an explicit resource path, such as `/api/helpdesk/chamados`, while also mentioning unrelated domain vocabulary. The expected result is that intent resolution keeps the explicit path as the governed target instead of re-grounding the handoff to another catalog resource.
 
 ## Page Builder Project Knowledge Cockpit
