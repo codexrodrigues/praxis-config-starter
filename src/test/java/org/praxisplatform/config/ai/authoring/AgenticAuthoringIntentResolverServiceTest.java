@@ -3661,6 +3661,76 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void apiCatalogQuickRepliesPreserveSelectedResourceContextForDashboardCreation() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                        "POST",
+                        "human-resources,folha,pagamento,salario,analytics,dashboard",
+                        "Analytics de folha por departamento",
+                        "Agrupa folha de pagamento por departamento para dashboards.",
+                        "analyticsFolhaPagamentoGroupBy",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        new AgenticAuthoringApiCatalogConversationService(objectMapper, repository));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
+        contextHints.put("submitUrl", "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        contextHints.put("operation", "post");
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais campos existem no schema da API recomendada?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                "session-1",
+                "turn-3",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "m1",
+                                "user",
+                                "Quero criar graficos de folha.",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "A fonte recomendada e Analytics de folha pagamento.",
+                                null)),
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.selectedCandidate()).isNotNull();
+        AgenticAuthoringQuickReply createDashboard = result.quickReplies().stream()
+                .filter(reply -> "api-create-dashboard".equals(reply.id()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(createDashboard.kind()).isEqualTo("confirm");
+        assertThat(createDashboard.prompt())
+                .contains("Confirmed:")
+                .contains("criar dashboard");
+        assertThat(createDashboard.contextHints().path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(createDashboard.contextHints().path("submitUrl").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+    }
+
+    @Test
     void governedResourceConfirmationUsesCanonicalContextWithoutReaskingLlm() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =

@@ -2073,7 +2073,7 @@ public class AgenticAuthoringIntentResolverService {
             return resourceDiscoveryQuickReplies(effectivePrompt, artifactKind);
         }
         if ("api_catalog".equals(artifactKind)) {
-            return apiCatalogQuickReplies();
+            return apiCatalogQuickReplies(effectivePrompt, selectedCandidate);
         }
         if (!"explore".equals(operationKind)
                 && gate.messages().contains("intent-confirmation-required")
@@ -2422,17 +2422,27 @@ public class AgenticAuthoringIntentResolverService {
                         null));
     }
 
-    private List<AgenticAuthoringQuickReply> apiCatalogQuickReplies() {
+    private List<AgenticAuthoringQuickReply> apiCatalogQuickReplies(
+            String effectivePrompt,
+            AgenticAuthoringCandidate selectedCandidate) {
+        ObjectNode contextHints = selectedCandidate == null
+                ? null
+                : dashboardContextHints(effectivePrompt, selectedCandidate);
         return List.of(
                 new AgenticAuthoringQuickReply(
                         "api-create-dashboard",
-                        "suggestion",
+                        contextHints == null ? "suggestion" : "confirm",
                         "Criar dashboard",
-                        "Crie um dashboard usando a API recomendada.",
+                        contextHints == null
+                                ? "Crie um dashboard usando a API recomendada."
+                                : AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "criar dashboard com " + candidateLabel(selectedCandidate)),
                         "Use quando voce ja quer transformar a fonte recomendada em uma primeira versao de painel governado.",
                         "dashboard_customize",
                         "analytics",
-                        quickReplyPresentation(
+                        withQuickReplyPresentation(
+                                contextHints,
                                 "Boa para sair da descoberta e materializar um painel inicial.",
                                 "Retorna uma pre-visualizacao com KPIs, graficos e componentes conectados ao recorte escolhido.",
                                 "Clique para pedir a primeira composicao do dashboard.")),
@@ -2444,7 +2454,8 @@ public class AgenticAuthoringIntentResolverService {
                         "Use quando voce quer entender quais campos, dimensoes e medidas podem virar filtros, colunas ou eixos.",
                         "schema",
                         "resource",
-                        quickReplyPresentation(
+                        withQuickReplyPresentation(
+                                contextHints == null ? null : contextHints.deepCopy(),
                                 "Boa para avaliar se a fonte tem os dados que voce precisa antes de criar a tela.",
                                 "Retorna os campos principais, tipos e pistas de uso para formularios, tabelas e graficos.",
                                 "Clique para pedir uma explicacao dos campos disponiveis.")),
@@ -2456,7 +2467,8 @@ public class AgenticAuthoringIntentResolverService {
                         "Use quando voce quer saber o que a fonte permite fazer: filtrar, consultar, criar, atualizar ou detalhar.",
                         "rule",
                         "resource",
-                        quickReplyPresentation(
+                        withQuickReplyPresentation(
+                                contextHints == null ? null : contextHints.deepCopy(),
                                 "Boa para decidir a interacao certa da pagina, como filtros, drill-downs ou acoes de linha.",
                                 "Retorna operacoes, filtros e capacidades expostas pelo catalogo governado.",
                                 "Clique para explorar as acoes suportadas pela fonte.")));
