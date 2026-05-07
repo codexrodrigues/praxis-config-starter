@@ -518,6 +518,64 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void apiCatalogDiscoveryPrioritizesRichCandidateCardsWhenResourcesWereFound() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "resource_discovery_for_indicators",
+                        null,
+                        "dados para indicadores",
+                        "none",
+                        "Encontrei fontes candidatas para graficos.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-api-catalog-discovery"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Sou gestor de negocio e quero saber quais dados existem para criar graficos e indicadores antes de criar dashboard.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.candidates()).isNotEmpty();
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .allMatch(id -> id.startsWith("resource-"));
+        AgenticAuthoringQuickReply firstReply = result.quickReplies().get(0);
+        assertThat(firstReply.contextHints().path("resourcePath").asText()).startsWith("/api/");
+        assertThat(firstReply.contextHints().path("presentation").path("bestFor").asText()).isNotBlank();
+        assertThat(firstReply.contextHints().path("presentation").path("returns").asText()).isNotBlank();
+        assertThat(firstReply.contextHints().path("presentation").path("nextStep").asText()).isNotBlank();
+        assertThat(firstReply.description()).contains("Indicada");
+    }
+
+    @Test
     void preservesCanonicalPayrollAnalyticsSourceWhenDepartmentFollowUpTriesToSwitchDashboardDataSource() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
@@ -2751,12 +2809,13 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.assistantMessage()).contains("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.assistantMessage()).contains("/api/human-resources/folhas-pagamento");
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::id)
-                .containsExactly("api-create-dashboard", "api-show-schema", "api-show-actions");
+                .allMatch(id -> id.startsWith("resource-"));
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::description)
                 .allSatisfy(description -> assertThat(description)
-                        .containsAnyOf("Use quando", "entender", "saber"));
+                        .containsAnyOf("Indicada", "Opcao encontrada"));
         assertThat(result.quickReplies())
                 .allSatisfy(reply -> {
+                    assertThat(reply.contextHints().path("resourcePath").asText()).startsWith("/api/");
                     assertThat(reply.contextHints().path("presentation").path("bestFor").asText()).isNotBlank();
                     assertThat(reply.contextHints().path("presentation").path("returns").asText()).isNotBlank();
                     assertThat(reply.contextHints().path("presentation").path("nextStep").asText()).contains("Clique");

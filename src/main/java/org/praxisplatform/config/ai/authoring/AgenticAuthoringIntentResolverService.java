@@ -1234,7 +1234,23 @@ public class AgenticAuthoringIntentResolverService {
                     return analyticsResourceCandidates.get(0);
                 }
             }
+            if ("api_catalog".equals(artifactKind)
+                    && "explore".equals(operationKind)
+                    && !isBroadApiCatalogResourceDiscoveryPrompt(prompt)) {
+                return candidates.get(0);
+            }
             return null;
+        }
+        if ("api_catalog".equals(artifactKind)
+                && "explore".equals(operationKind)
+                && isBroadApiCatalogResourceDiscoveryPrompt(prompt)) {
+            return null;
+        }
+        if ("api_catalog".equals(artifactKind)
+                && "explore".equals(operationKind)
+                && isSpecificApiCatalogAnswerPrompt(prompt)
+                && !candidates.isEmpty()) {
+            return candidates.get(0);
         }
         if (candidates.size() == 1) {
             return candidates.get(0);
@@ -1256,10 +1272,59 @@ public class AgenticAuthoringIntentResolverService {
                     .findFirst()
                     .orElse(null);
         }
-        if ("api_catalog".equals(artifactKind) && !candidates.isEmpty()) {
-            return candidates.get(0);
-        }
         return null;
+    }
+
+    private boolean isBroadApiCatalogResourceDiscoveryPrompt(String prompt) {
+        String normalized = normalize(prompt);
+        if (containsAny(normalized,
+                "schema",
+                "campos",
+                "filtros",
+                "actions",
+                "acoes",
+                "ações",
+                "permite criar",
+                "permite editar",
+                "permite excluir",
+                "qual endpoint devo usar",
+                "qual api devo usar",
+                "recomendacao",
+                "recomendação")) {
+            return false;
+        }
+        return containsAny(normalized,
+                "quais apis",
+                "quais dados",
+                "quais recursos",
+                "dados disponiveis",
+                "dados disponíveis",
+                "recursos disponiveis",
+                "recursos disponíveis",
+                "fontes candidatas",
+                "areas de dados",
+                "áreas de dados",
+                "para criar graficos",
+                "para criar gráficos",
+                "para indicadores");
+    }
+
+    private boolean isSpecificApiCatalogAnswerPrompt(String prompt) {
+        String normalized = normalize(prompt);
+        return containsAny(normalized,
+                "schema",
+                "campos",
+                "filtros",
+                "actions",
+                "acoes",
+                "ações",
+                "permite criar",
+                "permite editar",
+                "permite excluir",
+                "qual endpoint devo usar",
+                "qual api devo usar",
+                "recomendacao",
+                "recomendação");
     }
 
     private List<AgenticAuthoringCandidate> analyticsResourceCandidates(List<AgenticAuthoringCandidate> candidates) {
@@ -2072,9 +2137,6 @@ public class AgenticAuthoringIntentResolverService {
         if (gate.messages().contains("resource-candidate-required")) {
             return resourceDiscoveryQuickReplies(effectivePrompt, artifactKind);
         }
-        if ("api_catalog".equals(artifactKind)) {
-            return apiCatalogQuickReplies(effectivePrompt, selectedCandidate);
-        }
         if (!"explore".equals(operationKind)
                 && gate.messages().contains("intent-confirmation-required")
                 && !questions.isEmpty()) {
@@ -2094,6 +2156,12 @@ public class AgenticAuthoringIntentResolverService {
                 && candidates != null
                 && !candidates.isEmpty()) {
             return candidateResourceQuickReplies(effectivePrompt, candidates);
+        }
+        if ("api_catalog".equals(artifactKind)) {
+            if (selectedCandidate == null && candidates != null && !candidates.isEmpty()) {
+                return candidateResourceQuickReplies(effectivePrompt, candidates);
+            }
+            return apiCatalogQuickReplies(effectivePrompt, selectedCandidate);
         }
         if ("explore".equals(operationKind)
                 && "dashboard".equals(artifactKind)
