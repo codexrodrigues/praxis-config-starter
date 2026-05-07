@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiActionPlan;
+import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
@@ -260,6 +261,45 @@ class AiOrchestratorServiceActionPlanTest {
 
     AiActionItem item = (AiActionItem) updated.get(0);
     assertThat(item.getValue()).isEqualTo("BRL|symbol|2");
+  }
+
+  @Test
+  void shouldSuppressResourceBindingActionsForLocalEditorialPrompts() {
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("dataSource.resourcePath.set")
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("templating.trailing.status.chip")
+                        .params(objectMapper.createObjectNode().put("expr", "${item.status}"))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .userPrompt(
+                "Refine esta lista local/editorial mantendo tudo sem API real e sem schema externo.")
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan normalized =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "suppressLocalEditorialResourceBindingActions",
+            plan,
+            request,
+            warnings);
+
+    assertThat(normalized).isNotNull();
+    assertThat(normalized.getActions())
+        .extracting(AiActionPlan.Action::getType)
+        .containsExactly("templating.trailing.status.chip");
+    assertThat(warnings)
+        .contains(
+            "resource-binding-actions-suppressed-for-local-editorial:dataSource.resourcePath.set");
   }
 
   @Test

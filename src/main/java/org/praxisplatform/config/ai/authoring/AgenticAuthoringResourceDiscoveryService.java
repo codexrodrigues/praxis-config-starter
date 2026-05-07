@@ -1,12 +1,15 @@
 package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.praxisplatform.config.service.AiPrincipalContext;
 
 public class AgenticAuthoringResourceDiscoveryService {
 
@@ -33,6 +36,12 @@ public class AgenticAuthoringResourceDiscoveryService {
 
     public AgenticAuthoringResourceCandidatesResult search(
             AgenticAuthoringResourceCandidatesRequest request) {
+        return search(request, null);
+    }
+
+    public AgenticAuthoringResourceCandidatesResult search(
+            AgenticAuthoringResourceCandidatesRequest request,
+            AiPrincipalContext principalContext) {
         String retrievalQuery = retrievalQuery(request);
         String artifactKind = artifactKind(request);
         List<String> warnings = new ArrayList<>();
@@ -50,7 +59,12 @@ public class AgenticAuthoringResourceDiscoveryService {
         }
         List<AgenticAuthoringCandidate> candidates = candidateCatalog == null
                 ? List.of()
-                : candidateCatalog.discover(retrievalQuery, artifactKind);
+                : candidateCatalog.discover(
+                        retrievalQuery,
+                        artifactKind,
+                        principalContext == null ? null : principalContext.tenantId(),
+                        principalContext == null ? null : principalContext.environment(),
+                        null);
         int limit = limit(request);
         if (candidates.size() > limit) {
             candidates = candidates.subList(0, limit);
@@ -97,12 +111,14 @@ public class AgenticAuthoringResourceDiscoveryService {
         if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
-        Map<String, Long> resourcePathCounts = candidates.stream()
+        Map<String, List<AgenticAuthoringCandidate>> candidatesByResourcePath = candidates.stream()
                 .collect(Collectors.groupingBy(
                         candidate -> valueOrDefault(candidate.resourcePath(), ""),
-                        Collectors.counting()));
-        return candidates.stream()
-                .map(candidate -> {
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+        return candidatesByResourcePath.values().stream()
+                .map(resourceCandidates -> {
+                    AgenticAuthoringCandidate candidate = resourceCandidates.get(0);
                     ObjectNode contextHints = objectMapper.createObjectNode();
                     contextHints.put("resourcePath", candidate.resourcePath());
                     contextHints.put("submitUrl", candidate.submitUrl());
@@ -110,22 +126,20 @@ public class AgenticAuthoringResourceDiscoveryService {
                     contextHints.put("schemaUrl", candidate.schemaUrl());
                     contextHints.put("submitMethod", candidate.submitMethod());
                     contextHints.put("artifactKind", artifactKind);
-                    contextHints.set("technicalDetails", technicalDetails(candidate));
+                    contextHints.set("technicalDetails", technicalDetails(candidate, resourceCandidates));
+                    contextHints.set("presentation", candidatePresentation(candidate, artifactKind));
                     AgenticAuthoringDomainCatalogHints.enrich(
                             contextHints,
                             candidate,
                             artifactKind,
                             retrievalQuery,
                             domainCatalogServiceKey);
-                    boolean duplicatedResourcePath = resourcePathCounts.getOrDefault(
-                            valueOrDefault(candidate.resourcePath(), ""),
-                            0L) > 1L;
                     return new AgenticAuthoringQuickReply(
-                            quickReplyId(candidate, duplicatedResourcePath),
+                            quickReplyId(candidate),
                             "suggestion",
                             candidateLabel(candidate),
                             candidatePrompt(candidate, artifactKind),
-                            candidateDescription(candidate, artifactKind),
+                            candidateFriendlyDescription(candidate, artifactKind),
                             candidateIcon(candidate),
                             candidateTone(candidate),
                             contextHints);
@@ -133,19 +147,11 @@ public class AgenticAuthoringResourceDiscoveryService {
                 .toList();
     }
 
-    private String quickReplyId(AgenticAuthoringCandidate candidate, boolean includeOperation) {
+    private String quickReplyId(AgenticAuthoringCandidate candidate) {
         String base = "resource-" + normalize(candidate.resourcePath())
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-+|-+$)", "");
-        if (!includeOperation) {
-            return base;
-        }
-        String operation = valueOrDefault(candidate.operation(), "operation");
-        String submitUrl = valueOrDefault(candidate.submitUrl(), candidate.resourcePath());
-        String suffix = normalize(operation + "-" + submitUrl)
-                .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("(^-+|-+$)", "");
-        return suffix.isBlank() ? base : base + "-" + suffix;
+        return base.isBlank() ? "resource-candidate" : base;
     }
 
     private String candidateLabel(AgenticAuthoringCandidate candidate) {
@@ -185,13 +191,78 @@ public class AgenticAuthoringResourceDiscoveryService {
         };
     }
 
-    private ObjectNode technicalDetails(AgenticAuthoringCandidate candidate) {
+    private String candidateFriendlyDescription(AgenticAuthoringCandidate candidate, String artifactKind) {
+        String path = valueOrDefault(candidate.resourcePath(), "").toLowerCase(Locale.ROOT);
+        if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
+            if (path.contains("analytics") || path.contains("/vw-") || path.contains("stats")) {
+                return "Indicada para comecar por KPIs e graficos. Retorna dados agregaveis para comparar valores, volumes e tendencias por recorte de negocio.";
+            }
+            return "Indicada para montar um painel operacional. Retorna registros que podem virar listas, indicadores e drill-downs.";
+        }
+        if ("table".equals(artifactKind)) {
+            return "Indicada quando voce quer uma lista navegavel. Retorna registros para tabela, filtros e detalhes.";
+        }
+        if ("form".equals(artifactKind)) {
+            return "Indicada quando voce precisa cadastrar ou atualizar dados. Retorna uma operacao governada para o formulario.";
+        }
+        return "Opcao encontrada no catalogo semantico. Use para explorar quais dados ela oferece antes de criar a tela.";
+    }
+
+    private ObjectNode candidatePresentation(AgenticAuthoringCandidate candidate, String artifactKind) {
+        ObjectNode presentation = objectMapper.createObjectNode();
+        String path = valueOrDefault(candidate.resourcePath(), "").toLowerCase(Locale.ROOT);
+        boolean analytics = path.contains("analytics") || path.contains("/vw-") || path.contains("stats");
+        if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
+            presentation.put("bestFor", analytics
+                    ? "Boa para dashboards executivos, comparacoes e acompanhamento de tendencias."
+                    : "Boa para paineis operacionais com acompanhamento de registros e drill-down.");
+            presentation.put("returns", analytics
+                    ? "Retorna dados preparados para agregacoes, KPIs, rankings e series temporais."
+                    : "Retorna dados de negocio que podem alimentar cards, listas e graficos simples.");
+            presentation.put("nextStep", "Clique para usar esta fonte como recorte inicial da pre-visualizacao.");
+            return presentation;
+        }
+        if ("table".equals(artifactKind)) {
+            presentation.put("bestFor", "Boa para consultar, filtrar e comparar registros em uma lista.");
+            presentation.put("returns", "Retorna colecoes navegaveis com campos para colunas, busca e detalhes.");
+            presentation.put("nextStep", "Clique para criar a tabela usando esta fonte.");
+            return presentation;
+        }
+        if ("form".equals(artifactKind)) {
+            presentation.put("bestFor", "Boa para capturar ou atualizar informacoes com governanca.");
+            presentation.put("returns", "Retorna a operacao que o formulario deve executar ao salvar.");
+            presentation.put("nextStep", "Clique para usar esta operacao no formulario.");
+            return presentation;
+        }
+        presentation.put("bestFor", "Boa para explorar uma fonte semantica disponivel no catalogo.");
+        presentation.put("returns", "Retorna dados ou operacoes que podem ser materializados em componentes.");
+        presentation.put("nextStep", "Clique para investigar esta opcao no proximo passo.");
+        return presentation;
+    }
+
+    private ObjectNode technicalDetails(
+            AgenticAuthoringCandidate candidate,
+            List<AgenticAuthoringCandidate> resourceCandidates) {
         ObjectNode details = objectMapper.createObjectNode();
         details.put("resourcePath", valueOrDefault(candidate.resourcePath(), ""));
         details.put("submitUrl", valueOrDefault(candidate.submitUrl(), candidate.resourcePath()));
         details.put("submitMethod", valueOrDefault(candidate.submitMethod(), candidate.operation()).toUpperCase(Locale.ROOT));
         details.put("operation", valueOrDefault(candidate.operation(), ""));
         details.put("schemaUrl", valueOrDefault(candidate.schemaUrl(), ""));
+        ArrayNode relatedOperations = details.putArray("relatedOperations");
+        List<AgenticAuthoringCandidate> related = resourceCandidates == null
+                ? List.of(candidate)
+                : resourceCandidates;
+        related.stream()
+                .filter(relatedCandidate -> relatedCandidate != null)
+                .forEach(relatedCandidate -> {
+                    ObjectNode operation = relatedOperations.addObject();
+                    operation.put("submitUrl", valueOrDefault(relatedCandidate.submitUrl(), relatedCandidate.resourcePath()));
+                    operation.put("submitMethod", valueOrDefault(relatedCandidate.submitMethod(), relatedCandidate.operation()).toUpperCase(Locale.ROOT));
+                    operation.put("operation", valueOrDefault(relatedCandidate.operation(), ""));
+                    operation.put("schemaUrl", valueOrDefault(relatedCandidate.schemaUrl(), ""));
+                    operation.put("score", relatedCandidate.score());
+                });
         return details;
     }
 

@@ -220,6 +220,9 @@ public class AgenticAuthoringTurnStreamService {
             return new StreamAppendResult(turnEventService.findLastEvent(streamId).orElse(null), false);
         }
         AiTurnEventEnvelope event = turnEventService.appendEvent(principalContext, streamId, threadId, turnId, type, payload);
+        replayCursorByStream
+                .computeIfAbsent(streamId, ignored -> new AtomicLong(0))
+                .updateAndGet(current -> Math.max(current, event.getSeq()));
         emittersByStream.getOrDefault(streamId, Set.of()).forEach(emitter -> send(emitter, event));
         if (turnEventService.isTerminalType(type)) {
             complete(streamId);

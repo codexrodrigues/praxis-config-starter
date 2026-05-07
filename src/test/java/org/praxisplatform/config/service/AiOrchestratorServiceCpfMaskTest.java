@@ -3,13 +3,17 @@ package org.praxisplatform.config.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
+import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
+import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
@@ -153,5 +157,1391 @@ class AiOrchestratorServiceCpfMaskTest {
 
     assertThat(options).anyMatch(option -> option.contains("000.000.000-00"));
     assertThat(payloads).isNotEmpty();
+  }
+
+  @Test
+  void buildClarificationMessageUsesTabsLanguageForTabsComponent() {
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("update_column")
+            .category("unknown")
+            .needsClarification(true)
+            .missingContext(List.of("column"))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-tabs")
+            .componentType("tabs")
+            .userPrompt("renomeie a primeira aba para consulta")
+            .build();
+
+    String message =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service, "buildClarificationMessage", intent, request);
+
+    assertThat(message).isEqualTo("Qual aba ou item das abas devo ajustar?");
+  }
+
+  @Test
+  void buildClarificationMessageDoesNotLeakRawMissingContextKeys() {
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("update_component")
+            .category("tabs")
+            .scope("component")
+            .needsClarification(true)
+            .missingContext(
+                List.of(
+                    "fields_required",
+                    "attachments_support",
+                    "visibility_permissions",
+                    "preferred_label"))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-tabs")
+            .componentType("tabs")
+            .userPrompt("preciso de uma parte separada para documentos do empregado")
+            .build();
+
+    String message =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service, "buildClarificationMessage", intent, request);
+
+    assertThat(message).isEqualTo("Qual nome devo usar para essa nova aba?");
+    assertThat(message)
+        .doesNotContain("fields_required")
+        .doesNotContain("attachments_support")
+        .doesNotContain("visibility_permissions")
+        .doesNotContain("preferred_label");
+  }
+
+  @Test
+  void normalizeIntentDoesNotRequireColumnTargetForNonTableComponents() {
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("update_column")
+            .category("tabs")
+            .scope("config")
+            .needsClarification(false)
+            .build();
+
+    AiIntentClassification normalized =
+        (AiIntentClassification)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "normalizeIntent",
+                intent,
+                null,
+                "renomeie a primeira aba para consulta",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("tabs"),
+                List.of(),
+                false,
+                List.of());
+
+    assertThat(normalized.getMissingContext()).isNullOrEmpty();
+    assertThat(normalized.getNeedsClarification()).isFalse();
+  }
+
+  @Test
+  void mockProviderBuildsGenericTabsLabelActionPlan() {
+    MockAiService mockProvider = new MockAiService(new ObjectMapper());
+    String prompt =
+        """
+        CATALOGO DE ACOES (JSON):
+        [{"id":"tab.label.set","patchTemplate":{"tabs":[{"id":"{{target}}","textLabel":"{{value}}"}]}}]
+
+        CANDIDATOS DE ALVO (se houver):
+        [{"path":"tabs[]","items":[{"id":"search","textLabel":"Buscar e listar"}]}]
+
+        PEDIDO DO USUARIO: "a primeira aba deve ficar clara para consulta e busca"
+        """;
+
+    JsonNode actionPlan = mockProvider.generateJson(prompt);
+
+    assertThat(actionPlan.path("actions")).hasSize(1);
+    assertThat(actionPlan.path("actions").get(0).path("type").asText()).isEqualTo("tab.label.set");
+    assertThat(actionPlan.path("actions").get(0).path("target").asText()).isEqualTo("search");
+    assertThat(actionPlan.path("actions").get(0).path("value").asText()).isEqualTo("Consulta e busca");
+  }
+
+  @Test
+  void mockProviderBuildsGenericTabsAddActionPlanForNewDetailsFormTab() {
+    MockAiService mockProvider = new MockAiService(new ObjectMapper());
+    String prompt =
+        """
+        CATALOGO DE ACOES (JSON):
+        [
+          {"id":"tab.add"},
+          {"id":"tab.label.set","patchTemplate":{"tabs":[{"id":"{{target}}","textLabel":"{{value}}"}]}}
+        ]
+
+        PEDIDO DO USUARIO: "agora quero uma aba nova para ver os detalhes da pessoa selecionada, com um formulario simples"
+        """;
+
+    JsonNode actionPlan = mockProvider.generateJson(prompt);
+
+    assertThat(actionPlan.path("actions")).hasSize(1);
+    JsonNode action = actionPlan.path("actions").get(0);
+    assertThat(action.path("type").asText()).isEqualTo("tab.add");
+    assertThat(action.path("params").path("id").asText()).isEqualTo("detalhes-formulario");
+    assertThat(action.path("params").path("textLabel").asText()).isEqualTo("Detalhes da pessoa");
+    assertThat(action.path("params").path("content")).hasSize(1);
+  }
+
+  @Test
+  void mockProviderBuildsGenericTabsAddActionPlanForSeparatedBusinessArea() {
+    MockAiService mockProvider = new MockAiService(new ObjectMapper());
+    String prompt =
+        """
+        CATALOGO DE ACOES (JSON):
+        [
+          {"id":"tab.add"},
+          {"id":"tab.label.set","patchTemplate":{"tabs":[{"id":"{{target}}","textLabel":"{{value}}"}]}}
+        ]
+
+        PEDIDO DO USUARIO: "preciso de uma parte separada para acompanhar documentos e observacoes importantes do empregado"
+        """;
+
+    JsonNode actionPlan = mockProvider.generateJson(prompt);
+
+    assertThat(actionPlan.path("actions")).hasSize(1);
+    JsonNode action = actionPlan.path("actions").get(0);
+    assertThat(action.path("type").asText()).isEqualTo("tab.add");
+    assertThat(action.path("params").path("id").asText()).isEqualTo("documentos-observacoes");
+    assertThat(action.path("params").path("textLabel").asText()).isEqualTo("Documentos e observacoes");
+  }
+
+  @Test
+  void mockProviderBuildsDynamicFormLocalFieldAddActionPlan() {
+    MockAiService mockProvider = new MockAiService(new ObjectMapper());
+    String prompt =
+        """
+        CATALOGO DE ACOES (JSON):
+        [
+          {"id":"field.local.add"},
+          {"id":"field.label.set"},
+          {"id":"field.required.set"}
+        ]
+
+        PEDIDO DO USUARIO: "preciso de um campo a mais na parte de contato para informar whatsapp ou outro telefone de recado"
+        """;
+
+    JsonNode actionPlan = mockProvider.generateJson(prompt);
+
+    assertThat(actionPlan.path("actions")).hasSize(1);
+    JsonNode action = actionPlan.path("actions").get(0);
+    assertThat(action.path("type").asText()).isEqualTo("field.local.add");
+    assertThat(action.path("params").path("name").asText()).isEqualTo("whatsapp");
+    assertThat(action.path("params").path("label").asText()).contains("WhatsApp");
+    assertThat(action.path("params").path("source").asText()).isEqualTo("local");
+    assertThat(action.path("params").path("sectionLabel").asText()).isEqualTo("Contato");
+  }
+
+  @Test
+  void mockProviderClassifiesDynamicFormFieldAuthoringAsComponentScope() {
+    MockAiService mockProvider = new MockAiService(new ObjectMapper());
+    String prompt =
+        """
+        SCHEMA DE RESPOSTA (JSON):
+        {"intent":"string","category":"string","scope":"string"}
+
+        PEDIDO DO USUARIO: "preciso de um campo a mais na parte de contato para informar whatsapp ou outro telefone de recado"
+        """;
+
+    JsonNode intent = mockProvider.generateJson(prompt);
+
+    assertThat(intent.path("intent").asText()).isEqualTo("update_component");
+    assertThat(intent.path("category").asText()).isEqualTo("fields");
+    assertThat(intent.path("scope").asText()).isEqualTo("component");
+    assertThat(intent.path("targetField").isNull()).isTrue();
+  }
+
+  @Test
+  void mockProviderClassifiesHumanContactStoragePromptAsFormFieldAuthoring() {
+    MockAiService mockProvider = new MockAiService(new ObjectMapper());
+    String prompt =
+        """
+        SCHEMA DE RESPOSTA (JSON):
+        {"intent":"string","category":"string","scope":"string"}
+
+        PEDIDO DO USUARIO: "preciso guardar um telefone alternativo para emergencias ou recados"
+        """;
+
+    JsonNode intent = mockProvider.generateJson(prompt);
+
+    assertThat(intent.path("intent").asText()).isEqualTo("update_component");
+    assertThat(intent.path("category").asText()).isEqualTo("fields");
+    assertThat(intent.path("scope").asText()).isEqualTo("component");
+  }
+
+  @Test
+  void mockProviderBuildsLocalFieldAddForHumanContactStoragePrompt() {
+    MockAiService mockProvider = new MockAiService(new ObjectMapper());
+    String prompt =
+        """
+        CATALOGO DE ACOES (JSON):
+        [
+          {"id":"field.local.add"},
+          {"id":"field.label.set"},
+          {"id":"field.required.set"}
+        ]
+
+        PEDIDO DO USUARIO: "preciso guardar um telefone alternativo para emergencias ou recados"
+        """;
+
+    JsonNode actionPlan = mockProvider.generateJson(prompt);
+
+    assertThat(actionPlan.path("actions")).hasSize(1);
+    JsonNode action = actionPlan.path("actions").get(0);
+    assertThat(action.path("type").asText()).isEqualTo("field.local.add");
+    assertThat(action.path("params").path("name").asText()).isEqualTo("telefoneRecado");
+    assertThat(action.path("params").path("sectionLabel").asText()).isEqualTo("Contato");
+  }
+
+  @Test
+  void actionPlanClarificationRespectsOptionalTargetFromAuthoringManifest() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode componentContext =
+        mapper.readTree(
+            """
+            {
+              "actionCatalog": [
+                {
+                  "id": "tab.add",
+                  "patchTemplate": { "tabs": [{ "id": "{{target}}", "textLabel": "{{params.textLabel}}" }] }
+                }
+              ]
+            }
+            """);
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    Object actionCatalog = ReflectionTestUtils.invokeMethod(service, "extractComponentActions", componentContext);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("tab.add")
+                        .params(
+                            mapper.readTree(
+                                """
+                                { "id": "detalhes-formulario", "textLabel": "Detalhes da pessoa" }
+                                """))
+                        .build()))
+            .build();
+
+    Object clarification =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "resolveActionPlanClarification",
+            actionPlan,
+            actionCatalog,
+            List.of("search"),
+            authoringManifest);
+
+    assertThat(clarification).isNull();
+  }
+
+  @Test
+  void manifestBackedComponentCanDeferClassifierClarificationToActionPlan() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode componentContext =
+        mapper.readTree(
+            """
+            {
+              "actionCatalog": [
+                {
+                  "id": "tab.add",
+                  "patchTemplate": { "tabs": [{ "id": "{{params.id}}", "textLabel": "{{params.textLabel}}" }] }
+                }
+              ]
+            }
+            """);
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    Object actionCatalog = ReflectionTestUtils.invokeMethod(service, "extractComponentActions", componentContext);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("update_component")
+            .category("tabs")
+            .scope("component")
+            .needsClarification(true)
+            .missingContext(
+                List.of(
+                    "fields_required",
+                    "attachments_support",
+                    "visibility_permissions",
+                    "preferred_label"))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-tabs")
+            .componentType("tabs")
+            .userPrompt("preciso de uma parte separada para documentos do empregado")
+            .build();
+
+    Boolean shouldDefer =
+        (Boolean)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldDeferComponentClarificationToActionPlan",
+                intent,
+                request,
+                actionCatalog,
+                authoringManifest);
+
+    assertThat(shouldDefer).isTrue();
+  }
+
+  @Test
+  void manifestBackedComponentDoesNotDeferResourceClarification() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode componentContext =
+        mapper.readTree(
+            """
+            {
+              "actionCatalog": [
+                {
+                  "id": "widget.add",
+                  "patchTemplate": { "widgets": [{ "id": "{{params.id}}" }] }
+                }
+              ]
+            }
+            """);
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-dynamic-gridster-page",
+              "operations": [
+                {
+                  "operationId": "widget.add",
+                  "target": { "kind": "widget", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": { "id": { "type": "string" } }
+                  }
+                }
+              ]
+            }
+            """);
+    Object actionCatalog = ReflectionTestUtils.invokeMethod(service, "extractComponentActions", componentContext);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("update_component")
+            .category("widgets")
+            .scope("component")
+            .needsClarification(true)
+            .missingContext(List.of("resourcePath"))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-dynamic-gridster-page")
+            .componentType("page-builder")
+            .userPrompt("crie uma tabela")
+            .build();
+
+    Boolean shouldDefer =
+        (Boolean)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldDeferComponentClarificationToActionPlan",
+                intent,
+                request,
+                actionCatalog,
+                authoringManifest);
+
+    assertThat(shouldDefer).isFalse();
+  }
+
+  @Test
+  void derivesMinimalTabAddPlanForSafeHumanRequestWhenLlmReturnsNoAction() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode componentContext =
+        mapper.readTree(
+            """
+            {
+              "actionCatalog": [
+                {
+                  "id": "tab.add",
+                  "patchTemplate": { "tabs": [{ "id": "{{params.id}}", "textLabel": "{{params.textLabel}}" }] }
+                }
+              ]
+            }
+            """);
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    Object actionCatalog = ReflectionTestUtils.invokeMethod(service, "extractComponentActions", componentContext);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-tabs")
+            .componentType("tabs")
+            .userPrompt(
+                "preciso de uma parte separada para acompanhar documentos e observacoes importantes")
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackComponentActionPlan",
+            request,
+            actionCatalog,
+            mapper.createArrayNode(),
+            authoringManifest);
+
+    assertThat(fallback).isNotNull();
+    assertThat(fallback.getActions()).hasSize(1);
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("tab.add");
+    assertThat(action.getParams().path("id").asText()).isEqualTo("documentos-e-observacoes");
+    assertThat(action.getParams().path("textLabel").asText()).isEqualTo("Documentos e observacoes");
+  }
+
+  @Test
+  void componentEditPlanNormalizesNestedLlmParamsForManifestRequiredFields() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("tab.add")
+                        .params(
+                            mapper.readTree(
+                                """
+                                {
+                                  "params": {
+                                    "operacao": {
+                                      "id": "treinamentos-e-certificacoes",
+                                      "textLabel": "Treinamentos e certificacoes"
+                                    }
+                                  }
+                                }
+                                """))
+                        .build()))
+            .build();
+
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", actionPlan, authoringManifest);
+
+    JsonNode input = componentEditPlan.path("operations").get(0).path("input");
+    assertThat(input.path("id").asText()).isEqualTo("treinamentos-e-certificacoes");
+    assertThat(input.path("textLabel").asText()).isEqualTo("Treinamentos e certificacoes");
+  }
+
+  @Test
+  void componentEditPlanValidatorAcceptsNestedLlmOperationParamsForRequiredFields()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    JsonNode componentEditPlan =
+        mapper.readTree(
+            """
+            {
+              "schemaVersion": "praxis-component-edit-plan.v1",
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "input": {
+                    "params": {
+                      "operacao": {
+                        "id": "treinamentos",
+                        "textLabel": "Treinamentos"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            componentEditPlan,
+            authoringManifest);
+
+    assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void componentEditPlanValidatorAcceptsLocalizedNestedAliasesForRequiredFields()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    JsonNode componentEditPlan =
+        mapper.readTree(
+            """
+            {
+              "schemaVersion": "praxis-component-edit-plan.v1",
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "input": {
+                    "params": {
+                      "operacao": {
+                        "identificador": "cursos-realizados",
+                        "rotulo": "Cursos realizados"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            componentEditPlan,
+            authoringManifest);
+
+    assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void componentEditPlanValidatorDerivesTechnicalIdFromHumanLabelWhenMissing()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    JsonNode componentEditPlan =
+        mapper.readTree(
+            """
+            {
+              "schemaVersion": "praxis-component-edit-plan.v1",
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "input": {
+                    "params": {
+                      "operacao": {
+                        "descricao": "Treinamentos e certificações"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+
+    JsonNode normalizedInput =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanOperationInput",
+            componentEditPlan.path("operations").get(0),
+            authoringManifest.path("operations").get(0));
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            componentEditPlan,
+            authoringManifest);
+
+    assertThat(failures).isEmpty();
+    assertThat(normalizedInput.path("id").asText()).isEqualTo("treinamentos-e-certificacoes");
+    assertThat(normalizedInput.path("textLabel").asText()).isEqualTo("Treinamentos e certificações");
+  }
+
+  @Test
+  void componentActionPlanCompletesSafeTabAddRequiredFieldsFromHumanPrompt()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan incompletePlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("tab.add")
+                        .params(mapper.createObjectNode())
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-tabs")
+            .componentType("tabs")
+            .userPrompt("quero uma parte separada para acompanhar cursos realizados")
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            incompletePlan,
+            request,
+            mapper.createArrayNode(),
+            mapper.createObjectNode(),
+            authoringManifest,
+            warnings);
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", completed, authoringManifest);
+    JsonNode input = componentEditPlan.path("operations").get(0).path("input");
+
+    assertThat(input.path("id").asText()).isEqualTo("cursos-realizados");
+    assertThat(input.path("textLabel").asText()).isEqualTo("Cursos Realizados");
+    assertThat(warnings)
+        .contains(
+            "componentEditPlan completou campos obrigatorios seguros a partir do pedido humano e authoringManifest.");
+  }
+
+  @Test
+  void componentActionPlanPreservesComplexParamsSerializedAsJsonText()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "editableTargets": [{ "kind": "tabContent" }],
+              "operations": [
+                {
+                  "operationId": "tab.content.set",
+                  "target": { "kind": "tabContent", "resolver": "tab-or-link-by-id", "required": true },
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "widgets": { "type": "array", "items": { "type": "object" } }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("tab.content.set")
+                        .target("buscar-e-listar")
+                        .params(
+                            mapper.getNodeFactory()
+                                .textNode(
+                                    """
+                                    {"widgets":[{"id":"treinamentos-list","component":"praxis-list","title":"Treinamentos"}]}
+                                    """))
+                        .build()))
+            .build();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            AiOrchestratorRequest.builder()
+                .componentId("praxis-tabs")
+                .componentType("tabs")
+                .userPrompt("crie nesta aba uma lista de treinamentos")
+                .build(),
+            mapper.createArrayNode(),
+            mapper.createObjectNode(),
+            authoringManifest,
+            new ArrayList<>());
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", completed, authoringManifest);
+    JsonNode operation = componentEditPlan.path("operations").get(0);
+
+    assertThat(operation.path("operationId").asText()).isEqualTo("tab.content.set");
+    assertThat(operation.path("target").path("id").asText()).isEqualTo("buscar-e-listar");
+    assertThat(operation.path("input").path("widgets")).hasSize(1);
+    assertThat(operation.path("input").path("widgets").get(0).path("component").asText())
+        .isEqualTo("praxis-list");
+  }
+
+  @Test
+  void componentActionPlanHonorsExplicitNewTabLabelAndAlignsContentTarget()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "editableTargets": [{ "kind": "tab" }, { "kind": "tabContent" }],
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                },
+                {
+                  "operationId": "tab.content.set",
+                  "target": { "kind": "tabContent", "resolver": "tab-or-link-by-id", "required": true },
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "widgets": { "type": "array", "items": { "type": "object" } }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("tab.add")
+                        .params(
+                            mapper.readTree(
+                                """
+                                {
+                                  "id": "curso-pessoa-responsavel-data-previs",
+                                  "textLabel": "Curso Pessoa Responsavel Data Previs"
+                                }
+                                """))
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("tab.content.set")
+                        .target("curso-pessoa-responsavel-data-previs")
+                        .params(
+                            mapper.readTree(
+                                """
+                                {
+                                  "widgets": [
+                                    {
+                                      "id": "cadastro-treinamento-form",
+                                      "component": "praxis-form",
+                                      "title": "Cadastro de treinamento"
+                                    }
+                                  ]
+                                }
+                                """))
+                        .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            AiOrchestratorRequest.builder()
+                .componentId("praxis-tabs")
+                .componentType("tabs")
+                .userPrompt(
+                    "Crie uma nova aba chamada Cadastro de Treinamento com um formulario simples para registrar curso, pessoa responsavel, data prevista e status.")
+                .build(),
+            mapper.createArrayNode(),
+            mapper.createObjectNode(),
+            authoringManifest,
+            warnings);
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", completed, authoringManifest);
+
+    JsonNode addInput = componentEditPlan.path("operations").get(0).path("input");
+    JsonNode contentOperation = componentEditPlan.path("operations").get(1);
+    assertThat(addInput.path("id").asText()).isEqualTo("cadastro-de-treinamento");
+    assertThat(addInput.path("textLabel").asText()).isEqualTo("Cadastro de Treinamento");
+    assertThat(contentOperation.path("operationId").asText()).isEqualTo("tab.content.set");
+    assertThat(contentOperation.path("target").path("id").asText())
+        .isEqualTo("cadastro-de-treinamento");
+    assertThat(warnings)
+        .contains(
+            "tab.add respeitou rotulo explicito do pedido humano.",
+            "Alvo tab.content.set alinhado a aba explicitamente criada no pedido humano.");
+  }
+
+  @Test
+  void componentActionPlanInfersNewTabInlineFormContentWhenLlmOnlyAddsTab()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "editableTargets": [{ "kind": "tab" }, { "kind": "tabContent" }],
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                },
+                {
+                  "operationId": "tab.content.set",
+                  "target": { "kind": "tabContent", "resolver": "tab-or-link-by-id", "required": true },
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "content": { "type": "array", "items": { "type": "object" } },
+                      "widgets": { "type": "array", "items": { "type": "object" } }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(List.of(AiActionPlan.Action.builder()
+                .type("tab.add")
+                .params(mapper.readTree("""
+                    {
+                      "id": "cadastro-de-treinamento",
+                      "textLabel": "Cadastro de Treinamento"
+                    }
+                    """))
+                .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            AiOrchestratorRequest.builder()
+                .componentId("praxis-tabs")
+                .componentType("tabs")
+                .userPrompt(
+                    "Crie uma nova aba chamada Cadastro de Treinamento com um formulario simples para registrar curso, pessoa responsavel, data prevista e status.")
+                .build(),
+            mapper.createArrayNode(),
+            mapper.createObjectNode(),
+            authoringManifest,
+            warnings);
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", completed, authoringManifest);
+
+    JsonNode operations = componentEditPlan.path("operations");
+    assertThat(operations).hasSize(2);
+    assertThat(operations.get(1).path("operationId").asText()).isEqualTo("tab.content.set");
+    assertThat(operations.get(1).path("target").path("id").asText())
+        .isEqualTo("cadastro-de-treinamento");
+    JsonNode content = operations.get(1).path("input").path("content");
+    assertThat(content).hasSize(4);
+    assertThat(content.get(0).path("name").asText()).isEqualTo("curso");
+    assertThat(content.get(0).path("controlType").asText()).isEqualTo("input");
+    assertThat(content.get(1).path("name").asText()).isEqualTo("pessoaResponsavel");
+    assertThat(content.get(2).path("controlType").asText()).isEqualTo("date");
+    assertThat(content.get(3).path("controlType").asText()).isEqualTo("select");
+    assertThat(warnings)
+        .contains("tab.content.set inferido para conteudo solicitado junto da nova aba.");
+  }
+
+  @Test
+  void componentActionPlanInfersInlineFormContentForImperativeCreateTabPrompt()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "editableTargets": [{ "kind": "tab" }, { "kind": "tabContent" }],
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                },
+                {
+                  "operationId": "tab.content.set",
+                  "target": { "kind": "tabContent", "resolver": "tab-or-link-by-id", "required": true },
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "content": { "type": "array", "items": { "type": "object" } },
+                      "widgets": { "type": "array", "items": { "type": "object" } }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(List.of(AiActionPlan.Action.builder()
+                .type("tab.add")
+                .params(mapper.readTree("""
+                    {
+                      "id": "acompanhamento",
+                      "textLabel": "Acompanhamento"
+                    }
+                    """))
+                .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            AiOrchestratorRequest.builder()
+                .componentId("praxis-tabs")
+                .componentType("tabs")
+                .userPrompt(
+                    "Crie uma aba chamada Acompanhamento com um formulario para registrar titulo, responsavel, data prevista e status.")
+                .build(),
+            mapper.createArrayNode(),
+            mapper.createObjectNode(),
+            authoringManifest,
+            warnings);
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", completed, authoringManifest);
+
+    JsonNode operations = componentEditPlan.path("operations");
+    assertThat(operations).hasSize(2);
+    assertThat(operations.get(0).path("operationId").asText()).isEqualTo("tab.add");
+    assertThat(operations.get(1).path("operationId").asText()).isEqualTo("tab.content.set");
+    assertThat(operations.get(1).path("target").path("id").asText()).isEqualTo("acompanhamento");
+    JsonNode content = operations.get(1).path("input").path("content");
+    assertThat(content).hasSize(4);
+    assertThat(content.get(0).path("name").asText()).isEqualTo("titulo");
+    assertThat(content.get(1).path("name").asText()).isEqualTo("responsavel");
+    assertThat(content.get(2).path("controlType").asText()).isEqualTo("date");
+    assertThat(content.get(3).path("controlType").asText()).isEqualTo("select");
+    assertThat(warnings)
+        .contains("tab.content.set inferido para conteudo solicitado junto da nova aba.");
+  }
+
+  @Test
+  void componentActionPlanInfersDynamicFormLocalFieldsFromHumanFormPrompt()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-dynamic-form",
+              "editableTargets": [{ "kind": "localField" }, { "kind": "row" }],
+              "operations": [
+                {
+                  "operationId": "field.local.add",
+                  "target": { "kind": "localField", "resolver": "field-by-name", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["name", "label", "controlType", "source"],
+                    "properties": {
+                      "name": { "type": "string" },
+                      "label": { "type": "string" },
+                      "controlType": { "type": "string" },
+                      "source": { "const": "local" },
+                      "submitPolicy": { "enum": ["omit", "include", "includeWhenDirty"] }
+                    }
+                  }
+                },
+                {
+                  "operationId": "layout.column.add",
+                  "target": { "kind": "row", "resolver": "row-by-id-in-section", "required": true },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": { "id": { "type": "string" } }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(List.of(AiActionPlan.Action.builder()
+                .type("layout.column.add")
+                .params(mapper.createObjectNode())
+                .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            AiOrchestratorRequest.builder()
+                .componentId("praxis-dynamic-form")
+                .componentType("form")
+                .userPrompt(
+                    "Crie um formulario simples para cadastrar curso, pessoa responsavel, data prevista e status.")
+                .build(),
+            mapper.createArrayNode(),
+            mapper.createObjectNode(),
+            authoringManifest,
+            warnings);
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", completed, authoringManifest);
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            componentEditPlan,
+            authoringManifest);
+
+    JsonNode operations = componentEditPlan.path("operations");
+    assertThat(operations).hasSize(4);
+    assertThat(operations.get(0).path("operationId").asText()).isEqualTo("field.local.add");
+    assertThat(operations.get(0).path("input").path("name").asText()).isEqualTo("curso");
+    assertThat(operations.get(0).path("input").path("source").asText()).isEqualTo("local");
+    assertThat(operations.get(0).path("input").path("submitPolicy").asText()).isEqualTo("include");
+    assertThat(operations.get(1).path("input").path("name").asText()).isEqualTo("pessoaResponsavel");
+    assertThat(operations.get(2).path("input").path("controlType").asText()).isEqualTo("date");
+    assertThat(operations.get(3).path("input").path("label").asText()).isEqualTo("status");
+    assertThat(operations.get(3).path("input").path("controlType").asText()).isEqualTo("select");
+    assertThat(failures).isEmpty();
+    assertThat(warnings)
+        .contains("field.local.add inferido para campos solicitados no formulario.");
+  }
+
+  @Test
+  void derivesFallbackDynamicFormLocalFieldPlanWhenLlmReturnsNoAction()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode componentContext =
+        mapper.readTree(
+            """
+            {
+              "actionCatalog": [
+                {
+                  "id": "field.local.add",
+                  "patchTemplate": { "fieldMetadata": [{ "name": "{{params.name}}" }] }
+                }
+              ]
+            }
+            """);
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-dynamic-form",
+              "operations": [
+                {
+                  "operationId": "field.local.add",
+                  "target": { "kind": "localField", "resolver": "field-by-name", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["name", "label", "controlType", "source"],
+                    "properties": {
+                      "name": { "type": "string" },
+                      "label": { "type": "string" },
+                      "controlType": { "type": "string" },
+                      "source": { "const": "local" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    Object actionCatalog = ReflectionTestUtils.invokeMethod(service, "extractComponentActions", componentContext);
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackComponentActionPlan",
+            AiOrchestratorRequest.builder()
+                .componentId("praxis-dynamic-form")
+                .componentType("form")
+                .userPrompt("Crie um formulario para registrar titulo, responsavel e status.")
+                .build(),
+            actionCatalog,
+            mapper.createArrayNode(),
+            authoringManifest);
+
+    assertThat(fallback).isNotNull();
+    assertThat(fallback.getActions()).hasSize(3);
+    assertThat(fallback.getActions().get(0).getType()).isEqualTo("field.local.add");
+    assertThat(fallback.getActions().get(0).getParams().path("name").asText()).isEqualTo("titulo");
+    assertThat(fallback.getActions().get(2).getParams().path("controlType").asText()).isEqualTo("select");
+  }
+
+  @Test
+  void componentActionPlanNormalizesFieldLikeWidgetsInsideTabContentSet()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-tabs",
+              "editableTargets": [{ "kind": "tab" }, { "kind": "tabContent" }],
+              "operations": [
+                {
+                  "operationId": "tab.add",
+                  "target": { "kind": "tab", "resolver": "tab-by-id-or-label", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["id", "textLabel"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "textLabel": { "type": "string" }
+                    }
+                  }
+                },
+                {
+                  "operationId": "tab.content.set",
+                  "target": { "kind": "tabContent", "resolver": "tab-or-link-by-id", "required": true },
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "content": { "type": "array", "items": { "type": "object" } },
+                      "widgets": { "type": "array", "items": { "type": "object" } }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(List.of(
+                AiActionPlan.Action.builder()
+                    .type("tab.add")
+                    .params(mapper.readTree("""
+                        {
+                          "id": "cadastro-de-treinamento",
+                          "textLabel": "Cadastro de Treinamento"
+                        }
+                        """))
+                    .build(),
+                AiActionPlan.Action.builder()
+                    .type("tab.content.set")
+                    .target("cadastro-de-treinamento")
+                    .params(mapper.readTree("""
+                        {
+                          "content": "formulario simples",
+                          "widgets": [
+                            { "type": "text", "label": "Curso" },
+                            { "type": "text", "label": "Pessoa responsavel" },
+                            { "type": "date", "label": "Data prevista" },
+                            { "type": "select", "label": "Status" }
+                          ]
+                        }
+                        """))
+                    .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            AiOrchestratorRequest.builder()
+                .componentId("praxis-tabs")
+                .componentType("tabs")
+                .userPrompt(
+                    "Crie uma nova aba chamada Cadastro de Treinamento com um formulario simples para registrar curso, pessoa responsavel, data prevista e status.")
+                .build(),
+            mapper.createArrayNode(),
+            mapper.createObjectNode(),
+            authoringManifest,
+            warnings);
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", completed, authoringManifest);
+
+    JsonNode input = componentEditPlan.path("operations").get(1).path("input");
+    assertThat(input.has("widgets")).isFalse();
+    JsonNode content = input.path("content");
+    assertThat(content).hasSize(4);
+    assertThat(content.get(0).path("name").asText()).isEqualTo("curso");
+    assertThat(content.get(0).path("controlType").asText()).isEqualTo("input");
+    assertThat(content.get(1).path("name").asText()).isEqualTo("pessoaResponsavel");
+    assertThat(content.get(2).path("controlType").asText()).isEqualTo("date");
+    assertThat(content.get(3).path("controlType").asText()).isEqualTo("select");
+    assertThat(warnings)
+        .contains("tab.content.set normalizou widgets com formato de campo para DynamicFieldMetadata[].");
   }
 }

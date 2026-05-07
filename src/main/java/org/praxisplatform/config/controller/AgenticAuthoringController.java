@@ -130,8 +130,14 @@ public class AgenticAuthoringController {
 
     @PostMapping("/resource-candidates")
     public ResponseEntity<AgenticAuthoringResourceCandidatesResult> searchResourceCandidates(
-            @RequestBody AgenticAuthoringResourceCandidatesRequest request) {
-        return ResponseEntity.ok(resourceDiscoveryService.search(request));
+            @RequestBody AgenticAuthoringResourceCandidatesRequest request,
+            HttpServletRequest servletRequest,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(resourceDiscoveryService.search(
+                request,
+                resolveAuthoringPrincipalContext(servletRequest, tenantId, userId, environment)));
     }
 
     @PostMapping("/turn/stream/start")
@@ -336,6 +342,17 @@ public class AgenticAuthoringController {
             principalContext = null;
         }
         return streamAccessTokenService.resolvePrincipalContext(streamId, accessToken, principalContext);
+    }
+
+    private AiPrincipalContext resolveAuthoringPrincipalContext(
+            HttpServletRequest servletRequest,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (principalContextResolver == null) {
+            return new AiPrincipalContext(tenantId, userId, environment, false);
+        }
+        return principalContextResolver.resolve(servletRequest, tenantId, userId, environment);
     }
 
     private boolean shouldUseSignedTokenPrincipalContext(

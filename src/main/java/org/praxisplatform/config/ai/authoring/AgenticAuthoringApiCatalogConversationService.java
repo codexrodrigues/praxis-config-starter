@@ -49,6 +49,9 @@ public class AgenticAuthoringApiCatalogConversationService {
                     message,
                     baseAnswer("endpoints", null, null, usableCandidates));
         }
+        if (isBusinessAnalyticsCatalogQuestion(normalizedPrompt)) {
+            return businessAnalyticsCatalogAnswer(selectedMetadata, candidate, usableCandidates);
+        }
         if (containsAny(normalizedPrompt, "relacionad", "complement", "combinar", "combine", "drill", "detalhe", "detalhamento", "vincul")) {
             return relatedApisAnswer(normalizedPrompt, selectedMetadata, candidate, usableCandidates);
         }
@@ -62,6 +65,50 @@ public class AgenticAuthoringApiCatalogConversationService {
             return filtersAnswer(selectedMetadata, candidate, usableCandidates);
         }
         return endpointChoiceAnswer(normalizedPrompt, selectedMetadata, candidate, usableCandidates);
+    }
+
+    private ApiCatalogConversationAnswer businessAnalyticsCatalogAnswer(
+            ApiMetadata selectedMetadata,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        List<ApiMetadata> catalog = repository == null ? List.of() : repository.findAll();
+        List<BusinessAnalyticsArea> areas = businessAnalyticsAreas(catalog, candidates);
+        ObjectNode answer = baseAnswer("business_analytics_catalog", selectedMetadata, selectedCandidate, candidates);
+        ArrayNode businessAreas = answer.putArray("businessAreas");
+        for (BusinessAnalyticsArea area : areas) {
+            ObjectNode node = businessAreas.addObject();
+            node.put("area", area.label());
+            node.put("businessQuestion", area.businessQuestion());
+            node.put("recommendedStart", area.recommendedStart());
+            ArrayNode indicators = node.putArray("indicators");
+            area.indicators().forEach(indicators::add);
+            ArrayNode chartIdeas = node.putArray("chartIdeas");
+            area.chartIdeas().forEach(chartIdeas::add);
+            ArrayNode evidencePaths = node.putArray("canonicalResourcePaths");
+            area.evidencePaths().stream().limit(5).forEach(evidencePaths::add);
+        }
+        addRecommendation(
+                answer,
+                "start_with_business_analytics_catalog",
+                "Escolha primeiro uma area de negocio e uma pergunta analitica; depois materialize o dashboard governado.");
+        addEvidence(answer, "catalog", "/schemas/catalog");
+        addEvidence(answer, "filtered-schemas", "/schemas/filtered");
+
+        if (areas.isEmpty()) {
+            String message = "Ainda nao encontrei areas analiticas claras no catalogo local. Como proximo passo, descreva o processo de negocio, a entidade principal e o indicador que voce quer acompanhar.";
+            return new ApiCatalogConversationAnswer(message, answer);
+        }
+        StringJoiner areaSummary = new StringJoiner(" ");
+        for (BusinessAnalyticsArea area : areas) {
+            areaSummary.add(area.label() + ": " + area.businessQuestion()
+                    + " Indicadores: " + String.join(", ", area.indicators())
+                    + ". Graficos iniciais: " + String.join(", ", area.chartIdeas()) + ".");
+        }
+        String message = "Pelo catalogo semantico disponivel, eu comecaria por estas areas de negocio para graficos: "
+                + areaSummary
+                + " Minha recomendacao: comece por " + areas.get(0).label()
+                + ", porque ela tem uma fonte analitica mais aderente a KPIs e permite evoluir para drill-down operacional depois.";
+        return new ApiCatalogConversationAnswer(message, answer);
     }
 
     private ApiCatalogConversationAnswer schemaAnswer(
@@ -578,6 +625,146 @@ public class AgenticAuthoringApiCatalogConversationService {
         return "Motivo: melhor pontuacao no catalogo para a intencao informada.";
     }
 
+    private boolean isBusinessAnalyticsCatalogQuestion(String normalizedPrompt) {
+        boolean asksForDiscovery = containsAny(normalizedPrompt,
+                "catalogo", "catalog", "recursos", "recurso", "areas", "area", "dados", "disponiveis", "disponibilidade",
+                "quais", "descobrir", "descoberta", "opcoes", "opcoes de dados", "fonte", "fontes");
+        boolean asksForAnalytics = containsAny(normalizedPrompt,
+                "grafico", "graficos", "chart", "dashboard", "painel", "indicador", "indicadores", "kpi", "metricas", "analitica", "analitico");
+        boolean businessLanguage = containsAny(normalizedPrompt,
+                "negocio", "gestor", "pessoas", "folha", "operacoes", "ativos", "compras", "riscos", "sem endpoints", "linguagem simples");
+        boolean postponesAuthoring = containsAny(normalizedPrompt,
+                "ainda nao quero criar", "nao quero criar", "antes de escolher", "antes de criar", "primeiro descobrir");
+        return asksForDiscovery && asksForAnalytics && (businessLanguage || postponesAuthoring);
+    }
+
+    private List<BusinessAnalyticsArea> businessAnalyticsAreas(
+            List<ApiMetadata> catalog,
+            List<AgenticAuthoringCandidate> candidates) {
+        List<ApiMetadata> source = catalog == null || catalog.isEmpty()
+                ? candidates.stream()
+                        .map(this::candidateMetadataProjection)
+                        .flatMap(Optional::stream)
+                        .toList()
+                : catalog;
+        List<BusinessAnalyticsArea> areas = new ArrayList<>();
+        addBusinessAreaIfPresent(
+                areas,
+                source,
+                "Pessoas e folha",
+                List.of("human-resources", "folha", "pagamento", "funcionario", "funcionarios", "perfil", "reputacao"),
+                "Como custo, pessoas, perfis e folha evoluem por departamento, cargo, equipe ou competencia?",
+                List.of("custo de folha", "salario liquido", "headcount", "perfil/reputacao", "distribuicao por departamento"),
+                List.of("barras por departamento", "linha por competencia", "ranking de maiores custos", "cards de KPI"),
+                "folha de pagamento por departamento");
+        addBusinessAreaIfPresent(
+                areas,
+                source,
+                "Operacoes",
+                List.of("operations", "missao", "incidente", "equipe", "base", "licenca", "socorro"),
+                "Onde estao gargalos, incidentes, missoes, equipes ou bases que precisam de acompanhamento?",
+                List.of("incidentes por status", "missoes por base", "uso de equipes", "sinais de socorro"),
+                List.of("barras por status", "mapa/lista por base", "linha de eventos", "cards operacionais"),
+                "incidentes e missoes por status/base");
+        addBusinessAreaIfPresent(
+                areas,
+                source,
+                "Ativos",
+                List.of("assets", "ativo", "ativos", "veiculo", "veiculos", "equipamento", "alocacao"),
+                "Quais ativos estao alocados, disponiveis ou concentrando uso operacional?",
+                List.of("veiculos por status", "equipamentos alocados", "uso por missao", "disponibilidade"),
+                List.of("donut de status", "barras por tipo", "tabela com drill-down", "cards de disponibilidade"),
+                "disponibilidade de veiculos e equipamentos");
+        addBusinessAreaIfPresent(
+                areas,
+                source,
+                "Compras e contratos",
+                List.of("procurement", "compras", "products", "suppliers", "contracts", "purchase", "orders", "fornecedor"),
+                "Como fornecedores, produtos, contratos e pedidos se distribuem por valor, status ou prazo?",
+                List.of("contratos por status", "pedidos por fornecedor", "produtos por categoria", "volume de compras"),
+                List.of("barras por fornecedor", "linha de pedidos", "ranking de contratos", "cards financeiros"),
+                "contratos e pedidos por fornecedor/status");
+        addBusinessAreaIfPresent(
+                areas,
+                source,
+                "Riscos",
+                List.of("risk", "riscos", "ameaca", "ameacas", "incidente", "indicadores"),
+                "Quais riscos, ameacas ou incidentes exigem prioridade e tendencia de acompanhamento?",
+                List.of("ameacas por severidade", "incidentes por tendencia", "indicadores de risco", "prioridade operacional"),
+                List.of("heatmap de severidade", "linha de tendencia", "barras por categoria", "cards de risco"),
+                "ameacas e incidentes por severidade");
+        return areas;
+    }
+
+    private void addBusinessAreaIfPresent(
+            List<BusinessAnalyticsArea> output,
+            List<ApiMetadata> catalog,
+            String label,
+            List<String> tokens,
+            String businessQuestion,
+            List<String> indicators,
+            List<String> chartIdeas,
+            String recommendedStart) {
+        List<String> paths = catalog.stream()
+                .filter(metadata -> metadataMatchesBusinessTokens(metadata, tokens))
+                .sorted(Comparator.comparing(this::isAnalyticMetadata).reversed()
+                        .thenComparing(metadata -> valueOrDefault(metadata.getPath(), "")))
+                .map(ApiMetadata::getPath)
+                .filter(path -> path != null && !path.isBlank())
+                .distinct()
+                .limit(6)
+                .toList();
+        if (!paths.isEmpty()) {
+            output.add(new BusinessAnalyticsArea(
+                    label,
+                    businessQuestion,
+                    indicators,
+                    chartIdeas,
+                    recommendedStart,
+                    paths));
+        }
+    }
+
+    private boolean metadataMatchesBusinessTokens(ApiMetadata metadata, List<String> tokens) {
+        String haystack = normalize(String.join(" ",
+                valueOrDefault(metadata.getPath(), ""),
+                valueOrDefault(metadata.getTags(), ""),
+                valueOrDefault(metadata.getSummary(), ""),
+                valueOrDefault(metadata.getDescription(), ""),
+                valueOrDefault(metadata.getOperationId(), "")));
+        return tokens.stream().map(this::normalize).anyMatch(haystack::contains);
+    }
+
+    private boolean isAnalyticMetadata(ApiMetadata metadata) {
+        String path = normalizePath(metadata != null ? metadata.getPath() : "");
+        String tags = normalize(metadata != null ? metadata.getTags() : "");
+        String summary = normalize(metadata != null ? metadata.getSummary() : "");
+        return path.contains("analytics")
+                || path.contains("/vw-")
+                || path.contains("/stats/")
+                || tags.contains("analytics")
+                || summary.contains("analytics")
+                || summary.contains("indicador");
+    }
+
+    private Optional<ApiMetadata> candidateMetadataProjection(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || candidate.resourcePath() == null || candidate.resourcePath().isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(new ApiMetadata(
+                candidate.resourcePath(),
+                valueOrDefault(candidate.operation(), "GET"),
+                "",
+                candidate.resourcePath(),
+                candidate.reason(),
+                "",
+                null,
+                null,
+                "[]",
+                "{}",
+                null));
+    }
+
     private String writeOperationsHint(List<ApiMetadata> related) {
         boolean hasWrite = related.stream().anyMatch(item -> {
             String method = item.getMethod() == null ? "" : item.getMethod().toUpperCase(Locale.ROOT);
@@ -709,5 +896,14 @@ public class AgenticAuthoringApiCatalogConversationService {
     }
 
     private record ScoredMetadata(ApiMetadata metadata, double score) {
+    }
+
+    private record BusinessAnalyticsArea(
+            String label,
+            String businessQuestion,
+            List<String> indicators,
+            List<String> chartIdeas,
+            String recommendedStart,
+            List<String> evidencePaths) {
     }
 }

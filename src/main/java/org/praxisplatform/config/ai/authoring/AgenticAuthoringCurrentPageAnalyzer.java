@@ -180,6 +180,38 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         } else if ("praxis-chart".equals(componentId)) {
             editableRegions.add(editableRegion(widgetKey, componentId, "chart.series"));
             editableRegions.add(editableRegion(widgetKey, componentId, "chart.dataSource"));
+        } else if ("praxis-tabs".equals(componentId)) {
+            editableRegions.add(editableRegion(widgetKey, componentId, "tabs.items"));
+            editableRegions.add(editableRegion(widgetKey, componentId, "tabs.activeContent"));
+            inspectTabs(widgetSummary, inputs);
+        }
+    }
+
+    private void inspectTabs(ObjectNode widgetSummary, JsonNode inputs) {
+        JsonNode config = inputs.path("config");
+        JsonNode tabs = config.path("tabs");
+        if (!tabs.isArray()) {
+            return;
+        }
+        int selectedIndex = config.path("group").path("selectedIndex").asInt(0);
+        widgetSummary.put("selectedIndex", selectedIndex);
+        ArrayNode tabSummaries = widgetSummary.putArray("tabs");
+        for (int index = 0; index < tabs.size(); index++) {
+            JsonNode tab = tabs.get(index);
+            ObjectNode tabSummary = tabSummaries.addObject();
+            tabSummary.put("index", index);
+            tabSummary.put("id", text(tab, "id"));
+            tabSummary.put("label", firstNonBlank(text(tab, "textLabel"), text(tab, "label"), text(tab, "title")));
+            tabSummary.put("active", index == selectedIndex);
+            JsonNode nestedWidgets = tab.path("widgets");
+            tabSummary.put("widgetsCount", nestedWidgets.isArray() ? nestedWidgets.size() : 0);
+            if (index == selectedIndex) {
+                ObjectNode activeTab = widgetSummary.putObject("activeTab");
+                activeTab.put("index", index);
+                activeTab.put("id", text(tab, "id"));
+                activeTab.put("label", firstNonBlank(text(tab, "textLabel"), text(tab, "label"), text(tab, "title")));
+                activeTab.put("widgetsCount", nestedWidgets.isArray() ? nestedWidgets.size() : 0);
+            }
         }
     }
 
@@ -231,9 +263,22 @@ public class AgenticAuthoringCurrentPageAnalyzer {
             case "praxis-dynamic-form" -> "form";
             case "praxis-table" -> "table";
             case "praxis-chart" -> "dashboard";
+            case "praxis-tabs" -> "container";
             case "" -> "unknown";
             default -> "component";
         };
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String resolveResourcePath(JsonNode inputs) {

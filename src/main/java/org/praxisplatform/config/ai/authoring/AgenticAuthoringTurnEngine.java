@@ -23,6 +23,7 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer;
     private final AgenticAuthoringToolRegistry toolRegistry;
     private final AgenticAuthoringProjectKnowledgeService projectKnowledgeService;
+    private final AgenticAuthoringApiCatalogConversationService apiCatalogConversationService;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
     public AgenticAuthoringTurnEngine(
@@ -31,7 +32,7 @@ public class AgenticAuthoringTurnEngine {
             ObjectMapper objectMapper,
             AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
             AgenticAuthoringToolRegistry toolRegistry) {
-        this(intentResolverService, previewService, objectMapper, currentPageAnalyzer, toolRegistry, null);
+        this(intentResolverService, previewService, objectMapper, currentPageAnalyzer, toolRegistry, null, null);
     }
 
     public AgenticAuthoringTurnEngine(
@@ -41,12 +42,24 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
             AgenticAuthoringToolRegistry toolRegistry,
             AgenticAuthoringProjectKnowledgeService projectKnowledgeService) {
+        this(intentResolverService, previewService, objectMapper, currentPageAnalyzer, toolRegistry, projectKnowledgeService, null);
+    }
+
+    public AgenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringApiCatalogConversationService apiCatalogConversationService) {
         this.intentResolverService = intentResolverService;
         this.previewService = previewService;
         this.objectMapper = objectMapper;
         this.currentPageAnalyzer = currentPageAnalyzer;
         this.toolRegistry = toolRegistry;
         this.projectKnowledgeService = projectKnowledgeService;
+        this.apiCatalogConversationService = apiCatalogConversationService;
     }
 
     AgenticAuthoringTurnOutcome execute(
@@ -75,23 +88,26 @@ public class AgenticAuthoringTurnEngine {
             emitIntentResolutionProgress(eventSink, intentResolution);
             AgenticAuthoringToolResult resourceDiscoveryResult = maybeRunResourceDiscoveryTool(
                     request,
+                    principalContext,
                     eventSink,
                     intentResolution,
                     route);
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery =
+                    resourceDiscoveryPayload(resourceDiscoveryResult);
             if (resourceDiscoveryResult != null
                     && resourceDiscoveryResult.valid()
-                    && resourceDiscoveryResult.payload() instanceof AgenticAuthoringResourceCandidatesResult discovery
-                    && discovery.candidates() != null
-                    && !discovery.candidates().isEmpty()
+                    && resourceDiscovery != null
+                    && resourceDiscovery.candidates() != null
+                    && !resourceDiscovery.candidates().isEmpty()
                     && !eventSink.terminalReached()) {
                 eventSink.append("thought.step", safeToolProjection(
                         "intent.resolve",
                         "Resolving authoring intent with backend resource candidates.",
                         Map.of(
                                 "tool", resourceDiscoveryResult.tool(),
-                                "candidateCount", discovery.candidates().size())));
+                                "candidateCount", resourceDiscovery.candidates().size())));
                 intentResolution = intentResolverService.resolve(
-                        toIntentRequest(withResourceDiscoveryContext(request, discovery)),
+                        toIntentRequest(withResourceDiscoveryContext(request, resourceDiscovery)),
                         principalContext.tenantId(),
                         principalContext.userId(),
                         principalContext.environment());
@@ -99,6 +115,14 @@ public class AgenticAuthoringTurnEngine {
                 state = state.withRouteClass(route.routeClass());
                 emitIntentResolutionProgress(eventSink, intentResolution);
             }
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery =
+                    maybeRunBusinessCatalogResourceDiscoveryTool(
+                            request,
+                            principalContext,
+                            eventSink,
+                            intentResolution,
+                            route,
+                            resourceDiscovery);
             AgenticAuthoringPreviewResult preview = null;
             if (route.allowsPreview() && intentResolution.valid()) {
                 AgenticAuthoringTurnStreamRequest previewRequest = withProjectKnowledgeContext(
@@ -125,11 +149,15 @@ public class AgenticAuthoringTurnEngine {
                         intentResolution,
                         preview);
             }
+            String assistantMessage = advisoryCatalogAssistantMessage(request, route, intentResolution);
+            if (!StringUtils.hasText(assistantMessage)) {
+                assistantMessage = previewAssistantMessage(preview, intentResolution);
+            }
             AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", Map.of(
                     "intentResolution", intentResolution,
                     "preview", preview != null ? preview : objectMapper.createObjectNode(),
-                    "assistantMessage", safeText(previewAssistantMessage(preview, intentResolution)),
-                    "quickReplies", intentResolution.quickReplies() != null ? intentResolution.quickReplies() : List.of(),
+                    "assistantMessage", safeText(assistantMessage),
+                    "quickReplies", terminalQuickReplies(intentResolution, businessCatalogDiscovery),
                     "canApply", preview != null && preview.valid()));
             return terminalResult.appendedType("result")
                     ? AgenticAuthoringTurnOutcome.completed(state)
@@ -149,6 +177,7 @@ public class AgenticAuthoringTurnEngine {
 
     private AgenticAuthoringToolResult maybeRunResourceDiscoveryTool(
             AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringTurnRoute route) {
@@ -170,12 +199,91 @@ public class AgenticAuthoringTurnEngine {
                         "tool", toolCall.name(),
                         "routeClass", safeText(route.routeClass()),
                         "maxCallsPerTurn", MAX_TOOL_CALLS_PER_TURN)));
-        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall);
+        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext);
         eventSink.append("thought.step", safeToolProjection(
                 result.valid() ? "tool.result" : "tool.error",
                 result.valid() ? "Backend API resource search completed." : "Backend API resource search failed.",
                 safeToolDiagnostics(result)));
         return result;
+    }
+
+    private AgenticAuthoringResourceCandidatesResult maybeRunBusinessCatalogResourceDiscoveryTool(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            AgenticAuthoringResourceCandidatesResult existingDiscovery) {
+        if (eventSink.terminalReached()
+                || route == null
+                || route.allowsPreview()
+                || !isBusinessAnalyticsCatalogQuestion(request.userPrompt())) {
+            return null;
+        }
+        if (existingDiscovery != null
+                && existingDiscovery.quickReplies() != null
+                && !existingDiscovery.quickReplies().isEmpty()) {
+            return existingDiscovery;
+        }
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                route.routeClass(),
+                new AgenticAuthoringResourceCandidatesRequest(
+                        businessCatalogResourceDiscoveryQuery(request, intentResolution),
+                        request.userPrompt(),
+                        safeText(intentResolution == null ? "" : intentResolution.artifactKind()),
+                        6));
+        eventSink.append("thought.step", safeToolProjection(
+                "tool.start",
+                "Searching business data resources for advisory cards.",
+                Map.of(
+                        "tool", toolCall.name(),
+                        "routeClass", safeText(route.routeClass()),
+                        "maxCallsPerTurn", MAX_TOOL_CALLS_PER_TURN)));
+        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext);
+        eventSink.append("thought.step", safeToolProjection(
+                result.valid() ? "tool.result" : "tool.error",
+                result.valid()
+                        ? "Business data resource search completed."
+                        : "Business data resource search failed.",
+                safeToolDiagnostics(result)));
+        return resourceDiscoveryPayload(result);
+    }
+
+    private String businessCatalogResourceDiscoveryQuery(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        StringBuilder query = new StringBuilder(safeText(request.userPrompt()));
+        query.append(" analytics dashboard indicadores graficos kpis");
+        query.append(" pessoas folha pagamento operacoes incidentes ativos riscos");
+        if (intentResolution != null && intentResolution.candidates() != null) {
+            intentResolution.candidates().stream()
+                    .map(AgenticAuthoringCandidate::resourcePath)
+                    .filter(path -> path != null && !path.isBlank())
+                    .forEach(path -> query.append(' ').append(path.replace('/', ' ').replace('-', ' ')));
+        }
+        return query.toString().trim();
+    }
+
+    private AgenticAuthoringResourceCandidatesResult resourceDiscoveryPayload(AgenticAuthoringToolResult result) {
+        if (result == null || !result.valid()
+                || !(result.payload() instanceof AgenticAuthoringResourceCandidatesResult discovery)) {
+            return null;
+        }
+        return discovery;
+    }
+
+    private List<AgenticAuthoringQuickReply> terminalQuickReplies(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery) {
+        if (businessCatalogDiscovery != null
+                && businessCatalogDiscovery.quickReplies() != null
+                && !businessCatalogDiscovery.quickReplies().isEmpty()) {
+            return businessCatalogDiscovery.quickReplies();
+        }
+        return intentResolution != null && intentResolution.quickReplies() != null
+                ? intentResolution.quickReplies()
+                : List.of();
     }
 
     private AgenticAuthoringTurnStreamRequest withProjectKnowledgeContext(
@@ -186,8 +294,11 @@ public class AgenticAuthoringTurnEngine {
         if (projectKnowledgeService == null || eventSink.terminalReached()) {
             return request;
         }
-        List<AgenticAuthoringProjectKnowledgeProjection> projections = projectKnowledgeService.retrieve(
-                projectKnowledgeQuery(request, principalContext, intentResolution));
+        AgenticAuthoringProjectKnowledgeQuery query = projectKnowledgeQuery(request, principalContext, intentResolution);
+        if (!hasProjectKnowledgeScope(query)) {
+            return request;
+        }
+        List<AgenticAuthoringProjectKnowledgeProjection> projections = projectKnowledgeService.retrieve(query);
         if (projections.isEmpty()) {
             return request;
         }
@@ -236,6 +347,11 @@ public class AgenticAuthoringTurnEngine {
                         "integration_note"),
                 null,
                 6);
+    }
+
+    private boolean hasProjectKnowledgeScope(AgenticAuthoringProjectKnowledgeQuery query) {
+        return query != null
+                && (StringUtils.hasText(query.contextKey()) || StringUtils.hasText(query.resourceKey()));
     }
 
     private ObjectNode projectKnowledgeContext(List<AgenticAuthoringProjectKnowledgeProjection> projections) {
@@ -661,6 +777,59 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringIntentResolutionResult intentResolution) {
         String message = preview == null ? "" : safeText(preview.assistantMessage());
         return !message.isBlank() ? message : safeText(intentResolution.assistantMessage());
+    }
+
+    private String advisoryCatalogAssistantMessage(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringTurnRoute route,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (apiCatalogConversationService == null
+                || route == null
+                || route.allowsPreview()
+                || !isBusinessAnalyticsCatalogQuestion(request.userPrompt())) {
+            return "";
+        }
+        AgenticAuthoringApiCatalogConversationService.ApiCatalogConversationAnswer answer =
+                apiCatalogConversationService.answer(
+                        request.userPrompt(),
+                        intentResolution == null ? null : intentResolution.selectedCandidate(),
+                        intentResolution == null || intentResolution.candidates() == null
+                                ? List.of()
+                                : intentResolution.candidates());
+        return answer == null ? "" : safeText(answer.assistantMessage());
+    }
+
+    private boolean isBusinessAnalyticsCatalogQuestion(String prompt) {
+        String normalized = normalizeText(prompt);
+        boolean asksForDiscovery = containsAnyText(normalized,
+                "catalogo", "catalog", "recursos", "recurso", "areas", "area", "dados", "disponiveis", "disponibilidade",
+                "quais", "descobrir", "descoberta", "opcoes", "fonte", "fontes");
+        boolean asksForAnalytics = containsAnyText(normalized,
+                "grafico", "graficos", "chart", "dashboard", "painel", "indicador", "indicadores", "kpi", "metricas", "analitica", "analitico");
+        boolean businessLanguage = containsAnyText(normalized,
+                "negocio", "gestor", "pessoas", "folha", "operacoes", "ativos", "compras", "riscos", "sem endpoints", "linguagem simples");
+        boolean postponesAuthoring = containsAnyText(normalized,
+                "ainda nao quero criar", "nao quero criar", "antes de escolher", "antes de criar", "primeiro descobrir");
+        return asksForDiscovery && asksForAnalytics && (businessLanguage || postponesAuthoring);
+    }
+
+    private boolean containsAnyText(String value, String... tokens) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        for (String token : tokens) {
+            if (token != null && !token.isBlank() && value.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String normalizeText(String value) {
+        return java.text.Normalizer.normalize(value == null ? "" : value, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase()
+                .trim();
     }
 
     private Map<String, Object> safeDiagnostics(AgenticAuthoringTurnStreamRequest request) {

@@ -23,6 +23,8 @@ import org.praxisplatform.config.repository.AiTurnRepository;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiSensitiveDataRedactor;
 import org.praxisplatform.config.service.AiTurnEventService;
+import org.praxisplatform.config.service.DomainFederationQueryService;
+import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
@@ -35,6 +37,7 @@ import org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoCon
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -89,6 +92,12 @@ class AgenticAuthoringDryRunPersistenceIntegrationTest {
 
     @Autowired
     private AiTurnEventRepository turnEventRepository;
+
+    @MockBean
+    private DomainFederationQueryService domainFederationQueryService;
+
+    @MockBean
+    private DomainKnowledgeChangeSetService domainKnowledgeChangeSetService;
 
     private AgenticAuthoringDryRunService dryRunService;
     private AgenticAuthoringReplayAuditService replayAuditService;
@@ -172,10 +181,10 @@ class AgenticAuthoringDryRunPersistenceIntegrationTest {
     }
 
     private Path proofsDir() {
-        Path fromModuleDir = Path.of("..", "docs", "ai", "agentic-authoring", "proofs");
+        Path fromModuleDir = Path.of("docs", "ai", "agentic-authoring", "proofs");
         if (Files.exists(fromModuleDir)) {
             return fromModuleDir;
         }
-        return Path.of("docs", "ai", "agentic-authoring", "proofs");
+        return Path.of("..", "docs", "ai", "agentic-authoring", "proofs");
     }
 }

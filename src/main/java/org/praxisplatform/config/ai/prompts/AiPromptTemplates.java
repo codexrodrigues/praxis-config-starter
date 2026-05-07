@@ -34,8 +34,8 @@ public final class AiPromptTemplates {
     """;
 
     public static final String CONTRACT_API_LISTING = """
-    - PADRÃO PRAXIS (listagem): Para recursos CRUD, use POST {resource}/filter para filtros/paginação e GET {resource}/all para listagem simples.
-    - NÃO invente endpoints como /list. Se o endpoint não estiver no contexto, peça confirmação.
+    - PADRÃO PRAXIS (listagem): Para recursos CRUD, use POST {resource}/filter para filtros, paginação e listagem.
+    - NÃO invente endpoints como /list ou /all. Se o endpoint não estiver no contexto, peça confirmação.
     """;
 
     public static final String CONTRACT_RENDERER_PAYLOADS = """
@@ -123,8 +123,8 @@ public final class AiPromptTemplates {
 	   - add_column_computed: faltar newField OU baseFields[0] OU baseFields fora das colunas disponíveis.
 	   - custom_expression: faltar expression.
 	12. NÃO invente endpoints ou resourcePath. Se não estiver no contexto, peça clarificação.
-	13. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter (com paginação/filtros) e GET {resource}/all para listagem simples.
-	13.1. resourcePath SEMPRE é o caminho base do recurso (ex.: "/api/funcionarios"). O componente deriva /filter e /all automaticamente.
+	13. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter com paginação/filtros.
+	13.1. resourcePath SEMPRE é o caminho base do recurso (ex.: "/api/funcionarios"). O componente deriva apenas operações canonicas declaradas pelo schema/surface.
 	14. Retorne APENAS um objeto JSON válido (NUNCA um array).
 	15. Não inclua texto fora do JSON (sem markdown, sem comentários).
 	16. Se needsClarification=true: A) Preencha "options" com os valores possíveis. B) Defina "message" como uma PERGUNTA ESPECÍFICA que as opções respondem (ex: "Qual coluna deseja formatar?", "Qual o formato desejado?"). NUNCA use mensagens genéricas.
@@ -383,7 +383,7 @@ REGRAS:
 4. Para acoes com detalhes adicionais (ex.: COLUMN.RENDERER.BUTTON.STYLE.SET), use params. Se params for complexo (ex.: renderer completo), envie params como string JSON (ex.: "{\\"renderer\\":{\\"type\\":\\"badge\\",...},\\"condition\\":\\"valor > 0\\"}").
 5. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
 6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
-7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter e GET {resource}/all. resourcePath é SEMPRE a base (sem /filter).
+7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
 8. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
    10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
 9. Retorne APENAS um objeto JSON valido (sem markdown).
@@ -423,11 +423,13 @@ REGRAS:
 4. Use "params" para valores adicionais exigidos pelo patchTemplate. Se params for complexo, envie params como string JSON.
 5. Se houver ambiguidade de alvo, preencha "ambiguities" com alias e candidates.
 6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
-7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter e GET {resource}/all. resourcePath é SEMPRE a base (sem /filter).
+7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
 8. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
    10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
 9. Retorne APENAS um objeto JSON valido (sem markdown).
 10. VERIFIQUE o estado atual em "CANDIDATOS DE ALVO". Se ja existirem widgets (ex: "masterTable"), NAO use actions de criação (createTable, createForm, applyMasterDetail) ou conexao (bindMasterDetail), a menos que o usuario peca explicitamente "adicionar novo" ou "recriar". Foco em editar o existente.
+11. Quando o catalogo/manifest permitir uma acao segura de rascunho, gere a acao minima em vez de fazer entrevista ampla. Ex.: para "tab.add", "id" e "textLabel" bastam; tipos de documento, permissoes, anexos e campos internos sao refinamentos posteriores, salvo se o inputSchema exigir explicitamente.
+12. Em containers como tabs, diferencie criar uma nova area de editar a area atual. "nova aba", "adicionar aba" ou "criar outra aba" pode usar "tab.add". Mas "nesta aba", "nessa aba", "aba atual", "aba selecionada" ou "dentro da aba" junto com lista, tabela, formulario, widget, componente, grafico ou conteudo NAO deve usar "tab.add"; use a operacao de conteudo do item existente, como "tab.content.set", mirando a aba/link existente. Se nao houver alvo resolvivel, preencha "ambiguities" em vez de criar uma nova aba.
 
 SCHEMA DE RESPOSTA (JSON):
 {

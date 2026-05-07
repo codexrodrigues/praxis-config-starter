@@ -34,6 +34,21 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isApiCatalogQuestion(prompt)) {
             return "explore";
         }
+        if (isRecommendationQuestion(prompt) || asksToExploreUnknownInformation(prompt)) {
+            return "explore";
+        }
+        if (mentionsLiteralMasterDetail(prompt)) {
+            return "explore";
+        }
+        if (isTabbedMasterDetailFormPrompt(prompt)) {
+            return "create";
+        }
+        if (isMasterDetailPrompt(prompt) && !mentionsLiteralMasterDetail(prompt)) {
+            return "create";
+        }
+        if (isReadDetailPagePrompt(prompt) && !isConsultativePrompt(prompt)) {
+            return "create";
+        }
         if (containsAny(prompt, "conectar", "ligar", "vincular", "relacionar")) {
             return "connect";
         }
@@ -48,12 +63,12 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isExplicitCreateConfirmation(prompt)) {
             return "create";
         }
-        if (isConsultativePrompt(prompt)) {
-            return "explore";
-        }
         if (containsAny(prompt, "criar", "crie", "gerar", "gere", "montar", "monte",
                 "construir", "construa", "novo", "nova", "cadastrar", "abrir")) {
             return "create";
+        }
+        if (isConsultativePrompt(prompt)) {
+            return "explore";
         }
         if (tableCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
             return "modify";
@@ -73,6 +88,9 @@ final class AgenticAuthoringKeywordFallbackResolver {
     private String resolveArtifactKind(String prompt, JsonNode currentPageSummary, AgenticAuthoringTarget target) {
         if (isApiCatalogQuestion(prompt)) {
             return "api_catalog";
+        }
+        if (isTabbedMasterDetailFormPrompt(prompt)) {
+            return "page";
         }
         if (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt)) {
             return "page";
@@ -176,6 +194,10 @@ final class AgenticAuthoringKeywordFallbackResolver {
             return "create_chart_drilldown";
         }
         if ("create".equals(operationKind) && "page".equals(artifactKind)
+                && isTabbedMasterDetailFormPrompt(prompt)) {
+            return "create_tabbed_master_detail_form";
+        }
+        if ("create".equals(operationKind) && "page".equals(artifactKind)
                 && (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt))) {
             return "create_master_detail";
         }
@@ -244,6 +266,21 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 "ver", "visao", "mostrar", "mostre");
     }
 
+    private boolean isRecommendationQuestion(String prompt) {
+        return containsAny(prompt,
+                "melhor forma", "como visualizar", "como ver", "quais opcoes", "que opcoes",
+                "devo usar", "faz mais sentido", "recomenda", "recomende", "recomendacao",
+                "quais alternativas", "compare alternativas", "antes de criar", "ainda nao sei se devo usar");
+    }
+
+    private boolean asksToExploreUnknownInformation(String prompt) {
+        return containsAny(prompt,
+                "nao sei quais informacoes existem",
+                "não sei quais informações existem",
+                "quais informacoes existem",
+                "quais informações existem");
+    }
+
     private boolean isAnalyticalVisualizationIntent(String prompt) {
         if (isApiCatalogQuestion(prompt)) {
             return false;
@@ -286,9 +323,29 @@ final class AgenticAuthoringKeywordFallbackResolver {
         return containsAny(prompt,
                 "master detail", "master-detail", "mestre detalhe", "mestre-detalhe",
                 "lista e detalhe", "lista com detalhe", "abrir detalhes", "abrir detalhe",
-                "ver detalhes", "ver detalhe", "area de detalhe", "detalhe lateral",
+                "ver detalhes", "ver detalhe", "ver os detalhes", "area de detalhe", "detalhe lateral",
                 "painel de detalhes", "painel lateral", "detalhes ao selecionar",
                 "detalhes quando selecionar");
+    }
+
+    private boolean mentionsLiteralMasterDetail(String prompt) {
+        return containsAny(prompt, "master detail", "master-detail", "mestre detalhe", "mestre-detalhe");
+    }
+
+    private boolean isTabbedMasterDetailFormPrompt(String prompt) {
+        return containsAny(prompt, "aba", "abas", "tab", "tabs")
+                && (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt) || hasSearchDetailAndFormShape(prompt))
+                && containsAny(prompt, "formulario", "form", "editar", "alterar", "dados principais", "campos");
+    }
+
+    private boolean hasSearchDetailAndFormShape(String prompt) {
+        boolean hasSearchOrList = containsAny(prompt,
+                "procurar", "buscar", "pesquisar", "listar", "lista", "listagem", "tabela", "dados disponiveis");
+        boolean hasSelectionOrDetail = containsAny(prompt,
+                "selecionado", "selecionar", "detalhe", "detalhes", "ver dados", "ver informacoes");
+        boolean hasFormOrEdit = containsAny(prompt,
+                "formulario", "form", "editar", "alterar", "dados principais", "campos");
+        return hasSearchOrList && hasSelectionOrDetail && hasFormOrEdit;
     }
 
     private boolean isReadDetailPagePrompt(String prompt) {

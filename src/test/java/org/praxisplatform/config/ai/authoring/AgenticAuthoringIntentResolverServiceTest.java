@@ -162,9 +162,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid())
-                .as(objectMapper.valueToTree(result).toString())
-                .isTrue();
+        assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
         assertThat(result.changeKind()).isEqualTo("create_minimal_form");
@@ -196,7 +194,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 1.0d,
                 "api_metadata collection retrieval",
                 List.of("api-metadata", "semantic-retrieval"));
-        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString()))
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
                 .thenReturn(List.of(employeeSkillCandidate, employeeCollectionCandidate));
         AgenticAuthoringIntentResolverService serviceWithCatalog =
                 new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
@@ -212,9 +215,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid())
-                .as(objectMapper.valueToTree(result).toString())
-                .isTrue();
+        assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
         assertThat(result.changeKind()).isEqualTo("create_minimal_form");
@@ -241,9 +242,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid())
-                .as(objectMapper.valueToTree(result).toString())
-                .isTrue();
+        assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
         assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
@@ -335,6 +334,70 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void resolvesHumanCrudCompositionPromptAsMasterDetailCreation() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Agora faca isso para empregados: quero procurar pelos dados que existirem, ver uma lista, selecionar alguem, ver detalhes ao lado e ter caminho para cadastrar ou alterar quando fizer sentido. Nao sei quais campos usar.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_master_detail");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
+    }
+
+    @Test
+    void resolvesHumanTabbedWorkspacePromptAsTabbedMasterDetailFormCreation() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Agora organize essa tela em abas: uma aba para procurar e listar empregados, outra para ver detalhes do empregado selecionado e outra para editar os dados principais com um formulario guiado. Eu nao sei quais campos existem, me ajude a escolher.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_tabbed_master_detail_form");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
+    }
+
+    @Test
+    void resolvesNaturalTabbedWorkspacePromptWithArticleBeforeDetailsAsPageCreation() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie uma tela para empregados organizada em abas: uma aba para procurar pelos dados disponiveis e listar, outra para ver os detalhes do empregado selecionado, e outra para editar os dados principais com um formulario guiado. Eu nao sei quais campos existem, me ajude a escolher.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_tabbed_master_detail_form");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
     void resolvesHumanEmployeeSearchAndOpenDetailsPromptAsMasterDetailWithoutKeywordSyntax() {
         ObjectNode contextHints = resourcePathContextHints("/api/human-resources/funcionarios");
         contextHints.put("submitUrl", "/api/human-resources/funcionarios/filter");
@@ -408,6 +471,53 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void capsLongAssistantMessageAtFinalIntentResolutionBoundary() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "resource_discovery_for_indicators",
+                        null,
+                        "indicadores para dashboard",
+                        "none",
+                        "Pelo catalogo semantico disponivel, eu comecaria por estas areas de negocio para graficos. ".repeat(40),
+                        List.of(),
+                        List.of(),
+                        List.of("llm-test-warning"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quais dados posso usar para graficos?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.assistantMessage()).hasSizeLessThanOrEqualTo(700);
+    }
+
+    @Test
     void preservesCanonicalPayrollAnalyticsSourceWhenDepartmentFollowUpTriesToSwitchDashboardDataSource() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
@@ -422,7 +532,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 0.98d,
                 "llm selected department collection for grouping",
                 List.of("api-metadata", "semantic-retrieval"));
-        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString()))
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
                 .thenReturn(List.of(departmentCandidate));
         Mockito.when(llmIntentResolver.resolve(
                 Mockito.any(),
@@ -683,6 +798,14 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies().get(0).label()).isEqualTo("Gerar previa governada");
         assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("returns").asText())
+                .contains("KPIs", "graficos");
+        assertThat(result.quickReplies().get(1).contextHints().path("presentation").path("bestFor").asText())
+                .contains("indicadores", "filtros");
+        assertThat(result.quickReplies().get(2).description())
+                .contains("sem gerar previa");
+        assertThat(result.quickReplies().get(2).contextHints().path("presentation").path("nextStep").asText())
+                .contains("descartar");
     }
 
     @Test
@@ -819,7 +942,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 0.67d,
                 "api_metadata broad artifact discovery",
                 List.of("api-metadata", "broad-artifact-discovery"));
-        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString()))
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
                 .thenReturn(List.of(peopleCandidate))
                 .thenReturn(List.of(analyticsCandidate, peopleCandidate));
 
@@ -1204,8 +1332,18 @@ class AgenticAuthoringIntentResolverServiceTest {
                 0.96d,
                 "api_metadata semantic retrieval",
                 List.of("api-metadata", "semantic-retrieval"));
-        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString())).thenReturn(List.of());
-        Mockito.when(candidateCatalog.discover("cadastro de beneficios para funcionario", "form"))
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any())).thenReturn(List.of());
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.eq("cadastro de beneficios para funcionario"),
+                        Mockito.eq("form"),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
                 .thenReturn(List.of(benefitsCandidate));
         Mockito.when(llmIntentResolver.resolve(
                 Mockito.any(),
@@ -1251,7 +1389,12 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.artifactKind()).isEqualTo("form");
         assertThat(result.selectedCandidate()).isEqualTo(benefitsCandidate);
         assertThat(result.warnings()).contains("llm-resource-search-query");
-        Mockito.verify(candidateCatalog).discover("cadastro de beneficios para funcionario", "form");
+        Mockito.verify(candidateCatalog).discover(
+                Mockito.eq("cadastro de beneficios para funcionario"),
+                Mockito.eq("form"),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test
@@ -1269,8 +1412,18 @@ class AgenticAuthoringIntentResolverServiceTest {
                 0.96d,
                 "api_metadata semantic retrieval",
                 List.of("api-metadata", "semantic-retrieval"));
-        Mockito.when(candidateCatalog.discover(Mockito.anyString(), Mockito.anyString())).thenReturn(List.of());
-        Mockito.when(candidateCatalog.discover("cadastro de beneficios para funcionario", "form"))
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any())).thenReturn(List.of());
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.eq("cadastro de beneficios para funcionario"),
+                        Mockito.eq("form"),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
                 .thenReturn(List.of(benefitsCandidate));
         Mockito.when(llmIntentResolver.resolve(
                 Mockito.any(),
@@ -2599,6 +2752,15 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.assistantMessage()).contains("/api/human-resources/folhas-pagamento");
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::id)
                 .containsExactly("api-create-dashboard", "api-show-schema", "api-show-actions");
+        assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::description)
+                .allSatisfy(description -> assertThat(description)
+                        .containsAnyOf("Use quando", "entender", "saber"));
+        assertThat(result.quickReplies())
+                .allSatisfy(reply -> {
+                    assertThat(reply.contextHints().path("presentation").path("bestFor").asText()).isNotBlank();
+                    assertThat(reply.contextHints().path("presentation").path("returns").asText()).isNotBlank();
+                    assertThat(reply.contextHints().path("presentation").path("nextStep").asText()).contains("Clique");
+                });
     }
 
     @Test
@@ -2888,7 +3050,14 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "resource-api-operations-vw-analytics-incidentes");
         AgenticAuthoringQuickReply firstReply = result.quickReplies().get(0);
         assertThat(firstReply.description())
-                .isEqualTo("Fonte candidata encontrada no catalogo.");
+                .contains("Indicada para comecar por KPIs e graficos")
+                .contains("Retorna dados agregaveis");
+        assertThat(firstReply.contextHints().path("presentation").path("bestFor").asText())
+                .contains("dashboards executivos");
+        assertThat(firstReply.contextHints().path("presentation").path("returns").asText())
+                .contains("KPIs");
+        assertThat(firstReply.contextHints().path("presentation").path("nextStep").asText())
+                .contains("Clique");
         assertThat(firstReply.icon()).isEqualTo("query_stats");
         assertThat(firstReply.tone()).isEqualTo("analytics");
         assertThat(firstReply.contextHints().path("resourcePath").asText())
@@ -3904,6 +4073,387 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
+    void explicitLocalUiCompositionDoesNotRouteToSharedRulesEvenWithStaleDomainCatalogHint() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/vw-resumo-missoes");
+        ObjectNode domainCatalog = contextHints.putObject("domainCatalog");
+        domainCatalog.put("schemaVersion", "praxis.ai.context-hints.domain-catalog/v0.2");
+        domainCatalog.put("resourceKey", "human-resources.vw-resumo-missoes");
+        domainCatalog.put("recommendedAuthoringFlow", "shared_rule_authoring");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "Crie uma pagina operacional com Praxis Tabs. A primeira aba Cadastro contem um formulario simples com Nome, Email e Prioridade. A segunda aba Acompanhamento contem uma lista em cards com tres solicitacoes de exemplo e status curto. Use conteudo local/editorial de demonstracao, sem criar regra de negocio definitiva.",
+                contextHints));
+
+        assertThat(result.gate()).satisfiesAnyOf(
+                gate -> assertThat(gate).isNull(),
+                gate -> assertThat(gate.status()).isEqualTo("eligible"));
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.failureCodes())
+                .doesNotContain(
+                        "shared-rule-authoring-required",
+                        "resource-candidate-required",
+                        "resource-candidate-ambiguous");
+        assertThat(result.assistantMessage() == null || !result.assistantMessage().contains("/api/praxis/config/domain-rules"))
+                .isTrue();
+        assertThat(result.warnings()).contains("explicit-local-ui-composition-resource-selection-bypassed");
+    }
+
+    @Test
+    void explicitLocalUiCompositionBypassesResourceDisambiguationEvenWhenCatalogHasCandidates() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie uma página operacional com Praxis Tabs. A primeira aba deve se chamar Cadastro e conter um formulário simples de solicitação com campos Nome, Email e Prioridade. A segunda aba deve se chamar Acompanhamento e conter uma lista em cards com três solicitações de exemplo e status curto. Use conteúdo local/editorial de demonstração, sem criar regra de negócio definitiva.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.failureCodes())
+                .doesNotContain("resource-candidate-required", "resource-candidate-ambiguous");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::kind)
+                .doesNotContain("resource");
+        assertThat(result.assistantMessage() == null || !result.assistantMessage().contains("fonte de dados"))
+                .isTrue();
+    }
+
+    @Test
+    void explicitLocalTabbedRefinementKeepsPageCompositionWhenLlmClassifiesNestedCrud() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "compose",
+                        "table",
+                        "add_column",
+                        null,
+                        null,
+                        "new_instruction",
+                        "Preview applied to the page.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Agora refine a página existente mantendo as três abas. Na aba Registros, adicione uma coluna Categoria no CRUD e preserve as ações Criar, Editar e Excluir. Na aba Relacionamentos, inclua Status do comentário. Não use API real nem schema externo; continue como conteúdo local/editorial.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.failureCodes())
+                .doesNotContain("target-widget-required", "resource-candidate-required", "resource-candidate-ambiguous");
+        assertThat(result.warnings()).contains(
+                "explicit-local-ui-composition-resource-selection-bypassed",
+                "explicit-local-page-composition-normalized");
+    }
+
+    @Test
+    void explicitLocalTabbedAdjustmentKeepsPageCompositionWhenLlmClassifiesApiCatalog() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        null,
+                        "new_instruction",
+                        "APIs relacionadas: POST /api/human-resources/base-acessos/options/filter.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Ajuste somente os pontos faltantes da pre-visualizacao local/editorial: a tabela da aba Registros deve ter exatamente quatro registros ficticios e cada linha deve mostrar as acoes Editar, Excluir e Ver detalhes. A aba Acompanhamento esta vazia; preencha-a com cards visuais de resumo por Status e Prioridade, usando contagens coerentes com os quatro registros. Nao mude para API real, nao use schema externo e nao crie regra de negocio definitiva.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isNotEqualTo("answer_api_catalog_question");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.apiCatalogAnswer()).isNull();
+        assertThat(result.assistantMessage() == null || !result.assistantMessage().contains("APIs relacionadas"))
+                .isTrue();
+        assertThat(result.failureCodes())
+                .doesNotContain("resource-candidate-required", "resource-candidate-ambiguous");
+        assertThat(result.warnings()).contains(
+                "explicit-local-ui-composition-resource-selection-bypassed",
+                "explicit-local-page-composition-normalized");
+    }
+
+    @Test
+    void explicitLocalTabbedRenameDoesNotDiscoverApiResourcesWhenPromptForbidsDataSourceDiscovery() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        "recurso de exemplo",
+                        "new_instruction",
+                        "Encontrei mais de uma fonte de dados possivel para esta pagina.",
+                        List.of(new AgenticAuthoringQuickReply(
+                                "search-api-resources",
+                                "suggestion",
+                                "Buscar APIs",
+                                "Quais APIs disponiveis podem alimentar esta tela?")),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Refine localmente a página atual: renomeie somente a aba Relacionamentos para Acompanhamento. Não descubra fonte de dados e não conecte API real.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.authoringProfile()).isEqualTo("ui-composition-plan@0.1.0");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.apiCatalogAnswer()).isNull();
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::prompt)
+                .doesNotContain("Quais APIs disponiveis podem alimentar esta tela?");
+        assertThat(result.failureCodes())
+                .doesNotContain("resource-candidate-required", "resource-candidate-ambiguous");
+        assertThat(result.warnings()).contains(
+                "explicit-local-ui-composition-resource-selection-bypassed",
+                "explicit-local-page-composition-normalized");
+    }
+
+    @Test
+    void explicitLocalTableCrudRefinementDoesNotRouteToSharedRulesWhenPromptMentionsSla() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/vw-resumo-missoes");
+        ObjectNode domainCatalog = contextHints.putObject("domainCatalog");
+        domainCatalog.put("schemaVersion", "praxis.ai.context-hints.domain-catalog/v0.2");
+        domainCatalog.put("resourceKey", "human-resources.vw-resumo-missoes");
+        domainCatalog.put("recommendedAuthoringFlow", "shared_rule_authoring");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "Refine esta tabela local/editorial preservando as três solicitações fictícias. "
+                        + "Mantenha as colunas Título, Responsável, Categoria, SLA e Status, "
+                        + "mantenha as ações Criar, Editar e Excluir visíveis, e destaque visualmente o SLA "
+                        + "sem conectar API real, sem schema externo e sem criar regra de negócio definitiva.",
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.gate()).satisfiesAnyOf(
+                gate -> assertThat(gate).isNull(),
+                gate -> assertThat(gate.status()).isNotEqualTo("route_required"));
+        assertThat(result.failureCodes())
+                .doesNotContain(
+                        "shared-rule-authoring-required",
+                        "resource-candidate-required",
+                        "resource-candidate-ambiguous");
+        assertThat(result.assistantMessage() == null || !result.assistantMessage().contains("/api/praxis/config/domain-rules"))
+                .isTrue();
+        assertThat(result.warnings()).contains("explicit-local-ui-composition-resource-selection-bypassed");
+    }
+
+    @Test
+    void explicitLocalTableCrudRefinementWithSelectedWidgetIsEligibleForComponentAuthoring() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/vw-resumo-missoes");
+        ObjectNode domainCatalog = contextHints.putObject("domainCatalog");
+        domainCatalog.put("schemaVersion", "praxis.ai.context-hints.domain-catalog/v0.2");
+        domainCatalog.put("resourceKey", "human-resources.vw-resumo-missoes");
+        domainCatalog.put("recommendedAuthoringFlow", "shared_rule_authoring");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Refine esta tabela local/editorial preservando as três solicitações fictícias. "
+                        + "Mantenha as colunas Título, Responsável, Categoria, SLA e Status, "
+                        + "mantenha as ações Criar, Editar e Excluir visíveis, e destaque visualmente o SLA "
+                        + "sem conectar API real, sem schema externo e sem criar regra de negócio definitiva.",
+                "praxis-ui-angular",
+                "praxis-table",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                "local-solicitacoes-crud",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.failureCodes())
+                .doesNotContain(
+                        "shared-rule-authoring-required",
+                        "target-widget-required",
+                        "resource-candidate-required",
+                        "resource-candidate-ambiguous");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.warnings()).contains("explicit-local-ui-composition-resource-selection-bypassed");
+    }
+
+    @Test
+    void localUiCompositionConfirmationKeepsOriginalPromptWhenLlmResolverIsEnabled() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_composition",
+                        null,
+                        null,
+                        "clarification_answer",
+                        "",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        String originalPrompt = "Crie uma página operacional com Praxis Tabs para solicitações internas. A aba Cadastro deve conter um formulário local/editorial com campos Título, Responsável, Prioridade e Prazo. A aba Registros deve conter um componente Praxis CRUD local/editorial com três solicitações fictícias e ações visíveis de criar, editar e excluir. A aba Relacionamentos deve conter uma lista em cards relacionada aos registros com três comentários fictícios. Use apenas conteúdo local/editorial de demonstração, sem API real, sem schema externo e sem criar regra de negócio definitiva.";
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Sim, siga e gere o preview com essa composição local/editorial.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", originalPrompt, null),
+                        new AgenticAuthoringConversationMessage("m2", "assistant", "Entendi: posso montar a composição com Praxis Tabs e três áreas: Cadastro, Registros e Relacionamentos.", null)),
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.effectivePrompt())
+                .contains(originalPrompt)
+                .contains("Confirmed: Sim, siga e gere o preview");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.failureCodes())
+                .doesNotContain("resource-candidate-required", "resource-candidate-ambiguous");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::kind)
+                .doesNotContain("resource");
+        assertThat(result.warnings()).contains("explicit-local-ui-composition-resource-selection-bypassed");
+        ArgumentCaptor<String> effectivePromptCaptor = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                effectivePromptCaptor.capture(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+        assertThat(effectivePromptCaptor.getValue()).contains(originalPrompt);
     }
 
     @Test
