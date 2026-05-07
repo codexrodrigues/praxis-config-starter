@@ -108,6 +108,10 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         if (selectedPayrollTable.isPresent()) {
             return selectedPayrollTable;
         }
+        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceDashboard = selectedResourceDashboard(request);
+        if (selectedResourceDashboard.isPresent()) {
+            return selectedResourceDashboard;
+        }
         if (supportsChartDrillDown(request)) {
             PayrollBreakdown breakdown = resolvePayrollBreakdown(request.userPrompt());
             return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
@@ -118,10 +122,6 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                             "ui-composition-plan-provider:quickstart-payroll-chart-drilldown:" + breakdown.field()),
                     chartDrillDownPlan(breakdown),
                     emptyCompiledFormPatch()));
-        }
-        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceDashboard = selectedResourceDashboard(request);
-        if (selectedResourceDashboard.isPresent()) {
-            return selectedResourceDashboard;
         }
         Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceTabbedWorkspace =
                 selectedResourceTabbedWorkspace(request);
@@ -172,6 +172,9 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         }
         boolean asksForChart = containsAny(prompt, "chart", "grafico", "bar", "barra", "donut", "pizza");
         boolean asksForDashboard = containsAny(prompt, "dashboard", "painel");
+        boolean asksForAnalyticalExperience = containsAny(prompt,
+                "analise", "analytics", "indicador", "indicadores", "kpi", "metrica", "metricas",
+                "visao", "acompanhar", "acompanhamento", "monitorar", "explorar", "exploracao");
         boolean asksForDrillDown = containsAny(prompt, "drill down", "drill-down", "drilldown", "detalhar", "detalhe", "aprofundar");
         boolean referencesPayrollOrDepartment = containsAny(prompt,
                 "folha", "pagamento", "salario", "salarios", "remuneracao", "remuneracoes", "recebe", "ganha",
@@ -183,8 +186,12 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 "status", "situacao", "setor", "setores", "area", "areas", "cargo", "cargos", "equipe", "equipes", "base", "bases",
                 "perfil", "perfis", "profile", "ranking", "rank", "top", "maior", "maiores", "menor", "menores")
                 && containsAny(prompt, "folha", "pagamento", "salario", "salarios", "remuneracao", "remuneracoes", "recebe", "ganha");
+        boolean vaguePayrollAnalyticsPrompt = referencesPayrollOrDepartment
+                && !asksForTable
+                && (asksForChart || asksForDashboard || asksForAnalyticalExperience);
         return (asksForChart && asksForDrillDown && referencesPayrollOrDepartment)
-                || (asksForDashboard && referencesPayrollByBreakdown);
+                || (asksForDashboard && referencesPayrollByBreakdown)
+                || vaguePayrollAnalyticsPrompt;
     }
 
     private PayrollBreakdown resolvePayrollBreakdown(String prompt) {

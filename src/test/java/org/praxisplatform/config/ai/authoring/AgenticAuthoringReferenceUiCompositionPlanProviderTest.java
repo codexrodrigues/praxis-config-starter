@@ -147,6 +147,63 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
     }
 
     @Test
+    void promotesVaguePayrollAnalyticsPromptToPremiumChartDrilldownExperience() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Monte uma visao para acompanhar folha de pagamento",
+                null,
+                null,
+                null));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-drilldown-dashboard");
+        assertThat(plan.path("widgets")).extracting(widget -> widget.path("componentId").asText())
+                .containsExactly("praxis-chart", "praxis-list", "praxis-rich-content");
+
+        JsonNode chartConfig = plan.path("widgets").get(0).path("inputs").path("config");
+        assertThat(chartConfig.path("axes").path("x").path("field").asText()).isEqualTo("departamento");
+        assertThat(chartConfig.path("axes").path("y").path("labels").path("format").asText())
+                .isEqualTo("BRL|symbol|2");
+        assertThat(chartConfig.path("series").get(0).path("labels").path("format").asText())
+                .isEqualTo("BRL|symbol|2");
+        assertThat(chartConfig.path("interactions").path("crossFilter").asBoolean()).isTrue();
+
+        JsonNode listConfig = plan.path("widgets").get(1).path("inputs").path("config");
+        assertThat(listConfig.path("layout").path("variant").asText()).isEqualTo("cards");
+        assertThat(listConfig.path("skin").path("type").asText()).isEqualTo("glass");
+        assertThat(listConfig.path("templating").path("leading").path("type").asText()).isEqualTo("icon");
+        assertThat(listConfig.path("templating").path("trailing").path("type").asText()).isEqualTo("chip");
+        assertThat(listConfig.path("templating").path("balance").path("expr").asText()).contains("BRL:pt-BR");
+        assertThat(listConfig.path("templating").path("limit").path("expr").asText()).contains("BRL:pt-BR");
+        assertThat(listConfig.path("templating").path("features")).hasSize(3);
+        assertThat(listConfig.path("expansion").path("sections")).hasSize(2);
+
+        assertThat(plan.path("bindings")).extracting(binding -> binding.path("id").asText())
+                .contains(
+                        "payroll-by-department-chart.selectionChange->state.selectedDepartment",
+                        "state.selectedDepartment->payroll-drilldown-list.queryContext");
+        assertThat(result.orElseThrow().warnings())
+                .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
+    }
+
+    @Test
+    void keepsExplicitPayrollListPromptOnOperationalTablePath() {
+        Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma lista de folha de pagamento com colunas principais",
+                null,
+                null,
+                null));
+
+        assertThat(result).isPresent();
+        JsonNode plan = result.orElseThrow().uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("single-table-page");
+        assertThat(plan.path("widgets")).hasSize(1);
+        assertThat(result.orElseThrow().warnings())
+                .contains("ui-composition-plan-provider:quickstart-payroll-table")
+                .doesNotContain("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
+    }
+
+    @Test
     void returnsPayrollRankingDashboardUiCompositionPlanForTopSalaryPrompt() {
         Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Crie o dashboard com ranking dos 10 maiores salarios.",
