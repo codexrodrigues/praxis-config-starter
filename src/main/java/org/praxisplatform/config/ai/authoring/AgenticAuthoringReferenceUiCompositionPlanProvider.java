@@ -2689,12 +2689,18 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         config.put("title", "Folha por " + breakdown.label().toLowerCase(Locale.ROOT));
         ObjectNode axes = config.putObject("axes");
         axes.putObject("x").put("field", breakdown.field()).put("label", breakdown.label()).put("type", "category");
-        axes.putObject("y").put("field", "salarioLiquido").put("label", "Salario liquido").put("type", "value");
+        axes.putObject("y")
+                .put("field", "salarioLiquido")
+                .put("label", "Salario liquido")
+                .put("type", "value")
+                .putObject("labels")
+                .put("format", "BRL|symbol|2");
         ObjectNode series = config.putArray("series").addObject();
         series.put("id", "salario-liquido");
         series.put("name", "Salario liquido");
         series.put("type", breakdown.chartType());
         series.put("categoryField", breakdown.field());
+        series.putObject("labels").put("format", "BRL|symbol|2");
         ObjectNode metric = series.putObject("metric");
         metric.put("field", "salarioLiquido");
         metric.put("aggregation", "sum");

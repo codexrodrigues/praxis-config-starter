@@ -66,6 +66,10 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         JsonNode chartConfig = chart.path("inputs").path("config");
         assertThat(chartConfig.path("dataSource").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(chartConfig.path("axes").path("y").path("labels").path("format").asText())
+                .isEqualTo("BRL|symbol|2");
+        assertThat(chartConfig.path("series").get(0).path("labels").path("format").asText())
+                .isEqualTo("BRL|symbol|2");
         assertThat(chartConfig.path("dataSource").path("query").path("statsOperation").asText())
                 .isEqualTo("group-by");
         assertThat(chartConfig.path("dataSource").path("query").path("statsPath").asText())
