@@ -134,6 +134,18 @@ no estado interno do turno. Refinamentos como "gostei, mas prefiro graficos"
 devem preservar `selectedResource` da decisao anterior e produzir uma nova
 `semanticDecision` com `refinementOf`/`previousDecisionId` apontando para o
 `decisionId` anterior, alterando apenas a intencao visual/materializavel.
+O refinamento deve ser modelado como diff semantico em
+`semanticDecision.refinement`, com `preserve`, `replace`, `add` e `remove`.
+Assim, pedidos como "mantem os dados, so muda a visualizacao" preservam a
+fonte/recurso anterior e trocam apenas `artifactKind`, `visualIntent` ou
+`chartType` pela politica canonica.
+
+Antes da selecao de recurso, o backend deve montar um pacote canonico de
+evidencias em `semanticDecision.retrievedEvidence`. Esse bundle deve registrar
+evidencias recuperadas de `api_metadata`, `/schemas/filtered`, `capabilities`,
+`actions`, catalogo de dominio e, quando disponivel, conhecimento de
+projeto/RAG e exemplos/recipes. Fallback lexical deve aparecer como evidencia
+fraca (`kind=weak_lexical_match`), nao como decisao semanticamente confiavel.
 
 Campos canonicos atuais:
 
@@ -141,6 +153,11 @@ Campos canonicos atuais:
 - `retrievalSource`, por exemplo `semantic_retrieval`, `lexical_fallback`,
   `context_hint`, `broad_artifact_discovery`, `deterministic_override`,
   `none` ou `unknown`;
+- `retrievedEvidence`, com `source`, `kind`, `ref`, `summary`, `confidence`,
+  `matchedTerms`, `tenantId`, `environment` e `releaseId` por evidencia;
+- `refinement`, quando o turno for um diff semantico sobre decisao anterior ou
+  pagina atual, com `refinementKind`, `preserve`, `replace`, `add`, `remove`,
+  `rationale` e `confidence`;
 - `selectedResourcePath`, quando houver recurso selecionado;
 - `llmResolutionAttempted` e `llmResolved`;
 - `fallbackPolicy`, hoje `fail-safe` quando telemetry de resolucao existir;
@@ -151,6 +168,14 @@ Campos canonicos atuais:
 - `selectedCandidateUsesDomainAnchor`;
 - `candidateSetContainsLexicalFallback`;
 - `candidateSetContainsDomainAnchor`;
+- `previewTechnicallyValid`, que indica apenas compilacao tecnica do preview;
+- `previewResourceSchemaVerified`, que indica grounding estrutural do recurso em
+  `/schemas/filtered`;
+- `decisionValid`, que indica se a materializacao satisfaz a decisao semantica;
+- `semanticDecisionReviewGroundedByPreview`, quando uma decisao marcada como
+  `weak-lexical-evidence` foi re-grounded pela materializacao verificada;
+- `toolLoopCompleted`, `toolLoopTerminalReason` e `toolLoopStepCount`, quando o
+  turno executou o loop governado de ferramentas;
 - `requiresReview`;
 - `reviewReason`, quando `requiresReview=true`.
 - memoria de decisao: `conversationId`, `turnId`, `userGoal`,
@@ -159,15 +184,24 @@ Campos canonicos atuais:
 
 Regra de aplicacao:
 
-- `canApply=true` somente quando a preview e valida e
-  `decisionDiagnostics.requiresReview` nao e `true`.
+- `canApply=true` somente quando a preview compila tecnicamente, a decisao
+  materializada e semanticamente valida e `decisionDiagnostics.requiresReview`
+  nao e `true`.
+- `preview.valid=true` nao implica `canApply=true`; uma tabela tecnicamente
+  valida que contradiz `visualIntent=charts` deve retornar
+  `decisionDiagnostics.decisionValid=false`,
+  `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
 - `keywordFallbackApplied=true` deve forcar
   `decisionDiagnostics.requiresReview=true`,
   `reviewReason=keyword-fallback-fail-safe` e `canApply=false`.
 - `page-apply` deve exigir `semanticDecision`; aplicar apenas
   `compiledFormPatch` sem decisao canonica e um bypass de contrato.
-- `page-apply` deve rejeitar qualquer `semanticDecision.reviewRequired=true`,
-  mesmo que a materializacao seja estruturalmente valida.
+- `page-apply` deve rejeitar `semanticDecision.reviewRequired=true`, mesmo que
+  a materializacao seja estruturalmente valida, exceto pelo caso estrito
+  `reviewReason=weak-lexical-evidence` quando o `compiledFormPatch` carrega
+  `diagnostics.resourceSchemaGrounding.verified=true` com
+  `source=schemas.filtered`. Essa excecao representa re-grounding real por
+  schema canonico, nao laundering de memoria/fallback.
 - `semanticPolicyApplied=true` nao deve, por si so, forcar revisao. Ele marca
   que a plataforma aplicou uma regra semantica auditavel, por exemplo corrigir
   uma resposta operacional do LLM para dashboard analitico quando o objetivo

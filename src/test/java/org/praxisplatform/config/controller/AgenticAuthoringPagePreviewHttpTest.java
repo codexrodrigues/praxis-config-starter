@@ -509,7 +509,11 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("changeKind").asText()).isEqualTo("recommend_dashboard_visualization");
         assertThat(body.path("selectedCandidate").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
-        assertThat(body.path("assistantMessage").asText()).contains("melhores opcoes");
+        assertThat(body.path("assistantMessage").asText())
+                .contains("folha de pagamento")
+                .contains("Dashboard executivo")
+                .contains("Drilldown")
+                .contains("Auditoria");
         assertThat(body.path("quickReplies")).extracting(reply -> reply.path("id").asText())
                 .containsExactly(
                         "payroll-executive-dashboard",

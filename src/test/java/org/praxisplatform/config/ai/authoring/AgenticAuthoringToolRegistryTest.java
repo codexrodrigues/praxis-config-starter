@@ -34,6 +34,8 @@ class AgenticAuthoringToolRegistryTest {
                                     "advisory_authoring");
                     assertThat(definition.ownerSurface())
                             .isEqualTo("praxis-config-starter:/api/praxis/config/ai/authoring/resource-candidates");
+                    assertThat(definition.allowedPhases())
+                            .containsExactlyInAnyOrder("retrieveEvidence", "repairOrAsk");
                     assertThat(definition.sideEffectClass()).isEqualTo("read_only");
                     assertThat(definition.governanceLevel()).isEqualTo("safe_grounding");
                     assertThat(definition.auditRedactionPolicy()).isEqualTo("safe_event_projection_only");
@@ -61,14 +63,17 @@ class AgenticAuthoringToolRegistryTest {
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
                         objectMapper));
 
-        AgenticAuthoringToolResult result = registry.execute(new AgenticAuthoringToolCall(
-                "searchApiResources",
-                "component_authoring",
-                new AgenticAuthoringResourceCandidatesRequest(
-                        "graficos de folha de pagamento",
-                        null,
-                        "dashboard",
-                        5)));
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchApiResources",
+                        "component_authoring",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "graficos de folha de pagamento",
+                                null,
+                                "dashboard",
+                                5)),
+                null,
+                "retrieveEvidence");
 
         assertThat(result.valid()).isTrue();
         assertThat(result.tool()).isEqualTo("searchApiResources");
@@ -90,10 +95,13 @@ class AgenticAuthoringToolRegistryTest {
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
 
-        AgenticAuthoringToolResult result = registry.execute(new AgenticAuthoringToolCall(
-                "searchApiResources",
-                "unsupported_route",
-                new AgenticAuthoringResourceCandidatesRequest("funcionarios", null, "form", 5)));
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchApiResources",
+                        "unsupported_route",
+                        new AgenticAuthoringResourceCandidatesRequest("funcionarios", null, "form", 5)),
+                null,
+                "retrieveEvidence");
 
         assertThat(result.valid()).isFalse();
         assertThat(result.errorCode()).isEqualTo("tool-route-not-allowed");
@@ -101,14 +109,49 @@ class AgenticAuthoringToolRegistryTest {
     }
 
     @Test
-    void returnsStructuredFailureForInvalidPayload() {
+    void rejectsToolExecutionWithoutExplicitPhase() {
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
 
         AgenticAuthoringToolResult result = registry.execute(new AgenticAuthoringToolCall(
                 "searchApiResources",
                 "component_authoring",
-                "funcionarios"));
+                new AgenticAuthoringResourceCandidatesRequest("funcionarios", null, "form", 5)));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("tool-phase-required");
+    }
+
+    @Test
+    void rejectsToolExecutionOutsideDeclaredPhaseScope() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchApiResources",
+                        "component_authoring",
+                        new AgenticAuthoringResourceCandidatesRequest("funcionarios", null, "form", 5)),
+                null,
+                "proposeDecision");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("tool-phase-not-allowed");
+        assertThat(result.errorMessage()).contains("proposeDecision");
+    }
+
+    @Test
+    void returnsStructuredFailureForInvalidPayload() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchApiResources",
+                        "component_authoring",
+                        "funcionarios"),
+                null,
+                "retrieveEvidence");
 
         assertThat(result.valid()).isFalse();
         assertThat(result.errorCode()).isEqualTo("tool-payload-invalid");
@@ -120,10 +163,13 @@ class AgenticAuthoringToolRegistryTest {
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
 
-        AgenticAuthoringToolResult result = registry.execute(new AgenticAuthoringToolCall(
-                "unknownTool",
-                "component_authoring",
-                null));
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "unknownTool",
+                        "component_authoring",
+                        null),
+                null,
+                "retrieveEvidence");
 
         assertThat(result.valid()).isFalse();
         assertThat(result.errorCode()).isEqualTo("tool-not-found");

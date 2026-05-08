@@ -231,16 +231,8 @@ public class AgenticAuthoringPreviewService {
                     planResult.failureCodes() == null ? List.of() : planResult.failureCodes());
             List<String> warnings = new ArrayList<>(
                     planResult.warnings() == null ? List.of() : planResult.warnings());
+            boolean technicallyValid = planResult.valid();
             boolean semanticallyValid = planResult.valid();
-            AgenticAuthoringSemanticMaterializationPolicy.ValidationResult semanticValidation =
-                    AgenticAuthoringSemanticMaterializationPolicy.validate(
-                            semanticDecision(request.intentResolution()),
-                            planResult.uiCompositionPlan());
-            addAllOnce(failureCodes, semanticValidation.failureCodes());
-            addAllOnce(warnings, semanticValidation.warnings());
-            if (!semanticValidation.valid()) {
-                semanticallyValid = false;
-            }
             if (requiresOperationalMonitoringDashboard(request, request.intentResolution())
                     && !AgenticAuthoringSemanticMaterializationPolicy.containsComponent(
                     planResult.uiCompositionPlan(), "praxis-chart")) {
@@ -253,10 +245,16 @@ public class AgenticAuthoringPreviewService {
                     planResult.uiCompositionPlan(),
                     warnings,
                     schemaBaseUrl);
+            uiCompositionPlan = verifyResourceSchemaGrounding(
+                    request,
+                    uiCompositionPlan,
+                    warnings,
+                    schemaBaseUrl);
             if (containsUnverifiedSemanticAxes(uiCompositionPlan)) {
                 warnings.add("semantic-axis-schema-verification-pending");
             }
-            semanticValidation = AgenticAuthoringSemanticMaterializationPolicy.validate(
+            AgenticAuthoringSemanticMaterializationPolicy.ValidationResult semanticValidation =
+                    AgenticAuthoringSemanticMaterializationPolicy.validate(
                     semanticDecision(request.intentResolution()),
                     uiCompositionPlan);
             addAllOnce(failureCodes, semanticValidation.failureCodes());
@@ -271,7 +269,7 @@ public class AgenticAuthoringPreviewService {
                     semanticallyValid,
                     List.copyOf(failureCodes));
             return Optional.of(new AgenticAuthoringPreviewResult(
-                    semanticallyValid,
+                    technicallyValid,
                     List.copyOf(failureCodes),
                     List.copyOf(warnings),
                     MissingNode.getInstance(),
@@ -300,6 +298,66 @@ public class AgenticAuthoringPreviewService {
             ));
         }
         return Optional.empty();
+    }
+
+    private JsonNode verifyResourceSchemaGrounding(
+            AgenticAuthoringPlanRequest request,
+            JsonNode uiCompositionPlan,
+            List<String> warnings,
+            String schemaBaseUrl) {
+        if (schemaRetrievalService == null || uiCompositionPlan == null || uiCompositionPlan.isMissingNode()) {
+            return uiCompositionPlan;
+        }
+        AgenticAuthoringCandidate candidate = request == null || request.intentResolution() == null
+                ? null
+                : request.intentResolution().selectedCandidate();
+        AiSchemaContext schemaContext = schemaContext(candidate);
+        if (schemaContext == null) {
+            return uiCompositionPlan;
+        }
+        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(schemaContext, schemaBaseUrl);
+        if (schemaResult == null || !schemaResult.isSuccess()) {
+            return uiCompositionPlan;
+        }
+        Map<String, SchemaFieldDescriptor> schemaFields = schemaFields(schemaResult.getSchema());
+        if (schemaFields.isEmpty()) {
+            return uiCompositionPlan;
+        }
+        JsonNode copy = uiCompositionPlan.deepCopy();
+        if (copy instanceof ObjectNode objectNode) {
+            markResourceSchemaGrounded(objectNode, schemaResult, schemaFields.size());
+            return objectNode;
+        }
+        return copy;
+    }
+
+    private void markResourceSchemaGrounded(
+            ObjectNode uiCompositionPlan,
+            SchemaFetchResult schemaResult,
+            int fieldCount) {
+        ObjectNode diagnostics = uiCompositionPlan.path("diagnostics") instanceof ObjectNode existing
+                ? existing
+                : uiCompositionPlan.putObject("diagnostics");
+        ObjectNode grounding = diagnostics.putObject("resourceSchemaGrounding");
+        grounding.put("verified", true);
+        grounding.put("source", "schemas.filtered");
+        grounding.put("endpointUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+        grounding.put("fieldCount", Math.max(0, fieldCount));
+        JsonNode widgets = uiCompositionPlan.path("widgets");
+        if (widgets.isArray()) {
+            for (JsonNode widget : widgets) {
+                if (widget.path("inputs") instanceof ObjectNode inputs) {
+                    inputs.put("schemaVerification", "verified");
+                    inputs.put("schemaEvidenceSource", "schemas.filtered");
+                    inputs.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+                }
+                if (widget.path("definition").path("inputs") instanceof ObjectNode definitionInputs) {
+                    definitionInputs.put("schemaVerification", "verified");
+                    definitionInputs.put("schemaEvidenceSource", "schemas.filtered");
+                    definitionInputs.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+                }
+            }
+        }
     }
 
     private JsonNode verifySemanticAxesWithSchema(
@@ -349,6 +407,16 @@ public class AgenticAuthoringPreviewService {
         String schemaType = valueOrDefault(query.get("schemaType"), "response");
         if (isStatsPath(path) || isStatsPath(candidate.submitUrl()) || isStatsPath(candidate.resourcePath())) {
             path = businessResourcePath(firstNonBlank(candidate.resourcePath(), candidate.submitUrl())) + "/filter/cursor";
+            operation = "post";
+            schemaType = "response";
+        }
+        String businessPath = businessResourcePath(firstNonBlank(
+                firstNonBlank(path, candidate.submitUrl()),
+                candidate.resourcePath()));
+        if (!businessPath.isBlank()
+                && normalize(path).equals(normalize(businessPath))
+                && "get".equalsIgnoreCase(operation)) {
+            path = businessPath + "/filter/cursor";
             operation = "post";
             schemaType = "response";
         }
@@ -458,6 +526,7 @@ public class AgenticAuthoringPreviewService {
         if (widgets instanceof ArrayNode widgetArray) {
             for (int i = widgetArray.size() - 1; i >= 0; i--) {
                 JsonNode widget = widgetArray.get(i);
+                alignAuxiliaryWidgetBindings(widget, schemaFields, schemaResult, warnings);
                 JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
                 if (!(axis instanceof ObjectNode axisObject)) {
                     continue;
@@ -470,7 +539,126 @@ public class AgenticAuthoringPreviewService {
                     widgetArray.remove(i);
                 }
             }
+            pruneOrphanWidgetBindings(uiCompositionPlan, widgetArray, warnings);
         }
+    }
+
+    private void pruneOrphanWidgetBindings(
+            ObjectNode uiCompositionPlan,
+            ArrayNode widgets,
+            List<String> warnings) {
+        JsonNode bindings = uiCompositionPlan.path("bindings");
+        if (!(bindings instanceof ArrayNode bindingsArray)) {
+            return;
+        }
+        Set<String> widgetKeys = new LinkedHashSet<>();
+        for (JsonNode widget : widgets) {
+            String key = firstNonBlank(
+                    widget.path("key").asText(""),
+                    widget.path("id").asText(""));
+            if (!key.isBlank()) {
+                widgetKeys.add(key);
+            }
+        }
+        for (int i = bindingsArray.size() - 1; i >= 0; i--) {
+            JsonNode binding = bindingsArray.get(i);
+            String fromWidget = bindingWidgetKey(binding.path("from"));
+            String toWidget = bindingWidgetKey(binding.path("to"));
+            boolean fromMissing = !fromWidget.isBlank() && !widgetKeys.contains(fromWidget);
+            boolean toMissing = !toWidget.isBlank() && !widgetKeys.contains(toWidget);
+            if (fromMissing || toMissing) {
+                bindingsArray.remove(i);
+                addWarningOnce(warnings, "ui-composition-plan-orphan-binding-removed");
+            }
+        }
+    }
+
+    private String bindingWidgetKey(JsonNode endpoint) {
+        return firstNonBlank(
+                endpoint.path("widgetKey").asText(""),
+                endpoint.path("widget").asText(""));
+    }
+
+    private void alignAuxiliaryWidgetBindings(
+            JsonNode widget,
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            SchemaFetchResult schemaResult,
+            List<String> warnings) {
+        if (widget == null || !widget.isObject()) {
+            return;
+        }
+        String componentId = widget.path("componentId").asText("");
+        if ("praxis-filter".equals(componentId)) {
+            alignFilterFields(widget, schemaFields, schemaResult, warnings);
+        }
+        if ("praxis-rich-content".equals(componentId) && "kpi-band".equals(widget.path("role").asText(""))) {
+            alignKpiFields(widget, schemaFields, schemaResult, warnings);
+        }
+    }
+
+    private void alignFilterFields(
+            JsonNode widget,
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            SchemaFetchResult schemaResult,
+            List<String> warnings) {
+        JsonNode selectedFields = widget.path("inputs").path("selectedFieldIds");
+        if (!(selectedFields instanceof ArrayNode fieldsArray)) {
+            return;
+        }
+        for (int i = fieldsArray.size() - 1; i >= 0; i--) {
+            String requestedField = fieldsArray.get(i).asText("");
+            Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisProbe(requestedField), schemaFields);
+            if (schemaField.isPresent()) {
+                fieldsArray.set(i, objectMapper.getNodeFactory().textNode(schemaField.get().name()));
+            } else {
+                fieldsArray.remove(i);
+                addWarningOnce(warnings, "semantic-filter-schema-verification-unsupported-field");
+            }
+        }
+        if (widget.path("inputs") instanceof ObjectNode inputsObject) {
+            inputsObject.put("schemaVerification", "verified");
+            inputsObject.put("schemaEvidenceSource", "schemas.filtered");
+            inputsObject.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+        }
+    }
+
+    private void alignKpiFields(
+            JsonNode widget,
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            SchemaFetchResult schemaResult,
+            List<String> warnings) {
+        JsonNode kpis = widget.path("inputs").path("kpis");
+        if (!(kpis instanceof ArrayNode kpiArray)) {
+            return;
+        }
+        for (int i = kpiArray.size() - 1; i >= 0; i--) {
+            JsonNode kpi = kpiArray.get(i);
+            String dimensionField = kpi.path("dimensionField").asText("");
+            if (dimensionField.isBlank()) {
+                continue;
+            }
+            Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisProbe(dimensionField), schemaFields);
+            if (schemaField.isPresent()) {
+                if (kpi instanceof ObjectNode kpiObject) {
+                    kpiObject.put("dimensionField", schemaField.get().name());
+                    kpiObject.put("schemaVerified", true);
+                    kpiObject.put("schemaProbeStatus", "verified");
+                    kpiObject.put("schemaEvidenceSource", "schemas.filtered");
+                    kpiObject.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+                }
+            } else {
+                kpiArray.remove(i);
+                addWarningOnce(warnings, "semantic-kpi-schema-verification-unsupported-field");
+            }
+        }
+    }
+
+    private ObjectNode axisProbe(String field) {
+        ObjectNode probe = objectMapper.createObjectNode();
+        probe.put("field", field == null ? "" : field);
+        probe.put("label", field == null ? "" : field);
+        probe.put("concept", field == null ? "" : field);
+        return probe;
     }
 
     private void alignSemanticAxis(
@@ -537,6 +725,9 @@ public class AgenticAuthoringPreviewService {
         if (exact != null) {
             return Optional.of(exact);
         }
+        if (isAggregateCountAxis(semanticAxis)) {
+            return preferredGroupingField(schemaFields);
+        }
         Set<String> requestedTokens = semanticAxisTokens(semanticAxis);
         SchemaFieldDescriptor best = null;
         int bestScore = 0;
@@ -548,6 +739,98 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return bestScore >= 2 ? Optional.of(best) : Optional.empty();
+    }
+
+    private boolean isAggregateCountAxis(ObjectNode semanticAxis) {
+        String raw = normalize(String.join(" ",
+                semanticAxis.path("concept").asText(""),
+                semanticAxis.path("field").asText(""),
+                semanticAxis.path("label").asText("")));
+        if (!containsAny(raw, "quantidade", "qtd", "count", "total", "registro", "registros")) {
+            return false;
+        }
+        Set<String> tokens = new LinkedHashSet<>(semanticAxisTokens(semanticAxis));
+        tokens.removeAll(Set.of(
+                "recordcount",
+                "record",
+                "records",
+                "quantidade",
+                "qtd",
+                "count",
+                "contagem",
+                "registro",
+                "registros"));
+        return tokens.isEmpty();
+    }
+
+    private Optional<SchemaFieldDescriptor> preferredGroupingField(Map<String, SchemaFieldDescriptor> schemaFields) {
+        SchemaFieldDescriptor best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (SchemaFieldDescriptor field : schemaFields.values()) {
+            int score = groupingFieldScore(field);
+            if (score > bestScore) {
+                best = field;
+                bestScore = score;
+            }
+        }
+        return best == null || bestScore <= 0 ? Optional.empty() : Optional.of(best);
+    }
+
+    private int groupingFieldScore(SchemaFieldDescriptor field) {
+        Set<String> tokens = new LinkedHashSet<>();
+        tokens.addAll(field.fieldTokens());
+        tokens.addAll(field.labelTokens());
+        tokens.addAll(field.descriptionTokens());
+        if (tokens.isEmpty()) {
+            return 0;
+        }
+        int score = 10;
+        if (containsAnyToken(tokens, "status", "situacao", "andamento", "estado")) {
+            score += 100;
+        }
+        if (containsAnyToken(tokens, "categoria", "classe", "tipo", "natureza")) {
+            score += 90;
+        }
+        if (containsAnyToken(tokens, "departamento", "area", "equipe", "time", "setor")) {
+            score += 85;
+        }
+        if (containsAnyToken(tokens, "mes", "competencia", "periodo")) {
+            score += 80;
+        }
+        if (containsAnyToken(tokens, "ano", "exercicio")) {
+            score += 75;
+        }
+        if (containsAnyToken(tokens, "data", "created", "criacao", "pagamento")) {
+            score += 60;
+        }
+        if (containsAnyToken(tokens, "funcionario", "responsavel", "owner", "pessoa", "cliente")) {
+            score += 45;
+        }
+        if (containsAnyToken(tokens, "id", "uuid", "codigo")) {
+            score -= 80;
+        }
+        if (containsAnyToken(tokens,
+                "salario",
+                "valor",
+                "total",
+                "quantidade",
+                "desconto",
+                "bruto",
+                "liquido",
+                "preco",
+                "amount")) {
+            score -= 100;
+        }
+        return score;
+    }
+
+    private boolean containsAnyToken(Set<String> tokens, String... expected) {
+        for (String token : expected) {
+            if (tokens.contains(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int semanticMatchScore(Set<String> requestedTokens, SchemaFieldDescriptor field) {

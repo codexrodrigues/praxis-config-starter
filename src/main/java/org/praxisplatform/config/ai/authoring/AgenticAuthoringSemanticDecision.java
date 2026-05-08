@@ -20,6 +20,7 @@ public record AgenticAuthoringSemanticDecision(
         SelectedResource selectedResource,
         AgenticAuthoringVisualizationDecision visualizationDecision,
         RetrievalEvidence retrievalEvidence,
+        AgenticAuthoringEvidenceBundle retrievedEvidence,
         boolean reviewRequired,
         String reviewReason,
         String previousDecisionRef,
@@ -31,6 +32,7 @@ public record AgenticAuthoringSemanticDecision(
         String artifactIntent,
         String visualIntent,
         JsonNode constraints,
+        AgenticAuthoringSemanticRefinement refinement,
         String previousDecisionId,
         String rationale,
         Double confidence
@@ -60,6 +62,7 @@ public record AgenticAuthoringSemanticDecision(
                 selectedResource,
                 visualizationDecision,
                 retrievalEvidence,
+                null,
                 reviewRequired,
                 reviewReason,
                 previousDecisionRef,
@@ -70,6 +73,7 @@ public record AgenticAuthoringSemanticDecision(
                 "",
                 "",
                 "",
+                null,
                 null,
                 "",
                 "",
@@ -91,32 +95,43 @@ public record AgenticAuthoringSemanticDecision(
             String turnId,
             String userGoal,
             String activeObjective,
-            String rationale) {
+            String rationale,
+            AgenticAuthoringSemanticRefinement semanticRefinement) {
         boolean keywordFallback = contains(warnings, "keyword-fallback-applied")
                 || contains(warnings, "keyword-fallback-fail-safe-applied")
                 || keywordFallbackApplied(llmDiagnostics);
-        boolean domainAnchorSelection = contains(warnings, "resource-selection-domain-anchor-selected")
-                || selectedCandidateHasEvidence(selectedCandidate, "domain-anchor");
+        AgenticAuthoringEvidenceBundle retrievedEvidence = retrievedEvidence(selectedCandidate);
+        boolean strongGroundingEvidence = strongGroundingEvidence(retrievedEvidence, selectedCandidate);
+        boolean domainAnchorSelection = (contains(warnings, "resource-selection-domain-anchor-selected")
+                || selectedCandidateHasEvidence(selectedCandidate, "domain-anchor"))
+                && !strongGroundingEvidence;
         boolean visualProjectionRefinement = contains(warnings, "semantic-policy-refined-visual-projection");
         boolean decisionMemoryRefinement = contains(warnings, "semantic-decision-memory-refinement-applied");
+        boolean semanticRefinementApplied = contains(warnings, "semantic-refinement-applied");
         String followUpKind = llmIntent == null ? "" : safe(llmIntent.followUpKind());
         String previousDecisionId = activeDecision == null ? "" : safe(activeDecision.decisionId());
         boolean refinement = visualProjectionRefinement
                 || decisionMemoryRefinement
+                || semanticRefinementApplied
                 || "refinement".equals(followUpKind);
         boolean activeDecisionReviewRequired = refinement
                 && activeDecision != null
                 && activeDecision.reviewRequired();
-        boolean reviewRequired = keywordFallback || domainAnchorSelection || activeDecisionReviewRequired;
+        boolean weakLexicalEvidence = weakLexicalEvidence(retrievedEvidence, selectedCandidate);
+        boolean reviewRequired = keywordFallback
+                || domainAnchorSelection
+                || activeDecisionReviewRequired
+                || weakLexicalEvidence;
         String refinementOf = refinement
                 ? (previousDecisionId.isBlank() ? "previous-conversation-decision" : previousDecisionId)
                 : "";
-        String visualIntent = visualIntent(artifactKind, visualizationDecision, activeDecision, refinement);
+        String visualIntent = visualIntent(artifactKind, visualizationDecision, activeDecision, semanticRefinement, refinement);
+        String decisionArtifactKind = replacement(semanticRefinement, "artifactKind", artifactKind);
         return new AgenticAuthoringSemanticDecision(
                 SCHEMA_VERSION,
                 decisionId(
                         operationKind,
-                        artifactKind,
+                        decisionArtifactKind,
                         changeKind,
                         selectedCandidate,
                         visualizationDecision,
@@ -124,13 +139,14 @@ public record AgenticAuthoringSemanticDecision(
                         turnId,
                         previousDecisionId),
                 safe(operationKind),
-                safe(artifactKind),
+                safe(decisionArtifactKind),
                 safe(changeKind),
                 SelectedResource.from(selectedCandidate),
                 visualizationDecision,
                 RetrievalEvidence.from(selectedCandidate, candidates),
+                retrievedEvidence,
                 reviewRequired,
-                reviewReason(keywordFallback, domainAnchorSelection, activeDecisionReviewRequired, activeDecision),
+                reviewReason(keywordFallback, domainAnchorSelection, activeDecisionReviewRequired, weakLexicalEvidence, activeDecision),
                 visualProjectionRefinement ? "current-page-bound-resource" : refinementOf,
                 refinementOf,
                 safe(conversationId),
@@ -140,9 +156,45 @@ public record AgenticAuthoringSemanticDecision(
                 artifactIntent(operationKind, artifactKind, changeKind),
                 visualIntent,
                 null,
+                normalizeRefinement(semanticRefinement),
                 previousDecisionId,
                 safe(rationale),
-                confidence(reviewRequired, selectedCandidate, refinement));
+                confidence(reviewRequired, weakLexicalEvidence, retrievedEvidence, selectedCandidate, refinement));
+    }
+
+    static AgenticAuthoringSemanticDecision from(
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            List<String> warnings,
+            JsonNode llmDiagnostics,
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            AgenticAuthoringSemanticDecision activeDecision,
+            String conversationId,
+            String turnId,
+            String userGoal,
+            String activeObjective,
+            String rationale) {
+        return from(
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedCandidate,
+                candidates,
+                visualizationDecision,
+                warnings,
+                llmDiagnostics,
+                llmIntent,
+                activeDecision,
+                conversationId,
+                turnId,
+                userGoal,
+                activeObjective,
+                rationale,
+                null);
     }
 
     static AgenticAuthoringSemanticDecision from(
@@ -165,6 +217,7 @@ public record AgenticAuthoringSemanticDecision(
                 warnings,
                 llmDiagnostics,
                 llmIntent,
+                null,
                 null,
                 null,
                 null,
@@ -256,6 +309,7 @@ public record AgenticAuthoringSemanticDecision(
             boolean keywordFallback,
             boolean domainAnchorSelection,
             boolean activeDecisionReviewRequired,
+            boolean weakLexicalEvidence,
             AgenticAuthoringSemanticDecision activeDecision) {
         if (keywordFallback) {
             return "keyword-fallback-fail-safe";
@@ -266,6 +320,9 @@ public record AgenticAuthoringSemanticDecision(
         if (activeDecisionReviewRequired) {
             String reason = activeDecision == null ? "" : safe(activeDecision.reviewReason());
             return reason.isBlank() ? "active-decision-review-required" : reason;
+        }
+        if (weakLexicalEvidence) {
+            return "weak-lexical-evidence";
         }
         return "";
     }
@@ -281,7 +338,12 @@ public record AgenticAuthoringSemanticDecision(
             String artifactKind,
             AgenticAuthoringVisualizationDecision visualizationDecision,
             AgenticAuthoringSemanticDecision activeDecision,
+            AgenticAuthoringSemanticRefinement semanticRefinement,
             boolean refinement) {
+        String replacement = replacement(semanticRefinement, "visualIntent", "");
+        if (!replacement.isBlank()) {
+            return replacement;
+        }
         if (refinement && ("dashboard".equals(safe(artifactKind)) || "chart".equals(safe(artifactKind)))) {
             return "charts";
         }
@@ -300,10 +362,33 @@ public record AgenticAuthoringSemanticDecision(
         return safe(artifactKind);
     }
 
+    private static AgenticAuthoringSemanticRefinement normalizeRefinement(
+            AgenticAuthoringSemanticRefinement semanticRefinement) {
+        return semanticRefinement != null && semanticRefinement.active()
+                ? semanticRefinement
+                : null;
+    }
+
+    private static String replacement(
+            AgenticAuthoringSemanticRefinement semanticRefinement,
+            String key,
+            String fallback) {
+        if (semanticRefinement == null || !semanticRefinement.active()) {
+            return safe(fallback);
+        }
+        String replacement = semanticRefinement.replacement(key);
+        return replacement.isBlank() ? safe(fallback) : replacement;
+    }
+
     private static Double confidence(
             boolean reviewRequired,
+            boolean weakLexicalEvidence,
+            AgenticAuthoringEvidenceBundle retrievedEvidence,
             AgenticAuthoringCandidate selectedCandidate,
             boolean refinement) {
+        if (weakLexicalEvidence) {
+            return weakEvidenceConfidence(retrievedEvidence);
+        }
         if (reviewRequired) {
             return 0.5d;
         }
@@ -311,6 +396,74 @@ public record AgenticAuthoringSemanticDecision(
             return refinement ? 0.86d : 0.82d;
         }
         return refinement ? 0.72d : 0.68d;
+    }
+
+    private static boolean weakLexicalEvidence(
+            AgenticAuthoringEvidenceBundle retrievedEvidence,
+            AgenticAuthoringCandidate selectedCandidate) {
+        if (selectedCandidateHasEvidence(selectedCandidate, "lexical-fallback")
+                || selectedCandidateHasEvidence(selectedCandidate, "weak-evidence")) {
+            return true;
+        }
+        if (retrievedEvidence == null) {
+            return false;
+        }
+        if ("lexical_fallback".equals(safe(retrievedEvidence.retrievalSource()))) {
+            return true;
+        }
+        return retrievedEvidence.evidence().stream()
+                .anyMatch(evidence -> "weak_lexical_match".equals(safe(evidence.kind())));
+    }
+
+    private static double weakEvidenceConfidence(AgenticAuthoringEvidenceBundle retrievedEvidence) {
+        if (retrievedEvidence == null || retrievedEvidence.evidence().isEmpty()) {
+            return 0.49d;
+        }
+        double strongestWeakEvidence = retrievedEvidence.evidence().stream()
+                .filter(evidence -> "weak_lexical_match".equals(safe(evidence.kind()))
+                        || "lexical_fallback".equals(safe(retrievedEvidence.retrievalSource())))
+                .mapToDouble(AgenticAuthoringEvidenceBundle.Evidence::confidence)
+                .max()
+                .orElse(0.49d);
+        return Math.min(0.49d, strongestWeakEvidence);
+    }
+
+    private static AgenticAuthoringEvidenceBundle retrievedEvidence(AgenticAuthoringCandidate selectedCandidate) {
+        if (selectedCandidate != null && selectedCandidate.evidenceBundle() != null) {
+            return selectedCandidate.evidenceBundle();
+        }
+        return AgenticAuthoringEvidenceBundle.empty();
+    }
+
+    private static boolean strongGroundingEvidence(
+            AgenticAuthoringEvidenceBundle retrievedEvidence,
+            AgenticAuthoringCandidate selectedCandidate) {
+        if (weakLexicalEvidence(retrievedEvidence, selectedCandidate)) {
+            return false;
+        }
+        if (retrievedEvidence == null || retrievedEvidence.evidence().isEmpty()) {
+            return selectedCandidate != null
+                    && selectedCandidate.score() >= 0.85d
+                    && !selectedCandidateHasEvidence(selectedCandidate, "domain-anchor")
+                    && !selectedCandidateHasEvidence(selectedCandidate, "lexical-fallback")
+                    && !selectedCandidateHasEvidence(selectedCandidate, "weak-evidence");
+        }
+        String retrievalSource = safe(retrievedEvidence.retrievalSource());
+        if ("lexical_fallback".equals(retrievalSource)) {
+            return false;
+        }
+        double strongestEvidence = retrievedEvidence.evidence().stream()
+                .mapToDouble(AgenticAuthoringEvidenceBundle.Evidence::confidence)
+                .max()
+                .orElse(0d);
+        boolean structuralEvidence = retrievedEvidence.evidence().stream()
+                .map(AgenticAuthoringEvidenceBundle.Evidence::kind)
+                .map(AgenticAuthoringSemanticDecision::safe)
+                .anyMatch(kind -> kind.equals("schema_grounding")
+                        || kind.equals("operation_grounding")
+                        || kind.equals("resource_capability_hint")
+                        || kind.equals("retrieved_candidate"));
+        return strongestEvidence >= 0.62d && structuralEvidence;
     }
 
     private static String safe(String value) {

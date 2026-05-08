@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Host-neutral page composition planner for resource-backed authoring.
@@ -39,7 +41,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         AgenticAuthoringVisualizationDecision visualizationDecision = intent.visualizationDecision();
         ObjectNode plan = switch (artifactKind) {
-            case "dashboard" -> dashboardPlan(candidate, visualizationDecision);
+            case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
             case "page" -> pagePlan(candidate);
             default -> tablePlan(candidate);
         };
@@ -58,24 +60,26 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private ObjectNode dashboardPlan(
+            AgenticAuthoringPlanRequest request,
             AgenticAuthoringCandidate candidate,
             AgenticAuthoringVisualizationDecision visualizationDecision) {
         ObjectNode plan = basePlan("resource-dashboard");
         ArrayNode widgets = plan.putArray("widgets");
-        if (visualizationDecision == null || !"praxis-chart".equals(safe(visualizationDecision.primaryComponent()))) {
+        boolean chartDashboard = visualizationDecision != null
+                && "praxis-chart".equals(safe(visualizationDecision.primaryComponent()));
+        if (!chartDashboard && !looksLikeChartRequest(request)) {
             return plan;
         }
-        if (visualizationDecision.includeSummary()) {
-            addSummary(widgets, candidate, widgetKey(candidate, "summary"));
-        }
-        List<DashboardDimension> dimensions = dashboardDimensions(visualizationDecision);
+        List<DashboardDimension> dimensions = dashboardDimensions(visualizationDecision, candidate, request);
+        addSummary(widgets, candidate, widgetKey(candidate, "summary"));
+        addKpis(widgets, candidate, widgetKey(candidate, "kpis"), dimensions);
+        addFilter(widgets, candidate, widgetKey(candidate, "filter"), dimensions);
         for (DashboardDimension dimension : dimensions) {
             addChart(widgets, candidate, widgetKey(candidate, "chart-" + dimension.field()), dimension);
         }
         addSemanticAxisProvenance(plan, visualizationDecision, dimensions);
-        if (visualizationDecision.includeDetailTable()) {
-            addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
-        }
+        addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
+        addDashboardBindings(plan, candidate, dimensions);
         return plan;
     }
 
@@ -148,6 +152,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         dataSource.put("schemaUrl", schemaUrl(candidate));
         dataSource.put("submitUrl", submitUrl(candidate));
         dataSource.put("submitMethod", submitMethod(candidate));
+        dataSource.put("statsEndpointInference", "canonical-resource-stats-group-by");
         ObjectNode query = dataSource.putObject("query");
         query.put("sourceKind", "praxis.stats");
         query.put("statsOperation", "group-by");
@@ -173,15 +178,81 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         config.putObject("interactions").put("selection", true);
     }
 
+    private void addKpis(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            List<DashboardDimension> dimensions) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-rich-content");
+        widget.put("role", "kpi-band");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
+        inputs.put("schemaUrl", schemaUrl(candidate));
+        ArrayNode kpis = inputs.putArray("kpis");
+        ObjectNode total = kpis.addObject();
+        total.put("id", key + "-total");
+        total.put("label", "Total");
+        total.put("aggregation", "count");
+        total.put("schemaVerified", true);
+        total.put("provenance", "generic-dashboard-count-kpi");
+        for (DashboardDimension dimension : dimensions.stream().limit(2).toList()) {
+            ObjectNode kpi = kpis.addObject();
+            kpi.put("id", key + "-" + dimension.field());
+            kpi.put("label", dimension.label());
+            kpi.put("aggregation", dimension.metricAggregation());
+            if (!dimension.metricField().isBlank()) {
+                kpi.put("field", dimension.metricField());
+            }
+            kpi.put("dimensionField", dimension.field());
+            kpi.put("schemaVerified", false);
+            kpi.put("schemaProbeStatus", "pending");
+            kpi.put("provenance", dimension.provenance());
+        }
+        ObjectNode document = inputs.putObject("document");
+        document.put("kind", "praxis.rich-content.document");
+        document.put("version", "1.0.0");
+        ObjectNode text = document.putArray("nodes").addObject();
+        text.put("type", "text");
+        text.put("text", "Indicadores de " + titleFromResourcePath(businessResourcePath(candidate.resourcePath())) + ".");
+    }
+
+    private void addFilter(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            List<DashboardDimension> dimensions) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-filter");
+        widget.put("role", "filter");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
+        inputs.put("schemaUrl", schemaUrl(candidate));
+        inputs.put("filterId", key);
+        inputs.put("showFilterSettings", true);
+        ArrayNode selectedFields = inputs.putArray("selectedFieldIds");
+        for (DashboardDimension dimension : dimensions) {
+            selectedFields.add(dimension.field());
+        }
+        inputs.put("schemaVerification", "pending");
+    }
+
     private void addSemanticAxisProvenance(
             ObjectNode plan,
             AgenticAuthoringVisualizationDecision visualizationDecision,
             List<DashboardDimension> dimensions) {
         ObjectNode diagnostics = plan.putObject("diagnostics");
         diagnostics.put("schemaVersion", "praxis-ui-composition-plan-diagnostics.v1");
-        diagnostics.put("visualizationDecisionSchemaVersion", safe(visualizationDecision.schemaVersion()));
-        diagnostics.put("visualizationDecisionIntent", safe(visualizationDecision.intent()));
-        diagnostics.put("visualizationDecisionProvenance", safe(visualizationDecision.provenance()));
+        diagnostics.put("visualizationDecisionSchemaVersion",
+                visualizationDecision == null ? "" : safe(visualizationDecision.schemaVersion()));
+        diagnostics.put("visualizationDecisionIntent",
+                visualizationDecision == null ? "generic-dashboard" : safe(visualizationDecision.intent()));
+        diagnostics.put("visualizationDecisionProvenance",
+                visualizationDecision == null
+                        ? "generic-dashboard-field-inference"
+                        : safe(visualizationDecision.provenance()));
         ArrayNode axes = diagnostics.putArray("semanticAxes");
         for (DashboardDimension dimension : dimensions) {
             ObjectNode axis = axes.addObject();
@@ -192,6 +263,43 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             axis.put("schemaVerified", false);
             axis.put("schemaProbeStatus", "pending");
         }
+    }
+
+    private void addDashboardBindings(
+            ObjectNode plan,
+            AgenticAuthoringCandidate candidate,
+            List<DashboardDimension> dimensions) {
+        String filterKey = widgetKey(candidate, "filter");
+        String tableKey = widgetKey(candidate, "table");
+        ArrayNode bindings = plan.putArray("bindings");
+        ObjectNode tableBinding = bindings.addObject();
+        tableBinding.put("id", filterKey + ".requestSearch->" + tableKey + ".queryContext");
+        addComponentPortEndpoint(tableBinding.putObject("from"), filterKey, "requestSearch", "output");
+        addComponentPortEndpoint(tableBinding.putObject("to"), tableKey, "queryContext", "input");
+        tableBinding.putObject("transform").put("kind", "identity");
+        for (DashboardDimension dimension : dimensions) {
+            String chartKey = widgetKey(candidate, "chart-" + dimension.field());
+            ObjectNode filterBinding = bindings.addObject();
+            filterBinding.put("id", filterKey + ".requestSearch->" + chartKey + ".queryContext");
+            addComponentPortEndpoint(filterBinding.putObject("from"), filterKey, "requestSearch", "output");
+            addComponentPortEndpoint(filterBinding.putObject("to"), chartKey, "queryContext", "input");
+            filterBinding.putObject("transform").put("kind", "identity");
+
+            ObjectNode drilldownBinding = bindings.addObject();
+            drilldownBinding.put("id", chartKey + ".selectionChange->" + tableKey + ".queryContext");
+            addComponentPortEndpoint(drilldownBinding.putObject("from"), chartKey, "selectionChange", "output");
+            addComponentPortEndpoint(drilldownBinding.putObject("to"), tableKey, "queryContext", "input");
+            ObjectNode transform = drilldownBinding.putObject("transform");
+            transform.put("kind", "pick-path");
+            transform.put("path", "filters." + dimension.field());
+        }
+    }
+
+    private void addComponentPortEndpoint(ObjectNode endpoint, String widgetKey, String port, String direction) {
+        endpoint.put("kind", "component-port");
+        endpoint.put("widget", widgetKey);
+        endpoint.put("port", port);
+        endpoint.put("direction", direction);
     }
 
     private void addSummary(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
@@ -265,28 +373,117 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return title.isEmpty() ? "Resource" : title.toString();
     }
 
-    private List<DashboardDimension> dashboardDimensions(AgenticAuthoringVisualizationDecision visualizationDecision) {
-        if (visualizationDecision == null || visualizationDecision.axes() == null) {
-            return List.of();
-        }
+    private List<DashboardDimension> dashboardDimensions(
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            AgenticAuthoringCandidate candidate,
+            AgenticAuthoringPlanRequest request) {
         List<DashboardDimension> dimensions = new ArrayList<>();
-        for (AgenticAuthoringVisualizationAxisDecision axis : visualizationDecision.axes()) {
-            if (axis == null || safe(axis.field()).isBlank() || safe(axis.concept()).isBlank()) {
-                continue;
+        if (visualizationDecision != null && visualizationDecision.axes() != null) {
+            for (AgenticAuthoringVisualizationAxisDecision axis : visualizationDecision.axes()) {
+                if (axis == null || safe(axis.field()).isBlank() || safe(axis.concept()).isBlank()) {
+                    continue;
+                }
+                dimensions.add(new DashboardDimension(
+                        safe(axis.concept()),
+                        safe(axis.field()),
+                        valueOrDefault(axis.label(), titleFromResourcePath(axis.field())),
+                        "Registros por " + valueOrDefault(axis.label(), axis.field()),
+                        valueOrDefault(axis.chartType(), "bar"),
+                        valueOrDefault(axis.orientation(), "vertical"),
+                        valueOrDefault(axis.metricAggregation(), "count"),
+                        valueOrDefault(axis.metricField(), ""),
+                        valueOrDefault(axis.metricLabel(), "Total"),
+                        valueOrDefault(axis.provenance(), "llm-authored-semantic-axis")));
             }
-            dimensions.add(new DashboardDimension(
-                    safe(axis.concept()),
-                    safe(axis.field()),
-                    valueOrDefault(axis.label(), titleFromResourcePath(axis.field())),
-                    "Registros por " + valueOrDefault(axis.label(), axis.field()),
-                    valueOrDefault(axis.chartType(), "bar"),
-                    valueOrDefault(axis.orientation(), "vertical"),
-                    valueOrDefault(axis.metricAggregation(), "count"),
-                    valueOrDefault(axis.metricField(), ""),
-                    valueOrDefault(axis.metricLabel(), "Total"),
-                    valueOrDefault(axis.provenance(), "llm-authored-semantic-axis")));
+        }
+        if (dimensions.isEmpty()) {
+            dimensions.addAll(inferDashboardDimensions(candidate, request));
         }
         return dimensions.stream().limit(3).toList();
+    }
+
+    private List<DashboardDimension> inferDashboardDimensions(
+            AgenticAuthoringCandidate candidate,
+            AgenticAuthoringPlanRequest request) {
+        Set<String> terms = new LinkedHashSet<>();
+        addTerms(terms, request == null ? "" : request.userPrompt());
+        addTerms(terms, candidate == null ? "" : candidate.reason());
+        addTerms(terms, businessResourcePath(candidate == null ? "" : candidate.resourcePath()));
+        if (candidate != null && candidate.evidenceBundle() != null) {
+            for (AgenticAuthoringEvidenceBundle.Evidence evidence : candidate.evidenceBundle().evidence()) {
+                addTerms(terms, evidence.summary());
+                addTerms(terms, evidence.ref());
+                evidence.matchedTerms().forEach(term -> addTerms(terms, term));
+            }
+        }
+        List<DashboardDimension> dimensions = new ArrayList<>();
+        addInferredDimensionIfRelevant(dimensions, terms, "status", "status", "Status", "bar", "vertical");
+        addInferredDimensionIfRelevant(dimensions, terms, "severity", "severity", "Severity", "bar", "vertical");
+        addInferredDimensionIfRelevant(dimensions, terms, "category", "category", "Category", "bar", "vertical");
+        addInferredDimensionIfRelevant(dimensions, terms, "type", "type", "Type", "bar", "vertical");
+        addInferredDimensionIfRelevant(dimensions, terms, "period", "createdAt", "Period", "line", "horizontal");
+        if (dimensions.isEmpty()) {
+            dimensions.add(new DashboardDimension(
+                    "category",
+                    "category",
+                    "Category",
+                    "Registros por Category",
+                    "bar",
+                    "vertical",
+                    "count",
+                    "",
+                    "Total",
+                    "generic-dashboard-field-inference"));
+        }
+        return dimensions;
+    }
+
+    private void addInferredDimensionIfRelevant(
+            List<DashboardDimension> dimensions,
+            Set<String> terms,
+            String concept,
+            String field,
+            String label,
+            String chartType,
+            String orientation) {
+        if (terms.contains(concept)
+                || terms.contains(field.toLowerCase(Locale.ROOT))
+                || terms.contains(label.toLowerCase(Locale.ROOT))
+                || ("severity".equals(concept) && (terms.contains("gravidade") || terms.contains("severidade")))
+                || ("category".equals(concept) && (terms.contains("categoria") || terms.contains("classe")))
+                || ("type".equals(concept) && (terms.contains("tipo") || terms.contains("natureza")))
+                || ("period".equals(concept) && (terms.contains("data") || terms.contains("periodo") || terms.contains("tempo")))) {
+            dimensions.add(new DashboardDimension(
+                    concept,
+                    field,
+                    label,
+                    "Registros por " + label,
+                    chartType,
+                    orientation,
+                    "count",
+                    "",
+                    "Total",
+                    "generic-dashboard-field-inference"));
+        }
+    }
+
+    private void addTerms(Set<String> terms, String value) {
+        for (String token : normalize(value).replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
+            if (token.length() >= 3) {
+                terms.add(token);
+            }
+        }
+    }
+
+    private boolean looksLikeChartRequest(AgenticAuthoringPlanRequest request) {
+        String prompt = normalize(request == null ? "" : request.userPrompt());
+        return prompt.contains("grafico")
+                || prompt.contains("graficos")
+                || prompt.contains("chart")
+                || prompt.contains("dashboard")
+                || prompt.contains("painel")
+                || prompt.contains("indicador")
+                || prompt.contains("kpi");
     }
 
     private String valueOrDefault(String value, String fallback) {

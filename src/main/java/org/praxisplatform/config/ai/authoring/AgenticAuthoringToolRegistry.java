@@ -30,8 +30,25 @@ public class AgenticAuthoringToolRegistry {
     }
 
     AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call, AiPrincipalContext principalContext) {
+        String toolName = call == null ? "" : call.name();
+        return AgenticAuthoringToolResult.failure(
+                toolName,
+                "tool-phase-required",
+                "Tool execution requires an explicit authoring phase.");
+    }
+
+    AgenticAuthoringToolResult execute(
+            AgenticAuthoringToolCall call,
+            AiPrincipalContext principalContext,
+            String phase) {
         if (call == null || call.name() == null || call.name().isBlank()) {
             return AgenticAuthoringToolResult.failure("", "tool-name-required", "Tool name is required.");
+        }
+        if (phase == null || phase.isBlank()) {
+            return AgenticAuthoringToolResult.failure(
+                    call.name(),
+                    "tool-phase-required",
+                    "Tool execution requires an explicit authoring phase.");
         }
         AgenticAuthoringToolExecutor executor = executors.get(call.name());
         if (executor == null) {
@@ -43,6 +60,14 @@ public class AgenticAuthoringToolRegistry {
                     call.name(),
                     "tool-route-not-allowed",
                     "Tool is not allowed for route " + safeRoute(call.routeClass()) + ".");
+        }
+        if (definition.allowedPhases() != null
+                && !definition.allowedPhases().isEmpty()
+                && !definition.allowedPhases().contains(phase)) {
+            return AgenticAuthoringToolResult.failure(
+                    call.name(),
+                    "tool-phase-not-allowed",
+                    "Tool is not allowed for phase " + phase + ".");
         }
         try {
             return executor.execute(call, principalContext);

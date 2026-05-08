@@ -180,6 +180,124 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void semanticDecisionCarriesHostNeutralEvidenceBundleWithRetrievalSource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadata(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "POST",
+                        "risk,intelligence,incidentes,indicadores,analytics,dashboard,gravidade",
+                        "Indicadores de incidentes",
+                        "Visao analitica de incidentes por gravidade e responsavel."),
+                apiMetadata(
+                        "/api/customer-success/accounts",
+                        "POST",
+                        "customer,success,accounts,clientes",
+                        "Contas de clientes",
+                        "Cadastro operacional de contas de clientes.")));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Monte um dashboard de risco com incidentes por gravidade",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.semanticDecision().retrievalEvidence().retrievalSource())
+                .isEqualTo("lexical_fallback");
+        assertThat(result.semanticDecision().reviewRequired()).isTrue();
+        assertThat(result.semanticDecision().reviewReason()).isIn("weak-lexical-evidence", "keyword-fallback-fail-safe");
+        assertThat(result.semanticDecision().confidence()).isLessThan(0.5d);
+        AgenticAuthoringEvidenceBundle bundle = result.semanticDecision().retrievedEvidence();
+        assertThat(bundle.retrievalSource()).isEqualTo("lexical_fallback");
+        assertThat(bundle.evidence())
+                .extracting(AgenticAuthoringEvidenceBundle.Evidence::source)
+                .contains("api_metadata", "/schemas/filtered", "capabilities", "actions", "domain_catalog");
+        assertThat(bundle.evidence())
+                .anySatisfy(evidence -> {
+                    assertThat(evidence.source()).isEqualTo("api_metadata");
+                    assertThat(evidence.kind()).isEqualTo("weak_lexical_match");
+                    assertThat(evidence.confidence()).isLessThan(0.5d);
+                });
+    }
+
+    @Test
+    void semanticDecisionRequiresReviewForWeakLexicalEvidenceWithoutKeywordFallback() {
+        AgenticAuthoringCandidate weakLexicalCandidate = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/vw-indicadores-incidentes",
+                "post",
+                "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes&operation=post&schemaType=request",
+                "/api/risk-intelligence/vw-indicadores-incidentes",
+                "post",
+                0.61d,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                "/api/risk-intelligence/vw-indicadores-incidentes",
+                                "Lexical match only.",
+                                0.42d,
+                                List.of("incidentes"),
+                                "",
+                                "",
+                                ""))));
+
+        AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "dashboard",
+                "create_artifact",
+                weakLexicalCandidate,
+                List.of(weakLexicalCandidate),
+                null,
+                List.of());
+
+        assertThat(decision.reviewRequired()).isTrue();
+        assertThat(decision.reviewReason()).isEqualTo("weak-lexical-evidence");
+        assertThat(decision.confidence()).isLessThan(0.5d);
+    }
+
+    @Test
+    void semanticDecisionRequiresReviewForLegacyLexicalEvidenceWithoutBundle() {
+        AgenticAuthoringCandidate weakLexicalCandidate = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/vw-indicadores-incidentes",
+                "post",
+                "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes&operation=post&schemaType=request",
+                "/api/risk-intelligence/vw-indicadores-incidentes",
+                "post",
+                0.61d,
+                "api_metadata lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback"));
+
+        AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "dashboard",
+                "create_artifact",
+                weakLexicalCandidate,
+                List.of(weakLexicalCandidate),
+                null,
+                List.of());
+
+        assertThat(decision.reviewRequired()).isTrue();
+        assertThat(decision.reviewReason()).isEqualTo("weak-lexical-evidence");
+        assertThat(decision.confidence()).isLessThan(0.5d);
+    }
+
+    @Test
     void resolvesCreateMinimalFormForQuickstartFuncionarios() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um formulario didatico para cadastrar funcionarios",
@@ -339,8 +457,316 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.semanticDecision().selectedResource().resourcePath())
                 .isEqualTo("/api/human-resources/folhas-pagamento");
         assertThat(result.semanticDecision().visualIntent()).isEqualTo("charts");
+        assertThat(result.semanticDecision().refinement()).isNotNull();
+        assertThat(result.semanticDecision().refinement().refinementKind()).isEqualTo("visual_projection");
+        assertThat(result.semanticDecision().refinement().preserve()).contains("resource", "source");
+        assertThat(result.semanticDecision().refinement().replace())
+                .containsEntry("artifactKind", "dashboard")
+                .containsEntry("visualIntent", "charts");
         assertThat(result.visualizationDecision()).isNull();
         assertThat(result.warnings()).contains("semantic-decision-memory-refinement-applied");
+    }
+
+    @Test
+    void refinesActiveChartDecisionBackToTableBySemanticDiff() {
+        AgenticAuthoringCandidate chartResource = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                "POST",
+                0.92,
+                "turn 1 selected payroll chart resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "dashboard",
+                "create_artifact",
+                chartResource,
+                List.of(chartResource),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Criar gráficos de folha de pagamento",
+                "Criar gráficos de folha de pagamento",
+                "Initial chart decision.");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Troca para tabela, mantendo a fonte",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                previousDecision));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.semanticDecision().artifactKind()).isEqualTo("table");
+        assertThat(result.semanticDecision().visualIntent()).isEqualTo("table");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.semanticDecision().refinement().replace())
+                .containsEntry("artifactKind", "table")
+                .containsEntry("visualIntent", "table");
+        assertThat(result.semanticDecision().refinement().remove()).contains("chart");
+    }
+
+    @Test
+    void explicitPreserveDataRefinementDoesNotLetFallbackSwapResource() {
+        AgenticAuthoringCandidate tableResource = new AgenticAuthoringCandidate(
+                "/api/human-resources/folhas-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/folhas-pagamento&operation=post&schemaType=response",
+                "/api/human-resources/folhas-pagamento",
+                "POST",
+                0.92,
+                "turn 1 selected payroll table resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "table",
+                "create_artifact",
+                tableResource,
+                List.of(tableResource),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Criar tabela de folha de pagamento",
+                "Criar tabela de folha de pagamento",
+                "Initial table decision.");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Mantém os dados, só muda a visualização para gráficos de funcionários",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                previousDecision));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.semanticDecision().refinement().preserve()).contains("resource", "source", "filters");
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .contains("/api/human-resources/funcionarios");
+    }
+
+    @Test
+    void llmRefinementWithoutConcreteDiffDoesNotPreserveActiveResource() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "discover_resources",
+                        null,
+                        null,
+                        "refinement",
+                        "Vou entender melhor quais fontes se aplicam.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-semantic-follow-up"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "dashboard",
+                "create_artifact",
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/folhas-pagamento",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/folhas-pagamento&operation=post&schemaType=response",
+                        "/api/human-resources/folhas-pagamento",
+                        "POST",
+                        0.92,
+                        "previous payroll table resource",
+                        List.of("api-metadata", "semantic-retrieval")),
+                List.of(),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Criar dashboard de folha",
+                "Criar dashboard de folha",
+                "Initial decision.");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "agora veja outras possibilidades",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                previousDecision));
+
+        assertThat(result.warnings()).doesNotContain("semantic-decision-memory-refinement-applied");
+        assertThat(result.semanticDecision().refinement()).isNull();
+        assertThat(result.selectedCandidate() == null
+                || !"/api/human-resources/folhas-pagamento".equals(result.selectedCandidate().resourcePath()))
+                .isTrue();
+    }
+
+    @Test
+    void dataSourceRefinementDoesNotForcePreviousResourceWhenPromptAsksForNewSource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadata(
+                        "/api/human-resources/folhas-pagamento",
+                        "POST",
+                        "human-resources,folha,pagamento",
+                        "Folhas de pagamento",
+                        "Registros operacionais de folha."),
+                apiMetadata(
+                        "/api/customer-success/accounts",
+                        "POST",
+                        "customer,success,accounts,clientes,dashboard",
+                        "Contas de clientes",
+                        "Fonte de clientes para dashboards e analises.")));
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/customer-success/accounts",
+                        null,
+                        "refinement",
+                        "Vou trocar a fonte para clientes.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-semantic-follow-up"))));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        null,
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+        AgenticAuthoringCandidate payroll = new AgenticAuthoringCandidate(
+                "/api/human-resources/folhas-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/folhas-pagamento&operation=post&schemaType=response",
+                "/api/human-resources/folhas-pagamento",
+                "POST",
+                0.92,
+                "previous payroll table resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "dashboard",
+                "create_artifact",
+                payroll,
+                List.of(payroll),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Criar dashboard de folha",
+                "Criar dashboard de folha",
+                "Initial decision.");
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Agora usa clientes como fonte",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                previousDecision));
+
+        assertThat(result.semanticDecision().refinement()).isNotNull();
+        assertThat(result.semanticDecision().refinement().refinementKind()).isEqualTo("data_source");
+        assertThat(result.semanticDecision().refinementOf()).isEqualTo(previousDecision.decisionId());
+        assertThat(result.semanticDecision().previousDecisionId()).isEqualTo(previousDecision.decisionId());
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/customer-success/accounts");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .isEqualTo("/api/customer-success/accounts");
+        assertThat(result.warnings()).doesNotContain("semantic-decision-memory-refinement-applied");
+        assertThat(result.warnings()).contains("semantic-refinement-applied");
     }
 
     @Test
@@ -2131,6 +2557,87 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void preservesToolCandidateEvidenceBundleFromContextHints() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate toolCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-ranking-reputacao",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-ranking-reputacao/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-ranking-reputacao/filter/cursor",
+                "post",
+                0.44d,
+                "resource discovered by backend tool",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                "/api/human-resources/vw-ranking-reputacao",
+                                "Tool lexical candidate.",
+                                0.44d,
+                                List.of("ranking", "reputacao"),
+                                "tenant-a",
+                                "staging",
+                                "release-2026.05"))));
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-ranking-reputacao",
+                        null,
+                        "none",
+                        "Vou usar ranking reputacao como fonte de dados.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-tool-candidate"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                null,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.set("candidates", objectMapper.valueToTree(List.of(toolCandidate)));
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um painel para reputacao",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                contextHints));
+
+        assertThat(result.selectedCandidate().evidenceBundle()).isNotNull();
+        assertThat(result.selectedCandidate().evidenceBundle().retrievalSource()).isEqualTo("lexical_fallback");
+        assertThat(result.semanticDecision().retrievedEvidence().retrievalSource()).isEqualTo("lexical_fallback");
+        assertThat(result.semanticDecision().reviewRequired()).isTrue();
+        assertThat(result.semanticDecision().reviewReason()).isEqualTo("weak-lexical-evidence");
+        assertThat(result.semanticDecision().confidence()).isLessThan(0.5d);
+    }
+
+    @Test
     void overridesLlmResourceSelectionWhenItContradictsStrongBusinessTerms() {
         AgenticAuthoringCandidate incidentCandidate = new AgenticAuthoringCandidate(
                 "/api/operations/incidentes",
@@ -2421,6 +2928,12 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.semanticDecision().selectedResource().resourcePath())
                 .isEqualTo("/api/human-resources/folhas-pagamento");
         assertThat(result.semanticDecision().visualIntent()).isEqualTo("charts");
+        assertThat(result.semanticDecision().refinement()).isNotNull();
+        assertThat(result.semanticDecision().refinement().refinementKind()).isEqualTo("visual_projection");
+        assertThat(result.semanticDecision().refinement().preserve()).contains("resource", "source");
+        assertThat(result.semanticDecision().refinement().replace())
+                .containsEntry("artifactKind", "dashboard")
+                .containsEntry("visualIntent", "charts");
         assertThat(result.semanticDecision().refinementOf()).isEqualTo("previous-conversation-decision");
         assertThat(result.semanticDecision().previousDecisionRef()).isEqualTo("current-page-bound-resource");
         assertThat(result.warnings())
@@ -3174,6 +3687,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.clarificationQuestions()).isEmpty();
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .isEqualTo("/api/human-resources/folhas-pagamento");
     }
 
     @Test
@@ -4112,7 +4627,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "llm-operational-artifact-rejected-for-analytical-dashboard-intent",
                         "semantic-policy-corrected-analytical-dashboard-intent")
                 .doesNotContain("keyword-fallback-applied");
-        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+        assertThat(result.semanticDecision().reviewRequired()).isTrue();
+        assertThat(result.semanticDecision().reviewReason()).isEqualTo("weak-lexical-evidence");
     }
 
     @Test
@@ -4174,7 +4690,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "llm-operational-artifact-rejected-for-analytical-dashboard-intent",
                         "semantic-policy-corrected-analytical-dashboard-intent")
                 .doesNotContain("keyword-fallback-applied");
-        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+        assertThat(result.semanticDecision().reviewRequired()).isTrue();
+        assertThat(result.semanticDecision().reviewReason()).isEqualTo("weak-lexical-evidence");
     }
 
     @Test

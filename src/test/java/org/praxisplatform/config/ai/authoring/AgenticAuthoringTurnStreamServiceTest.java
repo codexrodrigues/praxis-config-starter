@@ -264,7 +264,7 @@ class AgenticAuthoringTurnStreamServiceTest {
         when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(secondPassIntent());
-        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local"), eq("http://localhost")))
                 .thenReturn(new AgenticAuthoringPreviewResult(
                         true,
                         List.of(),

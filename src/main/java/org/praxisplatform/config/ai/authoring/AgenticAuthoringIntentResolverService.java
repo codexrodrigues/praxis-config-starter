@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -116,7 +117,8 @@ public class AgenticAuthoringIntentResolverService {
         String prompt = normalize(effectivePrompt);
         String discoveryPrompt = normalize(turn.answeredPendingClarification() ? turn.effectivePrompt() : effectivePrompt);
         AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
-        boolean decisionMemoryRefinement = isDecisionMemoryRefinementPrompt(prompt, activeDecision);
+        AgenticAuthoringSemanticRefinement semanticRefinement = semanticRefinement(prompt, activeDecision, null);
+        boolean decisionMemoryRefinement = semanticRefinement.active();
         JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage(), request.selectedWidgetKey());
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(request.currentPage(), request.selectedWidgetKey());
         AgenticAuthoringKeywordFallbackResolution fallbackResolution =
@@ -154,6 +156,8 @@ public class AgenticAuthoringIntentResolverService {
                 tenantId,
                 userId,
                 environment);
+        semanticRefinement = semanticRefinement(prompt, activeDecision, llmIntent);
+        decisionMemoryRefinement = semanticRefinement.active();
         JsonNode llmDiagnostics = llmDiagnostics(
                 request,
                 effectivePrompt,
@@ -174,6 +178,9 @@ public class AgenticAuthoringIntentResolverService {
         boolean semanticPolicyCorrectedAnalyticalDashboardIntent = false;
         boolean semanticPolicyRefinedVisualProjection = false;
         boolean visualProjectionRefinement = isVisualProjectionRefinementPrompt(prompt, turn, currentPageSummary);
+        if (!semanticRefinement.active() && visualProjectionRefinement) {
+            semanticRefinement = visualProjectionRefinement(prompt);
+        }
         if (llmTreatsPendingAsContinuation) {
             effectivePrompt = turn.effectivePrompt();
             prompt = normalize(effectivePrompt);
@@ -424,10 +431,16 @@ public class AgenticAuthoringIntentResolverService {
             candidates = withPriorityCandidate(candidates, selectedCandidate);
         }
         if (decisionMemoryRefinement) {
-            AgenticAuthoringCandidate activeDecisionCandidate = activeDecisionCandidate(activeDecision, artifactKind);
+            String refinedArtifactKind = refinementReplacement(
+                    semanticRefinement,
+                    "artifactKind",
+                    artifactKind);
+            AgenticAuthoringCandidate activeDecisionCandidate = semanticRefinement.preservesResource()
+                    ? activeDecisionCandidate(activeDecision, refinedArtifactKind)
+                    : null;
             if (activeDecisionCandidate != null) {
                 operationKind = "create";
-                artifactKind = "dashboard";
+                artifactKind = refinedArtifactKind;
                 changeKind = "create_artifact";
                 selectedCandidate = activeDecisionCandidate;
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
@@ -529,6 +542,15 @@ public class AgenticAuthoringIntentResolverService {
         if (shouldHideTechnicalAddresses(request, prompt, operationKind, artifactKind)) {
             quickReplies = sanitizeQuickReplies(quickReplies, selectedCandidate, candidates);
         }
+        boolean governedDeterministicResolution = isGovernedDeterministicResolution(
+                deterministicFallbackApplied,
+                gate,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedCandidate);
+        boolean keywordFallbackAppliedForGovernance =
+                deterministicFallbackApplied && !governedDeterministicResolution;
         List<String> warnings = warnings(llmIntent);
         if (llmTreatsPendingAsNewInstruction) {
             warnings = withWarning(warnings, "llm-follow-up-kind-new-instruction");
@@ -539,9 +561,11 @@ public class AgenticAuthoringIntentResolverService {
         if (llmResourceSelectionOverriddenByPromptAlignment) {
             warnings = withWarning(warnings, "llm-resource-selection-overridden-by-prompt-alignment");
         }
-        if (deterministicFallbackApplied) {
+        if (keywordFallbackAppliedForGovernance) {
             warnings = withWarning(warnings, "keyword-fallback-applied");
             warnings = withWarning(warnings, "keyword-fallback-fail-safe-applied");
+        } else if (governedDeterministicResolution) {
+            warnings = withWarning(warnings, "governed-deterministic-resolution-applied");
         }
         if (governedResourceConfirmation) {
             warnings = withWarning(warnings, "governed-resource-confirmation-deterministic");
@@ -560,8 +584,10 @@ public class AgenticAuthoringIntentResolverService {
         if (semanticPolicyRefinedVisualProjection) {
             warnings = withWarning(warnings, "semantic-policy-refined-visual-projection");
         }
-        if (decisionMemoryRefinement) {
+        if (decisionMemoryRefinement && semanticRefinement.preservesResource()) {
             warnings = withWarning(warnings, "semantic-decision-memory-refinement-applied");
+        } else if (decisionMemoryRefinement) {
+            warnings = withWarning(warnings, "semantic-refinement-applied");
         }
         if (preLlmGovernedResourceChoiceApplied) {
             warnings = withWarning(warnings, "pre-llm-governed-resource-choice-applied");
@@ -605,12 +631,13 @@ public class AgenticAuthoringIntentResolverService {
                 request.clientTurnId(),
                 semanticRawPrompt(request, rawPrompt),
                 activeDecisionObjective(activeDecision, semanticRawPrompt(request, rawPrompt)),
-                decisionRationale(decisionMemoryRefinement, selectedCandidate));
+                decisionRationale(decisionMemoryRefinement, selectedCandidate),
+                semanticRefinement);
         llmDiagnostics = withResolutionTelemetry(
                 llmDiagnostics,
                 shouldResolveLlmIntent,
                 llmIntent,
-                deterministicFallbackApplied,
+                keywordFallbackAppliedForGovernance,
                 semanticPolicyCorrectedAnalyticalDashboardIntent || semanticPolicyRefinedVisualProjection,
                 selectedCandidate,
                 candidates);
@@ -702,6 +729,122 @@ public class AgenticAuthoringIntentResolverService {
         return refinementLanguage && visualLanguage;
     }
 
+    private AgenticAuthoringSemanticRefinement semanticRefinement(
+            String prompt,
+            AgenticAuthoringSemanticDecision activeDecision,
+            AgenticAuthoringLlmIntentResolution llmIntent) {
+        if (activeDecision == null || activeDecision.selectedResource() == null) {
+            return AgenticAuthoringSemanticRefinement.none();
+        }
+        String normalized = normalize(prompt);
+        String followUpKind = llmIntent == null ? "" : valueOrDefault(llmIntent.followUpKind(), "");
+        boolean refinementLanguage = containsAny(normalized,
+                "gostei", "prefiro", "melhor", "troca", "troque", "mude", "em vez",
+                "ao inves", "mantem", "mantenha", "preserve", "refina", "refine", "so muda");
+        boolean explicitPreserve = containsAny(normalized,
+                "mantem os dados", "mantenha os dados", "mantem a fonte", "mantenha a fonte",
+                "mantem o recurso", "mantenha o recurso", "mesma fonte", "mesmos dados", "preserve a fonte");
+        boolean chartRequested = containsAny(normalized,
+                "grafico", "graficos", "chart", "charts", "dashboard", "painel",
+                "visualizacao", "indicador", "indicadores", "kpi", "kpis", "pizza");
+        boolean tableRequested = containsAny(normalized,
+                "tabela", "table", "grid", "lista", "listagem");
+        boolean filterRequested = containsAny(normalized, "filtro", "filtrar", "status", "situacao");
+        boolean sourceReplacementRequested = containsAny(normalized,
+                "usa clientes", "usar clientes", "use clientes", "clientes como fonte",
+                "fonte de clientes", "troca a fonte", "troque a fonte", "mude a fonte",
+                "outra fonte", "nova fonte");
+        if (sourceReplacementRequested && !explicitPreserve) {
+            return new AgenticAuthoringSemanticRefinement(
+                    AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                    "data_source",
+                    List.of(),
+                    Map.of("source", normalized),
+                    Map.of(),
+                    List.of(),
+                    "Data-source refinement must be re-grounded by normal resource selection.",
+                    0.64d);
+        }
+        if (!refinementLanguage && !explicitPreserve) {
+            return AgenticAuthoringSemanticRefinement.none();
+        }
+        if (!chartRequested && !tableRequested && !filterRequested && !explicitPreserve) {
+            return AgenticAuthoringSemanticRefinement.none();
+        }
+        List<String> preserve = new ArrayList<>();
+        preserve.add("resource");
+        preserve.add("source");
+        if (explicitPreserve || filterRequested) {
+            preserve.add("filters");
+        }
+        Map<String, String> replace = new LinkedHashMap<>();
+        List<String> remove = new ArrayList<>();
+        if (tableRequested && !chartRequested) {
+            replace.put("artifactKind", "table");
+            replace.put("visualIntent", "table");
+            remove.add("chart");
+            remove.add("summary");
+        } else if (chartRequested) {
+            replace.put("artifactKind", "dashboard");
+            replace.put("visualIntent", "charts");
+            if (containsAny(normalized, "pizza", "pie")) {
+                replace.put("chartType", "pie");
+            }
+            remove.add("table");
+        }
+        Map<String, List<String>> add = new LinkedHashMap<>();
+        if (filterRequested) {
+            add.put("filters", containsAny(normalized, "status", "situacao")
+                    ? List.of("status")
+                    : List.of("requested-filter"));
+        }
+        return new AgenticAuthoringSemanticRefinement(
+                AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                filterRequested && !chartRequested && !tableRequested ? "filtering" : "visual_projection",
+                List.copyOf(preserve),
+                Map.copyOf(replace),
+                Map.copyOf(add),
+                List.copyOf(remove),
+                "Semantic refinement applies a governed diff to the active decision.",
+                explicitPreserve ? 0.90d : 0.86d);
+    }
+
+    private AgenticAuthoringSemanticRefinement visualProjectionRefinement(String prompt) {
+        String normalized = normalize(prompt);
+        Map<String, String> replace = new LinkedHashMap<>();
+        List<String> remove = new ArrayList<>();
+        if (containsAny(normalized, "tabela", "table", "grid", "lista", "listagem")
+                && !containsAny(normalized, "grafico", "graficos", "chart", "charts", "dashboard", "painel")) {
+            replace.put("artifactKind", "table");
+            replace.put("visualIntent", "table");
+            remove.add("chart");
+        } else {
+            replace.put("artifactKind", "dashboard");
+            replace.put("visualIntent", "charts");
+            remove.add("table");
+        }
+        return new AgenticAuthoringSemanticRefinement(
+                AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                "visual_projection",
+                List.of("resource", "source"),
+                Map.copyOf(replace),
+                Map.of(),
+                List.copyOf(remove),
+                "Visual projection refinement preserves the current page resource.",
+                0.84d);
+    }
+
+    private String refinementReplacement(
+            AgenticAuthoringSemanticRefinement semanticRefinement,
+            String key,
+            String fallback) {
+        if (semanticRefinement == null || !semanticRefinement.active()) {
+            return valueOrDefault(fallback, "");
+        }
+        String replacement = semanticRefinement.replacement(key);
+        return replacement.isBlank() ? valueOrDefault(fallback, "") : replacement;
+    }
+
     private AgenticAuthoringCandidate activeDecisionCandidate(
             AgenticAuthoringSemanticDecision activeDecision,
             String artifactKind) {
@@ -723,7 +866,8 @@ public class AgenticAuthoringIntentResolverService {
                 submitMethod,
                 1.0d,
                 "resource preserved from active semantic decision",
-                List.of("semantic-decision-memory"));
+                List.of("semantic-decision-memory"),
+                activeDecision.retrievedEvidence());
     }
 
     private String activeDecisionObjective(
@@ -1072,7 +1216,8 @@ public class AgenticAuthoringIntentResolverService {
                 candidate.submitMethod(),
                 candidate.score(),
                 candidate.reason(),
-                List.copyOf(mergedEvidence));
+                List.copyOf(mergedEvidence),
+                candidate.evidenceBundle());
     }
 
     private List<AgenticAuthoringCandidate> withContextHintCandidates(
@@ -1128,6 +1273,7 @@ public class AgenticAuthoringIntentResolverService {
                 });
             }
             evidence.add("tool-search-api-resources");
+            AgenticAuthoringEvidenceBundle evidenceBundle = evidenceBundle(candidateNode.path("evidenceBundle"));
             candidates.add(new AgenticAuthoringCandidate(
                     normalizePath(resourcePath),
                     operation,
@@ -1136,9 +1282,21 @@ public class AgenticAuthoringIntentResolverService {
                     submitMethod,
                     score,
                     reason,
-                    List.copyOf(evidence)));
+                    List.copyOf(evidence),
+                    evidenceBundle));
         }
         return deduplicateCandidates(candidates);
+    }
+
+    private AgenticAuthoringEvidenceBundle evidenceBundle(JsonNode evidenceBundleNode) {
+        if (evidenceBundleNode == null || evidenceBundleNode.isMissingNode() || evidenceBundleNode.isNull()) {
+            return null;
+        }
+        try {
+            return objectMapper.convertValue(evidenceBundleNode, AgenticAuthoringEvidenceBundle.class);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     private String artifactKindFromContextCandidate(
@@ -1545,7 +1703,8 @@ public class AgenticAuthoringIntentResolverService {
                                     candidate.evidence().stream(),
                                     Stream.of("explicit-submit-url"))
                             .distinct()
-                            .toList());
+                            .toList(),
+                    candidate.evidenceBundle());
         }
         return candidate(
                 resourcePath,
@@ -1716,7 +1875,8 @@ public class AgenticAuthoringIntentResolverService {
         telemetry.put("fallbackPolicy", "fail-safe");
         telemetry.put("keywordFallbackApplied", deterministicFallbackApplied);
         telemetry.put("semanticPolicyApplied", semanticPolicyCorrectedAnalyticalDashboardIntent);
-        telemetry.put("selectedCandidateUsesDomainAnchor", hasEvidence(selectedCandidate, "domain-anchor"));
+        telemetry.put("selectedCandidateUsesDomainAnchor",
+                hasEvidence(selectedCandidate, "domain-anchor") && !hasStrongGroundingEvidence(selectedCandidate));
         telemetry.put("selectedCandidateUsesLexicalFallback", hasEvidence(selectedCandidate, "lexical-fallback"));
         List<AgenticAuthoringCandidate> usableCandidates = candidates == null ? List.of() : candidates;
         telemetry.put("candidateSetContainsDomainAnchor",
@@ -1735,6 +1895,59 @@ public class AgenticAuthoringIntentResolverService {
         return candidate != null
                 && candidate.evidence() != null
                 && candidate.evidence().contains(evidence);
+    }
+
+    private boolean isGovernedDeterministicResolution(
+            boolean deterministicFallbackApplied,
+            AgenticAuthoringGateResult gate,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            AgenticAuthoringCandidate selectedCandidate) {
+        if (!deterministicFallbackApplied
+                || selectedCandidate == null
+                || gate == null
+                || !"eligible".equals(gate.status())
+                || "unknown".equals(valueOrUnknown(operationKind))
+                || "unknown".equals(valueOrUnknown(artifactKind))
+                || "unknown".equals(valueOrUnknown(changeKind))) {
+            return false;
+        }
+        if (hasEvidence(selectedCandidate, "lexical-fallback")
+                || hasEvidence(selectedCandidate, "weak-evidence")) {
+            return false;
+        }
+        if (hasEvidence(selectedCandidate, "domain-anchor") && !hasStrongGroundingEvidence(selectedCandidate)) {
+            return false;
+        }
+        return selectedCandidate.score() >= 0.75d
+                || hasStrongGroundingEvidence(selectedCandidate)
+                || hasEvidence(selectedCandidate, "semantic-retrieval")
+                || hasEvidence(selectedCandidate, "tool-search-api-resources")
+                || hasEvidence(selectedCandidate, "quick-reply-context")
+                || hasEvidence(selectedCandidate, "explicit-resource-path");
+    }
+
+    private boolean hasStrongGroundingEvidence(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || candidate.evidenceBundle() == null) {
+            return false;
+        }
+        AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+        if ("lexical_fallback".equals(valueOrDefault(bundle.retrievalSource(), ""))) {
+            return false;
+        }
+        double strongestEvidence = bundle.evidence().stream()
+                .mapToDouble(AgenticAuthoringEvidenceBundle.Evidence::confidence)
+                .max()
+                .orElse(0d);
+        boolean structuralEvidence = bundle.evidence().stream()
+                .map(AgenticAuthoringEvidenceBundle.Evidence::kind)
+                .map(kind -> valueOrDefault(kind, ""))
+                .anyMatch(kind -> kind.equals("schema_grounding")
+                        || kind.equals("operation_grounding")
+                        || kind.equals("resource_capability_hint")
+                        || kind.equals("retrieved_candidate"));
+        return strongestEvidence >= 0.62d && structuralEvidence;
     }
 
     private boolean isLlmFollowUpKind(AgenticAuthoringLlmIntentResolution llmIntent, String expected) {
@@ -2155,7 +2368,8 @@ public class AgenticAuthoringIntentResolverService {
                 submitMethod,
                 candidate.score(),
                 candidate.reason(),
-                candidate.evidence());
+                candidate.evidence(),
+                candidate.evidenceBundle());
     }
 
     private boolean shouldDeferResourceSelectionForGovernedChoice(

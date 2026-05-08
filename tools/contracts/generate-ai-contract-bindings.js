@@ -426,6 +426,39 @@ export interface AgenticAuthoringSemanticRetrievalEvidenceContract {
   [key: string]: AiJsonValue | undefined;
 }
 
+export interface AgenticAuthoringEvidenceBundleEvidenceContract {
+  source?: string | null;
+  kind?: string | null;
+  ref?: string | null;
+  summary?: string | null;
+  confidence?: number | null;
+  matchedTerms?: string[];
+  tenantId?: string | null;
+  environment?: string | null;
+  releaseId?: string | null;
+  [key: string]: AiJsonValue | undefined;
+}
+
+export interface AgenticAuthoringEvidenceBundleContract {
+  schemaVersion?: string | null;
+  retrievalSource?: string | null;
+  evidence?: AgenticAuthoringEvidenceBundleEvidenceContract[];
+  evidenceCount?: number;
+  [key: string]: AiJsonValue | AgenticAuthoringEvidenceBundleEvidenceContract[] | undefined;
+}
+
+export interface AgenticAuthoringSemanticRefinementContract {
+  schemaVersion?: string | null;
+  refinementKind?: 'visual_projection' | 'data_source' | 'filtering' | 'layout' | 'metric' | 'copy' | 'governance' | string | null;
+  preserve?: string[];
+  replace?: Record<string, string>;
+  add?: Record<string, string[]>;
+  remove?: string[];
+  rationale?: string | null;
+  confidence?: number | null;
+  [key: string]: AiJsonValue | Record<string, string> | Record<string, string[]> | undefined;
+}
+
 export interface AgenticAuthoringSemanticDecisionContract {
   schemaVersion?: string | null;
   decisionId?: string | null;
@@ -435,6 +468,7 @@ export interface AgenticAuthoringSemanticDecisionContract {
   selectedResource?: AgenticAuthoringSemanticSelectedResourceContract | null;
   visualizationDecision?: AgenticAuthoringVisualizationDecisionContract | null;
   retrievalEvidence?: AgenticAuthoringSemanticRetrievalEvidenceContract | null;
+  retrievedEvidence?: AgenticAuthoringEvidenceBundleContract | null;
   reviewRequired?: boolean | null;
   reviewReason?: string | null;
   previousDecisionRef?: string | null;
@@ -446,10 +480,11 @@ export interface AgenticAuthoringSemanticDecisionContract {
   artifactIntent?: string | null;
   visualIntent?: string | null;
   constraints?: AiJsonObject | null;
+  refinement?: AgenticAuthoringSemanticRefinementContract | null;
   previousDecisionId?: string | null;
   rationale?: string | null;
   confidence?: number | null;
-  [key: string]: AiJsonValue | AgenticAuthoringSemanticSelectedResourceContract | AgenticAuthoringSemanticRetrievalEvidenceContract | AgenticAuthoringVisualizationDecisionContract | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringSemanticSelectedResourceContract | AgenticAuthoringSemanticRetrievalEvidenceContract | AgenticAuthoringEvidenceBundleContract | AgenticAuthoringSemanticRefinementContract | AgenticAuthoringVisualizationDecisionContract | undefined;
 }
 
 export interface AgenticAuthoringIntentResolutionResultContract {
@@ -561,6 +596,10 @@ export interface AgenticAuthoringDecisionDiagnosticsContract {
   operationKind?: string | null;
   artifactKind?: string | null;
   valid?: boolean | null;
+  previewTechnicallyValid?: boolean | null;
+  decisionValid?: boolean | null;
+  previewResourceSchemaVerified?: boolean | null;
+  semanticDecisionReviewGroundedByPreview?: boolean | null;
   retrievalSource?: string | null;
   selectedResourcePath?: string | null;
   llmResolutionAttempted?: boolean | null;
@@ -580,6 +619,9 @@ export interface AgenticAuthoringDecisionDiagnosticsContract {
   semanticAxisPendingCount?: number | null;
   semanticAxesSchemaVerified?: boolean | null;
   semanticAxes?: AgenticAuthoringSemanticAxisDecisionDiagnosticContract[] | null;
+  toolLoopCompleted?: boolean | null;
+  toolLoopTerminalReason?: string | null;
+  toolLoopStepCount?: number | null;
   requiresReview?: boolean | null;
   reviewReason?: string | null;
   [key: string]: AiJsonValue | AgenticAuthoringSemanticAxisDecisionDiagnosticContract[] | undefined;
@@ -592,7 +634,8 @@ export interface AgenticAuthoringTurnResultPayloadContract {
   quickReplies?: AgenticAuthoringQuickReplyContract[];
   canApply?: boolean | null;
   decisionDiagnostics?: AgenticAuthoringDecisionDiagnosticsContract | null;
-  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringDecisionDiagnosticsContract | undefined;
+  toolLoopTrace?: AiJsonObject[] | null;
+  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
 }
 
 export interface AgenticAuthoringPreviewResultContract {

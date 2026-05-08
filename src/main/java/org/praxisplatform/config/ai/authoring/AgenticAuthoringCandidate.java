@@ -10,6 +10,27 @@ public record AgenticAuthoringCandidate(
         String submitMethod,
         double score,
         String reason,
-        List<String> evidence
+        List<String> evidence,
+        AgenticAuthoringEvidenceBundle evidenceBundle
 ) {
+    public AgenticAuthoringCandidate(
+            String resourcePath,
+            String operation,
+            String schemaUrl,
+            String submitUrl,
+            String submitMethod,
+            double score,
+            String reason,
+            List<String> evidence) {
+        this(
+                resourcePath,
+                operation,
+                schemaUrl,
+                submitUrl,
+                submitMethod,
+                score,
+                reason,
+                evidence,
+                null);
+    }
 }

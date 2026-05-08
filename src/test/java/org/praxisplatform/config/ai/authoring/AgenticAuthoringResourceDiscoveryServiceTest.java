@@ -68,6 +68,18 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .extracting(AgenticAuthoringCandidate::resourcePath)
                 .containsExactly("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.candidates().get(0).evidence()).contains("lexical-fallback");
+        AgenticAuthoringEvidenceBundle evidenceBundle = result.candidates().get(0).evidenceBundle();
+        assertThat(evidenceBundle).isNotNull();
+        assertThat(evidenceBundle.retrievalSource()).isEqualTo("lexical_fallback");
+        assertThat(evidenceBundle.evidence())
+                .extracting(AgenticAuthoringEvidenceBundle.Evidence::source)
+                .contains("api_metadata", "/schemas/filtered", "capabilities", "actions", "domain_catalog");
+        assertThat(evidenceBundle.evidence())
+                .anySatisfy(evidence -> {
+                    assertThat(evidence.kind()).isEqualTo("weak_lexical_match");
+                    assertThat(evidence.confidence()).isLessThan(0.5d);
+                    assertThat(evidence.matchedTerms()).contains("folha", "pagamento");
+                });
         assertThat(result.assistantMessage()).contains("Encontrei APIs");
         assertThat(result.quickReplies()).hasSize(1);
         assertThat(result.quickReplies().get(0).id())
@@ -216,6 +228,14 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.candidates().get(0).evidence())
                 .contains("semantic-retrieval")
                 .doesNotContain("lexical-fallback");
+        assertThat(result.candidates().get(0).evidenceBundle().retrievalSource())
+                .isEqualTo("semantic_retrieval");
+        assertThat(result.candidates().get(0).evidenceBundle().evidence())
+                .anySatisfy(evidence -> {
+                    assertThat(evidence.source()).isEqualTo("api_metadata");
+                    assertThat(evidence.kind()).isEqualTo("retrieved_candidate");
+                    assertThat(evidence.confidence()).isGreaterThan(0.9d);
+                });
         verify(repository, never()).findAll();
     }
 
@@ -253,6 +273,11 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.candidates()).hasSize(1);
+        assertThat(result.candidates().get(0).evidenceBundle().evidence())
+                .allSatisfy(evidence -> {
+                    assertThat(evidence.tenantId()).isEqualTo("desenv");
+                    assertThat(evidence.environment()).isEqualTo("local");
+                });
         verify(retrievalService).searchApiMetadata(
                 "Resumo analitico de folha por departamento",
                 null,
@@ -262,6 +287,41 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 "desenv",
                 "local",
                 null);
+    }
+
+    @Test
+    void evidenceBundleSupportsHostNeutralApiMetadataFixture() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "POST",
+                        "risk,intelligence,incidentes,indicadores,analytics,dashboard",
+                        "Indicadores de incidentes",
+                        "Visao analitica de incidentes por gravidade e responsavel.",
+                        "riskIncidentIndicators",
+                        "{\"type\":\"object\"}",
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository);
+
+        List<AgenticAuthoringCandidate> candidates =
+                catalog.discover("monitorar incidentes por gravidade", "dashboard", "tenant-a", "staging", "release-2026.05");
+
+        assertThat(candidates).hasSize(1);
+        AgenticAuthoringCandidate selected = candidates.get(0);
+        assertThat(selected.resourcePath()).isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(selected.evidenceBundle().evidence())
+                .anySatisfy(evidence -> {
+                    assertThat(evidence.source()).isEqualTo("domain_catalog");
+                    assertThat(evidence.ref()).isEqualTo("risk-intelligence.vw-indicadores-incidentes");
+                    assertThat(evidence.tenantId()).isEqualTo("tenant-a");
+                    assertThat(evidence.environment()).isEqualTo("staging");
+                    assertThat(evidence.releaseId()).isEqualTo("release-2026.05");
+                });
     }
 
     @Test

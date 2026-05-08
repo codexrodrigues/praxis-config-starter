@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.springframework.util.StringUtils;
@@ -25,6 +26,7 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringToolRegistry toolRegistry;
     private final AgenticAuthoringProjectKnowledgeService projectKnowledgeService;
     private final AgenticAuthoringApiCatalogConversationService apiCatalogConversationService;
+    private final AgenticAuthoringOrchestrator orchestrator;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
     public AgenticAuthoringTurnEngine(
@@ -54,6 +56,26 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringToolRegistry toolRegistry,
             AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
             AgenticAuthoringApiCatalogConversationService apiCatalogConversationService) {
+        this(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                currentPageAnalyzer,
+                toolRegistry,
+                projectKnowledgeService,
+                apiCatalogConversationService,
+                null);
+    }
+
+    public AgenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringApiCatalogConversationService apiCatalogConversationService,
+            AgenticAuthoringOrchestrator orchestrator) {
         this.intentResolverService = intentResolverService;
         this.previewService = previewService;
         this.objectMapper = objectMapper;
@@ -61,6 +83,7 @@ public class AgenticAuthoringTurnEngine {
         this.toolRegistry = toolRegistry;
         this.projectKnowledgeService = projectKnowledgeService;
         this.apiCatalogConversationService = apiCatalogConversationService;
+        this.orchestrator = orchestrator;
     }
 
     AgenticAuthoringTurnOutcome execute(
@@ -134,6 +157,7 @@ public class AgenticAuthoringTurnEngine {
                             route,
                             resourceDiscovery);
             AgenticAuthoringPreviewResult preview = null;
+            AgenticAuthoringToolLoopResult toolLoopResult = null;
             if (route.allowsPreview() && intentResolution.valid()) {
                 AgenticAuthoringTurnStreamRequest previewRequest = withProjectKnowledgeContext(
                         request,
@@ -167,19 +191,32 @@ public class AgenticAuthoringTurnEngine {
                         intentResolution,
                         preview,
                         schemaBaseUrl);
+                toolLoopResult = runGovernedToolLoop(
+                        previewRequest,
+                        principalContext,
+                        eventSink,
+                        intentResolution,
+                        preview,
+                        route);
             }
             String assistantMessage = advisoryCatalogAssistantMessage(request, route, intentResolution);
             if (!StringUtils.hasText(assistantMessage)) {
                 assistantMessage = previewAssistantMessage(preview, intentResolution);
             }
-            Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, preview);
+            Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, preview, toolLoopResult);
             Map<String, Object> resultPayload = new LinkedHashMap<>();
             resultPayload.put("intentResolution", intentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
             resultPayload.put("assistantMessage", safeText(assistantMessage));
             resultPayload.put("quickReplies", terminalQuickReplies(intentResolution, businessCatalogDiscovery));
-            resultPayload.put("canApply", preview != null && preview.valid() && !requiresDecisionReview(decisionDiagnostics));
+            resultPayload.put("canApply", preview != null
+                    && preview.valid()
+                    && !requiresDecisionReview(decisionDiagnostics)
+                    && (toolLoopResult == null || toolLoopResult.completed()));
             resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+            if (toolLoopResult != null) {
+                resultPayload.put("toolLoopTrace", safeToolLoopTrace(toolLoopResult));
+            }
             AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
             return terminalResult.appendedType("result")
                     ? AgenticAuthoringTurnOutcome.completed(state)
@@ -221,7 +258,7 @@ public class AgenticAuthoringTurnEngine {
                         "tool", toolCall.name(),
                         "routeClass", safeText(route.routeClass()),
                         "maxCallsPerTurn", MAX_TOOL_CALLS_PER_TURN)));
-        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext);
+        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext, "retrieveEvidence");
         eventSink.append("thought.step", safeToolProjection(
                 result.valid() ? "tool.result" : "tool.error",
                 result.valid() ? "Backend API resource search completed." : "Backend API resource search failed.",
@@ -262,7 +299,7 @@ public class AgenticAuthoringTurnEngine {
                         "tool", toolCall.name(),
                         "routeClass", safeText(route.routeClass()),
                         "maxCallsPerTurn", MAX_TOOL_CALLS_PER_TURN)));
-        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext);
+        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext, "retrieveEvidence");
         eventSink.append("thought.step", safeToolProjection(
                 result.valid() ? "tool.result" : "tool.error",
                 result.valid()
@@ -284,6 +321,62 @@ public class AgenticAuthoringTurnEngine {
                     .forEach(path -> query.append(' ').append(path.replace('/', ' ').replace('-', ' ')));
         }
         return query.toString().trim();
+    }
+
+    private AgenticAuthoringToolLoopResult runGovernedToolLoop(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview,
+            AgenticAuthoringTurnRoute route) {
+        if (orchestrator == null || eventSink.terminalReached()) {
+            return null;
+        }
+        AgenticAuthoringToolLoopResult result = orchestrator.runToolLoop(
+                request,
+                principalContext,
+                intentResolution,
+                preview,
+                route == null ? "" : route.routeClass());
+        eventSink.append("thought.step", safeToolProjection(
+                "tool.loop",
+                result.completed()
+                        ? "Governed authoring tool loop completed."
+                        : "Governed authoring tool loop stopped before completion.",
+                safeToolLoopDiagnostics(result)));
+        return result;
+    }
+
+    private Map<String, Object> safeToolLoopDiagnostics(AgenticAuthoringToolLoopResult result) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("completed", result != null && result.completed());
+        diagnostics.put("terminalReason", result == null ? "" : safeText(result.terminalReason()));
+        diagnostics.put("stepCount", result == null || result.trace() == null ? 0 : result.trace().size());
+        diagnostics.put("toolCallCount", result == null || result.trace() == null
+                ? 0
+                : result.trace().stream().filter(step -> step != null && StringUtils.hasText(step.tool())).count());
+        return diagnostics;
+    }
+
+    private List<Map<String, Object>> safeToolLoopTrace(AgenticAuthoringToolLoopResult result) {
+        if (result == null || result.trace() == null) {
+            return List.of();
+        }
+        return result.trace().stream()
+                .map(step -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("stepIndex", step.stepIndex());
+                    item.put("phase", safeText(step.phase()));
+                    item.put("tool", safeText(step.tool()));
+                    item.put("valid", step.valid());
+                    if (StringUtils.hasText(step.errorCode())) {
+                        item.put("errorCode", step.errorCode());
+                    }
+                    item.put("diagnostics", step.safeDiagnostics() == null ? Map.of() : step.safeDiagnostics());
+                    return item;
+                })
+                .toList();
     }
 
     private AgenticAuthoringResourceCandidatesResult resourceDiscoveryPayload(AgenticAuthoringToolResult result) {
@@ -436,6 +529,13 @@ public class AgenticAuthoringTurnEngine {
     private Map<String, Object> decisionDiagnostics(
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringPreviewResult preview) {
+        return decisionDiagnostics(intentResolution, preview, null);
+    }
+
+    private Map<String, Object> decisionDiagnostics(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview,
+            AgenticAuthoringToolLoopResult toolLoopResult) {
         Map<String, Object> diagnostics = new LinkedHashMap<>();
         diagnostics.put("schemaVersion", "praxis-agentic-authoring-decision-diagnostics.v1");
         if (intentResolution == null) {
@@ -449,6 +549,9 @@ public class AgenticAuthoringTurnEngine {
             diagnostics.put("uiCompositionPlanUsesReferenceProvider", uiCompositionPlanUsesReferenceProvider(preview));
             diagnostics.put("uiCompositionPlanUsesHardcodedAnchor", uiCompositionPlanUsesHardcodedAnchor(preview));
             diagnostics.put("uiCompositionPlanHasUnverifiedSemanticAxes", uiCompositionPlanHasUnverifiedSemanticAxes(preview));
+            diagnostics.put("previewTechnicallyValid", preview != null && preview.valid());
+            diagnostics.put("decisionValid", !previewHasSemanticMaterializationFailures(preview));
+            putToolLoopDiagnostics(diagnostics, toolLoopResult);
             putSemanticAxisDiagnostics(diagnostics, preview);
             diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
             return diagnostics;
@@ -457,10 +560,16 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("artifactKind", safeText(intentResolution.artifactKind()));
         AgenticAuthoringSemanticDecision semanticDecision = intentResolution.semanticDecision();
         if (semanticDecision != null) {
+            boolean semanticDecisionReviewGroundedByPreview =
+                    semanticDecision.reviewRequired()
+                            && "weak-lexical-evidence".equals(safeText(semanticDecision.reviewReason()))
+                            && previewResourceSchemaVerified(preview);
             diagnostics.put("semanticDecisionSchemaVersion", safeText(semanticDecision.schemaVersion()));
             diagnostics.put("semanticDecisionId", safeText(semanticDecision.decisionId()));
-            diagnostics.put("semanticDecisionReviewRequired", semanticDecision.reviewRequired());
+            diagnostics.put("semanticDecisionReviewRequired",
+                    semanticDecision.reviewRequired() && !semanticDecisionReviewGroundedByPreview);
             diagnostics.put("semanticDecisionReviewReason", safeText(semanticDecision.reviewReason()));
+            diagnostics.put("semanticDecisionReviewGroundedByPreview", semanticDecisionReviewGroundedByPreview);
             diagnostics.put("semanticDecisionRefinementOf", safeText(semanticDecision.refinementOf()));
             diagnostics.put("semanticDecisionPreviousDecisionId", safeText(semanticDecision.previousDecisionId()));
             diagnostics.put("semanticDecisionVisualIntent", safeText(semanticDecision.visualIntent()));
@@ -481,8 +590,10 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("fallbackPolicy", safeText(telemetry.path("fallbackPolicy").asText("")));
         diagnostics.put("keywordFallbackApplied", telemetry.path("keywordFallbackApplied").asBoolean(false));
         diagnostics.put("semanticPolicyApplied", telemetry.path("semanticPolicyApplied").asBoolean(false));
-        diagnostics.put("selectedCandidateUsesLexicalFallback",
-                telemetry.path("selectedCandidateUsesLexicalFallback").asBoolean(false));
+        boolean selectedCandidateUsesLexicalFallback =
+                telemetry.path("selectedCandidateUsesLexicalFallback").asBoolean(false)
+                        && !previewResourceSchemaVerified(preview);
+        diagnostics.put("selectedCandidateUsesLexicalFallback", selectedCandidateUsesLexicalFallback);
         diagnostics.put("selectedCandidateUsesDomainAnchor",
                 telemetry.path("selectedCandidateUsesDomainAnchor").asBoolean(false));
         diagnostics.put("candidateSetContainsLexicalFallback",
@@ -492,6 +603,10 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("uiCompositionPlanUsesReferenceProvider", uiCompositionPlanUsesReferenceProvider(preview));
         diagnostics.put("uiCompositionPlanUsesHardcodedAnchor", uiCompositionPlanUsesHardcodedAnchor(preview));
         diagnostics.put("uiCompositionPlanHasUnverifiedSemanticAxes", uiCompositionPlanHasUnverifiedSemanticAxes(preview));
+        diagnostics.put("previewTechnicallyValid", preview != null && preview.valid());
+        diagnostics.put("previewResourceSchemaVerified", previewResourceSchemaVerified(preview));
+        diagnostics.put("decisionValid", !previewHasSemanticMaterializationFailures(preview));
+        putToolLoopDiagnostics(diagnostics, toolLoopResult);
         putSemanticAxisDiagnostics(diagnostics, preview);
         diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
         String reviewReason = decisionReviewReason(diagnostics);
@@ -499,6 +614,19 @@ public class AgenticAuthoringTurnEngine {
             diagnostics.put("reviewReason", reviewReason);
         }
         return diagnostics;
+    }
+
+    private void putToolLoopDiagnostics(
+            Map<String, Object> diagnostics,
+            AgenticAuthoringToolLoopResult toolLoopResult) {
+        if (toolLoopResult == null) {
+            diagnostics.put("toolLoopCompleted", true);
+            diagnostics.put("toolLoopTerminalReason", "");
+            return;
+        }
+        diagnostics.put("toolLoopCompleted", toolLoopResult.completed());
+        diagnostics.put("toolLoopTerminalReason", safeText(toolLoopResult.terminalReason()));
+        diagnostics.put("toolLoopStepCount", toolLoopResult.trace() == null ? 0 : toolLoopResult.trace().size());
     }
 
     private boolean uiCompositionPlanUsesReferenceProvider(AgenticAuthoringPreviewResult preview) {
@@ -523,6 +651,14 @@ public class AgenticAuthoringTurnEngine {
         return preview != null
                 && preview.warnings() != null
                 && preview.warnings().contains("semantic-axis-schema-verification-pending");
+    }
+
+    private boolean previewResourceSchemaVerified(AgenticAuthoringPreviewResult preview) {
+        JsonNode grounding = preview == null || preview.uiCompositionPlan() == null
+                ? objectMapper.missingNode()
+                : preview.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding");
+        return grounding.path("verified").asBoolean(false)
+                && "schemas.filtered".equals(grounding.path("source").asText(""));
     }
 
     private void putSemanticAxisDiagnostics(Map<String, Object> diagnostics, AgenticAuthoringPreviewResult preview) {
@@ -567,7 +703,10 @@ public class AgenticAuthoringTurnEngine {
         }
         return Boolean.TRUE.equals(diagnostics.get("keywordFallbackApplied"))
                 || Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewRequired"))
+                || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesLexicalFallback"))
                 || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))
+                || Boolean.FALSE.equals(diagnostics.get("decisionValid"))
+                || Boolean.FALSE.equals(diagnostics.get("toolLoopCompleted"))
                 || Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanUsesHardcodedAnchor"))
                 || Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanHasUnverifiedSemanticAxes"));
     }
@@ -583,8 +722,18 @@ public class AgenticAuthoringTurnEngine {
             String reason = safeText((String) diagnostics.get("semanticDecisionReviewReason"));
             return reason.isBlank() ? "semantic-decision-review-required" : reason;
         }
+        if (Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesLexicalFallback"))) {
+            return "weak-lexical-evidence";
+        }
         if (Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))) {
             return "resource-selection-domain-anchor";
+        }
+        if (Boolean.FALSE.equals(diagnostics.get("decisionValid"))) {
+            return "semantic-preview-materialization-mismatch";
+        }
+        if (Boolean.FALSE.equals(diagnostics.get("toolLoopCompleted"))) {
+            String reason = safeText((String) diagnostics.get("toolLoopTerminalReason"));
+            return reason.isBlank() ? "agentic-tool-loop-incomplete" : "agentic-tool-loop-" + reason;
         }
         if (Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanUsesHardcodedAnchor"))) {
             return "ui-composition-hardcoded-reference-provider";
@@ -593,6 +742,15 @@ public class AgenticAuthoringTurnEngine {
             return "ui-composition-semantic-axis-schema-verification-pending";
         }
         return "";
+    }
+
+    private boolean previewHasSemanticMaterializationFailures(AgenticAuthoringPreviewResult preview) {
+        return preview != null
+                && preview.failureCodes() != null
+                && preview.failureCodes().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(code -> code.startsWith("semantic-preview-")
+                        || code.startsWith("semantic-decision-review-required"));
     }
 
     private AgenticAuthoringPreviewResult maybeRepairPreview(

@@ -165,6 +165,26 @@ class AgenticAuthoringApplyServiceTest {
     }
 
     @Test
+    void applyRejectsMaterializationBoundToDifferentResourceThanSemanticDecision() throws Exception {
+        assertThatThrownBy(() -> service().apply(
+                new AgenticAuthoringApplyRequest(
+                        compiledPatch(),
+                        "praxis-dynamic-page",
+                        "page",
+                        "tenant",
+                        null,
+                        semanticDecisionForResource("/api/helpdesk/clients")),
+                "tenant",
+                null,
+                null,
+                "author",
+                null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("semantic-materialization-mismatch")
+                .hasMessageContaining("semantic-preview-resource-binding-mismatch");
+    }
+
+    @Test
     void applyRejectsSemanticDecisionThatRequiresReview() throws Exception {
         assertThatThrownBy(() -> service().apply(
                 new AgenticAuthoringApplyRequest(
@@ -182,6 +202,70 @@ class AgenticAuthoringApplyServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("semantic-materialization-mismatch")
                 .hasMessageContaining("semantic-decision-review-required:resource-selection-domain-anchor");
+    }
+
+    @Test
+    void applyAllowsWeakLexicalReviewOnlyWhenMaterializationIsSchemaGrounded() throws Exception {
+        JsonNode compiledPatch = compiledPatchWithSchemaGrounding();
+        JsonNode savedPayload = compiledPatch.path("patch").path("page");
+        UiUserConfig saved = UiUserConfig.builder()
+                .componentType("praxis-dynamic-page")
+                .componentId("page")
+                .environment("local")
+                .payload(objectMapper.writeValueAsString(savedPayload))
+                .tags("{\"source\":\"agentic-authoring\"}")
+                .version(3L)
+                .etag(UUID.fromString("00000000-0000-0000-0000-000000000456"))
+                .build();
+        when(userConfigService.upsert(
+                eq(UserConfigService.Scope.TENANT),
+                eq("tenant"),
+                eq(null),
+                eq("praxis-dynamic-page"),
+                eq("page"),
+                eq("local"),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                eq(null),
+                eq("author"))).thenReturn(saved);
+        when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
+
+        AgenticAuthoringApplyResult result = service().apply(
+                new AgenticAuthoringApplyRequest(
+                        compiledPatch,
+                        "praxis-dynamic-page",
+                        "page",
+                        "tenant",
+                        null,
+                        weakLexicalReviewSemanticDecision()),
+                "tenant",
+                null,
+                "local",
+                "author",
+                null);
+
+        assertThat(result.applied()).isTrue();
+        assertThat(result.version()).isEqualTo(3L);
+    }
+
+    @Test
+    void applyRejectsWeakLexicalReviewWhenMaterializationIsNotSchemaGrounded() throws Exception {
+        assertThatThrownBy(() -> service().apply(
+                new AgenticAuthoringApplyRequest(
+                        compiledPatch(),
+                        "praxis-dynamic-page",
+                        "page",
+                        "tenant",
+                        null,
+                        weakLexicalReviewSemanticDecision()),
+                "tenant",
+                null,
+                "local",
+                "author",
+                null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("semantic-materialization-mismatch")
+                .hasMessageContaining("semantic-decision-review-required:weak-lexical-evidence");
     }
 
     private AgenticAuthoringApplyService service() {
@@ -220,6 +304,17 @@ class AgenticAuthoringApplyServiceTest {
                 """);
     }
 
+    private JsonNode compiledPatchWithSchemaGrounding() throws Exception {
+        ObjectNode patch = (ObjectNode) compiledPatch();
+        ObjectNode diagnostics = patch.putObject("diagnostics");
+        ObjectNode grounding = diagnostics.putObject("resourceSchemaGrounding");
+        grounding.put("verified", true);
+        grounding.put("source", "schemas.filtered");
+        grounding.put("endpointUrl", "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=response");
+        grounding.put("fieldCount", 4);
+        return patch;
+    }
+
     private AgenticAuthoringSemanticDecision chartSemanticDecision() {
         return new AgenticAuthoringSemanticDecision(
                 "praxis-agentic-authoring-semantic-decision.v1",
@@ -252,6 +347,48 @@ class AgenticAuthoringApplyServiceTest {
                 "form",
                 "create_artifact",
                 null,
+                null,
+                null,
+                false,
+                "",
+                "",
+                "");
+    }
+
+    private AgenticAuthoringSemanticDecision weakLexicalReviewSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-weak-lexical",
+                "create",
+                "form",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        "/api/helpdesk/chamados",
+                        "post",
+                        "/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=request",
+                        "/api/helpdesk/chamados",
+                        "POST"),
+                null,
+                null,
+                true,
+                "weak-lexical-evidence",
+                "",
+                "");
+    }
+
+    private AgenticAuthoringSemanticDecision semanticDecisionForResource(String resourcePath) {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-form-selected-resource",
+                "create",
+                "form",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        resourcePath,
+                        "post",
+                        "/schemas/filtered?path=" + resourcePath + "&operation=post&schemaType=request",
+                        resourcePath,
+                        "POST"),
                 null,
                 null,
                 false,
