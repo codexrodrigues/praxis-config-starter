@@ -19,6 +19,43 @@ public record AgenticAuthoringTurnStreamRequest(
         AgenticAuthoringPendingClarification pendingClarification,
         List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
         JsonNode contextHints,
-        AgenticAuthoringComponentCapabilitiesResult componentCapabilities
+        AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+        AgenticAuthoringSemanticDecision activeSemanticDecision
 ) {
+    public AgenticAuthoringTurnStreamRequest(
+            String userPrompt,
+            String targetApp,
+            String targetComponentId,
+            String currentRoute,
+            JsonNode currentPage,
+            String selectedWidgetKey,
+            String provider,
+            String model,
+            String apiKey,
+            String sessionId,
+            String clientTurnId,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            AgenticAuthoringPendingClarification pendingClarification,
+            List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
+            JsonNode contextHints,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        this(
+                userPrompt,
+                targetApp,
+                targetComponentId,
+                currentRoute,
+                currentPage,
+                selectedWidgetKey,
+                provider,
+                model,
+                apiKey,
+                sessionId,
+                clientTurnId,
+                conversationMessages,
+                pendingClarification,
+                attachmentSummaries,
+                contextHints,
+                componentCapabilities,
+                null);
+    }
 }

@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiProviderModel;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 /**
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
  * externo.
  */
 @Service
+@ConditionalOnProperty(name = "praxis.ai.mock.enabled", havingValue = "true")
 @RequiredArgsConstructor
 @Slf4j
 public class MockAiService implements AiProvider {

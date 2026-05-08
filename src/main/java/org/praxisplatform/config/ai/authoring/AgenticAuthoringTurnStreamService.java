@@ -90,6 +90,10 @@ public class AgenticAuthoringTurnStreamService {
                 principalContext.environment(),
                 request.userPrompt());
         UUID threadId = thread.getThreadId();
+        AgenticAuthoringSemanticDecision activeSemanticDecision = request.activeSemanticDecision() != null
+                ? request.activeSemanticDecision()
+                : turnEventService.findLatestSemanticDecision(threadId, principalContext).orElse(null);
+        AgenticAuthoringTurnStreamRequest effectiveRequest = withActiveSemanticDecision(request, activeSemanticDecision);
 
         AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
                 .orElse(null);
@@ -105,10 +109,37 @@ public class AgenticAuthoringTurnStreamService {
                 "phase", "context.bundle",
                 "message", "Agentic authoring stream started.",
                 "requestHash", stableUuid("agentic-authoring-request", request.userPrompt() + "|" + request.clientTurnId()).toString(),
+                "activeSemanticDecisionId", activeSemanticDecision == null ? "" : activeSemanticDecision.decisionId(),
                 "expiresAt", expiresAt.toString()));
         scheduleProcessingTimeout(principalContext, streamId, threadId, turnId);
-        executor.submit(() -> process(principalContext, streamId, threadId, turnId, request));
+        executor.submit(() -> process(principalContext, streamId, threadId, turnId, effectiveRequest, baseUrl));
         return new StartResult(startResponse(streamId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withActiveSemanticDecision(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision activeSemanticDecision) {
+        if (request == null || activeSemanticDecision == null || request.activeSemanticDecision() != null) {
+            return request;
+        }
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints(),
+                request.componentCapabilities(),
+                activeSemanticDecision);
     }
 
     public SseEmitter connect(UUID streamId, String lastEventId, AiPrincipalContext principalContext) {
@@ -174,7 +205,8 @@ public class AgenticAuthoringTurnStreamService {
             UUID streamId,
             UUID threadId,
             UUID turnId,
-            AgenticAuthoringTurnStreamRequest request) {
+            AgenticAuthoringTurnStreamRequest request,
+            String schemaBaseUrl) {
         try {
             AgenticAuthoringTurnEventSink eventSink = new AgenticAuthoringTurnEventSink() {
                 @Override
@@ -190,7 +222,7 @@ public class AgenticAuthoringTurnStreamService {
                     return AgenticAuthoringTurnStreamService.this.terminalReached(streamId);
                 }
             };
-            AgenticAuthoringTurnOutcome outcome = turnEngine.execute(request, principalContext, eventSink);
+            AgenticAuthoringTurnOutcome outcome = turnEngine.execute(request, principalContext, eventSink, schemaBaseUrl);
             if (outcome.completion() == Completion.COMPLETE) {
                 turnService.completeTurn(threadId, turnId);
             } else if (outcome.completion() == Completion.EXPIRE) {

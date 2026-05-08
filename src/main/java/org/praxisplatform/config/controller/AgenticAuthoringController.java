@@ -284,10 +284,19 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
-            AgenticAuthoringPreviewResult result = previewService.preview(request, tenantId, userId, environment);
+            String baseUrl = currentContextBaseUrl();
+            AgenticAuthoringPreviewResult result = previewService.preview(request, tenantId, userId, environment, baseUrl);
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException | IllegalStateException | IOException ex) {
             return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));
+        }
+    }
+
+    private String currentContextBaseUrl() {
+        try {
+            return ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString();
+        } catch (IllegalStateException ex) {
+            return null;
         }
     }
 

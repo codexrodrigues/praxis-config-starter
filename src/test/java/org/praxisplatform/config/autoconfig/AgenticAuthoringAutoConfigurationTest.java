@@ -12,6 +12,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
@@ -50,7 +51,8 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context).hasSingleBean(AgenticAuthoringIntentResolverService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringComponentCapabilitiesService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringPatchCompilerService.class);
-            assertThat(context).doesNotHaveBean(AgenticAuthoringUiCompositionPlanProvider.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringUiCompositionPlanProvider.class);
+            assertThat(context).hasSingleBean(AgenticAuthoringGenericUiCompositionPlanProvider.class);
             assertThat(context).hasSingleBean(AgenticAuthoringDryRunReportService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringManifestContractValidator.class);
             assertThat(context).hasSingleBean(AgenticAuthoringTargetResolverRegistry.class);
@@ -65,14 +67,14 @@ class AgenticAuthoringAutoConfigurationTest {
     }
 
     @Test
-    void shouldRegisterReferenceUiCompositionPlanProviderOnlyWhenExplicitlyEnabled() {
+    void shouldNotRegisterReferenceUiCompositionPlanProviderFromCanonicalStarter() {
         contextRunner
                 .withPropertyValues("praxis.ai.authoring.reference-ui-composition-provider-enabled=true")
                 .run(context -> {
                     assertThat(context).hasSingleBean(AgenticAuthoringArtifactProperties.class);
-                    assertThat(context.getBean(AgenticAuthoringArtifactProperties.class)
-                            .isReferenceUiCompositionProviderEnabled()).isTrue();
-                    assertThat(context).hasSingleBean(AgenticAuthoringUiCompositionPlanProvider.class);
+                    assertThat(context.getBeansOfType(AgenticAuthoringUiCompositionPlanProvider.class)).hasSize(1);
+                    assertThat(context).hasSingleBean(AgenticAuthoringGenericUiCompositionPlanProvider.class);
+                    assertThat(context).doesNotHaveBean("agenticAuthoringReferenceUiCompositionPlanProvider");
                 });
     }
 

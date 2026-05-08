@@ -24,8 +24,121 @@ public record AgenticAuthoringIntentResolutionResult(
         List<String> warnings,
         List<String> failureCodes,
         JsonNode currentPageSummary,
-        JsonNode llmDiagnostics
+        JsonNode llmDiagnostics,
+        AgenticAuthoringVisualizationDecision visualizationDecision,
+        AgenticAuthoringSemanticDecision semanticDecision
 ) {
+    public AgenticAuthoringIntentResolutionResult {
+        if (semanticDecision == null) {
+            semanticDecision = AgenticAuthoringSemanticDecision.from(
+                    operationKind,
+                    artifactKind,
+                    changeKind,
+                    selectedCandidate,
+                    candidates,
+                    visualizationDecision,
+                    warnings,
+                    llmDiagnostics);
+        }
+    }
+
+    public AgenticAuthoringIntentResolutionResult(
+            boolean valid,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            String authoringProfile,
+            String targetApp,
+            String targetComponentId,
+            AgenticAuthoringTarget target,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringGateResult gate,
+            String effectivePrompt,
+            String assistantMessage,
+            JsonNode apiCatalogAnswer,
+            List<AgenticAuthoringQuickReply> quickReplies,
+            AgenticAuthoringPendingClarification pendingClarification,
+            List<String> clarificationQuestions,
+            List<String> warnings,
+            List<String> failureCodes,
+            JsonNode currentPageSummary,
+            JsonNode llmDiagnostics,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        this(
+                valid,
+                operationKind,
+                artifactKind,
+                changeKind,
+                authoringProfile,
+                targetApp,
+                targetComponentId,
+                target,
+                selectedCandidate,
+                candidates,
+                gate,
+                effectivePrompt,
+                assistantMessage,
+                apiCatalogAnswer,
+                quickReplies,
+                pendingClarification,
+                clarificationQuestions,
+                warnings,
+                failureCodes,
+                currentPageSummary,
+                llmDiagnostics,
+                visualizationDecision,
+                null);
+    }
+
+    public AgenticAuthoringIntentResolutionResult(
+            boolean valid,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            String authoringProfile,
+            String targetApp,
+            String targetComponentId,
+            AgenticAuthoringTarget target,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringGateResult gate,
+            String effectivePrompt,
+            String assistantMessage,
+            JsonNode apiCatalogAnswer,
+            List<AgenticAuthoringQuickReply> quickReplies,
+            AgenticAuthoringPendingClarification pendingClarification,
+            List<String> clarificationQuestions,
+            List<String> warnings,
+            List<String> failureCodes,
+            JsonNode currentPageSummary,
+            JsonNode llmDiagnostics) {
+        this(
+                valid,
+                operationKind,
+                artifactKind,
+                changeKind,
+                authoringProfile,
+                targetApp,
+                targetComponentId,
+                target,
+                selectedCandidate,
+                candidates,
+                gate,
+                effectivePrompt,
+                assistantMessage,
+                apiCatalogAnswer,
+                quickReplies,
+                pendingClarification,
+                clarificationQuestions,
+                warnings,
+                failureCodes,
+                currentPageSummary,
+                llmDiagnostics,
+                null,
+                null);
+    }
+
     public AgenticAuthoringIntentResolutionResult(
             boolean valid,
             String operationKind,
@@ -66,6 +179,8 @@ public record AgenticAuthoringIntentResolutionResult(
                 warnings,
                 failureCodes,
                 currentPageSummary,
+                null,
+                null,
                 null);
     }
 
@@ -110,6 +225,8 @@ public record AgenticAuthoringIntentResolutionResult(
                 warnings,
                 failureCodes,
                 currentPageSummary,
+                null,
+                null,
                 null);
     }
 
@@ -155,6 +272,8 @@ public record AgenticAuthoringIntentResolutionResult(
                 warnings,
                 failureCodes,
                 currentPageSummary,
+                null,
+                null,
                 null);
     }
 
@@ -195,6 +314,8 @@ public record AgenticAuthoringIntentResolutionResult(
                 warnings,
                 failureCodes,
                 currentPageSummary,
+                null,
+                null,
                 null);
     }
 }

@@ -171,6 +171,8 @@ public class AgenticAuthoringLlmIntentResolverService {
         String resourceSearchQuery = nullableText(result, "resourceSearchQuery");
         String followUpKind = text(result, "followUpKind");
         String assistantMessage = conciseAssistantMessage(nullableText(result, "assistantMessage"));
+        AgenticAuthoringVisualizationDecision visualizationDecision =
+                visualizationDecision(result.path("visualizationDecision"));
         if (!resolved
                 && operationKind.isBlank()
                 && artifactKind.isBlank()
@@ -178,7 +180,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 && (assistantMessage == null || assistantMessage.isBlank())
                 && quickReplies.isEmpty()
                 && clarificationQuestions.isEmpty()
-                && warnings.isEmpty()) {
+                && warnings.isEmpty()
+                && visualizationDecision == null) {
             return Optional.empty();
         }
         return Optional.of(new AgenticAuthoringLlmIntentResolution(
@@ -192,7 +195,58 @@ public class AgenticAuthoringLlmIntentResolverService {
                 assistantMessage,
                 quickReplies,
                 clarificationQuestions,
-                warnings));
+                warnings,
+                visualizationDecision));
+    }
+
+    private AgenticAuthoringVisualizationDecision visualizationDecision(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        List<AgenticAuthoringVisualizationAxisDecision> axes = visualizationAxes(node.path("axes"));
+        String intent = text(node, "intent");
+        String layoutKind = text(node, "layoutKind");
+        String primaryComponent = text(node, "primaryComponent");
+        if (intent.isBlank() && layoutKind.isBlank() && primaryComponent.isBlank() && axes.isEmpty()) {
+            return null;
+        }
+        return new AgenticAuthoringVisualizationDecision(
+                valueOrDefault(nullableText(node, "schemaVersion"), "praxis-agentic-authoring-visualization-decision.v1"),
+                intent,
+                layoutKind,
+                primaryComponent,
+                axes,
+                node.path("includeSummary").asBoolean(true),
+                node.path("includeDetailTable").asBoolean(true),
+                valueOrDefault(nullableText(node, "provenance"), "llm-authored-semantic-decision"));
+    }
+
+    private List<AgenticAuthoringVisualizationAxisDecision> visualizationAxes(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<AgenticAuthoringVisualizationAxisDecision> axes = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (!item.isObject()) {
+                continue;
+            }
+            String field = text(item, "field");
+            String concept = text(item, "concept");
+            if (field.isBlank() || concept.isBlank()) {
+                continue;
+            }
+            axes.add(new AgenticAuthoringVisualizationAxisDecision(
+                    concept,
+                    field,
+                    valueOrDefault(nullableText(item, "label"), field),
+                    valueOrDefault(nullableText(item, "chartType"), "bar"),
+                    valueOrDefault(nullableText(item, "orientation"), "vertical"),
+                    valueOrDefault(nullableText(item, "metricAggregation"), "count"),
+                    nullableText(item, "metricField"),
+                    valueOrDefault(nullableText(item, "metricLabel"), "Total"),
+                    valueOrDefault(nullableText(item, "provenance"), "llm-authored-semantic-axis")));
+        }
+        return List.copyOf(axes);
     }
 
     private List<AgenticAuthoringQuickReply> quickReplies(JsonNode node) {
@@ -276,6 +330,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         nullableString(properties, "assistantMessage");
         arrayOfStrings(properties, "clarificationQuestions");
         arrayOfStrings(properties, "warnings");
+        properties.set("visualizationDecision", visualizationDecisionSchema());
 
         ObjectNode reply = objectMapper.createObjectNode();
         reply.put("type", "object");
@@ -308,6 +363,58 @@ public class AgenticAuthoringLlmIntentResolverService {
         return root.toString();
     }
 
+    private ObjectNode visualizationDecisionSchema() {
+        ObjectNode decision = objectMapper.createObjectNode();
+        ArrayNode decisionTypes = decision.putArray("type");
+        decisionTypes.add("object").add("null");
+        ObjectNode properties = decision.putObject("properties");
+        properties.putObject("schemaVersion").put("type", "string");
+        properties.putObject("intent").put("type", "string");
+        stringEnum(properties, "layoutKind", List.of("dashboard", "table", "page", "master_detail", "unknown"));
+        stringEnum(properties, "primaryComponent", List.of("praxis-chart", "praxis-table", "praxis-dynamic-form", "praxis-rich-content", "unknown"));
+        properties.putObject("includeSummary").put("type", "boolean");
+        properties.putObject("includeDetailTable").put("type", "boolean");
+        properties.putObject("provenance").put("type", "string");
+
+        ObjectNode axis = objectMapper.createObjectNode();
+        axis.put("type", "object");
+        ObjectNode axisProperties = axis.putObject("properties");
+        axisProperties.putObject("concept").put("type", "string");
+        axisProperties.putObject("field").put("type", "string");
+        axisProperties.putObject("label").put("type", "string");
+        stringEnum(axisProperties, "chartType", List.of("bar", "horizontal-bar", "line", "area", "pie", "donut"));
+        stringEnum(axisProperties, "orientation", List.of("vertical", "horizontal", "temporal"));
+        stringEnum(axisProperties, "metricAggregation", List.of("count", "sum", "avg", "min", "max"));
+        nullableString(axisProperties, "metricField");
+        axisProperties.putObject("metricLabel").put("type", "string");
+        axisProperties.putObject("provenance").put("type", "string");
+        axis.putArray("required")
+                .add("concept")
+                .add("field")
+                .add("label")
+                .add("chartType")
+                .add("orientation")
+                .add("metricAggregation")
+                .add("metricLabel")
+                .add("provenance");
+        axis.put("additionalProperties", false);
+
+        properties.putObject("axes")
+                .put("type", "array")
+                .set("items", axis);
+        decision.putArray("required")
+                .add("schemaVersion")
+                .add("intent")
+                .add("layoutKind")
+                .add("primaryComponent")
+                .add("axes")
+                .add("includeSummary")
+                .add("includeDetailTable")
+                .add("provenance");
+        decision.put("additionalProperties", false);
+        return decision;
+    }
+
     private void nullableString(ObjectNode properties, String name) {
         ArrayNode types = properties.putObject(name).putArray("type");
         types.add("string").add("null");
@@ -329,6 +436,10 @@ public class AgenticAuthoringLlmIntentResolverService {
 
     private String text(JsonNode node, String field) {
         return nullableText(node, field) == null ? "" : nullableText(node, field);
+    }
+
+    private String valueOrDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private String nullableText(JsonNode node, String field) {

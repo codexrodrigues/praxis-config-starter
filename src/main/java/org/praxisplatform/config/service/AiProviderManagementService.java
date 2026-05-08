@@ -251,18 +251,20 @@ public class AiProviderManagementService {
                 .iconKey("xai")
                 .build());
         ProviderCapabilities mockCapabilities = resolveProviderCapabilities("mock");
-        providers.add(AiProviderCatalogItem.builder()
-                .id("mock")
-                .label("Mock (dev)")
-                .description("Modo local para testes sem chave.")
-                .defaultModel("mock-default")
-                .requiresApiKey(false)
-                .supportsModels(true)
-                .supportsEmbeddings(true)
-                .supportsTextStreaming(mockCapabilities.supportsTextStreaming())
-                .supportsTurnCancellation(mockCapabilities.supportsTurnCancellation())
-                .iconKey("mock")
-                .build());
+        if (findProvider("mock") != null) {
+            providers.add(AiProviderCatalogItem.builder()
+                    .id("mock")
+                    .label("Mock (dev/test)")
+                    .description("Modo local opt-in para testes sem chave.")
+                    .defaultModel("mock-default")
+                    .requiresApiKey(false)
+                    .supportsModels(true)
+                    .supportsEmbeddings(true)
+                    .supportsTextStreaming(mockCapabilities.supportsTextStreaming())
+                    .supportsTurnCancellation(mockCapabilities.supportsTurnCancellation())
+                    .iconKey("mock")
+                    .build());
+        }
 
         return AiProviderCatalogResponse.builder()
                 .providers(providers)

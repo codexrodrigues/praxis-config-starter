@@ -96,7 +96,7 @@ export PRAXIS_AI_SECURITY_LOCAL_DEFAULT_USER="${PRAXIS_AI_SECURITY_LOCAL_DEFAULT
 export PRAXIS_AI_SECURITY_LOCAL_DEFAULT_ENVIRONMENT="${PRAXIS_AI_SECURITY_LOCAL_DEFAULT_ENVIRONMENT:-local}"
 export PRAXIS_AI_STREAM_AUTH_MODE="${PRAXIS_AI_STREAM_AUTH_MODE:-signed-url-token}"
 export PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET="${PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET:-codex-local-e2e-token-secret-20260421}"
-export EMBEDDING_PROVIDER="${EMBEDDING_PROVIDER:-mock}"
+export EMBEDDING_PROVIDER="${EMBEDDING_PROVIDER:-$PROVIDER}"
 export PRAXIS_DOMAIN_KNOWLEDGE_PROJECTION_ENABLED="${PRAXIS_DOMAIN_KNOWLEDGE_PROJECTION_ENABLED:-true}"
 export PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED="${PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED:-true}"
 
@@ -104,11 +104,35 @@ if [[ -n "${PRAXIS_AI_OPENAI_MODEL:-}" ]]; then
   export SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL="$PRAXIS_AI_OPENAI_MODEL"
 fi
 
+if [[ "${EMBEDDING_PROVIDER,,}" == "mock" && "${ALLOW_MOCK_EMBEDDINGS_FOR_LOCAL_E2E:-false}" != "true" ]]; then
+  echo "EMBEDDING_PROVIDER=mock is not allowed for local live LLM/browser E2E." >&2
+  echo "Use EMBEDDING_PROVIDER=$PROVIDER for Page Builder/assistant validation, or set ALLOW_MOCK_EMBEDDINGS_FOR_LOCAL_E2E=true only for explicitly deterministic non-LLM lanes." >&2
+  exit 1
+fi
+
+case "${PROVIDER,,}" in
+  openai)
+    if [[ -z "${PRAXIS_AI_OPENAI_API_KEY:-}" && -z "${SPRING_AI_OPENAI_API_KEY:-}" ]]; then
+      echo "OpenAI provider selected, but no OpenAI API key is loaded." >&2
+      echo "Load PRAXIS_AI_OPENAI_API_KEY or SPRING_AI_OPENAI_API_KEY before running live E2E." >&2
+      exit 1
+    fi
+    ;;
+  gemini)
+    if [[ -z "${PRAXIS_AI_GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
+      echo "Gemini provider selected, but no Gemini API key is loaded." >&2
+      echo "Load PRAXIS_AI_GEMINI_API_KEY or GOOGLE_API_KEY before running live E2E." >&2
+      exit 1
+    fi
+    ;;
+esac
+
 echo "Starting quickstart local E2E backend"
 echo "  root: $QUICKSTART_ROOT"
 echo "  jar:  $JAR_PATH"
 echo "  port: $PORT"
 echo "  provider: $PROVIDER"
+echo "  embedding provider: $EMBEDDING_PROVIDER"
 echo "  stream auth: $PRAXIS_AI_STREAM_AUTH_MODE"
 
 cd "$QUICKSTART_ROOT"

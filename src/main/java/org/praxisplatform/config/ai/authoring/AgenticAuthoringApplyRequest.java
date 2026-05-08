@@ -7,6 +7,7 @@ public record AgenticAuthoringApplyRequest(
         String componentType,
         String componentId,
         String scope,
-        JsonNode tags
+        JsonNode tags,
+        AgenticAuthoringSemanticDecision semanticDecision
 ) {
 }

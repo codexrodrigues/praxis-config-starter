@@ -76,8 +76,8 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.quickReplies().get(0).prompt())
                 .isEqualTo("Usar analytics folha pagamento como fonte de dados do painel.");
         assertThat(result.quickReplies().get(0).description())
-                .contains("Indicada para comecar por KPIs e graficos")
-                .contains("Retorna dados agregaveis");
+                .contains("Indicada para começar por KPIs e gráficos")
+                .contains("Retorna dados agregáveis");
         assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("bestFor").asText())
                 .contains("dashboards executivos");
         assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("returns").asText())
@@ -118,6 +118,61 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .contains("folha de pagamento")
                 .contains("analytics folha pagamento");
         assertThat(result.warnings()).isEmpty();
+    }
+
+    @Test
+    void metadataCatalogDoesNotEmitDomainAnchorCandidatesInDefaultDiscoveryPath() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/procurement/suppliers",
+                        "POST",
+                        "procurement,fornecedores,suppliers,compras,dashboard,tabela",
+                        "Fornecedores",
+                        "Fonte de fornecedores para paineis, tabelas e analises de compras.",
+                        "filterSuppliers",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository);
+
+        List<AgenticAuthoringCandidate> candidates =
+                catalog.discover("quero acompanhar fornecedores de compras", "dashboard");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates)
+                .allSatisfy(candidate -> assertThat(candidate.evidence()).doesNotContain("domain-anchor"));
+        assertThat(candidates)
+                .extracting(AgenticAuthoringCandidate::evidence)
+                .anySatisfy(evidence -> assertThat(evidence).contains("lexical-fallback"));
+    }
+
+    @Test
+    void metadataCatalogDoesNotExpandHostDomainSynonymsByDefault() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "funcionarios",
+                        "Funcionarios",
+                        "Cadastro de funcionarios.",
+                        "filterFuncionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository);
+
+        List<AgenticAuthoringCandidate> candidates =
+                catalog.discover("quero monitorar colaboradores", "dashboard");
+
+        assertThat(candidates).isEmpty();
     }
 
     @Test

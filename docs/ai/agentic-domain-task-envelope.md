@@ -151,12 +151,21 @@ contract:
     }
   },
   "preview": {
-    "canApply": true,
     "componentEditPlan": {
       "operations": []
     }
   },
   "assistantMessage": "Usei o catalogo de dominio de funcionarios e mantive CPF como dado mascarado com revisao obrigatoria.",
+  "decisionDiagnostics": {
+    "schemaVersion": "praxis-agentic-authoring-decision-diagnostics.v1",
+    "retrievalSource": "semantic_retrieval",
+    "llmResolutionAttempted": true,
+    "llmResolved": true,
+    "keywordFallbackApplied": false,
+    "selectedCandidateUsesLexicalFallback": false,
+    "selectedCandidateUsesDomainAnchor": false,
+    "requiresReview": false
+  },
   "canApply": true
 }
 ```
@@ -180,6 +189,16 @@ not a page preview:
     }
   },
   "assistantMessage": "Esse pedido deve seguir pela trilha governada de regra compartilhada em /api/praxis/config/domain-rules, e nao pelo preview de formulario/pagina. Use POST /api/praxis/config/domain-rules/intake com o recurso /api/human-resources/funcionarios como grounding canonico, depois POST /api/praxis/config/domain-rules/simulations para validar cobertura, aprovacoes e materializacoes antes de publicar.",
+  "decisionDiagnostics": {
+    "schemaVersion": "praxis-agentic-authoring-decision-diagnostics.v1",
+    "retrievalSource": "semantic_retrieval",
+    "llmResolutionAttempted": true,
+    "llmResolved": true,
+    "keywordFallbackApplied": false,
+    "selectedCandidateUsesLexicalFallback": false,
+    "selectedCandidateUsesDomainAnchor": false,
+    "requiresReview": false
+  },
   "canApply": false
 }
 ```

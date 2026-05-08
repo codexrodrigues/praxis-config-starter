@@ -105,6 +105,7 @@ class ApiMetadataIngestionServiceTest {
 
         when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
         when(repository.findByPathAndMethod("/v1/users", "GET")).thenReturn(Optional.empty());
+        when(repository.findAllByOperationIdAndMethod("listUsers", "GET")).thenReturn(List.of());
         when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.ingestCatalog(request, "tenant-a", "prod");
@@ -128,5 +129,39 @@ class ApiMetadataIngestionServiceTest {
         assertThat(document.getMetadata().get(RagMetadataKeys.TENANT_ID)).isEqualTo("tenant-a");
         assertThat(document.getMetadata().get(RagMetadataKeys.ENVIRONMENT)).isEqualTo("prod");
         assertThat(document.getMetadata().get(RagMetadataKeys.VERSION)).isEqualTo("2026.02");
+    }
+
+    @Test
+    void shouldReconcileMovedEndpointByStableOperationIdentity() {
+        ApiMetadata stale = new ApiMetadata();
+        stale.setPath("/api/human-resources/missoes/filter");
+        stale.setMethod("POST");
+        stale.setOperationId("filterMissoes");
+        ApiCatalogRequest.ApiEndpointEntry endpoint = ApiCatalogRequest.ApiEndpointEntry.builder()
+                .path("/api/operations/missoes/filter")
+                .method("POST")
+                .summary("Filtrar missoes")
+                .description("Consulta missoes operacionais")
+                .operationId("filterMissoes")
+                .tags(List.of("operations", "missoes"))
+                .build();
+        ApiCatalogRequest request = ApiCatalogRequest.builder()
+                .endpoints(List.of(endpoint))
+                .build();
+
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        when(repository.findByPathAndMethod("/api/operations/missoes/filter", "POST")).thenReturn(Optional.empty());
+        when(repository.findAllByOperationIdAndMethod("filterMissoes", "POST")).thenReturn(List.of(stale));
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.ingestCatalog(request, "demo", "dev");
+
+        ArgumentCaptor<ApiMetadata> captor = ArgumentCaptor.forClass(ApiMetadata.class);
+        verify(repository).save(captor.capture());
+        ApiMetadata saved = captor.getValue();
+        assertThat(saved).isSameAs(stale);
+        assertThat(saved.getPath()).isEqualTo("/api/operations/missoes/filter");
+        assertThat(saved.getMethod()).isEqualTo("POST");
+        assertThat(saved.getOperationId()).isEqualTo("filterMissoes");
     }
 }

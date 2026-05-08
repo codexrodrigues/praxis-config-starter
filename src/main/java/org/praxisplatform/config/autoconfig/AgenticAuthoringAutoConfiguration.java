@@ -12,6 +12,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiMetadataCandidateCatalog;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringLlmIntentResolverService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
@@ -19,7 +20,6 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewMessageSynthesizerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringProjectKnowledgeService;
-import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegistry;
@@ -37,6 +37,7 @@ import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.AiTurnService;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.UserConfigService;
@@ -48,9 +49,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.annotation.Order;
 
 @AutoConfiguration
 @ConditionalOnClass(AgenticAuthoringDryRunService.class)
@@ -209,14 +210,11 @@ public class AgenticAuthoringAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(name = "agenticAuthoringReferenceUiCompositionPlanProvider")
-    @ConditionalOnProperty(
-            prefix = "praxis.ai.authoring",
-            name = "reference-ui-composition-provider-enabled",
-            havingValue = "true")
-    public AgenticAuthoringUiCompositionPlanProvider agenticAuthoringReferenceUiCompositionPlanProvider(
+    @Order(1000)
+    @ConditionalOnMissingBean(name = "agenticAuthoringGenericUiCompositionPlanProvider")
+    public AgenticAuthoringUiCompositionPlanProvider agenticAuthoringGenericUiCompositionPlanProvider(
             ObjectMapper objectMapper) {
-        return new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper);
+        return new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper);
     }
 
     @Bean
@@ -236,13 +234,15 @@ public class AgenticAuthoringAutoConfiguration {
             AgenticAuthoringPatchCompilerService patchCompilerService,
             ObjectMapper objectMapper,
             ObjectProvider<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
-            ObjectProvider<AgenticAuthoringPreviewMessageSynthesizerService> messageSynthesizer) {
+            ObjectProvider<AgenticAuthoringPreviewMessageSynthesizerService> messageSynthesizer,
+            ObjectProvider<SchemaRetrievalService> schemaRetrievalService) {
         return new AgenticAuthoringPreviewService(
                 planService,
                 patchCompilerService,
                 objectMapper,
                 uiCompositionPlanProviders.orderedStream().toList(),
-                messageSynthesizer.getIfAvailable());
+                messageSynthesizer.getIfAvailable(),
+                schemaRetrievalService.getIfAvailable());
     }
 
     @Bean

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -51,7 +52,13 @@ class AgenticAuthoringApplyServiceTest {
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
 
         AgenticAuthoringApplyResult result = service().apply(
-                new AgenticAuthoringApplyRequest(compiledPatch, null, "helpdesk:notebook-screen", null, null),
+                new AgenticAuthoringApplyRequest(
+                        compiledPatch(),
+                        null,
+                        "helpdesk:notebook-screen",
+                        null,
+                        null,
+                        validSemanticDecision()),
                 "tenant",
                 "user",
                 "local",
@@ -101,7 +108,13 @@ class AgenticAuthoringApplyServiceTest {
         invalid.putObject("patch");
 
         assertThatThrownBy(() -> service().apply(
-                new AgenticAuthoringApplyRequest(invalid, "praxis-dynamic-page", "page", "tenant", null),
+                new AgenticAuthoringApplyRequest(
+                        invalid,
+                        "praxis-dynamic-page",
+                        "page",
+                        "tenant",
+                        null,
+                        validSemanticDecision()),
                 "tenant",
                 null,
                 null,
@@ -109,6 +122,66 @@ class AgenticAuthoringApplyServiceTest {
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("compiledFormPatch.patch.page");
+    }
+
+    @Test
+    void applyRejectsMissingSemanticDecision() throws Exception {
+        assertThatThrownBy(() -> service().apply(
+                new AgenticAuthoringApplyRequest(
+                        compiledPatch(),
+                        "praxis-dynamic-page",
+                        "page",
+                        "tenant",
+                        null,
+                        null),
+                "tenant",
+                null,
+                null,
+                "author",
+                null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("semantic-materialization-mismatch")
+                .hasMessageContaining("semantic-decision-required");
+    }
+
+    @Test
+    void applyRejectsMaterializationThatDoesNotSatisfySemanticDecision() throws Exception {
+        assertThatThrownBy(() -> service().apply(
+                new AgenticAuthoringApplyRequest(
+                        compiledPatch(),
+                        "praxis-dynamic-page",
+                        "page",
+                        "tenant",
+                        null,
+                        chartSemanticDecision()),
+                "tenant",
+                null,
+                null,
+                "author",
+                null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("semantic-materialization-mismatch")
+                .hasMessageContaining("semantic-preview-chart-required");
+    }
+
+    @Test
+    void applyRejectsSemanticDecisionThatRequiresReview() throws Exception {
+        assertThatThrownBy(() -> service().apply(
+                new AgenticAuthoringApplyRequest(
+                        compiledPatch(),
+                        "praxis-dynamic-page",
+                        "page",
+                        "tenant",
+                        null,
+                        reviewRequiredSemanticDecision()),
+                "tenant",
+                null,
+                null,
+                "author",
+                null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("semantic-materialization-mismatch")
+                .hasMessageContaining("semantic-decision-review-required:resource-selection-domain-anchor");
     }
 
     private AgenticAuthoringApplyService service() {
@@ -145,5 +218,61 @@ class AgenticAuthoringApplyServiceTest {
                   }
                 }
                 """);
+    }
+
+    private AgenticAuthoringSemanticDecision chartSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-chart",
+                "create",
+                "dashboard",
+                "create_chart",
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "analytical-breakdown",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(),
+                        true,
+                        true,
+                        "test"),
+                null,
+                false,
+                "",
+                "",
+                "previous-conversation-decision");
+    }
+
+    private AgenticAuthoringSemanticDecision validSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-form",
+                "create",
+                "form",
+                "create_artifact",
+                null,
+                null,
+                null,
+                false,
+                "",
+                "",
+                "");
+    }
+
+    private AgenticAuthoringSemanticDecision reviewRequiredSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-review",
+                "create",
+                "table",
+                "create_artifact",
+                null,
+                null,
+                null,
+                true,
+                "resource-selection-domain-anchor",
+                "",
+                "");
     }
 }

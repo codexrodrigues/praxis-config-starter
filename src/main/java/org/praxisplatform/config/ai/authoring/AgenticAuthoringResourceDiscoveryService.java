@@ -186,8 +186,8 @@ public class AgenticAuthoringResourceDiscoveryService {
         return switch (artifactKind) {
             case "dashboard", "page" -> "Fonte candidata para alimentar o painel.";
             case "table" -> "Fonte candidata para alimentar a tabela.";
-            case "form" -> "Operacao candidata para o formulario.";
-            default -> "Fonte candidata encontrada no catalogo.";
+            case "form" -> "Operação candidata para o formulário.";
+            default -> "Fonte candidata encontrada no catálogo.";
         };
     }
 
@@ -195,17 +195,17 @@ public class AgenticAuthoringResourceDiscoveryService {
         String path = valueOrDefault(candidate.resourcePath(), "").toLowerCase(Locale.ROOT);
         if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
             if (path.contains("analytics") || path.contains("/vw-") || path.contains("stats")) {
-                return "Indicada para comecar por KPIs e graficos. Retorna dados agregaveis para comparar valores, volumes e tendencias por recorte de negocio.";
+                return "Indicada para começar por KPIs e gráficos. Retorna dados agregáveis para comparar valores, volumes e tendências por recorte de negócio.";
             }
             return "Indicada para montar um painel operacional. Retorna registros que podem virar listas, indicadores e drill-downs.";
         }
         if ("table".equals(artifactKind)) {
-            return "Indicada quando voce quer uma lista navegavel. Retorna registros para tabela, filtros e detalhes.";
+            return "Indicada quando você quer uma lista navegável. Retorna registros para tabela, filtros e detalhes.";
         }
         if ("form".equals(artifactKind)) {
-            return "Indicada quando voce precisa cadastrar ou atualizar dados. Retorna uma operacao governada para o formulario.";
+            return "Indicada quando você precisa cadastrar ou atualizar dados. Retorna uma operação governada para o formulário.";
         }
-        return "Opcao encontrada no catalogo semantico. Use para explorar quais dados ela oferece antes de criar a tela.";
+        return "Opção encontrada no catálogo semântico. Use para explorar quais dados ela oferece antes de criar a tela.";
     }
 
     private ObjectNode candidatePresentation(AgenticAuthoringCandidate candidate, String artifactKind) {
@@ -214,29 +214,29 @@ public class AgenticAuthoringResourceDiscoveryService {
         boolean analytics = path.contains("analytics") || path.contains("/vw-") || path.contains("stats");
         if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
             presentation.put("bestFor", analytics
-                    ? "Boa para dashboards executivos, comparacoes e acompanhamento de tendencias."
-                    : "Boa para paineis operacionais com acompanhamento de registros e drill-down.");
+                    ? "Boa para dashboards executivos, comparações e acompanhamento de tendências."
+                    : "Boa para painéis operacionais com acompanhamento de registros e drill-down.");
             presentation.put("returns", analytics
-                    ? "Retorna dados preparados para agregacoes, KPIs, rankings e series temporais."
-                    : "Retorna dados de negocio que podem alimentar cards, listas e graficos simples.");
-            presentation.put("nextStep", "Clique para usar esta fonte como recorte inicial da pre-visualizacao.");
+                    ? "Retorna dados preparados para agregações, KPIs, rankings e séries temporais."
+                    : "Retorna dados de negócio que podem alimentar cards, listas e gráficos simples.");
+            presentation.put("nextStep", "Clique para usar esta fonte como recorte inicial da pré-visualização.");
             return presentation;
         }
         if ("table".equals(artifactKind)) {
             presentation.put("bestFor", "Boa para consultar, filtrar e comparar registros em uma lista.");
-            presentation.put("returns", "Retorna colecoes navegaveis com campos para colunas, busca e detalhes.");
+            presentation.put("returns", "Retorna coleções navegáveis com campos para colunas, busca e detalhes.");
             presentation.put("nextStep", "Clique para criar a tabela usando esta fonte.");
             return presentation;
         }
         if ("form".equals(artifactKind)) {
-            presentation.put("bestFor", "Boa para capturar ou atualizar informacoes com governanca.");
-            presentation.put("returns", "Retorna a operacao que o formulario deve executar ao salvar.");
-            presentation.put("nextStep", "Clique para usar esta operacao no formulario.");
+            presentation.put("bestFor", "Boa para capturar ou atualizar informações com governança.");
+            presentation.put("returns", "Retorna a operação que o formulário deve executar ao salvar.");
+            presentation.put("nextStep", "Clique para usar esta operação no formulário.");
             return presentation;
         }
-        presentation.put("bestFor", "Boa para explorar uma fonte semantica disponivel no catalogo.");
-        presentation.put("returns", "Retorna dados ou operacoes que podem ser materializados em componentes.");
-        presentation.put("nextStep", "Clique para investigar esta opcao no proximo passo.");
+        presentation.put("bestFor", "Boa para explorar uma fonte semântica disponível no catálogo.");
+        presentation.put("returns", "Retorna dados ou operações que podem ser materializados em componentes.");
+        presentation.put("nextStep", "Clique para investigar esta opção no próximo passo.");
         return presentation;
     }
 

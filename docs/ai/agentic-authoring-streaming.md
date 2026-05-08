@@ -96,7 +96,7 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 | `status` | `state`, `phase`, `message` |
 | `thought.step` | `phase`, `tool`, `summary`, `diagnostics` seguro |
 | `heartbeat` | metadados de keep-alive |
-| `result` | `intentResolution`, `preview`, `assistantMessage`, `quickReplies`, `canApply` |
+| `result` | `intentResolution`, `preview`, `assistantMessage`, `quickReplies`, `canApply`, `decisionDiagnostics` |
 | `error` | `code`, `assistantMessage`, `message`, `phase` |
 | `cancelled` | `message`, `phase` |
 
@@ -114,6 +114,75 @@ deve ser estavel para i18n e tratamento no cliente; `assistantMessage` deve ser
 seguro para exibir na conversa; `message` pode conter detalhe tecnico para
 diagnostico restrito. Falhas inesperadas de processamento usam
 `code=agentic-authoring-processing-failed`.
+
+### Diagnostico de decisao
+
+O evento terminal `result` deve incluir `decisionDiagnostics` com
+`schemaVersion=praxis-agentic-authoring-decision-diagnostics.v1`. Esse objeto e
+a trilha segura para diferenciar uma decisao authorada com LLM/RAG/contexto de
+um resultado que apenas compilou por fallback deterministico.
+
+O mesmo `result` deve transportar `intentResolution.semanticDecision` com
+`schemaVersion=praxis-agentic-authoring-semantic-decision.v1`. Essa e a decisao
+semantica canonica do turno; `operationKind`, `artifactKind`, `changeKind`,
+`selectedCandidate` e `visualizationDecision` permanecem como projecoes
+compatíveis para consumidores existentes, nao como fonte primaria da decisao.
+
+Quando houver resultado anterior na mesma thread, o backend pode carregar a
+ultima `semanticDecision` ativa e transporta-la como `activeSemanticDecision`
+no estado interno do turno. Refinamentos como "gostei, mas prefiro graficos"
+devem preservar `selectedResource` da decisao anterior e produzir uma nova
+`semanticDecision` com `refinementOf`/`previousDecisionId` apontando para o
+`decisionId` anterior, alterando apenas a intencao visual/materializavel.
+
+Campos canonicos atuais:
+
+- `operationKind`, `artifactKind` e `valid`;
+- `retrievalSource`, por exemplo `semantic_retrieval`, `lexical_fallback`,
+  `context_hint`, `broad_artifact_discovery`, `deterministic_override`,
+  `none` ou `unknown`;
+- `selectedResourcePath`, quando houver recurso selecionado;
+- `llmResolutionAttempted` e `llmResolved`;
+- `fallbackPolicy`, hoje `fail-safe` quando telemetry de resolucao existir;
+- `keywordFallbackApplied`;
+- `semanticPolicyApplied`, quando uma politica semantica governada ajustou a
+  decisao sem promover fallback de keyword a autoridade;
+- `selectedCandidateUsesLexicalFallback`;
+- `selectedCandidateUsesDomainAnchor`;
+- `candidateSetContainsLexicalFallback`;
+- `candidateSetContainsDomainAnchor`;
+- `requiresReview`;
+- `reviewReason`, quando `requiresReview=true`.
+- memoria de decisao: `conversationId`, `turnId`, `userGoal`,
+  `activeObjective`, `artifactIntent`, `visualIntent`, `constraints`,
+  `previousDecisionId`, `refinementOf`, `rationale` e `confidence`.
+
+Regra de aplicacao:
+
+- `canApply=true` somente quando a preview e valida e
+  `decisionDiagnostics.requiresReview` nao e `true`.
+- `keywordFallbackApplied=true` deve forcar
+  `decisionDiagnostics.requiresReview=true`,
+  `reviewReason=keyword-fallback-fail-safe` e `canApply=false`.
+- `page-apply` deve exigir `semanticDecision`; aplicar apenas
+  `compiledFormPatch` sem decisao canonica e um bypass de contrato.
+- `page-apply` deve rejeitar qualquer `semanticDecision.reviewRequired=true`,
+  mesmo que a materializacao seja estruturalmente valida.
+- `semanticPolicyApplied=true` nao deve, por si so, forcar revisao. Ele marca
+  que a plataforma aplicou uma regra semantica auditavel, por exemplo corrigir
+  uma resposta operacional do LLM para dashboard analitico quando o objetivo
+  conversacional pede ranking/comparacao.
+- Refinamentos visuais de segundo turno, como "prefiro graficos", devem
+  preservar a fonte de dados do artefato atual, trocar a projecao visual na
+  `semanticDecision` e registrar politica semantica auditavel, nao fallback de
+  keyword.
+- `selectedCandidateUsesDomainAnchor=true` deve forcar
+  `decisionDiagnostics.requiresReview=true`,
+  `reviewReason=resource-selection-domain-anchor` e `canApply=false`.
+
+Essa regra existe para impedir sucesso silencioso: um fallback pode ajudar a
+manter a conversa viva, mas nao deve liberar materializacao como se fosse uma
+decisao semanticamente governada.
 
 Fases recomendadas para authoring:
 
@@ -138,7 +207,14 @@ O Page Builder deve:
 - preservar `quickReplies[].contextHints` em todos os caminhos;
 - cancelar o stream quando o usuario cancelar o turno ou fechar o painel, se o stream
   ainda estiver ativo;
-- tratar `result` como a unica fonte para aplicar preview local.
+- tratar `result` como a unica fonte para aplicar preview local;
+- nunca habilitar aplicacao local apenas porque `preview.valid=true`; a UI deve
+  respeitar `canApply` e, quando
+  `decisionDiagnostics.requiresReview=true`, apresentar revisao/clarificacao em
+  vez de aplicar a materializacao;
+- reenviar `intentResolution.semanticDecision` em `page-apply` junto com o
+  `compiledFormPatch`, para que o backend rejeite materializacoes que nao
+  cumpram a decisao canonica authorada.
 
 ## Evidencia de validacao ponta a ponta
 

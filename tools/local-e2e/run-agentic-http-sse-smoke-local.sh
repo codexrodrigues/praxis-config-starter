@@ -65,7 +65,11 @@ test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.id' <<<"$comp
 test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.inputs.submitUrl' <<<"$compiled")" = "/api/helpdesk/chamados"
 
 echo "[4/7] page-preview"
-preview="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/page-preview" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/preview.response.json")"
+intent="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/intent-resolution" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/intent.response.json")"
+test "$(jq -r '.valid' <<<"$intent")" = "true"
+jq -e '.semanticDecision.schemaVersion == "praxis-agentic-authoring-semantic-decision.v1"' <<<"$intent" >/dev/null
+preview_body="$(jq --argjson intentResolution "$intent" '. + {intentResolution:$intentResolution}' <<<"$body")"
+preview="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/page-preview" "${headers[@]}" --data-binary @<(printf '%s' "$preview_body") | tee "$ARTIFACTS_DIR/preview.response.json")"
 test "$(jq -r '.valid' <<<"$preview")" = "true"
 test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.id' <<<"$preview")" = "praxis-dynamic-form"
 
@@ -73,8 +77,8 @@ echo "[5/7] page-apply/get/delete"
 component_type="praxis-dynamic-page"
 component_id="agentic-authoring:local-e2e:helpdesk-ticket-form"
 ui_uri="$BASE_URL/api/praxis/config/ui?componentType=$(urlencode "$component_type")&componentId=$(urlencode "$component_id")&scope=user"
-apply_body="$(jq -n --argjson compiledFormPatch "$(jq '.compiledFormPatch' <<<"$preview")" --arg componentType "$component_type" --arg componentId "$component_id" \
-  '{compiledFormPatch:$compiledFormPatch, componentType:$componentType, componentId:$componentId, scope:"user", tags:{purpose:"agentic-authoring-local-e2e"}}')"
+apply_body="$(jq -n --argjson compiledFormPatch "$(jq '.compiledFormPatch' <<<"$preview")" --argjson semanticDecision "$(jq '.semanticDecision' <<<"$intent")" --arg componentType "$component_type" --arg componentId "$component_id" \
+  '{compiledFormPatch:$compiledFormPatch, semanticDecision:$semanticDecision, componentType:$componentType, componentId:$componentId, scope:"user", tags:{purpose:"agentic-authoring-local-e2e"}}')"
 curl -fsS --max-time 60 -D "$ARTIFACTS_DIR/apply.headers" -o "$ARTIFACTS_DIR/apply.response.json" \
   -X POST "$BASE_URL/api/praxis/config/ai/authoring/page-apply" "${headers[@]}" -H "X-Updated-By: agentic-authoring-local-e2e" --data-binary @<(printf '%s' "$apply_body")
 test "$(jq -r '.applied' "$ARTIFACTS_DIR/apply.response.json")" = "true"

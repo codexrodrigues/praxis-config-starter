@@ -90,11 +90,12 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 15. [project-knowledge-vector-rag-release-checklist-2026-05-02.md](../../project-knowledge-vector-rag-release-checklist-2026-05-02.md)
 16. [12-page-builder-stream-first-routing-plan.md](./12-page-builder-stream-first-routing-plan.md)
 17. [13-runtime-enforcement-consumer-proof-plan.md](./13-runtime-enforcement-consumer-proof-plan.md)
-18. [release-readiness-2026-05-02-runtime-enforcement-consumer.md](../../release-readiness-2026-05-02-runtime-enforcement-consumer.md)
-19. [runtime-enforcement-consumer-release-checklist-2026-05-02.md](../../runtime-enforcement-consumer-release-checklist-2026-05-02.md)
-20. [01-current-state-and-target.md](./01-current-state-and-target.md)
-21. [02-implementation-backlog.md](./02-implementation-backlog.md)
-22. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+18. [14-platform-hygiene-for-host-neutral-authoring.md](./14-platform-hygiene-for-host-neutral-authoring.md)
+19. [release-readiness-2026-05-02-runtime-enforcement-consumer.md](../../release-readiness-2026-05-02-runtime-enforcement-consumer.md)
+20. [runtime-enforcement-consumer-release-checklist-2026-05-02.md](../../runtime-enforcement-consumer-release-checklist-2026-05-02.md)
+21. [01-current-state-and-target.md](./01-current-state-and-target.md)
+22. [02-implementation-backlog.md](./02-implementation-backlog.md)
+23. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -135,14 +136,20 @@ prompts governados falham fechados para handoffs canonicos.
 `release-readiness-2026-05-02-runtime-enforcement-consumer.md` e
 `runtime-enforcement-consumer-release-checklist-2026-05-02.md` fecham a prova
 local de runtime enforcement consumidor e definem os gates antes de qualquer
-release futuro. Os documentos
+release futuro. `14-platform-hygiene-for-host-neutral-authoring.md` passa a ser
+o baseline antes de ampliar o comportamento conversacional tipo Lovable/ChatGPT:
+o fluxo canonico deve remover inteligencia mockada ou quickstart-shaped do
+caminho real, deixando vocabulario de negocio entrar por metadata/RAG/corpus do
+host. Os documentos
 anteriores continuam uteis como historico e diagnostico, mas devem ser
 interpretados pela direcao atual: Page Builder authora componentes/paginas,
 decisoes compartilhadas de negocio devem seguir por
 `/api/praxis/config/domain-rules/**`, conhecimento persistente deve seguir pela
 fronteira `domain_knowledge_change_set`, correcoes de conhecimento aplicado
 devem seguir por revert/supersede governado, e ranking RAG deve permanecer uma
-projecao derivada revalidada contra o estado canonico.
+projecao derivada revalidada contra o estado canonico. A partir do plano 14,
+exemplos de quickstart podem continuar como prova/corpus, mas nao como
+preferencias hardcoded de ranking, planejamento ou resposta.
 
 ## Baseline de reaproveitamento
 
@@ -192,6 +199,17 @@ zero:
 - Tools de authoring devem ser tratadas como comportamento executavel interno do
   backend, nao como hint textual nem contrato publico automatico.
 - Heuristica lexical pode existir como fallback, mas nao como semantica primaria.
+- Fallback de keyword e apenas fail-safe/review. Quando uma decisao precisa ser
+  corrigida por objetivo conversacional, o ajuste deve ser atribuido a politica
+  semantica governada (`semanticPolicyApplied`), nao a `keyword-fallback-applied`.
+- `page-apply` deve consumir a decisao semantica como gate canônico: se
+  `semanticDecision` estiver ausente ou `semanticDecision.reviewRequired=true`,
+  a persistencia deve ser rejeitada independentemente da validade estrutural do
+  patch.
+- Um segundo turno de refinamento visual, por exemplo "gostei, mas prefiro
+  graficos", deve mutar a decisao semantica anterior: preservar o recurso
+  vinculado ao `currentPage`, trocar a projecao visual para dashboard/chart e
+  bloquear preview/apply se a materializacao nao cumprir essa decisao.
 - Repair loop deve ser backend-owned, limitado e auditavel.
 - Project knowledge persistente, quando entrar, deve ser governado, escopado e
   ancorado na Domain Knowledge Layer; nunca um blob opaco de prompt salvo no

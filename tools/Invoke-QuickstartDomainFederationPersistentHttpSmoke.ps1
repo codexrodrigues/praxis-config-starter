@@ -127,6 +127,9 @@ try {
         $env:CORS_ALLOWED_ORIGINS = "$Origin,https://praxisui-dev.web.app"
         $env:PRAXIS_AI_AUTHORING_HTTP_ENABLED = "true"
         $env:PRAXIS_DOMAIN_FEDERATION_PERSISTENCE_ENABLED = "true"
+        # This is a deterministic domain-federation persistence smoke. It does
+        # not validate Page Builder, assistant authoring, live LLM grounding or
+        # human simulation flows; those lanes must use a real embedding provider.
         $env:EMBEDDING_PROVIDER = "mock"
 
         $quickstartProcess = Start-Process `

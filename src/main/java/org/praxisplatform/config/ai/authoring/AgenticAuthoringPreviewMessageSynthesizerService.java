@@ -2,6 +2,7 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
@@ -78,21 +79,23 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             List<String> warnings) {
         return """
                 You write the final user-facing assistant message for Praxis Page Builder authoring.
-                Return only the message text. Do not return JSON, Markdown, bullets, code fences or headings.
+                Return only the message text. Do not return JSON, HTML, code fences or implementation diagnostics.
 
                 Language:
                 - Use the same language as the user's request; default to pt-BR when ambiguous.
 
                 Tone:
                 - Friendly, intelligent and didactic.
-                - Be concise: 2 to 4 short sentences.
-                - Explain what happened and what the user can do next.
+                - Format it like a polished chat assistant response: one short summary line, a blank line, then 2 to 4 concise "- " bullet lines.
+                - Use bullets to explain the governed source, visualization/component, validation status and next step.
+                - Keep it under 90 words.
 
                 Safety:
                 - Do not expose diagnostics, stack traces, internal prompts, API keys, tenant/user ids, raw JSON or implementation details.
                 - Do not claim that the page was saved.
                 - If valid=false, acknowledge that the selected source was found, explain that the generated plan needs adjustment, and say you will use only fields supported by the component.
                 - If valid=true, explain that a preview was created from the selected resource and that the user can review, ask for another component, or save.
+                - If uiCompositionSummary.semanticAxes has unsupported axes, explicitly say those requested axes were not materialized because they were not present in the selected resource schema. Do not imply that every requested chart was created.
                 - If localEditorialComposition=true or selectedResource is absent, say the preview was created from local/editorial demo content. Do not mention selected resource, source of data, API, schema or grounding.
 
                 Context:
@@ -140,6 +143,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         summary.put("kind", text(uiCompositionPlan, "kind"));
         summary.put("layoutPreset", text(uiCompositionPlan, "layoutPreset"));
         summary.set("components", objectMapper.createArrayNode());
+        summary.set("semanticAxes", semanticAxesSummary(uiCompositionPlan));
         JsonNode widgets = uiCompositionPlan.path("widgets");
         if (!widgets.isArray()) {
             return summary;
@@ -159,10 +163,34 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         return summary;
     }
 
+    private ArrayNode semanticAxesSummary(JsonNode uiCompositionPlan) {
+        ArrayNode result = objectMapper.createArrayNode();
+        JsonNode axes = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return result;
+        }
+        for (JsonNode axis : axes) {
+            ObjectNode item = objectMapper.createObjectNode();
+            item.put("concept", text(axis, "concept"));
+            item.put("requestedField", text(axis, "requestedField"));
+            item.put("field", text(axis, "field"));
+            item.put("label", text(axis, "label"));
+            item.put("schemaLabel", text(axis, "schemaLabel"));
+            item.put("schemaVerified", axis.path("schemaVerified").asBoolean(false));
+            item.put("schemaProbeStatus", text(axis, "schemaProbeStatus"));
+            result.add(item);
+        }
+        return result;
+    }
+
     private String safeMessage(String generated, String fallback) {
         String message = value(generated)
                 .replace("```", "")
-                .replaceAll("\\s+", " ")
+                .replaceAll("\\r\\n?", "\n")
+                .replaceAll("[\\t ]+", " ")
+                .replaceAll("\\n{3,}", "\n\n")
                 .trim();
         if (message.isBlank()
                 || message.startsWith("{")

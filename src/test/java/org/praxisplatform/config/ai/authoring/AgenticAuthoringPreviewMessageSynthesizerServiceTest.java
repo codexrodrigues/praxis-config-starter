@@ -62,6 +62,46 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeIncludesSemanticAxisVerificationInPreviewContext() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Criei uma pre-visualizacao governada com grafico por Severidade. Andamento nao foi materializado porque nao aparece no schema da fonte.");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        String result = service().synthesize(
+                request(),
+                intent(),
+                uiCompositionPlanWithSemanticAxes(),
+                true,
+                List.of(),
+                List.of("semantic-axis-schema-verification-unsupported-axis"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result).contains("Severidade");
+        org.mockito.Mockito.verify(providerManagementService).generateText(
+                promptCaptor.capture(),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        assertThat(promptCaptor.getValue())
+                .contains("If uiCompositionSummary.semanticAxes has unsupported axes")
+                .contains("\"semanticAxes\"")
+                .contains("\"requestedField\" : \"gravidade\"")
+                .contains("\"schemaLabel\" : \"Severidade\"")
+                .contains("\"schemaProbeStatus\" : \"unsupported\"")
+                .contains("\"field\" : \"andamento\"");
+    }
+
+
+    @Test
     void synthesizeFallsBackWhenProviderFails() {
         when(providerManagementService.generateText(
                 any(String.class),
@@ -229,6 +269,26 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", "/api/operations/vw-resumo-missoes");
         inputs.put("schemaPath", "/schemas/filtered?path=/api/operations/vw-resumo-missoes/all&operation=get&schemaType=response");
+        return plan;
+    }
+
+    private ObjectNode uiCompositionPlanWithSemanticAxes() {
+        ObjectNode plan = uiCompositionPlan();
+        ObjectNode diagnostics = plan.putObject("diagnostics");
+        ObjectNode severity = diagnostics.putArray("semanticAxes").addObject();
+        severity.put("concept", "severity");
+        severity.put("requestedField", "gravidade");
+        severity.put("field", "severidade");
+        severity.put("label", "Gravidade");
+        severity.put("schemaLabel", "Severidade");
+        severity.put("schemaVerified", true);
+        severity.put("schemaProbeStatus", "verified");
+        ObjectNode status = diagnostics.withArray("semanticAxes").addObject();
+        status.put("concept", "status");
+        status.put("field", "andamento");
+        status.put("label", "Andamento");
+        status.put("schemaVerified", false);
+        status.put("schemaProbeStatus", "unsupported");
         return plan;
     }
 }

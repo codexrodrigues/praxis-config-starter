@@ -50,19 +50,32 @@ Validated results:
 
 The local env loader tolerates BOM/CRLF in `.env.openai.local.sh` and never modifies the file.
 
+## Codex Agent Guardrail
+
+For Page Builder, assistant, browser visual E2E or any flow described as
+`live`, `real LLM`, `human simulation` or `without mocks`, the backend must use
+real provider credentials and a real embedding provider. Do not run these lanes
+with `EMBEDDING_PROVIDER=mock`.
+
+Use the mock embedding provider only for an explicitly deterministic non-LLM
+smoke that documents why retrieval/grounding is out of scope. If such a lane
+really needs it, make the opt-in visible with
+`ALLOW_MOCK_EMBEDDINGS_FOR_LOCAL_E2E=true`; never rely on a silent default.
+
 ## Backend
 
 Terminal 1:
 
 ```bash
 cd praxis-config-starter
-PROVIDER=openai ./tools/local-e2e/start-quickstart-local-e2e.sh
+PROVIDER=openai EMBEDDING_PROVIDER=openai ./tools/local-e2e/start-quickstart-local-e2e.sh
 ```
 
 The backend starts on `http://localhost:8088` with:
 
 - remote database configuration from quickstart;
-- `EMBEDDING_PROVIDER=mock`;
+- real LLM provider credentials from `.env.openai.local.sh`;
+- real embedding provider matching the selected live lane, for example `EMBEDDING_PROVIDER=openai`;
 - `PRAXIS_AI_STREAM_AUTH_MODE=signed-url-token`;
 - local tenant/user/env defaults for browser EventSource.
 
@@ -160,6 +173,10 @@ This validates:
 - persisted redaction of `contract.visibility=deny_for_llm` during LLM-facing context retrieval;
 - persisted exclusion of low-confidence relationships during `policyProfile=authoring` retrieval;
 - persisted counts for `domain_source`, `domain_context`, `domain_context_relationship`, `domain_contract` and `domain_resolution`.
+
+This persistent federation smoke is deterministic and does not validate Page
+Builder, assistant authoring, live LLM grounding or human simulation. Do not use
+its embedding-provider settings as precedent for the live assistant lanes above.
 
 The starter version override must match the local starter version being tested.
 Do not edit the quickstart `pom.xml` just to validate an unpublished starter;

@@ -49,6 +49,28 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "resourceSearchQuery": "pedidos de vendas para graficos",
                   "followUpKind": "none",
                   "assistantMessage": "Encontrei pedidos como base para o grafico. Quer usar esse recurso?",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "sales-dashboard",
+                    "layoutKind": "dashboard",
+                    "primaryComponent": "praxis-chart",
+                    "axes": [
+                      {
+                        "concept": "status",
+                        "field": "status",
+                        "label": "Status",
+                        "chartType": "bar",
+                        "orientation": "vertical",
+                        "metricAggregation": "count",
+                        "metricField": null,
+                        "metricLabel": "Total",
+                        "provenance": "llm-authored-semantic-axis"
+                      }
+                    ],
+                    "includeSummary": true,
+                    "includeDetailTable": true,
+                    "provenance": "llm-authored-semantic-decision"
+                  },
                   "quickReplies": [],
                   "clarificationQuestions": [],
                   "warnings": []
@@ -58,7 +80,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         AgenticAuthoringLlmIntentResolverService service =
                 new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
 
-        service.resolve(
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
                 new AgenticAuthoringIntentResolutionRequest(
                         "crie painel de visualizacao de graficos",
                         "page-builder",
@@ -90,7 +112,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 componentCapabilities(),
                 "tenant",
                 "user",
-                "local");
+                "local").orElseThrow();
 
         String prompt = promptCaptor.getValue();
         assertThat(prompt).contains("contextBundle:");
@@ -107,9 +129,15 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("\"searchApiResources\"");
         assertThat(prompt).contains("/api/praxis/config/ai/authoring/resource-candidates");
         assertThat(prompt).contains("Avoid terse labels such as \"alimentar tela\"");
-        assertThat(prompt).contains("Keep assistantMessage concise");
+        assertThat(prompt).contains("Format assistantMessage like a polished chat response");
+        assertThat(prompt).contains("author 2 to 4 quickReplies for this exact conversation");
         assertThat(prompt).contains("contextHints.presentation.bestFor");
         assertThat(prompt).contains("resourceSearchQuery");
+        assertThat(prompt).contains("visualizationDecision");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-chart");
+        assertThat(result.visualizationDecision().axes()).hasSize(1);
+        assertThat(result.visualizationDecision().axes().get(0).field()).isEqualTo("status");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(3600);
     }
 

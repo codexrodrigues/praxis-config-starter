@@ -7,6 +7,7 @@ param(
     [string] $JarPath = "",
     [string] $EnvFile = ".env.openai.local.ps1",
     [string] $JavaHome = "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21",
+    [string] $EmbeddingProvider = "",
     [string] $Origin = "http://localhost:4200",
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
@@ -105,6 +106,11 @@ try {
             throw "java.exe not found under JavaHome: $JavaHome"
         }
 
+        $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
+        if ($resolvedEmbeddingProvider -ieq "mock") {
+            throw "EMBEDDING_PROVIDER=mock is not valid for the live agentic authoring HTTP smoke suite. Use -EmbeddingProvider $Provider, or a documented deterministic non-LLM runner."
+        }
+
         $outLog = Join-Path $logDir ("agentic-authoring-smoke-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".out.log")
         $errLog = Join-Path $logDir ("agentic-authoring-smoke-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".err.log")
         $startScript = @"
@@ -126,7 +132,7 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_STREAM_PROCESSING_TIMEOUT_SECONDS = '$StreamProcessingTimeoutSeconds'
 `$env:PRAXIS_AI_SECURITY_CORPORATE_MODE = 'false'
 `$env:PRAXIS_AI_SECURITY_ALLOW_HEADER_IDENTITY_IN_LOCAL = 'true'
-`$env:EMBEDDING_PROVIDER = 'mock'
+`$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
 if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = `$env:PRAXIS_AI_OPENAI_MODEL
 }

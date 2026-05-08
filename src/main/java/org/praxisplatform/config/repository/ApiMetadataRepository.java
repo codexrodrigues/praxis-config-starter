@@ -13,7 +13,7 @@ public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> 
 
     Optional<ApiMetadata> findByPathAndMethod(String path, String method);
 
-
+    List<ApiMetadata> findAllByOperationIdAndMethod(String operationId, String method);
 
     @Query(value = """
         SELECT

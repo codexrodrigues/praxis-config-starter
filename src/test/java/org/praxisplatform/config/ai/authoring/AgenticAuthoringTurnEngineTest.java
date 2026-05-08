@@ -79,6 +79,193 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void exposesDecisionDiagnosticsOnTerminalResult() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        com.fasterxml.jackson.databind.node.ObjectNode llmDiagnostics = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode telemetry = llmDiagnostics.putObject("resolutionTelemetry");
+        telemetry.put("schemaVersion", "praxis-agentic-authoring-resolution-telemetry.v1");
+        telemetry.put("llmResolutionAttempted", true);
+        telemetry.put("llmResolved", false);
+        telemetry.put("fallbackPolicy", "fail-safe");
+        telemetry.put("keywordFallbackApplied", true);
+        telemetry.put("selectedCandidateUsesLexicalFallback", true);
+        telemetry.put("selectedCandidateUsesDomainAnchor", false);
+        telemetry.put("candidateSetContainsLexicalFallback", true);
+        telemetry.put("candidateSetContainsDomainAnchor", false);
+        AgenticAuthoringIntentResolutionResult intent = intentWithDiagnostics(
+                new AgenticAuthoringCandidate(
+                        "/api/acme/orders",
+                        "post",
+                        "/schemas/filtered?path=/api/acme/orders&operation=post&schemaType=request",
+                        "/api/acme/orders",
+                        "POST",
+                        0.61,
+                        "lexical fail-safe candidate",
+                        List.of("api-metadata", "lexical-fallback")),
+                llmDiagnostics);
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(intent);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Crie um dashboard de pedidos"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(sink.types.get(sink.types.size() - 1)).isEqualTo("result");
+        com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean())
+                .isFalse();
+        com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("schemaVersion").asText())
+                .isEqualTo("praxis-agentic-authoring-decision-diagnostics.v1");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticDecisionSchemaVersion").asText())
+                .isEqualTo("praxis-agentic-authoring-semantic-decision.v1");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticDecisionReviewRequired").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("retrievalSource").asText())
+                .isEqualTo("lexical_fallback");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("llmResolutionAttempted").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("keywordFallbackApplied").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("selectedCandidateUsesLexicalFallback").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("selectedResourcePath").asText())
+                .isEqualTo("/api/acme/orders");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("reviewReason").asText())
+                .isEqualTo("keyword-fallback-fail-safe");
+        org.assertj.core.api.Assertions.assertThat(result.path("intentResolution").path("semanticDecision").path("selectedResource").path("resourcePath").asText())
+                .isEqualTo("/api/acme/orders");
+    }
+
+    @Test
+    void blocksAutomaticApplyWhenPreviewComesFromHardcodedReferenceProvider() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:quickstart-payroll-table"),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Prefiro graficos"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("uiCompositionPlanUsesReferenceProvider").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("uiCompositionPlanUsesHardcodedAnchor").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("reviewReason").asText())
+                .isEqualTo("ui-composition-hardcoded-reference-provider");
+    }
+
+    @Test
+    void exposesVerifiedSemanticAxesInDecisionDiagnostics() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        uiCompositionPlanWithSemanticAxis(true, "verified"),
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Crie um dashboard por gravidade"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isTrue();
+        com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxisCount").asInt()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxisVerifiedCount").asInt()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxisPendingCount").asInt()).isEqualTo(0);
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxesSchemaVerified").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxes").path(0).path("field").asText())
+                .isEqualTo("gravidade");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxes").path(0).path("schemaVerified").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean()).isFalse();
+    }
+
+    @Test
+    void blocksAutomaticApplyWhenSemanticAxesAreUnverified() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of("semantic-axis-schema-verification-pending"),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        uiCompositionPlanWithSemanticAxis(false, "pending"),
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Crie um dashboard por gravidade"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("uiCompositionPlanHasUnverifiedSemanticAxes").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxisCount").asInt()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxisVerifiedCount").asInt()).isEqualTo(0);
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxisPendingCount").asInt()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticAxesSchemaVerified").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("reviewReason").asText())
+                .isEqualTo("ui-composition-semantic-axis-schema-verification-pending");
+    }
+
+    @Test
     void skipsPreviewWhenTerminalReachedAfterIntentResolution() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -700,9 +887,8 @@ class AgenticAuthoringTurnEngineTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("canApply").asBoolean()).isFalse();
                     org.assertj.core.api.Assertions.assertThat(node.path("quickReplies"))
                             .extracting(reply -> reply.path("id").asText())
-                            .contains(
-                                    "resource-api-human-resources-vw-analytics-folha-pagamento",
-                                    "resource-api-operations-incidentes");
+                            .contains("resource-api-human-resources-vw-analytics-folha-pagamento")
+                            .doesNotContain("resource-api-operations-incidentes");
                     org.assertj.core.api.Assertions.assertThat(node.path("quickReplies").get(0)
                                     .path("contextHints")
                                     .path("presentation")
@@ -1017,6 +1203,21 @@ class AgenticAuthoringTurnEngineTest {
                 null);
     }
 
+    private com.fasterxml.jackson.databind.node.ObjectNode uiCompositionPlanWithSemanticAxis(
+            boolean schemaVerified,
+            String schemaProbeStatus) {
+        com.fasterxml.jackson.databind.node.ObjectNode uiCompositionPlan = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode diagnostics = uiCompositionPlan.putObject("diagnostics");
+        com.fasterxml.jackson.databind.node.ObjectNode axis = diagnostics.putArray("semanticAxes").addObject();
+        axis.put("concept", "severity");
+        axis.put("field", "gravidade");
+        axis.put("label", "Gravidade");
+        axis.put("schemaVerified", schemaVerified);
+        axis.put("schemaProbeStatus", schemaProbeStatus);
+        axis.put("provenance", "user-prompt-semantic-axis");
+        return uiCompositionPlan;
+    }
+
     private AgenticAuthoringIntentResolutionResult validIntent() {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -1037,6 +1238,33 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult intentWithDiagnostics(
+            AgenticAuthoringCandidate selectedCandidate,
+            com.fasterxml.jackson.databind.JsonNode llmDiagnostics) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_chart",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                selectedCandidate,
+                selectedCandidate == null ? List.of() : List.of(selectedCandidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                llmDiagnostics);
     }
 
     private AgenticAuthoringIntentResolutionResult validIntentWithSelectedCandidate() {

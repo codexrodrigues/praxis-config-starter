@@ -75,15 +75,25 @@ try {
     } | ConvertTo-Json -Compress
 
     $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
+    $intent = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/api/praxis/config/ai/authoring/intent-resolution" `
+        -Headers $headers `
+        -Body $previewBody `
+        -TimeoutSec 90
+    $previewRequest = $previewBody | ConvertFrom-Json
+    $previewRequest | Add-Member -NotePropertyName intentResolution -NotePropertyValue $intent
+    $previewBodyWithIntent = $previewRequest | ConvertTo-Json -Depth 40 -Compress
     $preview = Invoke-RestMethod `
         -Method Post `
         -Uri "$base/api/praxis/config/ai/authoring/page-preview" `
         -Headers $headers `
-        -Body $previewBody `
+        -Body $previewBodyWithIntent `
         -TimeoutSec 90
 
     $applyBody = @{
         compiledFormPatch = $preview.compiledFormPatch
+        semanticDecision = $intent.semanticDecision
         componentType = $ComponentType
         componentId = $ComponentId
         scope = "user"

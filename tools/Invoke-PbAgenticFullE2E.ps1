@@ -6,6 +6,7 @@ param(
     [string] $JarPath = "",
     [string] $EnvFile = ".env.openai.local.ps1",
     [string] $JavaHome = "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21",
+    [string] $EmbeddingProvider = "",
     [int] $BackendPort = 8088,
     [int] $UiPort = 4003,
     [int] $StartupTimeoutSec = 180,
@@ -76,6 +77,11 @@ try {
     if ($null -ne (Get-ListenPid $BackendPort)) { throw "Port $BackendPort is already in use." }
     if ($null -ne (Get-ListenPid $UiPort)) { throw "Port $UiPort is already in use." }
 
+    $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
+    if ($resolvedEmbeddingProvider -ieq "mock") {
+        throw "EMBEDDING_PROVIDER=mock is not valid for the Page Builder live LLM/browser E2E. Use -EmbeddingProvider $Provider, or a documented deterministic non-LLM runner."
+    }
+
     $starterAuthoringRoot = Join-Path $starterRoot "docs\ai\agentic-authoring"
     $workspaceAuthoringRoot = Join-Path $workspaceRoot "docs\ai\agentic-authoring"
     $authoringRoot = if (Test-Path -LiteralPath (Join-Path $starterAuthoringRoot "contracts")) {
@@ -111,7 +117,7 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_SECURITY_LOCAL_DEFAULT_ENVIRONMENT = 'local'
 `$env:PRAXIS_AI_STREAM_AUTH_MODE = 'signed-url-token'
 `$env:PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET = 'codex-local-e2e-token-secret-20260421'
-`$env:EMBEDDING_PROVIDER = 'mock'
+`$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
 if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = `$env:PRAXIS_AI_OPENAI_MODEL }
 & '$JavaHome\bin\java.exe' -jar '$JarPath'
 "@

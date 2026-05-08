@@ -55,7 +55,10 @@ final class AgenticAuthoringIntentResolutionContext {
                 intentResolution.clarificationQuestions(),
                 List.copyOf(warnings),
                 intentResolution.failureCodes(),
-                derivedSummary);
+                derivedSummary,
+                intentResolution.llmDiagnostics(),
+                intentResolution.visualizationDecision(),
+                intentResolution.semanticDecision());
     }
 
     private boolean hasFieldAwareFormSummary(JsonNode summary) {

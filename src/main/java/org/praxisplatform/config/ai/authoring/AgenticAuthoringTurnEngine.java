@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,7 +67,16 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink) {
+        return execute(request, principalContext, eventSink, null);
+    }
+
+    AgenticAuthoringTurnOutcome execute(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            String schemaBaseUrl) {
         AgenticAuthoringTurnState state = initialState(request);
+        request = withActiveDecisionContext(request, state.activeSemanticDecision());
         try {
             eventSink.append("thought.step", Map.of(
                     "phase", "context.bundle",
@@ -133,11 +143,19 @@ public class AgenticAuthoringTurnEngine {
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.plan",
                         "summary", "Generating page preview plan."));
-                preview = previewService.preview(
-                        toPlanRequest(previewRequest, intentResolution),
-                        principalContext.tenantId(),
-                        principalContext.userId(),
-                        principalContext.environment());
+                AgenticAuthoringPlanRequest planRequest = toPlanRequest(previewRequest, intentResolution);
+                preview = StringUtils.hasText(schemaBaseUrl)
+                        ? previewService.preview(
+                                planRequest,
+                                principalContext.tenantId(),
+                                principalContext.userId(),
+                                principalContext.environment(),
+                                schemaBaseUrl)
+                        : previewService.preview(
+                                planRequest,
+                                principalContext.tenantId(),
+                                principalContext.userId(),
+                                principalContext.environment());
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.compile",
                         "summary", preview.valid() ? "Compiled preview payload." : "Preview requires backend repair classification.",
@@ -147,18 +165,22 @@ public class AgenticAuthoringTurnEngine {
                         principalContext,
                         eventSink,
                         intentResolution,
-                        preview);
+                        preview,
+                        schemaBaseUrl);
             }
             String assistantMessage = advisoryCatalogAssistantMessage(request, route, intentResolution);
             if (!StringUtils.hasText(assistantMessage)) {
                 assistantMessage = previewAssistantMessage(preview, intentResolution);
             }
-            AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", Map.of(
-                    "intentResolution", intentResolution,
-                    "preview", preview != null ? preview : objectMapper.createObjectNode(),
-                    "assistantMessage", safeText(assistantMessage),
-                    "quickReplies", terminalQuickReplies(intentResolution, businessCatalogDiscovery),
-                    "canApply", preview != null && preview.valid()));
+            Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, preview);
+            Map<String, Object> resultPayload = new LinkedHashMap<>();
+            resultPayload.put("intentResolution", intentResolution);
+            resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
+            resultPayload.put("assistantMessage", safeText(assistantMessage));
+            resultPayload.put("quickReplies", terminalQuickReplies(intentResolution, businessCatalogDiscovery));
+            resultPayload.put("canApply", preview != null && preview.valid() && !requiresDecisionReview(decisionDiagnostics));
+            resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+            AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
             return terminalResult.appendedType("result")
                     ? AgenticAuthoringTurnOutcome.completed(state)
                     : AgenticAuthoringTurnOutcome.noop(state);
@@ -254,8 +276,7 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution) {
         StringBuilder query = new StringBuilder(safeText(request.userPrompt()));
-        query.append(" analytics dashboard indicadores graficos kpis");
-        query.append(" pessoas folha pagamento operacoes incidentes ativos riscos");
+        query.append(" analytics dashboard indicadores graficos kpis metricas tendencias agregacoes");
         if (intentResolution != null && intentResolution.candidates() != null) {
             intentResolution.candidates().stream()
                     .map(AgenticAuthoringCandidate::resourcePath)
@@ -326,7 +347,8 @@ public class AgenticAuthoringTurnEngine {
                 request.pendingClarification(),
                 request.attachmentSummaries(),
                 contextHints,
-                request.componentCapabilities());
+                request.componentCapabilities(),
+                request.activeSemanticDecision());
     }
 
     private AgenticAuthoringProjectKnowledgeQuery projectKnowledgeQuery(
@@ -411,12 +433,175 @@ public class AgenticAuthoringTurnEngine {
         return diagnostics;
     }
 
+    private Map<String, Object> decisionDiagnostics(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("schemaVersion", "praxis-agentic-authoring-decision-diagnostics.v1");
+        if (intentResolution == null) {
+            diagnostics.put("retrievalSource", AgenticAuthoringCandidateProvenancePolicy.NONE);
+            diagnostics.put("llmResolutionAttempted", false);
+            diagnostics.put("llmResolved", false);
+            diagnostics.put("keywordFallbackApplied", false);
+            diagnostics.put("semanticPolicyApplied", false);
+            diagnostics.put("selectedCandidateUsesLexicalFallback", false);
+            diagnostics.put("selectedCandidateUsesDomainAnchor", false);
+            diagnostics.put("uiCompositionPlanUsesReferenceProvider", uiCompositionPlanUsesReferenceProvider(preview));
+            diagnostics.put("uiCompositionPlanUsesHardcodedAnchor", uiCompositionPlanUsesHardcodedAnchor(preview));
+            diagnostics.put("uiCompositionPlanHasUnverifiedSemanticAxes", uiCompositionPlanHasUnverifiedSemanticAxes(preview));
+            putSemanticAxisDiagnostics(diagnostics, preview);
+            diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
+            return diagnostics;
+        }
+        diagnostics.put("operationKind", safeText(intentResolution.operationKind()));
+        diagnostics.put("artifactKind", safeText(intentResolution.artifactKind()));
+        AgenticAuthoringSemanticDecision semanticDecision = intentResolution.semanticDecision();
+        if (semanticDecision != null) {
+            diagnostics.put("semanticDecisionSchemaVersion", safeText(semanticDecision.schemaVersion()));
+            diagnostics.put("semanticDecisionId", safeText(semanticDecision.decisionId()));
+            diagnostics.put("semanticDecisionReviewRequired", semanticDecision.reviewRequired());
+            diagnostics.put("semanticDecisionReviewReason", safeText(semanticDecision.reviewReason()));
+            diagnostics.put("semanticDecisionRefinementOf", safeText(semanticDecision.refinementOf()));
+            diagnostics.put("semanticDecisionPreviousDecisionId", safeText(semanticDecision.previousDecisionId()));
+            diagnostics.put("semanticDecisionVisualIntent", safeText(semanticDecision.visualIntent()));
+        }
+        diagnostics.put("valid", intentResolution.valid());
+        diagnostics.put("retrievalSource", AgenticAuthoringCandidateProvenancePolicy.retrievalSource(
+                intentResolution.selectedCandidate(),
+                intentResolution.candidates()));
+        AgenticAuthoringCandidate selectedCandidate = intentResolution.selectedCandidate();
+        if (selectedCandidate != null && StringUtils.hasText(selectedCandidate.resourcePath())) {
+            diagnostics.put("selectedResourcePath", selectedCandidate.resourcePath());
+        }
+        JsonNode telemetry = intentResolution.llmDiagnostics() == null
+                ? objectMapper.missingNode()
+                : intentResolution.llmDiagnostics().path("resolutionTelemetry");
+        diagnostics.put("llmResolutionAttempted", telemetry.path("llmResolutionAttempted").asBoolean(false));
+        diagnostics.put("llmResolved", telemetry.path("llmResolved").asBoolean(false));
+        diagnostics.put("fallbackPolicy", safeText(telemetry.path("fallbackPolicy").asText("")));
+        diagnostics.put("keywordFallbackApplied", telemetry.path("keywordFallbackApplied").asBoolean(false));
+        diagnostics.put("semanticPolicyApplied", telemetry.path("semanticPolicyApplied").asBoolean(false));
+        diagnostics.put("selectedCandidateUsesLexicalFallback",
+                telemetry.path("selectedCandidateUsesLexicalFallback").asBoolean(false));
+        diagnostics.put("selectedCandidateUsesDomainAnchor",
+                telemetry.path("selectedCandidateUsesDomainAnchor").asBoolean(false));
+        diagnostics.put("candidateSetContainsLexicalFallback",
+                telemetry.path("candidateSetContainsLexicalFallback").asBoolean(false));
+        diagnostics.put("candidateSetContainsDomainAnchor",
+                telemetry.path("candidateSetContainsDomainAnchor").asBoolean(false));
+        diagnostics.put("uiCompositionPlanUsesReferenceProvider", uiCompositionPlanUsesReferenceProvider(preview));
+        diagnostics.put("uiCompositionPlanUsesHardcodedAnchor", uiCompositionPlanUsesHardcodedAnchor(preview));
+        diagnostics.put("uiCompositionPlanHasUnverifiedSemanticAxes", uiCompositionPlanHasUnverifiedSemanticAxes(preview));
+        putSemanticAxisDiagnostics(diagnostics, preview);
+        diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
+        String reviewReason = decisionReviewReason(diagnostics);
+        if (!reviewReason.isBlank()) {
+            diagnostics.put("reviewReason", reviewReason);
+        }
+        return diagnostics;
+    }
+
+    private boolean uiCompositionPlanUsesReferenceProvider(AgenticAuthoringPreviewResult preview) {
+        return preview != null
+                && preview.warnings() != null
+                && preview.warnings().stream()
+                .anyMatch(warning -> warning != null
+                        && (warning.startsWith("ui-composition-plan-provider:quickstart-")
+                        || warning.startsWith("ui-composition-plan-provider:selected-resource-")
+                        || warning.startsWith("ui-composition-plan-provider:local-editorial-")));
+    }
+
+    private boolean uiCompositionPlanUsesHardcodedAnchor(AgenticAuthoringPreviewResult preview) {
+        return preview != null
+                && preview.warnings() != null
+                && preview.warnings().stream()
+                .anyMatch(warning -> warning != null
+                        && warning.startsWith("ui-composition-plan-provider:quickstart-"));
+    }
+
+    private boolean uiCompositionPlanHasUnverifiedSemanticAxes(AgenticAuthoringPreviewResult preview) {
+        return preview != null
+                && preview.warnings() != null
+                && preview.warnings().contains("semantic-axis-schema-verification-pending");
+    }
+
+    private void putSemanticAxisDiagnostics(Map<String, Object> diagnostics, AgenticAuthoringPreviewResult preview) {
+        JsonNode axes = preview == null || preview.uiCompositionPlan() == null
+                ? objectMapper.missingNode()
+                : preview.uiCompositionPlan().path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            diagnostics.put("semanticAxisCount", 0);
+            diagnostics.put("semanticAxisVerifiedCount", 0);
+            diagnostics.put("semanticAxisPendingCount", 0);
+            diagnostics.put("semanticAxesSchemaVerified", false);
+            return;
+        }
+        int total = 0;
+        int verified = 0;
+        List<Map<String, Object>> axisSummaries = new ArrayList<>();
+        for (JsonNode axis : axes) {
+            total++;
+            boolean schemaVerified = axis.path("schemaVerified").asBoolean(false);
+            if (schemaVerified) {
+                verified++;
+            }
+            Map<String, Object> axisSummary = new LinkedHashMap<>();
+            axisSummary.put("concept", safeText(axis.path("concept").asText("")));
+            axisSummary.put("field", safeText(axis.path("field").asText("")));
+            axisSummary.put("label", safeText(axis.path("label").asText("")));
+            axisSummary.put("schemaVerified", schemaVerified);
+            axisSummary.put("schemaProbeStatus", safeText(axis.path("schemaProbeStatus").asText("")));
+            axisSummary.put("provenance", safeText(axis.path("provenance").asText("")));
+            axisSummaries.add(axisSummary);
+        }
+        diagnostics.put("semanticAxisCount", total);
+        diagnostics.put("semanticAxisVerifiedCount", verified);
+        diagnostics.put("semanticAxisPendingCount", Math.max(0, total - verified));
+        diagnostics.put("semanticAxesSchemaVerified", total > 0 && total == verified);
+        diagnostics.put("semanticAxes", axisSummaries);
+    }
+
+    private boolean requiresDecisionReview(Map<String, Object> diagnostics) {
+        if (diagnostics == null || diagnostics.isEmpty()) {
+            return false;
+        }
+        return Boolean.TRUE.equals(diagnostics.get("keywordFallbackApplied"))
+                || Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewRequired"))
+                || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))
+                || Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanUsesHardcodedAnchor"))
+                || Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanHasUnverifiedSemanticAxes"));
+    }
+
+    private String decisionReviewReason(Map<String, Object> diagnostics) {
+        if (diagnostics == null || diagnostics.isEmpty()) {
+            return "";
+        }
+        if (Boolean.TRUE.equals(diagnostics.get("keywordFallbackApplied"))) {
+            return "keyword-fallback-fail-safe";
+        }
+        if (Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewRequired"))) {
+            String reason = safeText((String) diagnostics.get("semanticDecisionReviewReason"));
+            return reason.isBlank() ? "semantic-decision-review-required" : reason;
+        }
+        if (Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))) {
+            return "resource-selection-domain-anchor";
+        }
+        if (Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanUsesHardcodedAnchor"))) {
+            return "ui-composition-hardcoded-reference-provider";
+        }
+        if (Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanHasUnverifiedSemanticAxes"))) {
+            return "ui-composition-semantic-axis-schema-verification-pending";
+        }
+        return "";
+    }
+
     private AgenticAuthoringPreviewResult maybeRepairPreview(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringPreviewResult preview) throws Exception {
+            AgenticAuthoringPreviewResult preview,
+            String schemaBaseUrl) throws Exception {
         String repairClassification = AgenticAuthoringRepairClassificationPolicy.classify(intentResolution, preview);
         if (!AgenticAuthoringRepairClassificationPolicy.RETRYABLE.equals(repairClassification)
                 || eventSink.terminalReached()) {
@@ -432,11 +617,20 @@ public class AgenticAuthoringTurnEngine {
                         "maxAttempts", MAX_REPAIR_ATTEMPTS_PER_PHASE,
                         "failureCodeCount", preview.failureCodes() == null ? 0 : preview.failureCodes().size(),
                         "warningCount", preview.warnings() == null ? 0 : preview.warnings().size())));
-        AgenticAuthoringPreviewResult repairedPreview = previewService.preview(
-                toRepairPlanRequest(request, intentResolution, preview, repairClassification),
-                principalContext.tenantId(),
-                principalContext.userId(),
-                principalContext.environment());
+        AgenticAuthoringPlanRequest repairRequest =
+                toRepairPlanRequest(request, intentResolution, preview, repairClassification);
+        AgenticAuthoringPreviewResult repairedPreview = StringUtils.hasText(schemaBaseUrl)
+                ? previewService.preview(
+                        repairRequest,
+                        principalContext.tenantId(),
+                        principalContext.userId(),
+                        principalContext.environment(),
+                        schemaBaseUrl)
+                : previewService.preview(
+                        repairRequest,
+                        principalContext.tenantId(),
+                        principalContext.userId(),
+                        principalContext.environment());
         eventSink.append("thought.step", Map.of(
                 "phase", "preview.compile",
                 "summary", repairedPreview.valid()
@@ -536,7 +730,8 @@ public class AgenticAuthoringTurnEngine {
                 request.pendingClarification(),
                 request.attachmentSummaries(),
                 contextHints,
-                request.componentCapabilities());
+                request.componentCapabilities(),
+                request.activeSemanticDecision());
     }
 
     private String domainCatalogHint(AgenticAuthoringTurnStreamRequest request, String fieldName) {
@@ -608,7 +803,37 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(
                 request.currentPage(),
                 request.selectedWidgetKey());
-        return new AgenticAuthoringTurnState("component_authoring", target);
+        return new AgenticAuthoringTurnState("component_authoring", target, request.activeSemanticDecision());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withActiveDecisionContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision activeDecision) {
+        if (activeDecision == null) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("activeSemanticDecision", objectMapper.valueToTree(activeDecision));
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                contextHints,
+                request.componentCapabilities(),
+                activeDecision);
     }
 
     private AgenticAuthoringIntentResolutionRequest toIntentRequest(AgenticAuthoringTurnStreamRequest request) {
@@ -627,7 +852,8 @@ public class AgenticAuthoringTurnEngine {
                 request.conversationMessages(),
                 request.pendingClarification(),
                 request.attachmentSummaries(),
-                request.contextHints());
+                request.contextHints(),
+                request.activeSemanticDecision());
     }
 
     private AgenticAuthoringPlanRequest toPlanRequest(
@@ -838,6 +1064,7 @@ public class AgenticAuthoringTurnEngine {
                 "targetComponentId", nonBlank(request.targetComponentId(), ""),
                 "selectedWidgetKey", nonBlank(request.selectedWidgetKey(), ""),
                 "hasContextHints", request.contextHints() != null && !request.contextHints().isNull(),
+                "hasActiveSemanticDecision", request.activeSemanticDecision() != null,
                 "componentCapabilityCatalogs", request.componentCapabilities() != null
                         && request.componentCapabilities().catalogs() != null
                         ? request.componentCapabilities().catalogs().size()
@@ -852,10 +1079,13 @@ public class AgenticAuthoringTurnEngine {
         return value != null ? value : "";
     }
 
-    record AgenticAuthoringTurnState(String routeClass, AgenticAuthoringTarget structuralTarget) {
+    record AgenticAuthoringTurnState(
+            String routeClass,
+            AgenticAuthoringTarget structuralTarget,
+            AgenticAuthoringSemanticDecision activeSemanticDecision) {
 
         AgenticAuthoringTurnState withRouteClass(String routeClass) {
-            return new AgenticAuthoringTurnState(routeClass, structuralTarget);
+            return new AgenticAuthoringTurnState(routeClass, structuralTarget, activeSemanticDecision);
         }
     }
 

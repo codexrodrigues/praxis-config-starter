@@ -100,7 +100,7 @@ class AiProviderManagementServiceTest {
 
         AiProviderCatalogResponse response = service.listCatalog();
 
-        assertEquals(4, response.getProviders().size());
+        assertEquals(3, response.getProviders().size());
         assertTrue(response.getProviders().stream()
                 .anyMatch(item -> "gemini".equals(item.getId())
                         && item.isSupportsTextStreaming()
@@ -112,6 +112,8 @@ class AiProviderManagementServiceTest {
         assertTrue(response.getProviders().stream()
                 .anyMatch(item -> "xai".equals(item.getId())
                         && !item.isSupportsTextStreaming()));
+        assertTrue(response.getProviders().stream()
+                .noneMatch(item -> "mock".equals(item.getId())));
     }
 
     @Test

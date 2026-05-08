@@ -40,6 +40,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringSemanticDecision;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.praxisplatform.config.dto.AgenticAuthoringTurnStreamStartResponse;
@@ -300,7 +301,7 @@ class AgenticAuthoringControllerTest {
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance()
         );
-        when(previewService.preview(request, "tenant", "user", "local")).thenReturn(expected);
+        when(previewService.preview(request, "tenant", "user", "local", null)).thenReturn(expected);
 
         ResponseEntity<?> response = controller().previewPage(request, "tenant", "user", "local");
 
@@ -315,7 +316,8 @@ class AgenticAuthoringControllerTest {
                 "praxis-dynamic-page",
                 "page",
                 "user",
-                null);
+                null,
+                validSemanticDecision());
         AgenticAuthoringApplyResult expected = new AgenticAuthoringApplyResult(
                 true,
                 "praxis-dynamic-page",
@@ -343,7 +345,8 @@ class AgenticAuthoringControllerTest {
                 "praxis-dynamic-page",
                 "page",
                 "user",
-                null);
+                null,
+                validSemanticDecision());
         when(applyService.apply(request, "tenant", "user", "local", "author", "\"stale\""))
                 .thenThrow(new UserConfigService.PreconditionFailedException("stale configuration"));
 
@@ -441,5 +444,21 @@ class AgenticAuthoringControllerTest {
                 turnStreamService,
                 principalContextResolver,
                 streamAccessTokenService);
+    }
+
+    private AgenticAuthoringSemanticDecision validSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-form",
+                "create",
+                "form",
+                "create_artifact",
+                null,
+                null,
+                null,
+                false,
+                "",
+                "",
+                "");
     }
 }

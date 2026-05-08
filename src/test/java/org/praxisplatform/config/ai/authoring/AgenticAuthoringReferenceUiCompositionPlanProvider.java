@@ -14,9 +14,9 @@ import java.util.Optional;
 /**
  * Reference plan provider used by the Quickstart-hosted authoring demo.
  *
- * <p>This provider is intentionally narrow: it recognizes the Human Resources master-detail
- * benchmark that the official Quickstart exposes today and returns a {@code UiCompositionPlan}
- * instead of asking the minimal-form compiler to invent multi-widget page JSON.</p>
+ * <p>This provider is intentionally bounded to the official Quickstart surfaces and returns a
+ * {@code UiCompositionPlan} instead of asking the minimal-form compiler to invent page JSON for
+ * component/page authoring intents.</p>
  */
 public class AgenticAuthoringReferenceUiCompositionPlanProvider implements AgenticAuthoringUiCompositionPlanProvider {
 
@@ -25,6 +25,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     private static final String PAYROLL_ANALYTICS = "/api/human-resources/vw-analytics-folha-pagamento";
     private static final String PAYROLL = "/api/human-resources/folhas-pagamento";
     private static final String MISSION_SUMMARY = "/api/operations/vw-resumo-missoes";
+    private static final String PROCUREMENT_PRODUCTS = "/api/procurement/products";
     private static final String PAYROLL_DRILLDOWN_DETAIL_KEY = "payroll-drilldown-list";
     private static final PayrollBreakdown DEPARTMENT_BREAKDOWN =
             new PayrollBreakdown("departamento", "Departamento", "department", "selectedDepartment", "group-by", "bar");
@@ -107,6 +108,10 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         Optional<AgenticAuthoringUiCompositionPlanResult> selectedPayrollTable = selectedPayrollTable(request);
         if (selectedPayrollTable.isPresent()) {
             return selectedPayrollTable;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceTable = selectedResourceTable(request);
+        if (selectedResourceTable.isPresent()) {
+            return selectedResourceTable;
         }
         Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceDashboard = selectedResourceDashboard(request);
         if (selectedResourceDashboard.isPresent()) {
@@ -403,6 +408,19 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 emptyCompiledFormPatch()));
     }
 
+    private Optional<AgenticAuthoringUiCompositionPlanResult> selectedResourceTable(AgenticAuthoringPlanRequest request) {
+        if (!supportsSelectedResourceTable(request)) {
+            return Optional.empty();
+        }
+        AgenticAuthoringCandidate candidate = request.intentResolution().selectedCandidate();
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:selected-resource-table"),
+                selectedResourceTablePlan(request, candidate),
+                emptyCompiledFormPatch()));
+    }
+
     private boolean supportsSelectedPayrollTable(AgenticAuthoringPlanRequest request) {
         if (request == null || request.intentResolution() == null) {
             return false;
@@ -414,6 +432,20 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 && "create".equals(intent.operationKind())
                 && "table".equals(intent.artifactKind())
                 && (resourcePath.equals(PAYROLL) || resourcePath.startsWith(PAYROLL + "/"));
+    }
+
+    private boolean supportsSelectedResourceTable(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.intentResolution() == null
+                || request.intentResolution().selectedCandidate() == null) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
+        return intent.valid()
+                && "create".equals(intent.operationKind())
+                && "table".equals(intent.artifactKind())
+                && candidate.resourcePath() != null
+                && !candidate.resourcePath().isBlank();
     }
 
     private boolean supportsSelectedResourceDashboard(AgenticAuthoringPlanRequest request) {
@@ -1552,6 +1584,31 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ArrayNode widgets = plan.putArray("widgets");
         addSelectedResourceTable(widgets, candidate, widgetKey);
         addSelectedResourceSummary(widgets, candidate, widgetKey + "-summary");
+        plan.putArray("bindings");
+        return plan;
+    }
+
+    private ObjectNode selectedResourceTablePlan(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringCandidate candidate) {
+        String widgetKey = resourceWidgetKey(candidate.resourcePath());
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.put("layoutPreset", "single-table-page");
+        addSourceRefs(plan, request, candidate);
+
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "96px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        canvas.put("collisionPolicy", "block");
+        addCanvasItem(canvas.putObject("items"), widgetKey, 1, 1, 12, 7);
+
+        ArrayNode widgets = plan.putArray("widgets");
+        addSelectedResourceTable(widgets, candidate, widgetKey);
         plan.putArray("bindings");
         return plan;
     }
@@ -2777,7 +2834,20 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
             addPayrollTableColumns(columns);
         } else if (EMPLOYEES.equals(resourcePath)) {
             addEmployeeTableColumns(columns);
+        } else if (PROCUREMENT_PRODUCTS.equals(resourcePath)) {
+            addProcurementProductTableColumns(columns);
         }
+    }
+
+    private void addProcurementProductTableColumns(ArrayNode columns) {
+        addTableColumn(columns, "sku", "SKU", "text");
+        addTableColumn(columns, "name", "Produto", "text");
+        addTableColumn(columns, "categoryName", "Categoria", "text");
+        addTableColumn(columns, "stockAvailable", "Estoque", "number");
+        addTableColumn(columns, "unitOfMeasure", "Unidade", "text");
+        addChipTableColumn(columns, "status", "Disponibilidade", "chip", "success", "inventory_2");
+        addTableColumn(columns, "disabledReason", "Observacao", "text");
+        addActionMenuColumn(columns);
     }
 
     private void addPayrollDrillDownChart(ArrayNode widgets) {

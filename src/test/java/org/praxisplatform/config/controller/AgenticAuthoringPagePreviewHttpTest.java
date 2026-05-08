@@ -271,7 +271,7 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("valid").asBoolean()).isTrue();
         assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
                 .isEqualTo("chart-drilldown-dashboard");
-        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(3);
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
         assertThat(body.path("uiCompositionPlan").path("widgets").get(0).path("componentId").asText())
                 .isEqualTo("praxis-chart");
         assertThat(body.path("uiCompositionPlan").path("bindings")).hasSize(3);
@@ -569,7 +569,7 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("valid").asBoolean()).isTrue();
         assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
                 .isEqualTo("chart-drilldown-dashboard");
-        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(3);
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
         assertThat(body.path("warnings")).extracting(JsonNode::asText)
                 .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
     }
@@ -760,7 +760,7 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("valid").asBoolean()).isTrue();
         assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
                 .isEqualTo("chart-drilldown-dashboard");
-        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(3);
+        assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
         assertThat(body.path("warnings")).extracting(JsonNode::asText)
                 .contains("ui-composition-plan-provider:quickstart-payroll-chart-drilldown");
     }
@@ -807,6 +807,54 @@ class AgenticAuthoringPagePreviewHttpTest {
                 .isEqualTo("/api/human-resources/folhas-pagamento");
         assertThat(body.path("warnings")).extracting(JsonNode::asText)
                 .contains("ui-composition-plan-provider:quickstart-payroll-table");
+    }
+
+    @Test
+    void pagePreviewCanReturnSelectedResourceTableUiCompositionPlan() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Quero listar itens comprados, categoria, preco, disponibilidade e estoque.");
+        request.set("intentResolution", procurementProductsTableIntent());
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("failureCodes")).isEmpty();
+        assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
+                .isEqualTo("single-table-page");
+        JsonNode table = body.path("uiCompositionPlan").path("widgets").get(0);
+        assertThat(table.path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(table.path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/procurement/products");
+        assertThat(table.path("inputs").path("config").path("columns"))
+                .extracting(column -> column.path("field").asText())
+                .contains("categoryName", "stockAvailable", "status");
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains("ui-composition-plan-provider:selected-resource-table");
     }
 
     @Test
@@ -1035,6 +1083,37 @@ class AgenticAuthoringPagePreviewHttpTest {
         candidate.put("submitMethod", "POST");
         candidate.put("score", 0.79d);
         candidate.put("reason", "api_metadata lexical match");
+        candidate.putArray("evidence").add("api-metadata");
+        intent.putArray("candidates").add(candidate.deepCopy());
+        ObjectNode gate = intent.putObject("gate");
+        gate.put("gateId", "candidate-eligibility@0.1.0");
+        gate.put("status", "eligible");
+        gate.putArray("messages");
+        intent.putArray("quickReplies");
+        intent.putArray("clarificationQuestions");
+        intent.putArray("warnings");
+        intent.putArray("failureCodes");
+        intent.putObject("currentPageSummary");
+        return intent;
+    }
+
+    private ObjectNode procurementProductsTableIntent() {
+        ObjectNode intent = objectMapper.createObjectNode();
+        intent.put("valid", true);
+        intent.put("operationKind", "create");
+        intent.put("artifactKind", "table");
+        intent.put("changeKind", "create_artifact");
+        intent.put("authoringProfile", "ui-composition-plan@0.1.0");
+        intent.put("targetApp", "praxis-ui-angular");
+        intent.put("targetComponentId", "praxis-dynamic-page-builder");
+        ObjectNode candidate = intent.putObject("selectedCandidate");
+        candidate.put("resourcePath", "/api/procurement/products");
+        candidate.put("operation", "post");
+        candidate.put("schemaUrl", "/schemas/filtered?path=/api/procurement/products/filter/cursor&operation=post&schemaType=response");
+        candidate.put("submitUrl", "/api/procurement/products/filter/cursor");
+        candidate.put("submitMethod", "POST");
+        candidate.put("score", 0.87d);
+        candidate.put("reason", "api_metadata semantic match");
         candidate.putArray("evidence").add("api-metadata");
         intent.putArray("candidates").add(candidate.deepCopy());
         ObjectNode gate = intent.putObject("gate");

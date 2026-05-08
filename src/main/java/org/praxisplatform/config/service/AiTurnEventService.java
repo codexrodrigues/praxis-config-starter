@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import lombok.RequiredArgsConstructor;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringSemanticDecision;
 import org.praxisplatform.config.domain.AiTurnEvent;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.repository.AiTurnRepository;
@@ -209,6 +210,23 @@ public class AiTurnEventService {
             return Optional.empty();
         }
         return turnEventRepository.findFirstByStreamIdOrderBySeqDesc(streamId).map(this::toEnvelope);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public Optional<AgenticAuthoringSemanticDecision> findLatestSemanticDecision(
+            UUID threadId,
+            AiPrincipalContext principalContext) {
+        if (threadId == null || principalContext == null) {
+            return Optional.empty();
+        }
+        return turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId).stream()
+                .filter(event -> isOwnedByPrincipal(event, principalContext))
+                .map(event -> parsePayload(event.getPayload())
+                        .path("intentResolution")
+                        .path("semanticDecision"))
+                .filter(node -> node != null && node.isObject() && node.hasNonNull("decisionId"))
+                .map(node -> objectMapper.convertValue(node, AgenticAuthoringSemanticDecision.class))
+                .findFirst();
     }
 
     public boolean isTerminalType(String eventType) {

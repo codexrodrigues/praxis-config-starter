@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -247,7 +248,8 @@ public class ApiMetadataIngestionService {
     private ApiMetadata upsert(String path, String method, String tags, String summary, String description,
                                String operationId, String requestSchema, String responseSchema, String parameters,
                                String rawJson, List<Float> embedding) {
-        Optional<ApiMetadata> existing = repository.findByPathAndMethod(path, method);
+        Optional<ApiMetadata> existing = repository.findByPathAndMethod(path, method)
+                .or(() -> findExistingByStableOperationIdentity(operationId, method));
         ApiMetadata meta = existing.orElse(new ApiMetadata());
         meta.setPath(path);
         meta.setMethod(method);
@@ -261,6 +263,15 @@ public class ApiMetadataIngestionService {
         meta.setRawJson(rawJson);
         meta.setEmbedding(embedding);
         return repository.save(meta);
+    }
+
+    private Optional<ApiMetadata> findExistingByStableOperationIdentity(String operationId, String method) {
+        String normalizedOperationId = normalize(operationId);
+        if (normalizedOperationId == null) {
+            return Optional.empty();
+        }
+        return repository.findAllByOperationIdAndMethod(normalizedOperationId, method).stream()
+                .max(Comparator.comparing(ApiMetadata::getId, Comparator.nullsFirst(Comparator.naturalOrder())));
     }
 
     private Document toRagDocument(

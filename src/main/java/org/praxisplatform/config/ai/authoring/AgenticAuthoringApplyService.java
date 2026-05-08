@@ -43,6 +43,7 @@ public class AgenticAuthoringApplyService {
         String componentId = requireText(request.componentId(), "componentId is required");
         UserConfigService.Scope scope = resolveScope(request.scope(), userId);
         JsonNode payload = extractPagePayload(request.compiledFormPatch());
+        validateSemanticMaterialization(request.semanticDecision(), request.compiledFormPatch());
         JsonNode tags = buildTags(request.compiledFormPatch(), request.tags());
 
         UiUserConfig saved = userConfigService.upsert(
@@ -87,6 +88,17 @@ public class AgenticAuthoringApplyService {
             throw new IllegalArgumentException("compiledFormPatch.patch.page.widgets must not be empty");
         }
         return page;
+    }
+
+    private void validateSemanticMaterialization(
+            AgenticAuthoringSemanticDecision semanticDecision,
+            JsonNode compiledFormPatch) {
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult result =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(semanticDecision, compiledFormPatch);
+        if (!result.valid()) {
+            throw new IllegalArgumentException("semantic-materialization-mismatch: "
+                    + String.join(",", result.failureCodes()));
+        }
     }
 
     private JsonNode buildTags(JsonNode compiledFormPatch, JsonNode requestTags) {

@@ -1328,7 +1328,7 @@ components:
       required: false
       schema:
         type: string
-        default: 42af43aec91777def176def87d2f41d30c8dbc8abb6c21dc38b5e181a1a51f4f
+        default: f3dd475db4f37fbe8458335ae4a24b619182b62a7d84ba4b5987c72edc692e50
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1358,7 +1358,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 42af43aec91777def176def87d2f41d30c8dbc8abb6c21dc38b5e181a1a51f4f
+        example: f3dd475db4f37fbe8458335ae4a24b619182b62a7d84ba4b5987c72edc692e50
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1757,14 +1757,163 @@ components:
               additionalProperties: true
             componentCapabilities:
               $ref: '#/components/schemas/AgenticAuthoringComponentCapabilitiesResult'
+            activeSemanticDecision:
+              $ref: '#/components/schemas/AgenticAuthoringSemanticDecision'
+              nullable: true
+              description: Decisao semantica ativa carregada da conversa/thread para orientar refinamentos do proximo turno sem depender apenas do texto conversacional.
+
+    AgenticAuthoringSemanticAxisDecisionDiagnostic:
+      type: object
+      description: Diagnostico resumido de um eixo semantico usado pela decisao de composicao UI.
+      properties:
+        concept:
+          type: string
+          nullable: true
+        field:
+          type: string
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        schemaVerified:
+          type: boolean
+          nullable: true
+          description: Indica que o campo do eixo foi encontrado no schema canonico do recurso selecionado.
+        schemaProbeStatus:
+          type: string
+          nullable: true
+        provenance:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringDecisionDiagnostics:
+      type: object
+      description: Diagnosticos canonicos do resultado de authoring agentico. Clientes devem tratar requiresReview=true como bloqueio de aplicacao automatica, mesmo quando houver preview valido.
+      properties:
+        schemaVersion:
+          type: string
+          example: praxis-agentic-authoring-decision-diagnostics.v1
+        operationKind:
+          type: string
+          nullable: true
+        artifactKind:
+          type: string
+          nullable: true
+        valid:
+          type: boolean
+          nullable: true
+        retrievalSource:
+          type: string
+          nullable: true
+        selectedResourcePath:
+          type: string
+          nullable: true
+        llmResolutionAttempted:
+          type: boolean
+          nullable: true
+        llmResolved:
+          type: boolean
+          nullable: true
+        fallbackPolicy:
+          type: string
+          nullable: true
+        keywordFallbackApplied:
+          type: boolean
+          nullable: true
+        semanticPolicyApplied:
+          type: boolean
+          nullable: true
+          description: Indica que uma politica semantica governada ajustou a decisao sem usar fallback de keyword como autoridade.
+        selectedCandidateUsesLexicalFallback:
+          type: boolean
+          nullable: true
+        selectedCandidateUsesDomainAnchor:
+          type: boolean
+          nullable: true
+        candidateSetContainsLexicalFallback:
+          type: boolean
+          nullable: true
+        candidateSetContainsDomainAnchor:
+          type: boolean
+          nullable: true
+        uiCompositionPlanUsesReferenceProvider:
+          type: boolean
+          nullable: true
+          description: Indica que a materializacao veio de um provider de referencia/demo, nao de planner generico ou provider canonico do host.
+        uiCompositionPlanUsesHardcodedAnchor:
+          type: boolean
+          nullable: true
+          description: Indica que a materializacao usou anchors hardcoded de quickstart/demo e deve ser tratada como revisao obrigatoria.
+        uiCompositionPlanHasUnverifiedSemanticAxes:
+          type: boolean
+          nullable: true
+          description: Indica que a composicao UI contem eixos semanticos ainda nao confirmados no schema canonico do recurso.
+        semanticAxisCount:
+          type: integer
+          format: int32
+          nullable: true
+        semanticAxisVerifiedCount:
+          type: integer
+          format: int32
+          nullable: true
+        semanticAxisPendingCount:
+          type: integer
+          format: int32
+          nullable: true
+        semanticAxesSchemaVerified:
+          type: boolean
+          nullable: true
+          description: Indica que todos os eixos semanticos declarados foram verificados contra schema.
+        semanticAxes:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringSemanticAxisDecisionDiagnostic'
+        requiresReview:
+          type: boolean
+          nullable: true
+        reviewReason:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringTurnResultPayload:
+      type: object
+      description: Payload canonico de eventos SSE type=result para authoring agentico.
+      properties:
+        intentResolution:
+          $ref: '#/components/schemas/AgenticAuthoringIntentResolutionResult'
+        preview:
+          $ref: '#/components/schemas/AgenticAuthoringPreviewResult'
+          nullable: true
+        assistantMessage:
+          type: string
+          nullable: true
+        quickReplies:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringQuickReply'
+        canApply:
+          type: boolean
+          nullable: true
+        decisionDiagnostics:
+          $ref: '#/components/schemas/AgenticAuthoringDecisionDiagnostics'
+          nullable: true
+      additionalProperties: true
 
     AgenticAuthoringApplyRequest:
       type: object
       required:
+        - compiledFormPatch
         - componentType
         - componentId
-        - payload
+        - semanticDecision
       properties:
+        compiledFormPatch:
+          type: object
+          description: Patch compilado de pagina produzido por page-preview. Deve conter patch.page.widgets.
+          additionalProperties: true
         componentType:
           type: string
         componentId:
@@ -1772,13 +1921,13 @@ components:
         scope:
           type: string
           nullable: true
-        payload:
-          type: object
-          additionalProperties: true
         tags:
           type: object
           nullable: true
           additionalProperties: true
+        semanticDecision:
+          $ref: '#/components/schemas/AgenticAuthoringSemanticDecision'
+          description: Decisao semantica obrigatoria que autorizou a materializacao. O apply deve rejeitar requisicoes sem decisao, patches que nao cumpram esta decisao ou decisoes com reviewRequired=true.
       additionalProperties: true
 
     AgenticAuthoringComponentCapabilitiesResult:
@@ -1990,6 +2139,189 @@ components:
           nullable: true
           description: Diagnostico opaco e opt-in do prompt/contextBundle enviado ao resolvedor LLM quando contextHints.includeLlmDiagnostics=true. Pode conter contexto de pagina e catalogo suficiente para auditoria, portanto clientes nao devem solicitar em fluxo normal de usuario final.
           additionalProperties: true
+        semanticDecision:
+          $ref: '#/components/schemas/AgenticAuthoringSemanticDecision'
+          nullable: true
+          description: Decisao semantica canonica do authoring. Campos legados como operationKind, artifactKind, changeKind, selectedCandidate e visualizationDecision sao projecoes derivadas desta decisao.
+        visualizationDecision:
+          $ref: '#/components/schemas/AgenticAuthoringVisualizationDecision'
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringSemanticDecision:
+      type: object
+      nullable: true
+      description: Decisao semantica canonica authorada antes da materializacao UI. Preview, apply e cockpits devem usa-la como fonte de verdade governada e tratar campos legados como projecoes.
+      properties:
+        schemaVersion:
+          type: string
+          example: praxis-agentic-authoring-semantic-decision.v1
+        decisionId:
+          type: string
+          nullable: true
+          description: Identificador estavel da decisao dentro do turno.
+        operationKind:
+          type: string
+          nullable: true
+        artifactKind:
+          type: string
+          nullable: true
+        changeKind:
+          type: string
+          nullable: true
+        selectedResource:
+          type: object
+          nullable: true
+          properties:
+            resourcePath:
+              type: string
+              nullable: true
+            operation:
+              type: string
+              nullable: true
+            schemaUrl:
+              type: string
+              nullable: true
+            submitUrl:
+              type: string
+              nullable: true
+            submitMethod:
+              type: string
+              nullable: true
+          additionalProperties: true
+        visualizationDecision:
+          $ref: '#/components/schemas/AgenticAuthoringVisualizationDecision'
+          nullable: true
+        retrievalEvidence:
+          type: object
+          nullable: true
+          properties:
+            retrievalSource:
+              type: string
+              nullable: true
+            evidence:
+              type: array
+              items:
+                type: string
+            candidateCount:
+              type: integer
+              format: int32
+          additionalProperties: true
+        reviewRequired:
+          type: boolean
+          nullable: true
+          description: Indica se a decisao entrou por caminho de fail-safe/review em vez de materializacao automatica.
+        reviewReason:
+          type: string
+          nullable: true
+        previousDecisionRef:
+          type: string
+          nullable: true
+        refinementOf:
+          type: string
+          nullable: true
+          description: Referencia semantica usada quando o turno atual refina decisao conversacional anterior.
+        conversationId:
+          type: string
+          nullable: true
+        turnId:
+          type: string
+          nullable: true
+        userGoal:
+          type: string
+          nullable: true
+        activeObjective:
+          type: string
+          nullable: true
+        artifactIntent:
+          type: string
+          nullable: true
+        visualIntent:
+          type: string
+          nullable: true
+        constraints:
+          type: object
+          nullable: true
+          additionalProperties: true
+        previousDecisionId:
+          type: string
+          nullable: true
+          description: Identificador estruturado da decisao anterior quando o refinamento usa memoria de decisao ativa.
+        rationale:
+          type: string
+          nullable: true
+        confidence:
+          type: number
+          format: double
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringVisualizationDecision:
+      type: object
+      nullable: true
+      description: Decisao semantica canonica de visualizacao authorada por LLM/RAG antes da materializacao UI. Providers devem consumir esta decisao e nao reinterpretar o prompt por palavras-chave.
+      properties:
+        schemaVersion:
+          type: string
+          example: praxis-agentic-authoring-visualization-decision.v1
+        intent:
+          type: string
+          nullable: true
+          description: Intencao de visualizacao, como operational-monitoring-dashboard ou analytical-breakdown.
+        layoutKind:
+          type: string
+          nullable: true
+          description: Tipo de layout semantico decidido, como dashboard, table, page ou master_detail.
+        primaryComponent:
+          type: string
+          nullable: true
+          description: Componente primario a materializar, como praxis-chart ou praxis-table.
+        axes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringVisualizationAxisDecision'
+        includeSummary:
+          type: boolean
+          nullable: true
+        includeDetailTable:
+          type: boolean
+          nullable: true
+        provenance:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringVisualizationAxisDecision:
+      type: object
+      description: Eixo ou breakdown semantico decidido antes da materializacao e depois verificado contra schema canonico.
+      properties:
+        concept:
+          type: string
+          nullable: true
+        field:
+          type: string
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        chartType:
+          type: string
+          nullable: true
+        orientation:
+          type: string
+          nullable: true
+        metricAggregation:
+          type: string
+          nullable: true
+        metricField:
+          type: string
+          nullable: true
+        metricLabel:
+          type: string
+          nullable: true
+        provenance:
+          type: string
+          nullable: true
       additionalProperties: true
 
     AgenticAuthoringApiCatalogAnswer:

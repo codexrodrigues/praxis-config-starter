@@ -7,14 +7,33 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import org.praxisplatform.config.dto.AiSchemaContext;
+import org.praxisplatform.config.service.SchemaFetchResult;
+import org.praxisplatform.config.service.SchemaRetrievalService;
 
 public class AgenticAuthoringPreviewService {
+
+    private static final Set<String> SEMANTIC_AXIS_STOP_WORDS = Set.of(
+            "por",
+            "para",
+            "com",
+            "dos",
+            "das",
+            "the",
+            "and",
+            "total",
+            "registros",
+            "registro");
 
     private final AgenticAuthoringPlanService planService;
     private final AgenticAuthoringPatchCompilerService patchCompilerService;
@@ -23,6 +42,7 @@ public class AgenticAuthoringPreviewService {
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator;
     private final List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders;
     private final AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer;
+    private final SchemaRetrievalService schemaRetrievalService;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -51,6 +71,16 @@ public class AgenticAuthoringPreviewService {
             ObjectMapper objectMapper,
             List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
             AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer) {
+        this(planService, patchCompilerService, objectMapper, uiCompositionPlanProviders, messageSynthesizer, null);
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
+            SchemaRetrievalService schemaRetrievalService) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
@@ -59,6 +89,7 @@ public class AgenticAuthoringPreviewService {
         this.uiCompositionPlanProviders = List.copyOf(
                 uiCompositionPlanProviders == null ? List.of() : uiCompositionPlanProviders);
         this.messageSynthesizer = messageSynthesizer;
+        this.schemaRetrievalService = schemaRetrievalService;
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -66,6 +97,15 @@ public class AgenticAuthoringPreviewService {
             String tenantId,
             String userId,
             String environment) throws IOException {
+        return preview(request, tenantId, userId, environment, null);
+    }
+
+    public AgenticAuthoringPreviewResult preview(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment,
+            String schemaBaseUrl) throws IOException {
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         AgenticAuthoringIntentResolutionResult intentResolution =
                 effectiveRequest == null ? null : effectiveRequest.intentResolution();
@@ -86,7 +126,7 @@ public class AgenticAuthoringPreviewService {
             );
         }
         Optional<AgenticAuthoringPreviewResult> uiCompositionPreview =
-                previewUiCompositionPlan(effectiveRequest, tenantId, userId, environment);
+                previewUiCompositionPlan(effectiveRequest, tenantId, userId, environment, schemaBaseUrl);
         if (uiCompositionPreview.isPresent()) {
             return uiCompositionPreview.get();
         }
@@ -95,6 +135,9 @@ public class AgenticAuthoringPreviewService {
             List<String> warnings = new ArrayList<>();
             if (intentResolution != null) {
                 warnings.addAll(intentResolution.warnings());
+            }
+            if (requiresUiCompositionPlan(intentResolution)) {
+                warnings.add(uiCompositionPlanProviderDiagnostic());
             }
             warnings.add("preview-skipped-invalid-intent-resolution");
             return new AgenticAuthoringPreviewResult(
@@ -136,7 +179,11 @@ public class AgenticAuthoringPreviewService {
         failureCodes.addAll(compileResult.failureCodes());
         warnings.addAll(compileResult.warnings());
         boolean valid = planResult.valid() && compileResult.valid();
-        String fallbackMessage = deterministicPreviewAssistantMessage(intentResolution, null, valid);
+        String fallbackMessage = deterministicPreviewAssistantMessage(
+                intentResolution,
+                null,
+                valid,
+                List.copyOf(failureCodes));
         return new AgenticAuthoringPreviewResult(
                 valid,
                 List.copyOf(failureCodes),
@@ -169,7 +216,8 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPlanRequest request,
             String tenantId,
             String userId,
-            String environment) {
+            String environment,
+            String schemaBaseUrl) {
         if (request == null) {
             return Optional.empty();
         }
@@ -179,17 +227,52 @@ public class AgenticAuthoringPreviewService {
                 continue;
             }
             AgenticAuthoringUiCompositionPlanResult planResult = result.get();
-            List<String> failureCodes = planResult.failureCodes() == null ? List.of() : List.copyOf(planResult.failureCodes());
+            List<String> failureCodes = new ArrayList<>(
+                    planResult.failureCodes() == null ? List.of() : planResult.failureCodes());
             List<String> warnings = new ArrayList<>(
                     planResult.warnings() == null ? List.of() : planResult.warnings());
+            boolean semanticallyValid = planResult.valid();
+            AgenticAuthoringSemanticMaterializationPolicy.ValidationResult semanticValidation =
+                    AgenticAuthoringSemanticMaterializationPolicy.validate(
+                            semanticDecision(request.intentResolution()),
+                            planResult.uiCompositionPlan());
+            addAllOnce(failureCodes, semanticValidation.failureCodes());
+            addAllOnce(warnings, semanticValidation.warnings());
+            if (!semanticValidation.valid()) {
+                semanticallyValid = false;
+            }
+            if (requiresOperationalMonitoringDashboard(request, request.intentResolution())
+                    && !AgenticAuthoringSemanticMaterializationPolicy.containsComponent(
+                    planResult.uiCompositionPlan(), "praxis-chart")) {
+                addOnce(failureCodes, "semantic-preview-operational-dashboard-required");
+                addOnce(warnings, AgenticAuthoringSemanticMaterializationPolicy.MATERIALIZATION_MISMATCH_WARNING);
+                semanticallyValid = false;
+            }
+            JsonNode uiCompositionPlan = verifySemanticAxesWithSchema(
+                    request,
+                    planResult.uiCompositionPlan(),
+                    warnings,
+                    schemaBaseUrl);
+            if (containsUnverifiedSemanticAxes(uiCompositionPlan)) {
+                warnings.add("semantic-axis-schema-verification-pending");
+            }
+            semanticValidation = AgenticAuthoringSemanticMaterializationPolicy.validate(
+                    semanticDecision(request.intentResolution()),
+                    uiCompositionPlan);
+            addAllOnce(failureCodes, semanticValidation.failureCodes());
+            addAllOnce(warnings, semanticValidation.warnings());
+            if (!semanticValidation.valid()) {
+                semanticallyValid = false;
+            }
             warnings.add("compiled-form-patch-materialized-by-page-builder");
             String fallbackMessage = deterministicPreviewAssistantMessage(
                     request.intentResolution(),
-                    planResult.uiCompositionPlan(),
-                    planResult.valid());
+                    uiCompositionPlan,
+                    semanticallyValid,
+                    List.copyOf(failureCodes));
             return Optional.of(new AgenticAuthoringPreviewResult(
-                    planResult.valid(),
-                    failureCodes,
+                    semanticallyValid,
+                    List.copyOf(failureCodes),
                     List.copyOf(warnings),
                     MissingNode.getInstance(),
                     planResult.compiledFormPatch() == null ? MissingNode.getInstance() : planResult.compiledFormPatch(),
@@ -198,17 +281,17 @@ public class AgenticAuthoringPreviewService {
                             request.intentResolution(),
                             failureCodes,
                             List.copyOf(warnings),
-                            planResult.uiCompositionPlan(),
+                            uiCompositionPlan,
                             planResult.compiledFormPatch() == null
                                     ? MissingNode.getInstance()
                                     : planResult.compiledFormPatch()),
-                    planResult.uiCompositionPlan(),
+                    uiCompositionPlan,
                     previewAssistantMessage(
                             request,
                             request.intentResolution(),
-                            planResult.uiCompositionPlan(),
-                            planResult.valid(),
-                            failureCodes,
+                            uiCompositionPlan,
+                            semanticallyValid,
+                            List.copyOf(failureCodes),
                             List.copyOf(warnings),
                             fallbackMessage,
                             tenantId,
@@ -217,6 +300,379 @@ public class AgenticAuthoringPreviewService {
             ));
         }
         return Optional.empty();
+    }
+
+    private JsonNode verifySemanticAxesWithSchema(
+            AgenticAuthoringPlanRequest request,
+            JsonNode uiCompositionPlan,
+            List<String> warnings,
+            String schemaBaseUrl) {
+        if (schemaRetrievalService == null || !containsUnverifiedSemanticAxes(uiCompositionPlan)) {
+            return uiCompositionPlan;
+        }
+        AgenticAuthoringCandidate candidate = request == null || request.intentResolution() == null
+                ? null
+                : request.intentResolution().selectedCandidate();
+        AiSchemaContext schemaContext = schemaContext(candidate);
+        if (schemaContext == null) {
+            addWarningOnce(warnings, "semantic-axis-schema-verification-invalid-context");
+            return uiCompositionPlan;
+        }
+        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(schemaContext, schemaBaseUrl);
+        if (schemaResult == null || !schemaResult.isSuccess()) {
+            String status = schemaResult == null || schemaResult.getStatus() == null
+                    ? "unavailable"
+                    : schemaResult.getStatus().name().toLowerCase(java.util.Locale.ROOT);
+            addWarningOnce(warnings, "semantic-axis-schema-verification-" + status);
+            return uiCompositionPlan;
+        }
+        Map<String, SchemaFieldDescriptor> schemaFields = schemaFields(schemaResult.getSchema());
+        if (schemaFields.isEmpty()) {
+            addWarningOnce(warnings, "semantic-axis-schema-verification-no-fields");
+            return uiCompositionPlan;
+        }
+        JsonNode copy = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.deepCopy();
+        if (copy instanceof ObjectNode objectNode) {
+            reconcileSemanticAxesWithSchema(objectNode, schemaFields, schemaResult, warnings);
+            return objectNode;
+        }
+        return copy;
+    }
+
+    private AiSchemaContext schemaContext(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        java.util.Map<String, String> query = queryParameters(candidate.schemaUrl());
+        String path = valueOrDefault(query.get("path"), candidate.submitUrl());
+        String operation = valueOrDefault(query.get("operation"), candidate.submitMethod());
+        String schemaType = valueOrDefault(query.get("schemaType"), "response");
+        if (isStatsPath(path) || isStatsPath(candidate.submitUrl()) || isStatsPath(candidate.resourcePath())) {
+            path = businessResourcePath(firstNonBlank(candidate.resourcePath(), candidate.submitUrl())) + "/filter/cursor";
+            operation = "post";
+            schemaType = "response";
+        }
+        if (path.isBlank() || operation.isBlank() || schemaType.isBlank()) {
+            return null;
+        }
+        return AiSchemaContext.builder()
+                .path(path)
+                .operation(operation)
+                .schemaType(schemaType)
+                .build();
+    }
+
+    private java.util.Map<String, String> queryParameters(String url) {
+        java.util.Map<String, String> parameters = new java.util.LinkedHashMap<>();
+        String value = value(url);
+        int queryIndex = value.indexOf('?');
+        if (queryIndex < 0 || queryIndex == value.length() - 1) {
+            return parameters;
+        }
+        for (String pair : value.substring(queryIndex + 1).split("&")) {
+            if (pair.isBlank()) {
+                continue;
+            }
+            int separator = pair.indexOf('=');
+            String key = separator >= 0 ? pair.substring(0, separator) : pair;
+            String rawValue = separator >= 0 ? pair.substring(separator + 1) : "";
+            parameters.put(
+                    URLDecoder.decode(key, StandardCharsets.UTF_8),
+                    URLDecoder.decode(rawValue, StandardCharsets.UTF_8));
+        }
+        return parameters;
+    }
+
+    private String businessResourcePath(String resourcePath) {
+        String value = value(resourcePath).replaceAll("/+$", "");
+        for (String suffix : List.of(
+                "/stats/group-by",
+                "/stats/timeseries",
+                "/stats/distribution",
+                "/filter/cursor",
+                "/filter",
+                "/all")) {
+            if (value.endsWith(suffix)) {
+                value = value.substring(0, value.length() - suffix.length());
+                break;
+            }
+        }
+        return value;
+    }
+
+    private boolean isStatsPath(String value) {
+        String normalized = value(value);
+        return normalized.contains("/stats/group-by")
+                || normalized.contains("/stats/timeseries")
+                || normalized.contains("/stats/distribution");
+    }
+
+    private Map<String, SchemaFieldDescriptor> schemaFields(JsonNode schema) {
+        Map<String, SchemaFieldDescriptor> fields = new LinkedHashMap<>();
+        collectSchemaFields(schema, fields);
+        return fields;
+    }
+
+    private void collectSchemaFields(JsonNode node, Map<String, SchemaFieldDescriptor> fields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        JsonNode properties = node.path("properties");
+        if (properties.isObject()) {
+            properties.fields().forEachRemaining(entry -> {
+                String field = entry.getKey();
+                if (!value(field).isBlank()) {
+                    fields.putIfAbsent(normalize(field), schemaFieldDescriptor(field, entry.getValue()));
+                }
+            });
+        }
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> collectSchemaFields(entry.getValue(), fields));
+        } else if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectSchemaFields(item, fields);
+            }
+        }
+    }
+
+    private void reconcileSemanticAxesWithSchema(
+            ObjectNode uiCompositionPlan,
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            SchemaFetchResult schemaResult,
+            List<String> warnings) {
+        JsonNode axes = uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (axes.isArray()) {
+            for (JsonNode axis : axes) {
+                if (axis instanceof ObjectNode axisObject) {
+                    Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisObject, schemaFields);
+                    if (schemaField.isPresent()) {
+                        alignSemanticAxis(axisObject, schemaField.get(), schemaResult);
+                    } else {
+                        markSemanticAxisUnsupported(axisObject);
+                        addWarningOnce(warnings, "semantic-axis-schema-verification-unsupported-axis");
+                    }
+                }
+            }
+        }
+        JsonNode widgets = uiCompositionPlan.path("widgets");
+        if (widgets instanceof ArrayNode widgetArray) {
+            for (int i = widgetArray.size() - 1; i >= 0; i--) {
+                JsonNode widget = widgetArray.get(i);
+                JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
+                if (!(axis instanceof ObjectNode axisObject)) {
+                    continue;
+                }
+                Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisObject, schemaFields);
+                if (schemaField.isPresent()) {
+                    alignSemanticAxis(axisObject, schemaField.get(), schemaResult);
+                    alignChartBinding(widget, schemaField.get());
+                } else {
+                    widgetArray.remove(i);
+                }
+            }
+        }
+    }
+
+    private void alignSemanticAxis(
+            ObjectNode semanticAxis,
+            SchemaFieldDescriptor field,
+            SchemaFetchResult schemaResult) {
+        String requestedField = semanticAxis.path("field").asText("");
+        if (!normalize(requestedField).equals(normalize(field.name()))) {
+            semanticAxis.put("requestedField", requestedField);
+            semanticAxis.put("field", field.name());
+            if (!field.label().isBlank()) {
+                semanticAxis.put("schemaLabel", field.label());
+            }
+        }
+        semanticAxis.put("schemaVerified", true);
+        semanticAxis.put("schemaProbeStatus", "verified");
+        ObjectNode evidence = semanticAxis.putObject("schemaEvidence");
+        evidence.put("source", "schemas.filtered");
+        evidence.put("endpointUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+    }
+
+    private void markSemanticAxisUnsupported(ObjectNode semanticAxis) {
+        semanticAxis.put("schemaVerified", false);
+        semanticAxis.put("schemaProbeStatus", "unsupported");
+    }
+
+    private void alignChartBinding(JsonNode widget, SchemaFieldDescriptor field) {
+        ObjectNode config = widget.path("inputs").path("config") instanceof ObjectNode objectNode
+                ? objectNode
+                : null;
+        if (config == null) {
+            return;
+        }
+        JsonNode xAxis = config.path("axes").path("x");
+        if (xAxis instanceof ObjectNode xAxisObject) {
+            xAxisObject.put("field", field.name());
+            if (!field.label().isBlank()) {
+                xAxisObject.put("label", field.label());
+            }
+        }
+        JsonNode series = config.path("series");
+        if (series.isArray()) {
+            for (JsonNode item : series) {
+                if (item instanceof ObjectNode seriesObject) {
+                    seriesObject.put("categoryField", field.name());
+                }
+            }
+        }
+        JsonNode dimensions = config.path("dataSource").path("query").path("dimensions");
+        if (dimensions instanceof ArrayNode dimensionsArray && !dimensionsArray.isEmpty()) {
+            dimensionsArray.set(0, objectMapper.getNodeFactory().textNode(field.name()));
+        }
+        JsonNode statsRequest = config.path("dataSource").path("query").path("statsRequest");
+        if (statsRequest instanceof ObjectNode statsRequestObject) {
+            statsRequestObject.put("field", field.name());
+        }
+    }
+
+    private Optional<SchemaFieldDescriptor> resolveSchemaField(
+            ObjectNode semanticAxis,
+            Map<String, SchemaFieldDescriptor> schemaFields) {
+        String requestedField = semanticAxis.path("field").asText("");
+        SchemaFieldDescriptor exact = schemaFields.get(normalize(requestedField));
+        if (exact != null) {
+            return Optional.of(exact);
+        }
+        Set<String> requestedTokens = semanticAxisTokens(semanticAxis);
+        SchemaFieldDescriptor best = null;
+        int bestScore = 0;
+        for (SchemaFieldDescriptor field : schemaFields.values()) {
+            int score = semanticMatchScore(requestedTokens, field);
+            if (score > bestScore) {
+                best = field;
+                bestScore = score;
+            }
+        }
+        return bestScore >= 2 ? Optional.of(best) : Optional.empty();
+    }
+
+    private int semanticMatchScore(Set<String> requestedTokens, SchemaFieldDescriptor field) {
+        if (requestedTokens.isEmpty()) {
+            return 0;
+        }
+        int score = 0;
+        for (String token : requestedTokens) {
+            if (field.fieldTokens().contains(token)) {
+                score += 3;
+            } else if (field.labelTokens().contains(token)) {
+                score += 3;
+            } else if (field.descriptionTokens().contains(token)) {
+                score += 2;
+            }
+        }
+        return score;
+    }
+
+    private Set<String> semanticAxisTokens(ObjectNode semanticAxis) {
+        Set<String> tokens = new LinkedHashSet<>();
+        addTokens(tokens, semanticAxis.path("concept").asText(""));
+        addTokens(tokens, semanticAxis.path("field").asText(""));
+        addTokens(tokens, semanticAxis.path("label").asText(""));
+        return tokens;
+    }
+
+    private SchemaFieldDescriptor schemaFieldDescriptor(String field, JsonNode property) {
+        String label = firstNonBlank(
+                property.path("x-ui").path("label").asText(""),
+                property.path("title").asText(""));
+        String description = firstNonBlank(
+                property.path("description").asText(""),
+                property.path("x-ui").path("helpText").asText(""));
+        return new SchemaFieldDescriptor(
+                field,
+                label,
+                description,
+                tokens(field),
+                tokens(label),
+                tokens(description));
+    }
+
+    private Set<String> tokens(String value) {
+        Set<String> tokens = new LinkedHashSet<>();
+        addTokens(tokens, value);
+        return tokens;
+    }
+
+    private void addTokens(Set<String> tokens, String value) {
+        for (String token : normalize(value).replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
+            if (token.length() >= 3 && !SEMANTIC_AXIS_STOP_WORDS.contains(token)) {
+                tokens.add(token);
+            }
+        }
+    }
+
+    private void addWarningOnce(List<String> warnings, String warning) {
+        if (warnings != null && !warnings.contains(warning)) {
+            warnings.add(warning);
+        }
+    }
+
+    private boolean containsUnverifiedSemanticAxes(JsonNode uiCompositionPlan) {
+        JsonNode axes = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return false;
+        }
+        for (JsonNode axis : axes) {
+            if (!axis.path("schemaVerified").asBoolean(false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean requiresOperationalMonitoringDashboard(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution != null && "dashboard".equals(intentResolution.artifactKind())) {
+            String prompt = normalize(firstNonBlank(intentResolution.effectivePrompt(), request == null ? "" : request.userPrompt()));
+            return isOperationalMonitoringPrompt(prompt);
+        }
+        String prompt = normalize(
+                firstNonBlank(
+                        intentResolution == null ? "" : intentResolution.effectivePrompt(),
+                        request == null ? "" : request.userPrompt()));
+        return isOperationalMonitoringPrompt(prompt);
+    }
+
+    private boolean isOperationalMonitoringPrompt(String prompt) {
+        boolean monitoringIntent = containsAny(prompt,
+                "monitorar", "acompanhar", "controlar", "painel de controle", "observabilidade");
+        int operationalAxes = 0;
+        if (containsAny(prompt, "gravidade", "severidade", "prioridade", "risco", "riscos")) {
+            operationalAxes++;
+        }
+        if (containsAny(prompt, "andamento", "status", "situacao", "etapa", "fila", "atendimento")) {
+            operationalAxes++;
+        }
+        if (containsAny(prompt, "responsavel", "dono", "owner", "equipe", "time")) {
+            operationalAxes++;
+        }
+        if (containsAny(prompt, "chamado", "chamados", "ocorrencia", "ocorrencias", "incidente", "incidentes", "caso", "casos")) {
+            operationalAxes++;
+        }
+        return monitoringIntent && operationalAxes >= 2;
+    }
+
+    private boolean requiresUiCompositionPlan(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
+            return false;
+        }
+        return !"form".equals(intentResolution.artifactKind())
+                && ("create".equals(intentResolution.operationKind())
+                || "modify".equals(intentResolution.operationKind())
+                || "remove".equals(intentResolution.operationKind()));
+    }
+
+    private String uiCompositionPlanProviderDiagnostic() {
+        return uiCompositionPlanProviders.isEmpty()
+                ? "ui-composition-plan-provider-unavailable"
+                : "ui-composition-plan-provider-no-plan";
     }
 
     private String previewAssistantMessage(
@@ -249,8 +705,15 @@ public class AgenticAuthoringPreviewService {
     private String deterministicPreviewAssistantMessage(
             AgenticAuthoringIntentResolutionResult intentResolution,
             JsonNode uiCompositionPlan,
-            boolean valid) {
+            boolean valid,
+            List<String> failureCodes) {
         if (!valid) {
+            if (failureCodes != null && failureCodes.contains("semantic-preview-chart-required")) {
+                return "Encontrei a fonte de dados, mas a pre-visualizacao nao materializou o grafico solicitado. Vou manter em revisao ate gerar um plano com componente analitico.";
+            }
+            if (failureCodes != null && failureCodes.contains("semantic-preview-operational-dashboard-required")) {
+                return "Encontrei a fonte de dados, mas a pre-visualizacao nao materializou um dashboard de monitoramento. Vou manter em revisao ate gerar indicadores, grafico e detalhe operacional.";
+            }
             return "Encontrei a fonte de dados, mas o plano gerado usou propriedades incompativeis com o componente de tabela. Vou ajustar para usar apenas os campos suportados.";
         }
         AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
@@ -258,36 +721,120 @@ public class AgenticAuthoringPreviewService {
             return "";
         }
         String resourceLabel = titleFromResourcePath(candidate.resourcePath());
-        if (containsComponent(uiCompositionPlan, "praxis-chart")) {
-            return "Criei uma pre-visualizacao de dashboard analitico usando \"" + resourceLabel
-                    + "\" como fonte governada. O grafico foi conectado ao recorte analitico e a lista de detalhe "
-                    + "em cards ricos pode apoiar a validacao dos dados antes de salvar a pagina.";
+        if (AgenticAuthoringSemanticMaterializationPolicy.containsComponent(uiCompositionPlan, "praxis-chart")) {
+            SemanticAxisAssistantSummary axisSummary = semanticAxisAssistantSummary(uiCompositionPlan);
+            String visualization = axisSummary.verifiedAxes().isEmpty()
+                    ? "grafico conectado ao recorte analitico solicitado"
+                    : "grafico por " + joinHuman(axisSummary.verifiedAxes()) + ", validado em /schemas/filtered";
+            String governance = axisSummary.unsupportedAxes().isEmpty()
+                    ? "campos semanticos verificados antes da materializacao"
+                    : "nao criei graficos para " + joinHuman(axisSummary.unsupportedAxes())
+                    + " porque esses campos nao aparecem no schema da fonte";
+            return "Criei uma pre-visualizacao de dashboard analitico.\n\n"
+                    + "- Fonte governada: \"" + resourceLabel + "\".\n"
+                    + "- Visualizacao: " + visualization + ".\n"
+                    + "- Governanca: " + governance + ".\n"
+                    + "- Apoio: " + detailSupportAssistantLine(uiCompositionPlan) + ".";
         }
         if (containsComponent(uiCompositionPlan, "praxis-table")) {
             if (containsRichTableRendering(uiCompositionPlan)) {
-                return "Criei uma pre-visualizacao usando \"" + resourceLabel
-                        + "\" como fonte governada. A tabela ja nasce com colunas semanticas, valores formatados, "
-                        + "chips, icones e acoes por linha para investigar detalhes sem configurar tudo manualmente.";
+                return "Criei uma pre-visualizacao com tabela semantica.\n\n"
+                        + "- Fonte governada: \"" + resourceLabel + "\".\n"
+                        + "- Tabela: colunas semanticas, valores formatados, chips, icones e acoes por linha.\n"
+                        + "- Proximo passo: revise os detalhes ou peca uma visualizacao analitica.";
             }
-            return "Criei uma pre-visualizacao usando \"" + resourceLabel
-                    + "\" como fonte de dados. A tabela foi conectada ao recurso e ja pode carregar schema/dados. "
-                    + "Voce pode revisar as colunas, pedir um grafico ou salvar a pagina.";
+            return "Criei uma pre-visualizacao com tabela conectada.\n\n"
+                    + "- Fonte de dados: \"" + resourceLabel + "\".\n"
+                    + "- Tabela: conectada ao recurso para carregar schema e dados.\n"
+                    + "- Proximo passo: revise as colunas, peca um grafico ou salve a pagina.";
         }
-        return "Criei uma pre-visualizacao usando \"" + resourceLabel
-                + "\" como fonte de dados. Revise o resultado e salve a pagina quando estiver de acordo.";
+        return "Criei uma pre-visualizacao para revisao.\n\n"
+                + "- Fonte de dados: \"" + resourceLabel + "\".\n"
+                + "- Proximo passo: revise o resultado e salve a pagina quando estiver de acordo.";
+    }
+
+    private SemanticAxisAssistantSummary semanticAxisAssistantSummary(JsonNode uiCompositionPlan) {
+        List<String> verifiedAxes = new ArrayList<>();
+        List<String> unsupportedAxes = new ArrayList<>();
+        JsonNode axes = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return new SemanticAxisAssistantSummary(List.of(), List.of());
+        }
+        for (JsonNode axis : axes) {
+            String label = semanticAxisDisplayName(axis);
+            if (label.isBlank()) {
+                continue;
+            }
+            if ("unsupported".equals(axis.path("schemaProbeStatus").asText(""))) {
+                addUnique(unsupportedAxes, label);
+            } else if (axis.path("schemaVerified").asBoolean(false)) {
+                addUnique(verifiedAxes, label);
+            }
+        }
+        return new SemanticAxisAssistantSummary(List.copyOf(verifiedAxes), List.copyOf(unsupportedAxes));
+    }
+
+    private String semanticAxisDisplayName(JsonNode axis) {
+        if (axis == null || axis.isMissingNode() || axis.isNull()) {
+            return "";
+        }
+        String label = firstNonBlank(
+                axis.path("schemaLabel").asText(""),
+                firstNonBlank(axis.path("label").asText(""), axis.path("field").asText("")));
+        String requestedField = axis.path("requestedField").asText("");
+        if (axis.path("schemaVerified").asBoolean(false)
+                && !requestedField.isBlank()
+                && !normalize(requestedField).equals(normalize(axis.path("field").asText("")))) {
+            return label + " (pedido como " + requestedField + ")";
+        }
+        return label;
+    }
+
+    private String detailSupportAssistantLine(JsonNode uiCompositionPlan) {
+        if (containsComponent(uiCompositionPlan, "praxis-table")) {
+            return "tabela de detalhe conectada ao recurso para validar os dados antes de salvar";
+        }
+        if (containsComponent(uiCompositionPlan, "praxis-list")) {
+            return "lista de detalhe em cards ricos para validar os dados antes de salvar";
+        }
+        return "componentes de apoio para validar os dados antes de salvar";
+    }
+
+    private void addUnique(List<String> values, String value) {
+        String normalized = normalize(value);
+        if (normalized.isBlank()) {
+            return;
+        }
+        for (String existing : values) {
+            if (normalize(existing).equals(normalized)) {
+                return;
+            }
+        }
+        values.add(value);
+    }
+
+    private String joinHuman(List<String> values) {
+        List<String> filtered = values == null
+                ? List.of()
+                : values.stream().filter(value -> !value(value).isBlank()).toList();
+        if (filtered.isEmpty()) {
+            return "";
+        }
+        if (filtered.size() == 1) {
+            return filtered.get(0);
+        }
+        if (filtered.size() == 2) {
+            return filtered.get(0) + " e " + filtered.get(1);
+        }
+        return String.join(", ", filtered.subList(0, filtered.size() - 1))
+                + " e "
+                + filtered.get(filtered.size() - 1);
     }
 
     private boolean containsComponent(JsonNode uiCompositionPlan, String componentId) {
-        JsonNode widgets = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.path("widgets");
-        if (!widgets.isArray()) {
-            return false;
-        }
-        for (JsonNode widget : widgets) {
-            if (componentId.equals(widget.path("componentId").asText())) {
-                return true;
-            }
-        }
-        return false;
+        return AgenticAuthoringSemanticMaterializationPolicy.containsComponent(uiCompositionPlan, componentId);
     }
 
     private boolean containsRichTableRendering(JsonNode uiCompositionPlan) {
@@ -310,6 +857,28 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return false;
+    }
+
+    private boolean containsAny(String value, String... tokens) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        for (String token : tokens) {
+            if (value.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return value(first).isBlank() ? value(second) : value(first);
+    }
+
+    private String normalize(String value) {
+        String normalized = java.text.Normalizer.normalize(value(value), java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return normalized.toLowerCase(java.util.Locale.ROOT).trim();
     }
 
     private String titleFromResourcePath(String resourcePath) {
@@ -582,6 +1151,11 @@ public class AgenticAuthoringPreviewService {
         return value == null ? "" : value;
     }
 
+    private String valueOrDefault(String value, String fallback) {
+        String sanitized = value(value).trim();
+        return sanitized.isBlank() ? value(fallback).trim() : sanitized;
+    }
+
     private String safeText(String value) {
         return value == null ? "" : value.trim();
     }
@@ -624,6 +1198,25 @@ public class AgenticAuthoringPreviewService {
         return List.copyOf(failures);
     }
 
+    private AgenticAuthoringSemanticDecision semanticDecision(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return intentResolution == null ? null : intentResolution.semanticDecision();
+    }
+
+    private void addAllOnce(List<String> target, List<String> values) {
+        if (values == null) {
+            return;
+        }
+        for (String value : values) {
+            addOnce(target, value);
+        }
+    }
+
+    private void addOnce(List<String> target, String value) {
+        if (target != null && value != null && !value.isBlank() && !target.contains(value)) {
+            target.add(value);
+        }
+    }
+
     private List<String> validateSharedRuleRoute(AgenticAuthoringIntentResolutionResult intentResolution) {
         if (intentResolution == null || intentResolution.gate() == null) {
             return List.of();
@@ -633,5 +1226,19 @@ public class AgenticAuthoringPreviewService {
             return List.of("intent-resolution-shared-rule-route-required");
         }
         return List.of();
+    }
+
+    private record SchemaFieldDescriptor(
+            String name,
+            String label,
+            String description,
+            Set<String> fieldTokens,
+            Set<String> labelTokens,
+            Set<String> descriptionTokens) {
+    }
+
+    private record SemanticAxisAssistantSummary(
+            List<String> verifiedAxes,
+            List<String> unsupportedAxes) {
     }
 }

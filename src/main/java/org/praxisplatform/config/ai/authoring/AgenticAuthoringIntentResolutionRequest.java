@@ -18,7 +18,8 @@ public record AgenticAuthoringIntentResolutionRequest(
         List<AgenticAuthoringConversationMessage> conversationMessages,
         AgenticAuthoringPendingClarification pendingClarification,
         List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
-        JsonNode contextHints
+        JsonNode contextHints,
+        AgenticAuthoringSemanticDecision activeSemanticDecision
 ) {
     public AgenticAuthoringIntentResolutionRequest(
             String userPrompt,
@@ -40,6 +41,7 @@ public record AgenticAuthoringIntentResolutionRequest(
                 provider,
                 model,
                 apiKey,
+                null,
                 null,
                 null,
                 null,
@@ -77,6 +79,7 @@ public record AgenticAuthoringIntentResolutionRequest(
                 conversationMessages,
                 pendingClarification,
                 null,
+                null,
                 null);
     }
 
@@ -110,6 +113,42 @@ public record AgenticAuthoringIntentResolutionRequest(
                 conversationMessages,
                 pendingClarification,
                 attachmentSummaries,
+                null,
+                null);
+    }
+
+    public AgenticAuthoringIntentResolutionRequest(
+            String userPrompt,
+            String targetApp,
+            String targetComponentId,
+            String currentRoute,
+            JsonNode currentPage,
+            String selectedWidgetKey,
+            String provider,
+            String model,
+            String apiKey,
+            String sessionId,
+            String clientTurnId,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            AgenticAuthoringPendingClarification pendingClarification,
+            List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
+            JsonNode contextHints) {
+        this(
+                userPrompt,
+                targetApp,
+                targetComponentId,
+                currentRoute,
+                currentPage,
+                selectedWidgetKey,
+                provider,
+                model,
+                apiKey,
+                sessionId,
+                clientTurnId,
+                conversationMessages,
+                pendingClarification,
+                attachmentSummaries,
+                contextHints,
                 null);
     }
 }

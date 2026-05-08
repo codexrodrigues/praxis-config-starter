@@ -34,9 +34,6 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isApiCatalogQuestion(prompt)) {
             return "explore";
         }
-        if (isRecommendationQuestion(prompt) || asksToExploreUnknownInformation(prompt)) {
-            return "explore";
-        }
         if (mentionsLiteralMasterDetail(prompt)) {
             return "explore";
         }
@@ -48,6 +45,9 @@ final class AgenticAuthoringKeywordFallbackResolver {
         }
         if (isReadDetailPagePrompt(prompt) && !isConsultativePrompt(prompt)) {
             return "create";
+        }
+        if (isRecommendationQuestion(prompt) || asksToExploreUnknownInformation(prompt)) {
+            return "explore";
         }
         if (containsAny(prompt, "conectar", "ligar", "vincular", "relacionar")) {
             return "connect";
@@ -70,6 +70,12 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isConsultativePrompt(prompt)) {
             return "explore";
         }
+        if (isAnalyticalVisualizationIntent(prompt)) {
+            return "explore";
+        }
+        if (isBusinessAuthoringRequest(prompt)) {
+            return "create";
+        }
         if (tableCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
             return "modify";
         }
@@ -89,17 +95,32 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isApiCatalogQuestion(prompt)) {
             return "api_catalog";
         }
+        if (isExplicitDashboardPrompt(prompt) && !asksToExploreUnknownInformation(prompt)) {
+            return "dashboard";
+        }
         if (isTabbedMasterDetailFormPrompt(prompt)) {
             return "page";
         }
-        if (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt)) {
+        if (isMasterDetailPrompt(prompt)) {
             return "page";
         }
-        if (isExplicitDashboardPrompt(prompt)) {
+        if (isTablePrompt(prompt) && !isExplicitPageCompositionPrompt(prompt)) {
+            return "table";
+        }
+        if (isReadDetailPagePrompt(prompt)) {
+            return "page";
+        }
+        if (isOperationalMonitoringDashboardPrompt(prompt)) {
             return "dashboard";
         }
         if (isAnalyticalVisualizationIntent(prompt)) {
             return "dashboard";
+        }
+        if (isOperationalTrackingPrompt(prompt)) {
+            return "table";
+        }
+        if (isBusinessAuthoringRequest(prompt)) {
+            return "table";
         }
         if (containsAny(prompt, "formulario", "form", "campo", "campos", "cadastrar", "cadastro", "abrir chamado")) {
             return "form";
@@ -117,9 +138,6 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (target != null && "praxis-chart".equals(target.componentId())
                 && ("modify".equals(resolveOperationKind(prompt)) || chartCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
             return "dashboard";
-        }
-        if (isTablePrompt(prompt)) {
-            return "table";
         }
         if (isDashboardWidgetAdditionPrompt(prompt)) {
             return "dashboard";
@@ -315,7 +333,7 @@ final class AgenticAuthoringKeywordFallbackResolver {
     }
 
     private boolean isExplicitDashboardPrompt(String prompt) {
-        return containsAny(prompt, "dashboard", "painel", "grafico", "graficos", "chart", "charts",
+        return containsAny(prompt, "dashboard", "grafico", "graficos", "chart", "charts",
                 "kpi", "indicador", "indicadores", "drill down", "drill-down", "drilldown");
     }
 
@@ -326,6 +344,75 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 "ver detalhes", "ver detalhe", "ver os detalhes", "area de detalhe", "detalhe lateral",
                 "painel de detalhes", "painel lateral", "detalhes ao selecionar",
                 "detalhes quando selecionar");
+    }
+
+    private boolean isExplicitPageCompositionPrompt(String prompt) {
+        return containsAny(prompt,
+                "pagina", "page", "tela", "layout", "master detail", "master-detail",
+                "mestre detalhe", "mestre-detalhe", "lista e detalhe", "lista com detalhe",
+                "tabela e detalhe", "tabela com detalhe", "painel lateral", "detalhe lateral",
+                "detalhes ao selecionar", "detalhes quando selecionar");
+    }
+
+    private boolean isBusinessAuthoringRequest(String prompt) {
+        return containsAny(prompt,
+                "quero", "preciso", "gostaria", "necessito", "acompanhar", "controlar",
+                "avaliar", "conferir", "entender", "investigar", "organizar", "comparar",
+                "saber", "monitorar", "analisar")
+                && containsAny(prompt,
+                "tabela", "lista", "listagem", "dashboard", "painel", "grafico", "graficos",
+                "indicador", "indicadores", "visao", "visão", "tela", "detalhes", "status",
+                "prioridade", "valor", "valores", "custo", "custos", "evolucao", "evolução",
+                "atividade", "atividades", "responsavel", "responsável", "etapa", "local",
+                "locais", "base", "bases", "acesso", "acessos", "area", "areas",
+                "setor", "setores", "funcao", "funcoes", "função", "funções", "cargo",
+                "cargos", "estrutura", "time", "times", "fornecedor", "fornecedores",
+                "parceiro", "parceiros", "pedido", "pedidos", "contrato", "contratos",
+                "produto", "produtos", "item", "itens", "equipamento", "equipamentos",
+                "frota", "carro", "carros", "veiculo", "veiculos", "recurso", "recursos",
+                "ameaca", "ameacas", "perigo", "perigos", "severidade",
+                "atendimento", "atendimentos", "rua", "caso", "casos", "andamento");
+    }
+
+    private boolean isOperationalTrackingPrompt(String prompt) {
+        return containsAny(prompt,
+                "acompanhar", "controlar", "conferir", "organizar", "avaliar", "investigar",
+                "registrar", "monitorar", "ver", "mostrar", "encontrar", "saber",
+                "entender", "analisar")
+                && containsAny(prompt,
+                "status", "situacao", "situação", "prioridade", "detalhe", "detalhes",
+                "contato", "prazo", "periodo", "período", "disponibilidade", "manutencao",
+                "manutenção", "aprovacao", "aprovação", "vigencia", "vigência", "risco",
+                "riscos", "fornecedor", "parceiro", "frota", "carro", "veiculo", "veículo",
+                "item", "itens", "equipamento", "equipamentos", "atividade", "atividades",
+                "responsavel", "responsável", "atraso", "atrasos", "base", "bases",
+                "acesso", "acessos", "local", "locais", "usado", "usados", "uso", "usos",
+                "area", "areas", "setor", "setores", "funcao", "funcoes", "cargo",
+                "cargos", "estrutura", "pedido", "pedidos", "contrato", "contratos",
+                "produto", "produtos", "atendimento", "atendimentos", "rua", "caso",
+                "casos", "andamento", "recurso", "recursos");
+    }
+
+    private boolean isOperationalMonitoringDashboardPrompt(String prompt) {
+        if (isTablePrompt(prompt)) {
+            return false;
+        }
+        boolean monitoringIntent = containsAny(prompt,
+                "monitorar", "acompanhar", "controlar", "painel de controle", "observabilidade");
+        int operationalAxes = 0;
+        if (containsAny(prompt, "gravidade", "severidade", "prioridade", "risco", "riscos")) {
+            operationalAxes++;
+        }
+        if (containsAny(prompt, "andamento", "status", "situacao", "situação", "etapa", "fila", "atendimento")) {
+            operationalAxes++;
+        }
+        if (containsAny(prompt, "responsavel", "responsável", "dono", "owner", "equipe", "time")) {
+            operationalAxes++;
+        }
+        if (containsAny(prompt, "chamado", "chamados", "ocorrencia", "ocorrencias", "incidente", "incidentes", "caso", "casos")) {
+            operationalAxes++;
+        }
+        return monitoringIntent && operationalAxes >= 2;
     }
 
     private boolean mentionsLiteralMasterDetail(String prompt) {
