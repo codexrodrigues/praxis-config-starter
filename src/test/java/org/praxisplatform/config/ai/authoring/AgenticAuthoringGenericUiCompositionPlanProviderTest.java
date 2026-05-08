@@ -37,14 +37,37 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("kind").asText()).isEqualTo("praxis.ui-composition-plan");
         assertThat(plan.path("version").asText()).isEqualTo("1.0");
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-dashboard");
-        assertThat(plan.path("widgets")).hasSize(3);
+        assertThat(plan.path("widgets")).hasSize(5);
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly(
+                        "praxis-rich-content",
+                        "praxis-rich-content",
+                        "praxis-filter",
+                        "praxis-chart",
+                        "praxis-table");
         assertThat(plan.path("widgets").toString())
                 .contains("praxis-chart")
+                .contains("praxis-filter")
+                .contains("kpi-band")
                 .contains("praxis-table")
                 .contains("/api/acme/orders")
+                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"")
                 .doesNotContain("human-resources")
                 .doesNotContain("payroll")
                 .doesNotContain("quickstart");
+        assertThat(plan.path("bindings").toString())
+                .contains("orders-filter.requestSearch->orders-chart-status.queryContext")
+                .contains("orders-chart-status.selectionChange->orders-table.queryContext");
+        JsonNode filterToChart = findBinding(plan.path("bindings"),
+                "orders-filter.requestSearch->orders-chart-status.queryContext");
+        assertThat(filterToChart.path("from").path("kind").asText()).isEqualTo("component-port");
+        assertThat(filterToChart.path("from").path("widget").asText()).isEqualTo("orders-filter");
+        assertThat(filterToChart.path("from").path("direction").asText()).isEqualTo("output");
+        assertThat(filterToChart.path("from").has("widgetKey")).isFalse();
+        assertThat(filterToChart.path("to").path("kind").asText()).isEqualTo("component-port");
+        assertThat(filterToChart.path("to").path("widget").asText()).isEqualTo("orders-chart-status");
+        assertThat(filterToChart.path("to").path("direction").asText()).isEqualTo("input");
+        assertThat(filterToChart.path("to").has("widgetKey")).isFalse();
     }
 
     @Test
@@ -60,10 +83,12 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         axis("owner", "responsavel", "Responsavel", "horizontal-bar", "horizontal"))))).orElseThrow();
 
         JsonNode plan = result.uiCompositionPlan();
-        assertThat(plan.path("widgets")).hasSize(5);
+        assertThat(plan.path("widgets")).hasSize(7);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
                         "praxis-rich-content",
+                        "praxis-rich-content",
+                        "praxis-filter",
                         "praxis-chart",
                         "praxis-chart",
                         "praxis-chart",
@@ -74,6 +99,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"field\":\"responsavel\"")
                 .contains("\"statsOperation\":\"group-by\"")
                 .contains("\"statsPath\":\"/api/operations/incidentes/stats/group-by\"")
+                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"")
                 .contains("\"operation\":\"COUNT\"")
                 .contains("\"resourcePath\":\"/api/operations/incidentes\"")
                 .contains("\"provenance\":\"llm-authored-semantic-axis\"")
@@ -87,6 +113,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("diagnostics").path("semanticAxes").toString())
                 .contains("\"schemaVerified\":false")
                 .contains("\"schemaProbeStatus\":\"pending\"");
+        assertThat(plan.path("bindings").toString())
+                .contains("incidentes-filter.requestSearch->incidentes-chart-gravidade.queryContext")
+                .contains("incidentes-chart-gravidade.selectionChange->incidentes-table.queryContext");
     }
 
     @Test
@@ -110,6 +139,36 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"submitUrl\":\"/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor\"")
                 .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
                 .doesNotContain("\"resourcePath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries\"");
+    }
+
+    @Test
+    void infersTraceablePendingAxisForGenericChartRequestWithoutLlmAxes() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Quero graficos sobre pedidos por status",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "dashboard", "create_artifact", "/api/acme/orders",
+                        new AgenticAuthoringVisualizationDecision(
+                                "praxis-agentic-authoring-visualization-decision.v1",
+                                "generic-chart-dashboard",
+                                "dashboard",
+                                "praxis-chart",
+                                List.of(),
+                                true,
+                                true,
+                                "llm-authored-semantic-decision")))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("widgets").findValuesAsText("componentId")).contains("praxis-chart");
+        assertThat(plan.path("widgets").toString())
+                .contains("\"field\":\"status\"")
+                .contains("\"schemaVerified\":false")
+                .contains("\"schemaProbeStatus\":\"pending\"")
+                .contains("\"provenance\":\"generic-dashboard-field-inference\"");
+        assertThat(plan.path("diagnostics").path("semanticAxes").toString())
+                .contains("\"field\":\"status\"")
+                .contains("\"schemaVerified\":false");
     }
 
 
@@ -209,5 +268,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
             }
         }
         throw new AssertionError("Widget not found: " + componentId);
+    }
+
+    private JsonNode findBinding(JsonNode bindings, String id) {
+        for (JsonNode binding : bindings) {
+            if (id.equals(binding.path("id").asText())) {
+                return binding;
+            }
+        }
+        throw new AssertionError("Binding not found: " + id);
     }
 }

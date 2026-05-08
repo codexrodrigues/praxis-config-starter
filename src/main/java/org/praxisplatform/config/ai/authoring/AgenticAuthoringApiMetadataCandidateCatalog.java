@@ -161,7 +161,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
                 .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
                 .filter(metadata -> isAnalyticsResource(baseResourcePath(metadata.getPath())))
-                .map(metadata -> toScoredCandidate(metadata, expectedMethod, artifactKind, tokens))
+                .map(metadata -> toScoredCandidate(metadata, expectedMethod, artifactKind, tokens, null, null, null))
                 .filter(scored -> scored.score() >= 0.36d)
                 .sorted(CandidateRankingPolicy.byScoreDescending())
                 .limit(8)
@@ -177,7 +177,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                 .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
                 .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
-                .map(metadata -> toBroadScoredCandidate(metadata, expectedMethod, artifactKind))
+                .map(metadata -> toBroadScoredCandidate(metadata, expectedMethod, artifactKind, null, null, null))
                 .filter(scored -> scored.score() >= 0.36d)
                 .sorted(CandidateRankingPolicy.byScoreDescending())
                 .limit(8)
@@ -216,7 +216,13 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     .stream()
                     .filter(result -> result.getPath() != null && result.getMethod() != null)
                     .filter(result -> isRenderableBusinessEndpoint(result.getPath()))
-                    .map(result -> toCandidate(result, artifactKind))
+                    .map(result -> toCandidate(
+                            result,
+                            artifactKind,
+                            normalizedPrompt,
+                            tenantId,
+                            environment,
+                            releaseId))
                     .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
                     .toList();
         } catch (RuntimeException ex) {
@@ -256,7 +262,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             metadata,
                             context.expectedMethod(),
                             context.artifactKind(),
-                            context.tokens()))
+                            context.tokens(),
+                            context.tenantId(),
+                            context.environment(),
+                            context.releaseId()))
                     .filter(scored -> scored.score() >= 0.45d)
                     .sorted(CandidateRankingPolicy.byScoreDescending())
                     .limit(8)
@@ -283,7 +292,13 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
     }
 
-    private AgenticAuthoringCandidate toCandidate(ApiSearchResult result, String artifactKind) {
+    private AgenticAuthoringCandidate toCandidate(
+            ApiSearchResult result,
+            String artifactKind,
+            String normalizedPrompt,
+            String tenantId,
+            String environment,
+            String releaseId) {
         String operation = result.getMethod().toLowerCase(Locale.ROOT);
         String submitUrl = canonicalSubmitUrl(result.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
@@ -297,14 +312,29 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 submitMethod,
                 score,
                 "api_metadata semantic retrieval",
-                List.of("api-metadata", "semantic-retrieval", "schema-available", "actions-probe-pending"));
+                List.of("api-metadata", "semantic-retrieval", "schema-available", "actions-probe-pending"),
+                evidenceBundle(
+                        "semantic_retrieval",
+                        resourcePath,
+                        submitUrl,
+                        submitMethod,
+                        valueOrEmpty(result.getSummary()),
+                        score,
+                        meaningfulTokens(normalize(valueOrEmpty(normalizedPrompt))),
+                        tenantId,
+                        environment,
+                        releaseId,
+                        false));
     }
 
     private ScoredCandidate toScoredCandidate(
             ApiMetadata metadata,
             String expectedMethod,
             String artifactKind,
-            List<String> tokens) {
+            List<String> tokens,
+            String tenantId,
+            String environment,
+            String releaseId) {
         String endpointText = searchableText(metadata);
         String path = normalize(metadata.getPath());
         double score = expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()) ? 0.34d : 0.20d;
@@ -333,15 +363,30 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 submitUrl,
                 submitMethod,
                 score,
-                "api_metadata lexical match",
-                List.of("api-metadata", "lexical-fallback", "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending")),
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence", "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending"),
+                evidenceBundle(
+                        "lexical_fallback",
+                        resourcePath,
+                        submitUrl,
+                        submitMethod,
+                        compactReasonText(searchableText(metadata)),
+                        Math.min(score, 0.49d),
+                        tokens,
+                        tenantId,
+                        environment,
+                        releaseId,
+                        true)),
                 score);
     }
 
     private ScoredCandidate toBroadScoredCandidate(
             ApiMetadata metadata,
             String expectedMethod,
-            String artifactKind) {
+            String artifactKind,
+            String tenantId,
+            String environment,
+            String releaseId) {
         String endpointText = searchableText(metadata);
         String path = normalize(metadata.getPath());
         double score = expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()) ? 0.36d : 0.20d;
@@ -365,7 +410,19 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 submitMethod,
                 score,
                 broadDiscoveryReason(metadata),
-                List.of("api-metadata", "broad-artifact-discovery", "schema-probe-pending", "actions-probe-pending")),
+                List.of("api-metadata", "broad-artifact-discovery", "schema-probe-pending", "actions-probe-pending"),
+                evidenceBundle(
+                        "broad_artifact_discovery",
+                        resourcePath,
+                        submitUrl,
+                        submitMethod,
+                        broadDiscoveryReason(metadata),
+                        Math.min(score, 0.72d),
+                        List.of(),
+                        tenantId,
+                        environment,
+                        releaseId,
+                        false)),
                 score);
     }
 
@@ -379,6 +436,95 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return "api_metadata broad artifact discovery";
         }
         return "api_metadata broad artifact discovery: " + businessContext;
+    }
+
+    private AgenticAuthoringEvidenceBundle evidenceBundle(
+            String retrievalSource,
+            String resourcePath,
+            String submitUrl,
+            String submitMethod,
+            String summary,
+            double confidence,
+            List<String> matchedTerms,
+            String tenantId,
+            String environment,
+            String releaseId,
+            boolean weakLexical) {
+        List<String> terms = matchedTerms == null ? List.of() : List.copyOf(matchedTerms);
+        String safeResource = valueOrEmpty(resourcePath);
+        String safeSubmit = valueOrEmpty(submitUrl);
+        String safeMethod = valueOrEmpty(submitMethod).toLowerCase(Locale.ROOT);
+        String safeSummary = compactReasonText(summary);
+        List<AgenticAuthoringEvidenceBundle.Evidence> evidence = new ArrayList<>();
+        evidence.add(new AgenticAuthoringEvidenceBundle.Evidence(
+                "api_metadata",
+                weakLexical ? "weak_lexical_match" : "retrieved_candidate",
+                safeResource,
+                safeSummary,
+                weakLexical ? Math.min(confidence, 0.49d) : confidence,
+                terms,
+                tenantId,
+                environment,
+                releaseId));
+        if (!safeSubmit.isBlank()) {
+            evidence.add(new AgenticAuthoringEvidenceBundle.Evidence(
+                    "/schemas/filtered",
+                    weakLexical ? "schema_probe_pending" : "schema_grounding",
+                    schemaUrl(safeSubmit, safeMethod),
+                    "Canonical filtered schema for the selected operation.",
+                    weakLexical ? 0.35d : 0.78d,
+                    terms,
+                    tenantId,
+                    environment,
+                    releaseId));
+            evidence.add(new AgenticAuthoringEvidenceBundle.Evidence(
+                    "actions",
+                    weakLexical ? "actions_probe_pending" : "operation_grounding",
+                    safeMethod.toUpperCase(Locale.ROOT) + " " + safeSubmit,
+                    "Candidate operation and materialization endpoint.",
+                    weakLexical ? 0.34d : 0.74d,
+                    terms,
+                    tenantId,
+                    environment,
+                    releaseId));
+        }
+        if (!safeResource.isBlank()) {
+            evidence.add(new AgenticAuthoringEvidenceBundle.Evidence(
+                    "capabilities",
+                    weakLexical ? "capabilities_probe_pending" : "resource_capability_hint",
+                    safeResource + "/capabilities",
+                    "Resource capability snapshot candidate.",
+                    weakLexical ? 0.32d : 0.68d,
+                    terms,
+                    tenantId,
+                    environment,
+                    releaseId));
+            evidence.add(new AgenticAuthoringEvidenceBundle.Evidence(
+                    "domain_catalog",
+                    "domain_catalog_hint",
+                    domainCatalogRef(safeResource),
+                    "Domain catalog key inferred from the API resource path.",
+                    weakLexical ? 0.30d : 0.62d,
+                    domainTerms(safeResource),
+                    tenantId,
+                    environment,
+                    releaseId));
+        }
+        return AgenticAuthoringEvidenceBundle.of(retrievalSource, evidence);
+    }
+
+    private String domainCatalogRef(String resourcePath) {
+        String normalized = normalizePath(resourcePath);
+        if (normalized.startsWith("/api/")) {
+            normalized = normalized.substring(5);
+        } else if (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized.replace('/', '.');
+    }
+
+    private List<String> domainTerms(String resourcePath) {
+        return meaningfulTokens(normalize(domainCatalogRef(resourcePath).replace('.', ' ')));
     }
 
     private String compactReasonText(String value) {

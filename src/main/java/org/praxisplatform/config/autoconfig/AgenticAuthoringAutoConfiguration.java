@@ -26,6 +26,10 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegi
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringDefaultToolLoopPlanner;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringOrchestrator;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolLoopExecutor;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolLoopPlanner;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
@@ -193,6 +197,27 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public AgenticAuthoringToolLoopPlanner agenticAuthoringToolLoopPlanner() {
+        return new AgenticAuthoringDefaultToolLoopPlanner();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringToolLoopExecutor agenticAuthoringToolLoopExecutor(
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringToolLoopPlanner planner) {
+        return new AgenticAuthoringToolLoopExecutor(toolRegistry, planner);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringOrchestrator agenticAuthoringOrchestrator(
+            AgenticAuthoringToolLoopExecutor toolLoopExecutor) {
+        return new AgenticAuthoringOrchestrator(toolLoopExecutor);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public AgenticAuthoringPatchCompilerService agenticAuthoringPatchCompilerService(
             AgenticAuthoringArtifactProperties properties,
             ObjectMapper objectMapper) {
@@ -285,6 +310,7 @@ public class AgenticAuthoringAutoConfiguration {
             AgenticAuthoringIntentResolverService intentResolverService,
             AgenticAuthoringPreviewService previewService,
             AgenticAuthoringToolRegistry toolRegistry,
+            ObjectProvider<AgenticAuthoringOrchestrator> orchestrator,
             ObjectProvider<AgenticAuthoringProjectKnowledgeService> projectKnowledgeService,
             ObjectProvider<AgenticAuthoringApiCatalogConversationService> apiCatalogConversationService,
             ObjectMapper objectMapper) {
@@ -295,7 +321,8 @@ public class AgenticAuthoringAutoConfiguration {
                 new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
                 toolRegistry,
                 projectKnowledgeService.getIfAvailable(),
-                apiCatalogConversationService.getIfAvailable());
+                apiCatalogConversationService.getIfAvailable(),
+                orchestrator.getIfAvailable());
     }
 
     @Bean

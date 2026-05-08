@@ -1328,7 +1328,7 @@ components:
       required: false
       schema:
         type: string
-        default: f3dd475db4f37fbe8458335ae4a24b619182b62a7d84ba4b5987c72edc692e50
+        default: 817d476f725d5c9dfaf3f967f6c0b466a438f649db801260528c70211ca5c2dd
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1358,7 +1358,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: f3dd475db4f37fbe8458335ae4a24b619182b62a7d84ba4b5987c72edc692e50
+        example: 817d476f725d5c9dfaf3f967f6c0b466a438f649db801260528c70211ca5c2dd
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1803,6 +1803,23 @@ components:
         valid:
           type: boolean
           nullable: true
+          description: Validade da resolucao de intent antes da materializacao.
+        previewTechnicallyValid:
+          type: boolean
+          nullable: true
+          description: Indica que o preview compilou tecnicamente. Nao autoriza aplicacao quando decisionValid=false.
+        decisionValid:
+          type: boolean
+          nullable: true
+          description: Indica que a materializacao satisfaz a decisao semantica desejada. Clientes devem bloquear aplicacao automatica quando false.
+        previewResourceSchemaVerified:
+          type: boolean
+          nullable: true
+          description: Indica que o recurso materializado foi re-grounded por /schemas/filtered antes da aplicacao.
+        semanticDecisionReviewGroundedByPreview:
+          type: boolean
+          nullable: true
+          description: Indica que uma decisao marcada como weak-lexical-evidence foi re-grounded por materializacao com schema canonico verificado.
         retrievalSource:
           type: string
           nullable: true
@@ -1870,6 +1887,18 @@ components:
           nullable: true
           items:
             $ref: '#/components/schemas/AgenticAuthoringSemanticAxisDecisionDiagnostic'
+        toolLoopCompleted:
+          type: boolean
+          nullable: true
+          description: Indica se o loop governado de ferramentas encerrou sem bloqueio.
+        toolLoopTerminalReason:
+          type: string
+          nullable: true
+          description: Motivo terminal seguro quando o loop governado de ferramentas nao completa.
+        toolLoopStepCount:
+          type: integer
+          format: int32
+          nullable: true
         requiresReview:
           type: boolean
           nullable: true
@@ -1900,6 +1929,13 @@ components:
         decisionDiagnostics:
           $ref: '#/components/schemas/AgenticAuthoringDecisionDiagnostics'
           nullable: true
+        toolLoopTrace:
+          type: array
+          nullable: true
+          description: Trace seguro do loop governado de ferramentas, sem payload bruto, prompt interno ou secrets.
+          items:
+            type: object
+            additionalProperties: true
       additionalProperties: true
 
     AgenticAuthoringApplyRequest:
@@ -2207,6 +2243,9 @@ components:
               type: integer
               format: int32
           additionalProperties: true
+        retrievedEvidence:
+          $ref: '#/components/schemas/AgenticAuthoringEvidenceBundle'
+          nullable: true
         reviewRequired:
           type: boolean
           nullable: true
@@ -2243,6 +2282,9 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+        refinement:
+          $ref: '#/components/schemas/AgenticAuthoringSemanticRefinement'
+          nullable: true
         previousDecisionId:
           type: string
           nullable: true
@@ -2254,6 +2296,95 @@ components:
           type: number
           format: double
           nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringSemanticRefinement:
+      type: object
+      nullable: true
+      description: Diff semantico aplicado sobre a decisao ativa para refinar visualizacao, fonte de dados, filtros, layout, metricas, copia ou governanca sem tratar o turno como prompt isolado.
+      properties:
+        schemaVersion:
+          type: string
+          example: praxis-agentic-authoring-semantic-refinement.v1
+        refinementKind:
+          type: string
+          nullable: true
+          enum: [visual_projection, data_source, filtering, layout, metric, copy, governance]
+        preserve:
+          type: array
+          items:
+            type: string
+        replace:
+          type: object
+          additionalProperties:
+            type: string
+        add:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        remove:
+          type: array
+          items:
+            type: string
+        rationale:
+          type: string
+          nullable: true
+        confidence:
+          type: number
+          format: double
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringEvidenceBundle:
+      type: object
+      nullable: true
+      description: Pacote canonico de evidencias recuperadas antes da decisao semantica. Deve orientar selecao de recurso e explicar se a decisao veio de RAG, api_metadata, schema, capabilities, actions, catalogo de dominio, conhecimento de projeto ou fallback lexical fraco.
+      properties:
+        schemaVersion:
+          type: string
+          example: praxis-agentic-authoring-evidence-bundle.v1
+        retrievalSource:
+          type: string
+          nullable: true
+        evidenceCount:
+          type: integer
+          format: int32
+        evidence:
+          type: array
+          items:
+            type: object
+            properties:
+              source:
+                type: string
+                nullable: true
+              kind:
+                type: string
+                nullable: true
+              ref:
+                type: string
+                nullable: true
+              summary:
+                type: string
+                nullable: true
+              confidence:
+                type: number
+                format: double
+              matchedTerms:
+                type: array
+                items:
+                  type: string
+              tenantId:
+                type: string
+                nullable: true
+              environment:
+                type: string
+                nullable: true
+              releaseId:
+                type: string
+                nullable: true
+            additionalProperties: true
       additionalProperties: true
 
     AgenticAuthoringVisualizationDecision:
