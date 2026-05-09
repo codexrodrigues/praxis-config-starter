@@ -188,6 +188,69 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     }
 
     @Test
+    void enterprisePeoplePromptPrefersEmployeeResourceOverGenericDashboardIndicators() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "POST",
+                        "risk,intelligence,incidentes,indicadores,analytics,dashboard",
+                        "Indicadores de incidentes",
+                        "Visao analitica de incidentes por gravidade e responsavel.",
+                        "riskIncidentIndicators",
+                        "{\"type\":\"object\"}",
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "human-resources,funcionarios,funcionario,colaboradores,departamento,cargo,status",
+                        "Funcionarios",
+                        "Cadastro de pessoas da empresa, colaboradores, cargos, departamentos e status.",
+                        "filterFuncionarios",
+                        "{\"type\":\"object\"}",
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/departamentos",
+                        "POST",
+                        "human-resources,departamentos,departamento",
+                        "Departamentos",
+                        "Cadastro de departamentos da empresa.",
+                        "filterDepartamentos",
+                        "{\"type\":\"object\"}",
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "Quero um dashboard de pessoas da empresa com indicadores, grafico por departamento, filtros e uma tabela de detalhes conectada.",
+                        null,
+                        "dashboard",
+                        5));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .contains("/api/human-resources/funcionarios")
+                .contains("/api/human-resources/departamentos");
+        assertThat(result.candidates().get(0).resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.candidates().get(0).resourcePath())
+                .isNotEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+    }
+
+    @Test
     void semanticRetrievalIsPreferredOverLexicalFallback() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);

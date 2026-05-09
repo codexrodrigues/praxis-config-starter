@@ -693,6 +693,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 "indicador", "indicadores", "kpi", "kpis", "metrica", "metricas")) {
             expanded.append(" analytics analitico analitica metricas indicadores kpis agregacao agregacoes");
         }
+        if (isEnterprisePeoplePrompt(normalizedPrompt)) {
+            expanded.append(" funcionario funcionarios empregado empregados colaborador colaboradores")
+                    .append(" recursos humanos human resources departamento departamentos cargo cargos status admissao");
+        }
         if (containsAny(normalizedPrompt, "comparar", "compare", "ranking", "rank", "top",
                 "maior", "maiores", "menor", "menores",
                 "por setor", "por setores", "por departamento", "por departamentos", "por area", "por areas")) {
@@ -709,6 +713,20 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             expanded.append(" timeseries serie temporal periodo data datas historico tendencia");
         }
         return expanded.toString();
+    }
+
+    private boolean isEnterprisePeoplePrompt(String normalizedPrompt) {
+        boolean peopleSubject = containsAny(normalizedPrompt,
+                "pessoa", "pessoas", "funcionario", "funcionarios",
+                "empregado", "empregados", "colaborador", "colaboradores");
+        boolean enterpriseContext = containsAny(normalizedPrompt,
+                "empresa", "companhia", "organizacao", "organizacoes",
+                "time", "times", "equipe", "equipes", "rh", "recursos humanos",
+                "departamento", "departamentos", "cargo", "cargos");
+        boolean detailOrFilterIntent = containsAny(normalizedPrompt,
+                "tabela", "lista", "listagem", "detalhe", "detalhes", "detalhada", "detalhado",
+                "filtro", "filtros", "conectada", "conectado", "drill", "drilldown", "drill-down");
+        return peopleSubject && enterpriseContext && detailOrFilterIntent;
     }
 
     private boolean isAnalyticalBusinessQuestion(String normalizedPrompt) {
