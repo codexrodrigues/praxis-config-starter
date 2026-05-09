@@ -334,7 +334,23 @@ final class AgenticAuthoringKeywordFallbackResolver {
 
     private boolean isExplicitDashboardPrompt(String prompt) {
         return containsAny(prompt, "dashboard", "grafico", "graficos", "chart", "charts",
-                "kpi", "indicador", "indicadores", "drill down", "drill-down", "drilldown");
+                "kpi", "indicador", "indicadores", "drill down", "drill-down", "drilldown")
+                || isDashboardPanelPrompt(prompt);
+    }
+
+    private boolean isDashboardPanelPrompt(String prompt) {
+        if (!containsAny(prompt, "painel")) {
+            return false;
+        }
+        if (isMasterDetailPrompt(prompt) || isReadDetailPagePrompt(prompt)) {
+            return false;
+        }
+        return containsAny(prompt,
+                "painel bonito", "painel executivo", "painel gerencial", "painel analitico",
+                "painel analítico", "painel de controle", "painel de indicadores",
+                "pagamento", "pagamentos", "folha", "salario", "salarios", "remuneracao",
+                "visualizar", "ver", "visao", "visão", "acompanhar", "monitorar",
+                "analise", "analisar", "comparar", "comparativo");
     }
 
     private boolean isMasterDetailPrompt(String prompt) {

@@ -343,21 +343,6 @@ public class AgenticAuthoringPreviewService {
         grounding.put("source", "schemas.filtered");
         grounding.put("endpointUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
         grounding.put("fieldCount", Math.max(0, fieldCount));
-        JsonNode widgets = uiCompositionPlan.path("widgets");
-        if (widgets.isArray()) {
-            for (JsonNode widget : widgets) {
-                if (widget.path("inputs") instanceof ObjectNode inputs) {
-                    inputs.put("schemaVerification", "verified");
-                    inputs.put("schemaEvidenceSource", "schemas.filtered");
-                    inputs.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
-                }
-                if (widget.path("definition").path("inputs") instanceof ObjectNode definitionInputs) {
-                    definitionInputs.put("schemaVerification", "verified");
-                    definitionInputs.put("schemaEvidenceSource", "schemas.filtered");
-                    definitionInputs.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
-                }
-            }
-        }
     }
 
     private JsonNode verifySemanticAxesWithSchema(
@@ -391,7 +376,12 @@ public class AgenticAuthoringPreviewService {
         }
         JsonNode copy = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.deepCopy();
         if (copy instanceof ObjectNode objectNode) {
-            reconcileSemanticAxesWithSchema(objectNode, schemaFields, schemaResult, warnings);
+            reconcileSemanticAxesWithSchema(
+                    objectNode,
+                    schemaFields,
+                    schemaResult,
+                    warnings,
+                    allowsSchemaSafeAxisRepair(request));
             return objectNode;
         }
         return copy;
@@ -507,7 +497,8 @@ public class AgenticAuthoringPreviewService {
             ObjectNode uiCompositionPlan,
             Map<String, SchemaFieldDescriptor> schemaFields,
             SchemaFetchResult schemaResult,
-            List<String> warnings) {
+            List<String> warnings,
+            boolean allowSchemaSafeAxisRepair) {
         JsonNode axes = uiCompositionPlan.path("diagnostics").path("semanticAxes");
         if (axes.isArray()) {
             for (JsonNode axis : axes) {
@@ -524,6 +515,7 @@ public class AgenticAuthoringPreviewService {
         }
         JsonNode widgets = uiCompositionPlan.path("widgets");
         if (widgets instanceof ArrayNode widgetArray) {
+            Set<String> assignedChartFields = exactSafeChartFields(widgetArray, schemaFields);
             for (int i = widgetArray.size() - 1; i >= 0; i--) {
                 JsonNode widget = widgetArray.get(i);
                 alignAuxiliaryWidgetBindings(widget, schemaFields, schemaResult, warnings);
@@ -532,33 +524,216 @@ public class AgenticAuthoringPreviewService {
                     continue;
                 }
                 Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisObject, schemaFields);
-                if (schemaField.isPresent()) {
+                if (schemaField.isPresent() && isSafeGenericGroupByChartField(schemaField.get(), widget)) {
                     alignSemanticAxis(axisObject, schemaField.get(), schemaResult);
                     alignChartBinding(widget, schemaField.get());
+                    assignedChartFields.add(normalize(schemaField.get().name()));
                 } else {
+                    boolean allowGenericAxisRepair = allowsGenericInferredAxisRepair(axisObject);
+                    Optional<SchemaFieldDescriptor> repairedSchemaField =
+                            (allowSchemaSafeAxisRepair || allowGenericAxisRepair)
+                            ? preferredSafeGroupingField(schemaFields, widget, assignedChartFields)
+                            : Optional.empty();
+                    if (repairedSchemaField.isPresent()) {
+                        SchemaFieldDescriptor repairedField = repairedSchemaField.get();
+                        String requestedField = axisObject.path("field").asText("");
+                        alignSemanticAxis(axisObject, repairedField, schemaResult);
+                        alignChartBinding(widget, repairedField);
+                        alignDiagnosticsAxis(uiCompositionPlan, requestedField, repairedField, schemaResult);
+                        assignedChartFields.add(normalize(repairedField.name()));
+                        addWarningOnce(warnings, "semantic-chart-axis-repaired-with-schema-field");
+                        continue;
+                    }
+                    if (schemaField.isPresent()) {
+                        markSemanticAxisUnsupported(axisObject);
+                        markDiagnosticsAxisUnsupported(uiCompositionPlan, schemaField.get().name());
+                        addWarningOnce(warnings, "semantic-chart-group-by-unsupported-field-type");
+                    } else if (allowSchemaSafeAxisRepair) {
+                        markSemanticAxisDropped(axisObject, "schema-safe-axis-repair");
+                        markDiagnosticsAxisDropped(uiCompositionPlan, axisObject.path("field").asText(""), "schema-safe-axis-repair");
+                        addWarningOnce(warnings, "semantic-chart-axis-dropped-without-safe-schema-field");
+                    }
                     widgetArray.remove(i);
                 }
             }
-            pruneOrphanWidgetBindings(uiCompositionPlan, widgetArray, warnings);
+            Set<String> widgetKeys = widgetKeys(widgetArray);
+            pruneOrphanWidgetBindings(uiCompositionPlan, widgetKeys, warnings);
+            pruneOrphanCanvasItems(uiCompositionPlan, widgetKeys, warnings);
+        }
+    }
+
+    private Set<String> exactSafeChartFields(
+            ArrayNode widgetArray,
+            Map<String, SchemaFieldDescriptor> schemaFields) {
+        Set<String> fields = new LinkedHashSet<>();
+        if (widgetArray == null) {
+            return fields;
+        }
+        for (JsonNode widget : widgetArray) {
+            JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
+            if (!(axis instanceof ObjectNode axisObject)) {
+                continue;
+            }
+            Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisObject, schemaFields);
+            if (schemaField.isPresent()
+                    && isSafeGenericGroupByChartField(schemaField.get(), widget)) {
+                fields.add(normalize(schemaField.get().name()));
+            }
+        }
+        return fields;
+    }
+
+    private boolean allowsSchemaSafeAxisRepair(AgenticAuthoringPlanRequest request) {
+        String prompt = normalize(String.join(" ",
+                request == null ? "" : request.userPrompt(),
+                request == null || request.intentResolution() == null ? "" : request.intentResolution().effectivePrompt()));
+        if (prompt.isBlank()) {
+            return false;
+        }
+        boolean asksForSafeAxis = containsAny(prompt,
+                "eixo seguro",
+                "eixos seguros",
+                "safe axis",
+                "safe axes",
+                "campo seguro",
+                "campos seguros",
+                "campos suportados",
+                "eixos suportados");
+        boolean asksForSchemaGrounding = containsAny(prompt,
+                "schema",
+                "esquema",
+                "confirmado",
+                "confirmados",
+                "verificado",
+                "verificados",
+                "suportado",
+                "suportados");
+        return asksForSafeAxis && asksForSchemaGrounding;
+    }
+
+    private boolean allowsGenericInferredAxisRepair(ObjectNode semanticAxis) {
+        if (semanticAxis == null) {
+            return false;
+        }
+        String provenance = semanticAxis.path("provenance").asText("");
+        String probeStatus = semanticAxis.path("schemaProbeStatus").asText("");
+        return "generic-dashboard-field-inference".equals(provenance)
+                && (probeStatus.isBlank() || "pending".equals(probeStatus));
+    }
+
+    private boolean isSafeGenericGroupByChartField(SchemaFieldDescriptor field, JsonNode widget) {
+        if (field == null) {
+            return false;
+        }
+        String statsOperation = value(widget.path("inputs").path("config").path("dataSource").path("query").path("statsOperation").asText(""));
+        if (!statsOperation.isBlank() && !"group-by".equalsIgnoreCase(statsOperation)) {
+            return true;
+        }
+        String type = normalize(field.type());
+        String format = normalize(field.format());
+        if (field.hasEnum()) {
+            return true;
+        }
+        if (containsAnyToken(field.fieldTokens(), "data", "date", "pagamento")
+                || containsAnyToken(field.labelTokens(), "data", "date", "pagamento")) {
+            return false;
+        }
+        if (type.isBlank()) {
+            return true;
+        }
+        if ("integer".equals(type) || "long".equals(type)) {
+            return containsAnyToken(field.fieldTokens(), "mes", "ano", "competencia", "periodo")
+                    || containsAnyToken(field.labelTokens(), "mes", "ano", "competencia", "periodo");
+        }
+        if ("string".equals(type)) {
+            return format.isBlank() || "text".equals(format);
+        }
+        return "boolean".equals(type);
+    }
+
+    private Optional<SchemaFieldDescriptor> preferredSafeGroupingField(
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            JsonNode widget,
+            Set<String> assignedChartFields) {
+        SchemaFieldDescriptor best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (SchemaFieldDescriptor field : schemaFields.values()) {
+            if (assignedChartFields != null && assignedChartFields.contains(normalize(field.name()))) {
+                continue;
+            }
+            if (!isSafeGenericGroupByChartField(field, widget)) {
+                continue;
+            }
+            int score = groupingFieldScore(field);
+            if (score > bestScore) {
+                best = field;
+                bestScore = score;
+            }
+        }
+        return best == null || bestScore <= 0 ? Optional.empty() : Optional.of(best);
+    }
+
+    private void alignDiagnosticsAxis(
+            ObjectNode uiCompositionPlan,
+            String requestedField,
+            SchemaFieldDescriptor field,
+            SchemaFetchResult schemaResult) {
+        if (uiCompositionPlan == null || field == null) {
+            return;
+        }
+        JsonNode axes = uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return;
+        }
+        for (JsonNode axis : axes) {
+            if (axis instanceof ObjectNode axisObject
+                    && normalize(requestedField).equals(normalize(axisObject.path("field").asText("")))) {
+                alignSemanticAxis(axisObject, field, schemaResult);
+                axisObject.put("materialized", true);
+                return;
+            }
+        }
+    }
+
+    private void markDiagnosticsAxisUnsupported(ObjectNode uiCompositionPlan, String fieldName) {
+        if (uiCompositionPlan == null || value(fieldName).isBlank()) {
+            return;
+        }
+        JsonNode axes = uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return;
+        }
+        for (JsonNode axis : axes) {
+            if (axis instanceof ObjectNode axisObject
+                    && normalize(fieldName).equals(normalize(axisObject.path("field").asText("")))) {
+                markSemanticAxisUnsupported(axisObject);
+            }
+        }
+    }
+
+    private void markDiagnosticsAxisDropped(ObjectNode uiCompositionPlan, String fieldName, String reason) {
+        if (uiCompositionPlan == null || value(fieldName).isBlank()) {
+            return;
+        }
+        JsonNode axes = uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return;
+        }
+        for (JsonNode axis : axes) {
+            if (axis instanceof ObjectNode axisObject
+                    && normalize(fieldName).equals(normalize(axisObject.path("field").asText("")))) {
+                markSemanticAxisDropped(axisObject, reason);
+            }
         }
     }
 
     private void pruneOrphanWidgetBindings(
             ObjectNode uiCompositionPlan,
-            ArrayNode widgets,
+            Set<String> widgetKeys,
             List<String> warnings) {
         JsonNode bindings = uiCompositionPlan.path("bindings");
         if (!(bindings instanceof ArrayNode bindingsArray)) {
             return;
-        }
-        Set<String> widgetKeys = new LinkedHashSet<>();
-        for (JsonNode widget : widgets) {
-            String key = firstNonBlank(
-                    widget.path("key").asText(""),
-                    widget.path("id").asText(""));
-            if (!key.isBlank()) {
-                widgetKeys.add(key);
-            }
         }
         for (int i = bindingsArray.size() - 1; i >= 0; i--) {
             JsonNode binding = bindingsArray.get(i);
@@ -570,6 +745,42 @@ public class AgenticAuthoringPreviewService {
                 bindingsArray.remove(i);
                 addWarningOnce(warnings, "ui-composition-plan-orphan-binding-removed");
             }
+        }
+    }
+
+    private Set<String> widgetKeys(ArrayNode widgets) {
+        Set<String> widgetKeys = new LinkedHashSet<>();
+        if (widgets == null) {
+            return widgetKeys;
+        }
+        for (JsonNode widget : widgets) {
+            String key = firstNonBlank(
+                    widget.path("key").asText(""),
+                    widget.path("id").asText(""));
+            if (!key.isBlank()) {
+                widgetKeys.add(key);
+            }
+        }
+        return widgetKeys;
+    }
+
+    private void pruneOrphanCanvasItems(
+            ObjectNode uiCompositionPlan,
+            Set<String> widgetKeys,
+            List<String> warnings) {
+        JsonNode items = uiCompositionPlan.path("canvas").path("items");
+        if (!(items instanceof ObjectNode itemsObject)) {
+            return;
+        }
+        List<String> orphanKeys = new ArrayList<>();
+        itemsObject.fieldNames().forEachRemaining(key -> {
+            if (!widgetKeys.contains(key)) {
+                orphanKeys.add(key);
+            }
+        });
+        for (String orphanKey : orphanKeys) {
+            itemsObject.remove(orphanKey);
+            addWarningOnce(warnings, "ui-composition-plan-orphan-canvas-item-removed");
         }
     }
 
@@ -615,11 +826,6 @@ public class AgenticAuthoringPreviewService {
                 addWarningOnce(warnings, "semantic-filter-schema-verification-unsupported-field");
             }
         }
-        if (widget.path("inputs") instanceof ObjectNode inputsObject) {
-            inputsObject.put("schemaVerification", "verified");
-            inputsObject.put("schemaEvidenceSource", "schemas.filtered");
-            inputsObject.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
-        }
     }
 
     private void alignKpiFields(
@@ -628,6 +834,9 @@ public class AgenticAuthoringPreviewService {
             SchemaFetchResult schemaResult,
             List<String> warnings) {
         JsonNode kpis = widget.path("inputs").path("kpis");
+        if (kpis.isMissingNode()) {
+            kpis = widget.path("inputs").path("document").path("kpis");
+        }
         if (!(kpis instanceof ArrayNode kpiArray)) {
             return;
         }
@@ -683,6 +892,12 @@ public class AgenticAuthoringPreviewService {
     private void markSemanticAxisUnsupported(ObjectNode semanticAxis) {
         semanticAxis.put("schemaVerified", false);
         semanticAxis.put("schemaProbeStatus", "unsupported");
+    }
+
+    private void markSemanticAxisDropped(ObjectNode semanticAxis, String reason) {
+        markSemanticAxisUnsupported(semanticAxis);
+        semanticAxis.put("materialized", false);
+        semanticAxis.put("materializationReason", valueOrDefault(reason, "not-materialized"));
     }
 
     private void alignChartBinding(JsonNode widget, SchemaFieldDescriptor field) {
@@ -869,6 +1084,9 @@ public class AgenticAuthoringPreviewService {
                 field,
                 label,
                 description,
+                property.path("type").asText(""),
+                property.path("format").asText(""),
+                property.path("enum").isArray() && !property.path("enum").isEmpty(),
                 tokens(field),
                 tokens(label),
                 tokens(description));
@@ -997,6 +1215,15 @@ public class AgenticAuthoringPreviewService {
             if (failureCodes != null && failureCodes.contains("semantic-preview-operational-dashboard-required")) {
                 return "Encontrei a fonte de dados, mas a pre-visualizacao nao materializou um dashboard de monitoramento. Vou manter em revisao ate gerar indicadores, grafico e detalhe operacional.";
             }
+            if (failureCodes != null && failureCodes.contains("semantic-preview-axis-schema-verification-required")) {
+                return "Encontrei a fonte de dados, mas alguns eixos analiticos do grafico nao puderam ser confirmados ou usados com seguranca no schema. Vou manter em revisao ate regenerar o plano com eixos compativeis.";
+            }
+            if (failureCodes != null && failureCodes.stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(code -> code.equals("semantic-decision-required")
+                            || code.startsWith("semantic-decision-review-required"))) {
+                return governedReviewAssistantMessage(intentResolution, uiCompositionPlan);
+            }
             return "Encontrei a fonte de dados, mas o plano gerado usou propriedades incompativeis com o componente de tabela. Vou ajustar para usar apenas os campos suportados.";
         }
         AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
@@ -1034,6 +1261,36 @@ public class AgenticAuthoringPreviewService {
         return "Criei uma pre-visualizacao para revisao.\n\n"
                 + "- Fonte de dados: \"" + resourceLabel + "\".\n"
                 + "- Proximo passo: revise o resultado e salve a pagina quando estiver de acordo.";
+    }
+
+    private String governedReviewAssistantMessage(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode uiCompositionPlan) {
+        AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
+        String resourceLabel = candidate == null || value(candidate.resourcePath()).isBlank()
+                ? "a fonte encontrada"
+                : titleFromResourcePath(candidate.resourcePath());
+        String prompt = normalize(intentResolution == null ? "" : intentResolution.effectivePrompt());
+        String subject = containsAny(prompt, "pessoa", "pessoas", "funcionario", "funcionarios", "colaborador", "colaboradores")
+                ? "pessoas da empresa"
+                : resourceLabel;
+        if (containsComponent(uiCompositionPlan, "praxis-table")) {
+            return "Montei uma primeira pre-visualizacao de tabela para " + subject + ".\n\n"
+                    + "- Fonte usada: \"" + resourceLabel + "\".\n"
+                    + "- O que ja foi criado: uma tabela conectada, com colunas vindas do schema da fonte.\n"
+                    + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
+                    + "- Como prosseguir: confirme que esta fonte esta correta, peca ajustes nas colunas ou diga \"salvar esta tabela\".";
+        }
+        if (containsComponent(uiCompositionPlan, "praxis-chart")) {
+            return "Montei uma primeira pre-visualizacao de dashboard para " + subject + ".\n\n"
+                    + "- Fonte usada: \"" + resourceLabel + "\".\n"
+                    + "- O que ja foi criado: componentes analiticos conectados ao schema da fonte.\n"
+                    + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
+                    + "- Como prosseguir: confirme a fonte, peca outro recorte ou diga \"salvar este dashboard\".";
+        }
+        return "Montei uma primeira pre-visualizacao usando \"" + resourceLabel + "\".\n\n"
+                + "- Por que ficou em revisao: a decisao semantica ainda precisa de confirmacao antes de salvar.\n"
+                + "- Como prosseguir: confirme a fonte, peca ajustes ou diga que posso salvar.";
     }
 
     private SemanticAxisAssistantSummary semanticAxisAssistantSummary(JsonNode uiCompositionPlan) {
@@ -1205,6 +1462,9 @@ public class AgenticAuthoringPreviewService {
     }
 
     private AgenticAuthoringPlanRequest withEffectivePrompt(AgenticAuthoringPlanRequest request) {
+        if (allowsSchemaSafeAxisRepair(request)) {
+            return request;
+        }
         String intentEffectivePrompt = request.intentResolution() == null
                 ? ""
                 : value(request.intentResolution().effectivePrompt()).trim();
@@ -1515,6 +1775,9 @@ public class AgenticAuthoringPreviewService {
             String name,
             String label,
             String description,
+            String type,
+            String format,
+            boolean hasEnum,
             Set<String> fieldTokens,
             Set<String> labelTokens,
             Set<String> descriptionTokens) {

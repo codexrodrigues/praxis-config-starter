@@ -28,7 +28,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     @Override
     public Optional<AgenticAuthoringUiCompositionPlanResult> plan(AgenticAuthoringPlanRequest request) {
         AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
-        AgenticAuthoringCandidate candidate = intent == null ? null : intent.selectedCandidate();
+        AgenticAuthoringCandidate candidate = selectedCandidate(intent);
         if (intent == null
                 || candidate == null
                 || !"create".equals(intent.operationKind())
@@ -51,6 +51,31 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 List.of("ui-composition-plan-provider:generic-resource-" + artifactKind),
                 plan,
                 emptyCompiledFormPatch()));
+    }
+
+    private AgenticAuthoringCandidate selectedCandidate(AgenticAuthoringIntentResolutionResult intent) {
+        if (intent == null) {
+            return null;
+        }
+        if (intent.selectedCandidate() != null) {
+            return intent.selectedCandidate();
+        }
+        AgenticAuthoringSemanticDecision semanticDecision = intent.semanticDecision();
+        AgenticAuthoringSemanticDecision.SelectedResource resource =
+                semanticDecision == null ? null : semanticDecision.selectedResource();
+        if (resource == null || safe(resource.resourcePath()).isBlank()) {
+            return null;
+        }
+        return new AgenticAuthoringCandidate(
+                safe(resource.resourcePath()),
+                valueOrDefault(resource.operation(), "post"),
+                valueOrDefault(resource.schemaUrl(), defaultSchemaUrl(resource.resourcePath(), resource.operation())),
+                valueOrDefault(resource.submitUrl(), resource.resourcePath()),
+                valueOrDefault(resource.submitMethod(), valueOrDefault(resource.operation(), "post")),
+                semanticDecision.confidence() == null ? 0.70d : semanticDecision.confidence(),
+                "semantic-decision-selected-resource",
+                List.of("semantic-decision-selected-resource"),
+                semanticDecision.retrievedEvidence());
     }
 
     private ObjectNode tablePlan(AgenticAuthoringCandidate candidate) {
@@ -80,6 +105,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         addSemanticAxisProvenance(plan, visualizationDecision, dimensions);
         addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
         addDashboardBindings(plan, candidate, dimensions);
+        addDashboardCanvas(plan, candidate, dimensions);
         return plan;
     }
 
@@ -108,7 +134,6 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
         inputs.put("tableId", key);
-        inputs.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
         ObjectNode config = inputs.putObject("config");
         config.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
         config.putArray("columns");
@@ -145,7 +170,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         series.put("name", "Total");
         series.put("type", dimension.chartType());
         series.put("categoryField", dimension.field());
-        series.putObject("metric").put("aggregation", "count").put("label", "Total");
+        series.putObject("metric")
+                .put("field", metricOutputField(dimension))
+                .put("aggregation", dimension.metricAggregation())
+                .put("label", "Total");
         ObjectNode dataSource = config.putObject("dataSource");
         dataSource.put("kind", "remote");
         dataSource.put("resourcePath", businessResourcePath(candidate.resourcePath()));
@@ -163,7 +191,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (!dimension.metricField().isBlank()) {
             metric.put("field", dimension.metricField());
         }
-        metric.put("alias", "total");
+        metric.put("alias", metricOutputField(dimension));
         ObjectNode statsRequest = query.putObject("statsRequest");
         statsRequest.putObject("filter");
         statsRequest.put("field", dimension.field());
@@ -172,10 +200,17 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (!dimension.metricField().isBlank()) {
             statsMetric.put("field", dimension.metricField());
         }
-        statsMetric.put("alias", "total");
+        statsMetric.put("alias", metricOutputField(dimension));
         statsRequest.put("limit", 12);
         statsRequest.put("orderBy", "VALUE_DESC");
         config.putObject("interactions").put("selection", true);
+    }
+
+    private String metricOutputField(DashboardDimension dimension) {
+        if (dimension != null && !dimension.metricField().isBlank()) {
+            return dimension.metricField();
+        }
+        return "total";
     }
 
     private void addKpis(
@@ -187,10 +222,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         widget.put("key", key);
         widget.put("componentId", "praxis-rich-content");
         widget.put("role", "kpi-band");
-        ObjectNode inputs = widget.putObject("inputs");
-        inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
-        inputs.put("schemaUrl", schemaUrl(candidate));
-        ArrayNode kpis = inputs.putArray("kpis");
+        ObjectNode document = widget.putObject("inputs").putObject("document");
+        document.put("kind", "praxis.rich-content.document");
+        document.put("version", "1.0.0");
+        ArrayNode kpis = document.putArray("kpis");
         ObjectNode total = kpis.addObject();
         total.put("id", key + "-total");
         total.put("label", "Total");
@@ -210,9 +245,6 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             kpi.put("schemaProbeStatus", "pending");
             kpi.put("provenance", dimension.provenance());
         }
-        ObjectNode document = inputs.putObject("document");
-        document.put("kind", "praxis.rich-content.document");
-        document.put("version", "1.0.0");
         ObjectNode text = document.putArray("nodes").addObject();
         text.put("type", "text");
         text.put("text", "Indicadores de " + titleFromResourcePath(businessResourcePath(candidate.resourcePath())) + ".");
@@ -229,14 +261,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         widget.put("role", "filter");
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
-        inputs.put("schemaUrl", schemaUrl(candidate));
         inputs.put("filterId", key);
         inputs.put("showFilterSettings", true);
         ArrayNode selectedFields = inputs.putArray("selectedFieldIds");
         for (DashboardDimension dimension : dimensions) {
             selectedFields.add(dimension.field());
         }
-        inputs.put("schemaVerification", "pending");
     }
 
     private void addSemanticAxisProvenance(
@@ -293,6 +323,47 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             transform.put("kind", "pick-path");
             transform.put("path", "filters." + dimension.field());
         }
+    }
+
+    private void addDashboardCanvas(
+            ObjectNode plan,
+            AgenticAuthoringCandidate candidate,
+            List<DashboardDimension> dimensions) {
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "72px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        ObjectNode items = canvas.putObject("items");
+        putCanvasItem(items, widgetKey(candidate, "summary"), 1, 1, 12, 1);
+        putCanvasItem(items, widgetKey(candidate, "kpis"), 1, 2, 12, 1);
+        putCanvasItem(items, widgetKey(candidate, "filter"), 1, 3, 12, 1);
+
+        int chartCount = Math.max(1, dimensions.size());
+        int chartColSpan = chartCount == 1 ? 12 : chartCount == 2 ? 6 : 4;
+        int chartRow = 4;
+        int chartRowSpan = 4;
+        for (int i = 0; i < dimensions.size(); i++) {
+            DashboardDimension dimension = dimensions.get(i);
+            int rowOffset = i / 3;
+            int columnOffset = i % 3;
+            int col = 1 + columnOffset * chartColSpan;
+            putCanvasItem(items, widgetKey(candidate, "chart-" + dimension.field()),
+                    col, chartRow + rowOffset * chartRowSpan, chartColSpan, chartRowSpan);
+        }
+
+        int chartRows = (int) Math.ceil(dimensions.size() / 3.0d);
+        int tableRow = chartRow + Math.max(1, chartRows) * chartRowSpan;
+        putCanvasItem(items, widgetKey(candidate, "table"), 1, tableRow, 12, 5);
+    }
+
+    private void putCanvasItem(ObjectNode items, String key, int col, int row, int colSpan, int rowSpan) {
+        ObjectNode item = items.putObject(key);
+        item.put("col", col);
+        item.put("row", row);
+        item.put("colSpan", colSpan);
+        item.put("rowSpan", rowSpan);
     }
 
     private void addComponentPortEndpoint(ObjectNode endpoint, String widgetKey, String port, String direction) {
@@ -489,6 +560,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     private String valueOrDefault(String value, String fallback) {
         String safe = safe(value);
         return safe.isBlank() ? fallback : safe;
+    }
+
+    private String defaultSchemaUrl(String resourcePath, String operation) {
+        String path = businessResourcePath(resourcePath);
+        if (path.isBlank()) {
+            return "";
+        }
+        return "/schemas/filtered?path=" + path
+                + "&operation=" + valueOrDefault(operation, "post").toLowerCase(Locale.ROOT)
+                + "&schemaType=response";
     }
 
     private String baseResourceName(String path) {

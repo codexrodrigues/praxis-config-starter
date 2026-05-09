@@ -294,6 +294,48 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewDescribesGovernanceReviewWithoutBlamingTableContract() throws Exception {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
+        ArrayNode widgets = plan.putArray("widgets");
+        widgets.addObject().put("key", "payroll-chart").put("componentId", "praxis-chart");
+        widgets.addObject().put("key", "payroll-table").put("componentId", "praxis-table")
+                .putObject("inputs").put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.putObject("patch").putArray("widgets");
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:test-governed-review"),
+                        plan,
+                        compiledFormPatch));
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Gostei, mas prefiro graficos",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                keywordFallbackReviewDashboardIntent());
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).contains("semantic-decision-review-required:keyword-fallback-fail-safe");
+        assertThat(result.assistantMessage())
+                .contains("Montei uma primeira pre-visualizacao de tabela")
+                .contains("Como prosseguir")
+                .doesNotContain("propriedades incompativeis")
+                .doesNotContain("componente de tabela");
+    }
+
+    @Test
     void previewAuditsProjectKnowledgeRefsFromUiCompositionPlanProvider() throws Exception {
         ObjectNode contextHints = objectMapper.createObjectNode();
         ObjectNode projectKnowledge = contextHints.putObject("projectKnowledge");
@@ -617,6 +659,44 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewRemovesGenericGroupByChartsForNonCategoricalFields() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Preciso monitorar chamados e ocorrencias em atendimento, gravidade, andamento e responsavel.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                operationalMonitoringDashboardIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("gravidade").put("type", "string");
+        properties.putObject("andamento").put("type", "number");
+        properties.putObject("responsavel").put("type", "string");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("semantic-chart-group-by-unsupported-field-type");
+        assertThat(result.uiCompositionPlan().path("widgets").toString())
+                .contains("incidentes-chart-gravidade")
+                .contains("incidentes-chart-responsavel")
+                .doesNotContain("incidentes-chart-andamento");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .doesNotContain("incidentes-chart-andamento");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
+                .contains("\"field\":\"andamento\",\"label\":\"Andamento\",\"provenance\":\"llm-authored-semantic-axis\",\"schemaVerified\":false,\"schemaProbeStatus\":\"unsupported\"");
+    }
+
+    @Test
     void previewAddsResourceSchemaGroundingForTablePlansWhenSchemaIsAvailable() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie uma tabela operacional de folhas de pagamento",
@@ -647,8 +727,10 @@ class AgenticAuthoringPreviewServiceTest {
                 .isTrue();
         assertThat(result.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding").path("fieldCount").asInt())
                 .isEqualTo(3);
-        assertThat(result.uiCompositionPlan().path("widgets").path(0).path("inputs").path("schemaVerification").asText())
-                .isEqualTo("verified");
+        assertThat(result.uiCompositionPlan().path("widgets").toString())
+                .doesNotContain("schemaVerification")
+                .doesNotContain("schemaEvidenceSource")
+                .doesNotContain("schemaEvidenceUrl");
     }
 
     @Test
@@ -778,13 +860,67 @@ class AgenticAuthoringPreviewServiceTest {
                 .doesNotContain("andamento")
                 .doesNotContain("responsavel");
         assertThat(result.warnings()).contains("ui-composition-plan-orphan-binding-removed");
+        String canvasItems = result.uiCompositionPlan().path("canvas").path("items").toString();
+        assertThat(canvasItems)
+                .contains("incidentes-chart-gravidade")
+                .doesNotContain("incidentes-chart-andamento")
+                .doesNotContain("incidentes-chart-responsavel")
+                .doesNotContain("andamento")
+                .doesNotContain("responsavel");
+        assertThat(result.warnings()).contains("ui-composition-plan-orphan-canvas-item-removed");
         assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
                 .contains("\"field\":\"severidade\"")
                 .contains("\"schemaProbeStatus\":\"unsupported\"");
         assertThat(result.failureCodes()).contains("semantic-preview-axis-schema-verification-required");
         assertThat(result.assistantMessage())
-                .contains("plano gerado usou propriedades incompativeis")
+                .contains("eixos analiticos do grafico")
+                .contains("manter em revisao")
+                .doesNotContain("propriedades incompativeis")
                 .doesNotContain("cards ricos");
+    }
+
+    @Test
+    void previewRepairsUnsupportedChartAxesWhenUserAsksForSchemaSafeAxes() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "ajuste os graficos usando apenas eixos seguros confirmados pelo schema",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                operationalMonitoringDashboardIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        ObjectNode severidade = properties.putObject("severidade");
+        severidade.put("type", "string");
+        severidade.put("description", "Classe de gravidade do incidente.");
+        severidade.putObject("x-ui").put("label", "Severidade");
+        properties.putObject("missao").put("type", "string").putObject("x-ui").put("label", "Missao");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
+        assertThat(result.warnings())
+                .contains("semantic-chart-axis-repaired-with-schema-field")
+                .contains("semantic-chart-axis-dropped-without-safe-schema-field");
+        String widgets = result.uiCompositionPlan().path("widgets").toString();
+        assertThat(widgets)
+                .contains("\"field\":\"severidade\"")
+                .contains("\"field\":\"missao\"")
+                .doesNotContain("\"field\":\"andamento\"");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
+                .contains("\"field\":\"missao\"")
+                .contains("\"materialized\":false")
+                .contains("\"materializationReason\":\"schema-safe-axis-repair\"");
     }
 
     @Test
@@ -827,6 +963,49 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"selectedFieldIds\":[\"mes\"]")
                 .contains("\"dimensionField\":\"mes\"")
                 .contains("\"statsPath\":\"/api/human-resources/folhas-pagamento/stats/group-by\"");
+    }
+
+    @Test
+    void previewRepairsGenericInferredChartAxisWithSchemaBackedGroupingDimension() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Gostei, mas prefiro graficos com KPIs, filtros e tabela de detalhe preservando estes dados.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollAnalyticsDashboardIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("departamento").put("type", "string").putObject("x-ui").put("label", "Departamento");
+        properties.putObject("mes").put("type", "integer").putObject("x-ui").put("label", "Mes");
+        properties.putObject("salarioBruto").put("type", "number").putObject("x-ui").put("label", "Salario Bruto");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
+        assertThat(result.warnings()).contains("semantic-chart-axis-repaired-with-schema-field");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"requestedField\":\"category\"")
+                .contains("\"field\":\"departamento\"")
+                .contains("\"schemaVerified\":true")
+                .contains("\"statsPath\":\"/api/human-resources/vw-analytics-folha-pagamento/stats/group-by\"")
+                .doesNotContain("Canvas item references unknown widget");
+        assertThat(result.uiCompositionPlan().path("canvas").path("items").toString())
+                .contains("vw-analytics-folha-pagamento-chart-category");
+        assertThat(result.assistantMessage())
+                .contains("grafico")
+                .doesNotContain("nao materializou o grafico solicitado");
     }
 
     @Test
@@ -1166,6 +1345,71 @@ class AgenticAuthoringPreviewServiceTest {
                         true,
                         true,
                         "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult keywordFallbackReviewDashboardIntent() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                "POST",
+                0.95d,
+                "matched payroll analytics",
+                List.of("semantic-retrieval"));
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "analytical-breakdown",
+                "dashboard",
+                "praxis-chart",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Gostei, mas prefiro graficos",
+                "Vou criar uma pre-visualizacao governada.",
+                null,
+                List.of(),
+                null,
+                List.of("keyword-fallback-fail-safe-applied"),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                visualizationDecision,
+                new AgenticAuthoringSemanticDecision(
+                        AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                        "keyword-fallback-review-decision",
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        new AgenticAuthoringSemanticDecision.SelectedResource(
+                                candidate.resourcePath(),
+                                candidate.operation(),
+                                candidate.schemaUrl(),
+                                candidate.submitUrl(),
+                                candidate.submitMethod()),
+                        visualizationDecision,
+                        new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                                "keyword_fallback",
+                                List.of("keyword-fallback-fail-safe-applied"),
+                                1),
+                        true,
+                        "keyword-fallback-fail-safe",
+                        "",
+                        ""));
     }
 
     private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntent() {

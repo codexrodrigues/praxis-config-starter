@@ -204,8 +204,13 @@ public class AgenticAuthoringTurnEngine {
                 assistantMessage = previewAssistantMessage(preview, intentResolution);
             }
             Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, preview, toolLoopResult);
+            if (Boolean.TRUE.equals(decisionDiagnostics.get("semanticDecisionReviewGroundedByPreview"))) {
+                assistantMessage = groundedPreviewAssistantMessage(preview, intentResolution);
+            }
+            AgenticAuthoringIntentResolutionResult terminalIntentResolution =
+                    terminalIntentResolution(intentResolution, decisionDiagnostics);
             Map<String, Object> resultPayload = new LinkedHashMap<>();
-            resultPayload.put("intentResolution", intentResolution);
+            resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
             resultPayload.put("assistantMessage", safeText(assistantMessage));
             resultPayload.put("quickReplies", terminalQuickReplies(intentResolution, businessCatalogDiscovery));
@@ -532,6 +537,43 @@ public class AgenticAuthoringTurnEngine {
         return decisionDiagnostics(intentResolution, preview, null);
     }
 
+    private AgenticAuthoringIntentResolutionResult terminalIntentResolution(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            Map<String, Object> decisionDiagnostics) {
+        if (intentResolution == null || intentResolution.semanticDecision() == null) {
+            return intentResolution;
+        }
+        if (!Boolean.TRUE.equals(decisionDiagnostics.get("semanticDecisionReviewGroundedByPreview"))) {
+            return intentResolution;
+        }
+        AgenticAuthoringSemanticDecision groundedDecision =
+                intentResolution.semanticDecision().withReviewResolvedByPreviewGrounding();
+        return new AgenticAuthoringIntentResolutionResult(
+                intentResolution.valid(),
+                intentResolution.operationKind(),
+                intentResolution.artifactKind(),
+                intentResolution.changeKind(),
+                intentResolution.authoringProfile(),
+                intentResolution.targetApp(),
+                intentResolution.targetComponentId(),
+                intentResolution.target(),
+                intentResolution.selectedCandidate(),
+                intentResolution.candidates(),
+                intentResolution.gate(),
+                intentResolution.effectivePrompt(),
+                intentResolution.assistantMessage(),
+                intentResolution.apiCatalogAnswer(),
+                intentResolution.quickReplies(),
+                intentResolution.pendingClarification(),
+                intentResolution.clarificationQuestions(),
+                intentResolution.warnings(),
+                intentResolution.failureCodes(),
+                intentResolution.currentPageSummary(),
+                intentResolution.llmDiagnostics(),
+                intentResolution.visualizationDecision(),
+                groundedDecision);
+    }
+
     private Map<String, Object> decisionDiagnostics(
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringPreviewResult preview,
@@ -550,7 +592,7 @@ public class AgenticAuthoringTurnEngine {
             diagnostics.put("uiCompositionPlanUsesHardcodedAnchor", uiCompositionPlanUsesHardcodedAnchor(preview));
             diagnostics.put("uiCompositionPlanHasUnverifiedSemanticAxes", uiCompositionPlanHasUnverifiedSemanticAxes(preview));
             diagnostics.put("previewTechnicallyValid", preview != null && preview.valid());
-            diagnostics.put("decisionValid", !previewHasSemanticMaterializationFailures(preview));
+            diagnostics.put("decisionValid", !previewHasSemanticMaterializationFailures(preview, false));
             putToolLoopDiagnostics(diagnostics, toolLoopResult);
             putSemanticAxisDiagnostics(diagnostics, preview);
             diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
@@ -561,9 +603,7 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringSemanticDecision semanticDecision = intentResolution.semanticDecision();
         if (semanticDecision != null) {
             boolean semanticDecisionReviewGroundedByPreview =
-                    semanticDecision.reviewRequired()
-                            && "weak-lexical-evidence".equals(safeText(semanticDecision.reviewReason()))
-                            && previewResourceSchemaVerified(preview);
+                    semanticDecisionReviewGroundedByPreview(semanticDecision, preview);
             diagnostics.put("semanticDecisionSchemaVersion", safeText(semanticDecision.schemaVersion()));
             diagnostics.put("semanticDecisionId", safeText(semanticDecision.decisionId()));
             diagnostics.put("semanticDecisionReviewRequired",
@@ -588,7 +628,9 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("llmResolutionAttempted", telemetry.path("llmResolutionAttempted").asBoolean(false));
         diagnostics.put("llmResolved", telemetry.path("llmResolved").asBoolean(false));
         diagnostics.put("fallbackPolicy", safeText(telemetry.path("fallbackPolicy").asText("")));
-        diagnostics.put("keywordFallbackApplied", telemetry.path("keywordFallbackApplied").asBoolean(false));
+        boolean keywordFallbackApplied = telemetry.path("keywordFallbackApplied").asBoolean(false)
+                && !Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewGroundedByPreview"));
+        diagnostics.put("keywordFallbackApplied", keywordFallbackApplied);
         diagnostics.put("semanticPolicyApplied", telemetry.path("semanticPolicyApplied").asBoolean(false));
         boolean selectedCandidateUsesLexicalFallback =
                 telemetry.path("selectedCandidateUsesLexicalFallback").asBoolean(false)
@@ -605,7 +647,9 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("uiCompositionPlanHasUnverifiedSemanticAxes", uiCompositionPlanHasUnverifiedSemanticAxes(preview));
         diagnostics.put("previewTechnicallyValid", preview != null && preview.valid());
         diagnostics.put("previewResourceSchemaVerified", previewResourceSchemaVerified(preview));
-        diagnostics.put("decisionValid", !previewHasSemanticMaterializationFailures(preview));
+        diagnostics.put("decisionValid", !previewHasSemanticMaterializationFailures(
+                preview,
+                Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewGroundedByPreview"))));
         putToolLoopDiagnostics(diagnostics, toolLoopResult);
         putSemanticAxisDiagnostics(diagnostics, preview);
         diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
@@ -659,6 +703,24 @@ public class AgenticAuthoringTurnEngine {
                 : preview.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding");
         return grounding.path("verified").asBoolean(false)
                 && "schemas.filtered".equals(grounding.path("source").asText(""));
+    }
+
+    private boolean semanticDecisionReviewGroundedByPreview(
+            AgenticAuthoringSemanticDecision semanticDecision,
+            AgenticAuthoringPreviewResult preview) {
+        if (semanticDecision == null || !semanticDecision.reviewRequired() || !previewResourceSchemaVerified(preview)) {
+            return false;
+        }
+        String reason = safeText(semanticDecision.reviewReason());
+        if ("weak-lexical-evidence".equals(reason)) {
+            return true;
+        }
+        return "keyword-fallback-fail-safe".equals(reason)
+                && semanticDecision.refinement() != null
+                && semanticDecision.refinement().preservesResource()
+                && ("current-page-bound-resource".equals(safeText(semanticDecision.previousDecisionRef()))
+                        || !safeText(semanticDecision.refinementOf()).isBlank()
+                        || !safeText(semanticDecision.previousDecisionId()).isBlank());
     }
 
     private void putSemanticAxisDiagnostics(Map<String, Object> diagnostics, AgenticAuthoringPreviewResult preview) {
@@ -744,13 +806,16 @@ public class AgenticAuthoringTurnEngine {
         return "";
     }
 
-    private boolean previewHasSemanticMaterializationFailures(AgenticAuthoringPreviewResult preview) {
+    private boolean previewHasSemanticMaterializationFailures(
+            AgenticAuthoringPreviewResult preview,
+            boolean semanticDecisionReviewGroundedByPreview) {
         return preview != null
                 && preview.failureCodes() != null
                 && preview.failureCodes().stream()
                 .filter(Objects::nonNull)
                 .anyMatch(code -> code.startsWith("semantic-preview-")
-                        || code.startsWith("semantic-decision-review-required"));
+                        || (code.startsWith("semantic-decision-review-required")
+                                && !semanticDecisionReviewGroundedByPreview));
     }
 
     private AgenticAuthoringPreviewResult maybeRepairPreview(
@@ -1161,6 +1226,19 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringIntentResolutionResult intentResolution) {
         String message = preview == null ? "" : safeText(preview.assistantMessage());
         return !message.isBlank() ? message : safeText(intentResolution.assistantMessage());
+    }
+
+    private String groundedPreviewAssistantMessage(
+            AgenticAuthoringPreviewResult preview,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        String artifactKind = intentResolution == null ? "" : safeText(intentResolution.artifactKind());
+        if ("dashboard".equals(artifactKind)) {
+            return "Criei uma pre-visualizacao de dashboard analitico com recurso reancorado por /schemas/filtered.";
+        }
+        String message = preview == null ? "" : safeText(preview.assistantMessage());
+        return !message.isBlank() && !message.contains("revisao de governanca")
+                ? message
+                : "Criei uma pre-visualizacao com recurso reancorado por /schemas/filtered.";
     }
 
     private String advisoryCatalogAssistantMessage(

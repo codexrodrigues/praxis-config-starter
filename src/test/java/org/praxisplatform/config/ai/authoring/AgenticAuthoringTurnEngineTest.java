@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -246,12 +247,12 @@ class AgenticAuthoringTurnEngineTest {
                 .thenReturn(new AgenticAuthoringPreviewResult(
                         true,
                         List.of(),
-                        List.of(),
+                        List.of("semantic-decision-review-required:keyword-fallback-fail-safe"),
                         objectMapper.createObjectNode(),
                         objectMapper.createObjectNode(),
                         null,
                         uiCompositionPlanWithResourceSchemaGrounding(),
-                        "Preview ready."));
+                        "Materializei a pre-visualizacao, mas a decisao semantica ainda exige revisao de governanca antes da aplicacao."));
 
         engine().execute(
                 request("Crie uma tabela operacional de folhas de pagamento"),
@@ -270,6 +271,150 @@ class AgenticAuthoringTurnEngineTest {
                 .isTrue();
         org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean())
                 .isFalse();
+        com.fasterxml.jackson.databind.JsonNode terminalDecision = result.path("intentResolution").path("semanticDecision");
+        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("reviewRequired").asBoolean())
+                .isFalse();
+        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("reviewReason").asText())
+                .isBlank();
+        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("rationale").asText())
+                .contains("/schemas/filtered preview grounding");
+        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("confidence").asDouble())
+                .isGreaterThanOrEqualTo(0.70);
+    }
+
+    @Test
+    void allowsKeywordFallbackRefinementAfterCurrentPageResourceIsRegroundedByPreviewSchema() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        com.fasterxml.jackson.databind.node.ObjectNode llmDiagnostics = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode telemetry = llmDiagnostics.putObject("resolutionTelemetry");
+        telemetry.put("schemaVersion", "praxis-agentic-authoring-resolution-telemetry.v1");
+        telemetry.put("llmResolutionAttempted", true);
+        telemetry.put("llmResolved", true);
+        telemetry.put("fallbackPolicy", "fail-safe");
+        telemetry.put("keywordFallbackApplied", true);
+        telemetry.put("selectedCandidateUsesLexicalFallback", true);
+        telemetry.put("selectedCandidateUsesDomainAnchor", false);
+        telemetry.put("candidateSetContainsLexicalFallback", true);
+        telemetry.put("candidateSetContainsDomainAnchor", false);
+        AgenticAuthoringCandidate selectedCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/folhas-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/folhas-pagamento/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/folhas-pagamento/filter/cursor",
+                "POST",
+                0.49,
+                "keyword fallback candidate re-grounded by current page preview schema",
+                List.of("api-metadata", "lexical-fallback", "conversation-refinement-current-page-resource"));
+        AgenticAuthoringSemanticRefinement refinement = new AgenticAuthoringSemanticRefinement(
+                AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                "visual_projection",
+                List.of("resource", "source"),
+                Map.of("artifactKind", "dashboard", "visualIntent", "charts"),
+                Map.of("filters", List.of("requested-filter")),
+                List.of("table"),
+                "Visual refinement preserves current page resource.",
+                0.86d);
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-turn-2",
+                "create",
+                "dashboard",
+                "create_artifact",
+                AgenticAuthoringSemanticDecision.SelectedResource.from(selectedCandidate),
+                null,
+                AgenticAuthoringSemanticDecision.RetrievalEvidence.from(selectedCandidate, List.of(selectedCandidate)),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                "/api/human-resources/folhas-pagamento",
+                                "fallback lexical match",
+                                0.49d,
+                                List.of("folha"),
+                                "tenant",
+                                "local",
+                                ""))),
+                true,
+                "keyword-fallback-fail-safe",
+                "current-page-bound-resource",
+                "decision-turn-1",
+                "session-1",
+                "turn-client-2",
+                "Prefer charts over the current table.",
+                "Refine the current page visualization.",
+                "create:dashboard:create_artifact",
+                "charts",
+                null,
+                refinement,
+                "decision-turn-1",
+                "Keyword fallback was later grounded by current page schema preview.",
+                0.49d);
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                selectedCandidate,
+                List.of(selectedCandidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("semantic-policy-refined-visual-projection"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                llmDiagnostics,
+                null,
+                semanticDecision);
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(intent);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        uiCompositionPlanWithResourceSchemaGrounding(),
+                        "Preview ready."));
+
+        engine().execute(
+                request("Gostei, mas prefiro graficos com KPIs, filtros e tabela de detalhe preservando estes dados."),
+                principalContext,
+                sink);
+
+        com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .contains("reancorado por /schemas/filtered")
+                .doesNotContain("exige revisao de governanca");
+        com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("keywordFallbackApplied").asBoolean())
+                .isFalse();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("decisionValid").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticDecisionReviewGroundedByPreview").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean())
+                .isFalse();
+        com.fasterxml.jackson.databind.JsonNode terminalDecision = result.path("intentResolution").path("semanticDecision");
+        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("reviewRequired").asBoolean())
+                .isFalse();
+        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("reviewReason").asText())
+                .isBlank();
+        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("confidence").asDouble())
+                .isGreaterThanOrEqualTo(0.70);
     }
 
     @Test

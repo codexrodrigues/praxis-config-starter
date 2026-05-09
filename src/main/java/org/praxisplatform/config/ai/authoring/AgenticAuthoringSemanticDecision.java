@@ -80,6 +80,41 @@ public record AgenticAuthoringSemanticDecision(
                 null);
     }
 
+    AgenticAuthoringSemanticDecision withReviewResolvedByPreviewGrounding() {
+        String groundingRationale = "Weak lexical review resolved by canonical /schemas/filtered preview grounding.";
+        String mergedRationale = safe(rationale).isBlank()
+                ? groundingRationale
+                : safe(rationale) + " " + groundingRationale;
+        Double groundedConfidence = confidence == null
+                ? 0.70
+                : Math.max(confidence, 0.70);
+        return new AgenticAuthoringSemanticDecision(
+                schemaVersion,
+                decisionId,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedResource,
+                visualizationDecision,
+                retrievalEvidence,
+                retrievedEvidence,
+                false,
+                "",
+                previousDecisionRef,
+                refinementOf,
+                conversationId,
+                turnId,
+                userGoal,
+                activeObjective,
+                artifactIntent,
+                visualIntent,
+                constraints,
+                refinement,
+                previousDecisionId,
+                mergedRationale,
+                groundedConfidence);
+    }
+
     static AgenticAuthoringSemanticDecision from(
             String operationKind,
             String artifactKind,

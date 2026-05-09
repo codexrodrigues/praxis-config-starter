@@ -235,6 +235,30 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void fallbackKeepsPainelAsDashboardInsteadOfGenericTable() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.semanticDecision().artifactKind()).isEqualTo("dashboard");
+        assertThat(result.semanticDecision().visualIntent()).isEqualTo("resource-backed-dashboard");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
     void semanticDecisionRequiresReviewForWeakLexicalEvidenceWithoutKeywordFallback() {
         AgenticAuthoringCandidate weakLexicalCandidate = new AgenticAuthoringCandidate(
                 "/api/risk-intelligence/vw-indicadores-incidentes",
@@ -1393,6 +1417,96 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(firstReply.contextHints().path("presentation").path("returns").asText()).isNotBlank();
         assertThat(firstReply.contextHints().path("presentation").path("nextStep").asText()).isNotBlank();
         assertThat(firstReply.description()).contains("Indicada");
+    }
+
+    @Test
+    void consultativeRelatedTableQuestionAnswersInsteadOfMaterializingPreview() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais outras tabelas podem ser criadas que tem referencia ou relacionamento com pessoas?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.assistantMessage())
+                .contains("Nao vou criar outra tela automaticamente")
+                .contains("Para prosseguir")
+                .contains("crie uma tabela de funcionarios");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly("people-table-create", "people-table-fields", "people-related-options");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::label)
+                .containsExactly("Criar tabela de pessoas", "Ver campos", "Comparar opcoes")
+                .doesNotContain("Criar dashboard");
+        assertThat(result.quickReplies().get(0).contextHints().path("artifactKind").asText()).isEqualTo("table");
+        assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("nextStep").asText())
+                .contains("tabela de pessoas");
+        assertThat(result.quickReplies().get(1).contextHints().path("resourcePath").asText())
+                .startsWith("/api/");
+        assertThat(result.quickReplies().get(1).contextHints().path("presentation").path("returns").asText())
+                .contains("campos recomendados");
+    }
+
+    @Test
+    void consultativePeopleTableFieldQuestionExplainsColumnsInsteadOfSchemaUrl() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais campos existem para montar uma tabela de funcionarios?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.assistantMessage())
+                .contains("Para uma tabela de pessoas")
+                .contains("Nome completo")
+                .contains("Departamento")
+                .contains("Para prosseguir")
+                .doesNotContain("/schemas/filtered")
+                .doesNotContain("/api/");
+    }
+
+    @Test
+    void comparativePeopleTableQuestionRecommendsNextStepInsteadOfMaterializingPreview() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Compare as tabelas relacionadas a pessoas e recomende a melhor para comecar.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.assistantMessage())
+                .contains("Eu recomendo comecar pela tabela principal de funcionarios")
+                .contains("Comparacao rapida")
+                .contains("Para prosseguir")
+                .contains("Criar tabela de pessoas")
+                .doesNotContain("/schemas/filtered")
+                .doesNotContain("/api/");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly("people-table-create", "people-table-fields", "people-related-options");
     }
 
     @Test

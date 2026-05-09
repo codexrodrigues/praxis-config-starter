@@ -115,6 +115,9 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             return false;
         }
         for (JsonNode axis : axes) {
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
             if (!axis.path("schemaVerified").asBoolean(false)) {
                 return true;
             }

@@ -37,6 +37,15 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("kind").asText()).isEqualTo("praxis.ui-composition-plan");
         assertThat(plan.path("version").asText()).isEqualTo("1.0");
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-dashboard");
+        assertThat(plan.path("canvas").path("mode").asText()).isEqualTo("grid");
+        assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
+        assertThat(plan.path("canvas").path("rowUnit").asText()).isEqualTo("72px");
+        assertThat(plan.path("canvas").path("items").path("orders-summary").path("rowSpan").asInt()).isEqualTo(1);
+        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("rowSpan").asInt()).isEqualTo(1);
+        assertThat(plan.path("canvas").path("items").path("orders-filter").path("rowSpan").asInt()).isEqualTo(1);
+        assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("colSpan").asInt()).isEqualTo(12);
+        assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("rowSpan").asInt()).isEqualTo(4);
+        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(8);
         assertThat(plan.path("widgets")).hasSize(5);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
@@ -55,6 +64,15 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .doesNotContain("human-resources")
                 .doesNotContain("payroll")
                 .doesNotContain("quickstart");
+        assertRuntimeInputsDoNotContainGovernanceEvidence(plan);
+        JsonNode kpiInputs = findWidgetInputs(plan, "praxis-rich-content", "kpi-band");
+        assertThat(kpiInputs.has("resourcePath")).isFalse();
+        assertThat(kpiInputs.has("schemaUrl")).isFalse();
+        assertThat(kpiInputs.has("kpis")).isFalse();
+        assertThat(kpiInputs.path("document").path("kpis")).hasSize(2);
+        JsonNode filterInputs = findWidgetInputs(plan, "praxis-filter");
+        assertThat(filterInputs.has("schemaUrl")).isFalse();
+        assertThat(filterInputs.has("schemaVerification")).isFalse();
         assertThat(plan.path("bindings").toString())
                 .contains("orders-filter.requestSearch->orders-chart-status.queryContext")
                 .contains("orders-chart-status.selectionChange->orders-table.queryContext");
@@ -84,6 +102,16 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         JsonNode plan = result.uiCompositionPlan();
         assertThat(plan.path("widgets")).hasSize(7);
+        assertThat(plan.path("canvas").path("items").path("incidentes-chart-gravidade").path("col").asInt())
+                .isEqualTo(1);
+        assertThat(plan.path("canvas").path("items").path("incidentes-chart-andamento").path("col").asInt())
+                .isEqualTo(5);
+        assertThat(plan.path("canvas").path("items").path("incidentes-chart-responsavel").path("col").asInt())
+                .isEqualTo(9);
+        assertThat(plan.path("canvas").path("items").path("incidentes-chart-responsavel").path("colSpan").asInt())
+                .isEqualTo(4);
+        assertThat(plan.path("canvas").path("items").path("incidentes-table").path("row").asInt())
+                .isEqualTo(8);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
                         "praxis-rich-content",
@@ -107,6 +135,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .doesNotContain("Chamados por");
         JsonNode tableInputs = findWidgetInputs(plan, "praxis-table");
         assertThat(tableInputs.path("resourcePath").asText()).isEqualTo("/api/operations/incidentes");
+        assertThat(tableInputs.has("title")).isFalse();
+        assertThat(tableInputs.path("config").path("title").asText()).isEqualTo("Incidentes");
         assertThat(tableInputs.has("schemaUrl")).isFalse();
         assertThat(tableInputs.has("submitUrl")).isFalse();
         assertThat(tableInputs.has("submitMethod")).isFalse();
@@ -142,6 +172,31 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void bindsChartSeriesMetricToStatsOutputAlias() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um dashboard de pagamentos por departamento somando salario liquido",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                dashboardIntent("/api/human-resources/vw-analytics-folha-pagamento", List.of(new AgenticAuthoringVisualizationAxisDecision(
+                        "department",
+                        "departamento",
+                        "Departamento",
+                        "bar",
+                        "vertical",
+                        "sum",
+                        "salario_liquido",
+                        "Salario liquido",
+                        "llm-authored-semantic-axis"))))).orElseThrow();
+
+        String widgets = result.uiCompositionPlan().path("widgets").toString();
+        assertThat(widgets)
+                .contains("\"metric\":{\"field\":\"salario_liquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
+                .contains("\"metric\":{\"operation\":\"SUM\",\"field\":\"salario_liquido\",\"alias\":\"salario_liquido\"}")
+                .contains("\"metrics\":[{\"aggregation\":\"sum\",\"field\":\"salario_liquido\",\"alias\":\"salario_liquido\"}]");
+    }
+
+    @Test
     void infersTraceablePendingAxisForGenericChartRequestWithoutLlmAxes() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Quero graficos sobre pedidos por status",
@@ -169,6 +224,69 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("diagnostics").path("semanticAxes").toString())
                 .contains("\"field\":\"status\"")
                 .contains("\"schemaVerified\":false");
+    }
+
+    @Test
+    void materializesDashboardFromSemanticDecisionWhenLegacySelectedCandidateIsMissing() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "resource-backed-dashboard",
+                "dashboard",
+                "praxis-chart",
+                List.of(axis("department", "departamento", "Departamento", "bar", "vertical")),
+                true,
+                true,
+                "semantic-decision-memory");
+        AgenticAuthoringIntentResolutionResult intent = intentWithoutSelectedCandidate(
+                "create",
+                "dashboard",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision(
+                        AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                        "decision-payroll-dashboard",
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        new AgenticAuthoringSemanticDecision.SelectedResource(
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                "post",
+                                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento&operation=post&schemaType=response",
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                "POST"),
+                        visualizationDecision,
+                        null,
+                        null,
+                        true,
+                        "keyword-fallback-fail-safe",
+                        "",
+                        "",
+                        "conversation-1",
+                        "turn-3",
+                        "criar painel de pagamentos",
+                        "dashboard de pagamentos",
+                        "create:dashboard:create_artifact",
+                        "resource-backed-dashboard",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "decision-previous",
+                        "semantic decision selected the payroll analytics resource",
+                        0.50d),
+                visualizationDecision);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Gerar previa governada",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent)).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-chart", "praxis-table");
+        assertThat(plan.path("widgets").toString())
+                .contains("\"resourcePath\":\"/api/human-resources/vw-analytics-folha-pagamento\"")
+                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"");
+        assertRuntimeInputsDoNotContainGovernanceEvidence(plan);
     }
 
 
@@ -243,6 +361,38 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 visualizationDecision);
     }
 
+    private AgenticAuthoringIntentResolutionResult intentWithoutSelectedCandidate(
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            AgenticAuthoringSemanticDecision semanticDecision,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                operationKind,
+                artifactKind,
+                changeKind,
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                visualizationDecision,
+                semanticDecision);
+    }
+
     private AgenticAuthoringVisualizationAxisDecision axis(
             String concept,
             String field,
@@ -262,12 +412,24 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     private JsonNode findWidgetInputs(JsonNode plan, String componentId) {
+        return findWidgetInputs(plan, componentId, "");
+    }
+
+    private JsonNode findWidgetInputs(JsonNode plan, String componentId, String role) {
         for (JsonNode widget : plan.path("widgets")) {
-            if (componentId.equals(widget.path("componentId").asText())) {
+            if (componentId.equals(widget.path("componentId").asText())
+                    && (role == null || role.isBlank() || role.equals(widget.path("role").asText()))) {
                 return widget.path("inputs");
             }
         }
         throw new AssertionError("Widget not found: " + componentId);
+    }
+
+    private void assertRuntimeInputsDoNotContainGovernanceEvidence(JsonNode plan) {
+        assertThat(plan.path("widgets").toString())
+                .doesNotContain("schemaVerification")
+                .doesNotContain("schemaEvidenceSource")
+                .doesNotContain("schemaEvidenceUrl");
     }
 
     private JsonNode findBinding(JsonNode bindings, String id) {

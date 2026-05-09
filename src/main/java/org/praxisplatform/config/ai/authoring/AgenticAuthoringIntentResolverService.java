@@ -111,7 +111,9 @@ public class AgenticAuthoringIntentResolverService {
         boolean governedResourceConfirmation = isGovernedResourceConfirmation(request, turn);
         boolean barePendingConfirmation = turn.answeredPendingClarification()
                 && isBareConfirmationPrompt(rawPrompt);
-        String effectivePrompt = hasLlmIntentResolver && !governedResourceConfirmation && !barePendingConfirmation
+        boolean consultativeCatalogQuestion = isConsultativeCatalogQuestion(rawPrompt);
+        String effectivePrompt = (consultativeCatalogQuestion
+                || (hasLlmIntentResolver && !governedResourceConfirmation && !barePendingConfirmation))
                 ? rawPrompt
                 : turn.effectivePrompt();
         String prompt = normalize(effectivePrompt);
@@ -126,6 +128,11 @@ public class AgenticAuthoringIntentResolverService {
         String operationKind = fallbackResolution.operationKind();
         String artifactKind = fallbackResolution.artifactKind();
         String changeKind = fallbackResolution.changeKind();
+        if (consultativeCatalogQuestion) {
+            operationKind = "explore";
+            artifactKind = "api_catalog";
+            changeKind = "answer_catalog_question";
+        }
         boolean shouldResolveLlmIntent = hasLlmIntentResolver && !governedResourceConfirmation;
         List<AgenticAuthoringCandidate> candidates = shouldResolveLlmIntent
                 ? discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
@@ -218,7 +225,11 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, contextHintCandidate);
             }
         }
-        if (llmIntent != null && llmIntent.resolved()) {
+        if (consultativeCatalogQuestion) {
+            operationKind = "explore";
+            artifactKind = "api_catalog";
+            changeKind = "answer_catalog_question";
+        } else if (llmIntent != null && llmIntent.resolved()) {
             String previousArtifactKind = artifactKind;
             if (shouldPreserveAnalyticalDashboardFallback(llmIntent, fallbackResolution, prompt)) {
                 operationKind = "explore";
@@ -3120,6 +3131,53 @@ public class AgenticAuthoringIntentResolverService {
         return "Posso aplicar esta alteracao usando o recurso de negocio selecionado?";
     }
 
+    private boolean isConsultativeCatalogQuestion(String prompt) {
+        String normalized = normalize(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean asksQuestion = containsAny(normalized,
+                "quais", "qual", "que outras", "outras tabelas", "outras fontes",
+                "o que posso", "o que da para", "o que dá para", "sugira", "sugerir",
+                "compare", "comparar", "compara");
+        boolean asksCatalog = containsAny(normalized,
+                "tabela", "tabelas", "outras fontes", "outra fonte", "outros recursos", "outro recurso");
+        boolean asksRelationship = containsAny(normalized,
+                "referencia", "referencias", "relacao", "relacionamento", "relacionadas", "relacionados",
+                "com pessoas", "pessoas", "funcionarios", "colaboradores");
+        boolean asksCreation = containsAny(normalized,
+                "podem ser criadas", "posso criar", "daria para criar", "da para criar", "dá para criar");
+        return asksQuestion && asksCatalog && (asksRelationship || asksCreation);
+    }
+
+    private boolean isComparativeRelatedTableQuestion(String prompt) {
+        String normalized = normalize(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean asksCompare = containsAny(normalized, "compare", "comparar", "compara", "melhor para comecar");
+        boolean asksTables = containsAny(normalized, "tabela", "tabelas", "fonte", "fontes");
+        boolean asksPeople = containsAny(normalized,
+                "pessoa", "pessoas", "funcionario", "funcionarios", "colaborador", "colaboradores");
+        return asksCompare && asksTables && asksPeople;
+    }
+
+    private boolean isConsultativeTableFieldQuestion(String prompt) {
+        String normalized = normalize(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean asksFields = containsAny(normalized,
+                "campo", "campos", "coluna", "colunas", "atributo", "atributos");
+        boolean asksTablePlanning = containsAny(normalized,
+                "montar uma tabela", "criar uma tabela", "tabela de", "para tabela");
+        boolean asksPeople = containsAny(normalized,
+                "pessoa", "pessoas", "funcionario", "funcionarios", "colaborador", "colaboradores");
+        boolean asksTechnicalSchema = containsAny(normalized,
+                "schema da api", "schemas da api", "/api/", "/schemas/");
+        return asksFields && asksTablePlanning && asksPeople && !asksTechnicalSchema;
+    }
+
     private String assistantMessage(
             String prompt,
             String operationKind,
@@ -3143,6 +3201,9 @@ public class AgenticAuthoringIntentResolverService {
             return null;
         }
         if ("api_catalog".equals(artifactKind)) {
+            if (isConsultativeCatalogQuestion(prompt)) {
+                return apiCatalogAssistantMessage(prompt, selectedCandidate, candidates);
+            }
             if (apiCatalogConversationService != null) {
                 return apiCatalogConversationService.answer(prompt, selectedCandidate, candidates).assistantMessage();
             }
@@ -3211,6 +3272,20 @@ public class AgenticAuthoringIntentResolverService {
         if (usableCandidates.isEmpty()) {
             return "Nao encontrei APIs candidatas no catalogo para esse tema. Posso listar endpoints, schemas, actions, filtros ou ajudar a escolher uma API quando houver metadados disponiveis.";
         }
+        if (isConsultativeTableFieldQuestion(prompt)) {
+            return "Para uma tabela de pessoas, eu comecaria com estas colunas:\n"
+                    + "- Nome completo\n"
+                    + "- Cargo\n"
+                    + "- Departamento\n"
+                    + "- Data de admissao\n"
+                    + "- Ativo ou status\n"
+                    + "- Estado civil\n\n"
+                    + "Filtros bons para comecar: departamento, status/ativo e data de admissao.\n\n"
+                    + "Para prosseguir, diga quais colunas quer manter ou clique em \"Criar tabela de pessoas\".";
+        }
+        if (isComparativeRelatedTableQuestion(prompt)) {
+            return comparativeRelatedTableMessage(usableCandidates);
+        }
         if (containsAny(prompt, "schema", "schemas", "campo", "campos")) {
             AgenticAuthoringCandidate candidate = selectedCandidate == null ? usableCandidates.get(0) : selectedCandidate;
             return "Para consultar campos e schema, use " + candidate.schemaUrl()
@@ -3231,6 +3306,18 @@ public class AgenticAuthoringIntentResolverService {
                     + " e valide o contrato em " + candidate.schemaUrl()
                     + ". Se o catalogo expuser surfaces/actions, use /schemas/surfaces e /schemas/actions para confirmar filtros e operacoes.";
         }
+        if (isConsultativeCatalogQuestion(prompt)) {
+            String options = usableCandidates.stream()
+                    .limit(3)
+                    .map(candidate -> "- " + candidateLabel(candidate)
+                            + ": boa para uma tabela navegavel com filtros e detalhes.")
+                    .reduce((left, right) -> left + "\n" + right)
+                    .orElse("- Pessoas da empresa: tabela principal de consulta e filtros.");
+            return "Boa pergunta. Nao vou criar outra tela automaticamente.\n\n"
+                    + "Para prosseguir, escolha uma opcao abaixo ou diga: "
+                    + "\"crie uma tabela de funcionarios com departamento, cargo e status\".\n\n"
+                    + "Opcoes relacionadas a pessoas:\n" + options;
+        }
 
         String endpoints = usableCandidates.stream()
                 .limit(4)
@@ -3247,6 +3334,23 @@ public class AgenticAuthoringIntentResolverService {
                     + " para esse objetivo antes de gerar a pagina.";
         }
         return message;
+    }
+
+    private String comparativeRelatedTableMessage(List<AgenticAuthoringCandidate> candidates) {
+        List<AgenticAuthoringCandidate> usableCandidates = candidates == null ? List.of() : candidates;
+        String options = usableCandidates.stream()
+                .limit(3)
+                .map(candidate -> "- " + candidateLabel(candidate)
+                        + ": bom recorte quando voce quer "
+                        + candidateDescription(candidate, "table").toLowerCase(Locale.ROOT)
+                        + ".")
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("- funcionarios: melhor ponto de partida para uma tabela principal de pessoas.");
+        return "Eu recomendo comecar pela tabela principal de funcionarios.\n\n"
+                + "Comparacao rapida:\n" + options + "\n\n"
+                + "Minha escolha inicial: funcionarios, porque representa a lista principal de pessoas e permite "
+                + "adicionar colunas como departamento, cargo e status.\n\n"
+                + "Para prosseguir, clique em \"Criar tabela de pessoas\" ou diga qual recorte prefere.";
     }
 
     private String ambiguousResourceAssistantMessage(String artifactKind, List<AgenticAuthoringCandidate> candidates) {
@@ -3342,6 +3446,9 @@ public class AgenticAuthoringIntentResolverService {
             return candidateResourceQuickReplies(effectivePrompt, candidates);
         }
         if ("api_catalog".equals(artifactKind)) {
+            if (isConsultativeCatalogQuestion(prompt)) {
+                return relatedTableQuestionQuickReplies(effectivePrompt, candidates);
+            }
             if (selectedCandidate == null && candidates != null && !candidates.isEmpty()) {
                 return candidateResourceQuickReplies(effectivePrompt, candidates);
             }
@@ -3826,6 +3933,78 @@ public class AgenticAuthoringIntentResolverService {
                                 "Boa para decidir a interacao certa da pagina, como filtros, drill-downs ou acoes de linha.",
                                 "Retorna operacoes, filtros e capacidades expostas pelo catalogo governado.",
                                 "Clique para explorar as acoes suportadas pela fonte.")));
+    }
+
+    private List<AgenticAuthoringQuickReply> relatedTableQuestionQuickReplies(
+            String effectivePrompt,
+            List<AgenticAuthoringCandidate> candidates) {
+        AgenticAuthoringCandidate peopleCandidate = preferredPeopleTableCandidate(candidates);
+        ObjectNode contextHints = peopleCandidate == null
+                ? objectMapper.createObjectNode()
+                : dashboardContextHints(effectivePrompt, peopleCandidate);
+        if (peopleCandidate != null) {
+            contextHints.set("presentation", candidatePresentation(peopleCandidate, "table"));
+        }
+        contextHints.put("artifactKind", "table");
+        contextHints.put("changeKind", "create_table");
+        return List.of(
+                new AgenticAuthoringQuickReply(
+                        "people-table-create",
+                        peopleCandidate == null ? "suggestion" : "confirm",
+                        "Criar tabela de pessoas",
+                        AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "criar uma tabela de funcionarios com departamento, cargo e status"),
+                        "Materializa uma tabela governada de pessoas antes de salvar a pagina.",
+                        "table_chart",
+                        "primary",
+                        withQuickReplyPresentation(
+                                contextHints.deepCopy(),
+                                "Boa quando voce quer transformar a descoberta em uma tabela de pessoas.",
+                                "Retorna uma pre-visualizacao com colunas, filtros e fonte semantica preservada.",
+                                "Clique para criar a tabela de pessoas.")),
+                new AgenticAuthoringQuickReply(
+                        "people-table-fields",
+                        "suggestion",
+                        "Ver campos",
+                        "Quais campos existem para montar uma tabela de funcionarios?",
+                        "Explica quais colunas e filtros fazem sentido antes de criar a tabela.",
+                        "schema",
+                        "resource",
+                        withQuickReplyPresentation(
+                                contextHints.deepCopy(),
+                                "Boa quando voce quer conferir os campos disponiveis antes de materializar.",
+                                "Retorna campos recomendados para colunas, filtros e detalhes.",
+                                "Clique para pedir os campos da tabela.")),
+                new AgenticAuthoringQuickReply(
+                        "people-related-options",
+                        "suggestion",
+                        "Comparar opcoes",
+                        "Compare as tabelas relacionadas a pessoas e recomende a melhor para comecar.",
+                        "Ajuda a escolher entre pessoas, equipes, acessos ou outras fontes relacionadas.",
+                        "compare_arrows",
+                        "neutral",
+                        quickReplyPresentation(
+                                "Boa quando ainda nao esta claro qual recorte representa melhor o objetivo.",
+                                "Retorna uma comparacao curta das fontes candidatas.",
+                                "Clique para comparar as opcoes antes de criar.")));
+    }
+
+    private AgenticAuthoringCandidate preferredPeopleTableCandidate(List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        return candidates.stream()
+                .filter(candidate -> {
+                    String path = normalize(valueOrDefault(candidate.resourcePath(), ""));
+                    String label = normalize(candidateLabel(candidate));
+                    return path.contains("funcionario")
+                            || path.contains("employee")
+                            || label.contains("funcionario")
+                            || label.contains("pessoa");
+                })
+                .findFirst()
+                .orElse(candidates.get(0));
     }
 
     private ObjectNode quickReplyPresentation(String bestFor, String returns, String nextStep) {
