@@ -397,7 +397,9 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean())
                 .isTrue();
         org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
-                .contains("reancorado por /schemas/filtered")
+                .contains("Criei uma pre-visualizacao de dashboard analitico")
+                .contains("fonte confirmada pelo schema da API")
+                .contains("grafico, filtros, KPIs e tabela de detalhe conectada")
                 .doesNotContain("exige revisao de governanca");
         com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
         org.assertj.core.api.Assertions.assertThat(diagnostics.path("keywordFallbackApplied").asBoolean())

@@ -794,6 +794,169 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void dataSourceRefinementRecognizesNaturalEmployeeSourceCorrection() {
+        AgenticAuthoringCandidate payroll = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                "POST",
+                0.92,
+                "previous payroll analytics resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "dashboard",
+                "create_artifact",
+                payroll,
+                List.of(payroll),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Criar dashboard de folha",
+                "Criar dashboard de folha",
+                "Initial decision.");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "A fonte deve ser a tabela de funcionarios, nao folha. Mantenha o dashboard com grafico por departamento, filtros, KPIs e tabela conectada.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                previousDecision));
+
+        assertThat(result.semanticDecision().refinement()).isNotNull();
+        assertThat(result.semanticDecision().refinement().refinementKind()).isEqualTo("data_source");
+        assertThat(result.semanticDecision().refinementOf()).isEqualTo(previousDecision.decisionId());
+        assertThat(result.warnings()).contains("semantic-refinement-applied");
+        assertThat(result.warnings()).doesNotContain("semantic-decision-memory-refinement-applied");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().axes())
+                .extracting(AgenticAuthoringVisualizationAxisDecision::field)
+                .containsExactly("departamento");
+    }
+
+    @Test
+    void dataSourceRefinementDetachesFromSelectedChartResourceWhenUserCorrectsSource() {
+        AgenticAuthoringCandidate payroll = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                "POST",
+                0.92,
+                "previous payroll analytics resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "dashboard",
+                "create_artifact",
+                payroll,
+                List.of(payroll),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Criar dashboard de folha",
+                "Criar dashboard de folha",
+                "Initial decision.");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "A fonte deve ser a tabela de funcionarios, nao folha. Mantenha o dashboard com grafico por departamento, filtros, KPIs e tabela conectada.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                payrollChartPage(),
+                "payroll-chart",
+                "mock",
+                null,
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                previousDecision));
+
+        assertThat(result.target()).isNotNull();
+        assertThat(result.target().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.semanticDecision().refinement()).isNotNull();
+        assertThat(result.semanticDecision().refinement().refinementKind()).isEqualTo("data_source");
+        assertThat(result.warnings()).contains("semantic-refinement-applied");
+        assertThat(result.warnings()).doesNotContain("semantic-decision-memory-refinement-applied");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().axes())
+                .extracting(AgenticAuthoringVisualizationAxisDecision::field)
+                .containsExactly("departamento");
+    }
+
+    @Test
+    void dataSourceCorrectionAgainstSelectedChartRegroundsEvenWithoutLoadedDecisionMemory() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "A fonte deve ser a tabela de funcionarios, nao folha. Mantenha o dashboard com grafico por departamento, filtros, KPIs e tabela conectada.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                payrollChartPage(),
+                "payroll-chart",
+                "mock",
+                null,
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.target()).isNotNull();
+        assertThat(result.target().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.semanticDecision().selectedResource().resourcePath())
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().axes())
+                .extracting(AgenticAuthoringVisualizationAxisDecision::field)
+                .containsExactly("departamento");
+    }
+
+    @Test
     void keepsReviewRequiredWhenRefiningReviewRequiredActiveDecision() {
         AgenticAuthoringCandidate fallbackResource = new AgenticAuthoringCandidate(
                 "/api/human-resources/folhas-pagamento",

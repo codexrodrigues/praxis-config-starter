@@ -44,6 +44,7 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 && selectedCandidate != null
                 && candidates.size() > 1
                 && containsAny(prompt, "visualizar informacoes", "visualizar informacao", "visualizar dados")
+                && !explicitDataSourceChoice
                 && !isSpecificPayrollAnalyticsPrompt(prompt)) {
             selectedCandidate = null;
         }
@@ -52,6 +53,7 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 && candidates.size() > 1
                 && isAnalyticalComparisonPrompt(prompt)
                 && analyticsCandidateCount(candidates) > 1
+                && !explicitDataSourceChoice
                 && !isSpecificPayrollAnalyticsPrompt(prompt)) {
             selectedCandidate = null;
         }

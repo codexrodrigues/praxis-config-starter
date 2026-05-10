@@ -311,7 +311,7 @@ public class AgenticAuthoringPreviewService {
         AgenticAuthoringCandidate candidate = request == null || request.intentResolution() == null
                 ? null
                 : request.intentResolution().selectedCandidate();
-        AiSchemaContext schemaContext = schemaContext(candidate);
+        AiSchemaContext schemaContext = schemaContext(candidate, uiCompositionPlan);
         if (schemaContext == null) {
             return uiCompositionPlan;
         }
@@ -356,7 +356,7 @@ public class AgenticAuthoringPreviewService {
         AgenticAuthoringCandidate candidate = request == null || request.intentResolution() == null
                 ? null
                 : request.intentResolution().selectedCandidate();
-        AiSchemaContext schemaContext = schemaContext(candidate);
+        AiSchemaContext schemaContext = schemaContext(candidate, uiCompositionPlan);
         if (schemaContext == null) {
             addWarningOnce(warnings, "semantic-axis-schema-verification-invalid-context");
             return uiCompositionPlan;
@@ -387,9 +387,17 @@ public class AgenticAuthoringPreviewService {
         return copy;
     }
 
-    private AiSchemaContext schemaContext(AgenticAuthoringCandidate candidate) {
+    private AiSchemaContext schemaContext(AgenticAuthoringCandidate candidate, JsonNode uiCompositionPlan) {
         if (candidate == null) {
             return null;
+        }
+        String materializationReadPath = materializationReadSchemaPath(candidate, uiCompositionPlan);
+        if (!materializationReadPath.isBlank()) {
+            return AiSchemaContext.builder()
+                    .path(materializationReadPath)
+                    .operation("post")
+                    .schemaType("response")
+                    .build();
         }
         java.util.Map<String, String> query = queryParameters(candidate.schemaUrl());
         String path = valueOrDefault(query.get("path"), candidate.submitUrl());
@@ -418,6 +426,21 @@ public class AgenticAuthoringPreviewService {
                 .operation(operation)
                 .schemaType(schemaType)
                 .build();
+    }
+
+    private String materializationReadSchemaPath(
+            AgenticAuthoringCandidate candidate,
+            JsonNode uiCompositionPlan) {
+        if (!containsComponent(uiCompositionPlan, "praxis-chart")) {
+            return "";
+        }
+        String businessPath = businessResourcePath(firstNonBlank(
+                candidate == null ? "" : candidate.resourcePath(),
+                candidate == null ? "" : candidate.submitUrl()));
+        if (businessPath.isBlank()) {
+            return "";
+        }
+        return businessPath + "/filter/cursor";
     }
 
     private java.util.Map<String, String> queryParameters(String url) {
@@ -1062,6 +1085,12 @@ public class AgenticAuthoringPreviewService {
                 score += 2;
             }
         }
+        if (score > 0 && containsAnyToken(field.fieldTokens(), "id", "uuid", "codigo")) {
+            score -= 1;
+        }
+        if (score > 0 && containsAnyToken(field.fieldTokens(), "nome", "name", "label", "descricao", "description")) {
+            score += 1;
+        }
         return score;
     }
 
@@ -1099,7 +1128,10 @@ public class AgenticAuthoringPreviewService {
     }
 
     private void addTokens(Set<String> tokens, String value) {
-        for (String token : normalize(value).replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
+        String tokenizable = value == null
+                ? ""
+                : value.replaceAll("([a-z])([A-Z])", "$1 $2");
+        for (String token : normalize(tokenizable).replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
             if (token.length() >= 3 && !SEMANTIC_AXIS_STOP_WORDS.contains(token)) {
                 tokens.add(token);
             }

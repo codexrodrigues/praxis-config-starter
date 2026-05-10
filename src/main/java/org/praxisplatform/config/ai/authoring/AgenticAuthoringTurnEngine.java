@@ -1231,14 +1231,27 @@ public class AgenticAuthoringTurnEngine {
     private String groundedPreviewAssistantMessage(
             AgenticAuthoringPreviewResult preview,
             AgenticAuthoringIntentResolutionResult intentResolution) {
+        String message = preview == null ? "" : safeText(preview.assistantMessage());
+        if (!message.isBlank()
+                && !message.contains("revisao de governanca")
+                && !isGenericPreviewReadyMessage(message)) {
+            return message;
+        }
         String artifactKind = intentResolution == null ? "" : safeText(intentResolution.artifactKind());
         if ("dashboard".equals(artifactKind)) {
-            return "Criei uma pre-visualizacao de dashboard analitico com recurso reancorado por /schemas/filtered.";
+            return "Criei uma pre-visualizacao de dashboard analitico com a fonte confirmada pelo schema da API. "
+                    + "Ele ja inclui grafico, filtros, KPIs e tabela de detalhe conectada; revise a pre-visualizacao "
+                    + "e salve quando estiver de acordo.";
         }
-        String message = preview == null ? "" : safeText(preview.assistantMessage());
-        return !message.isBlank() && !message.contains("revisao de governanca")
-                ? message
-                : "Criei uma pre-visualizacao com recurso reancorado por /schemas/filtered.";
+        return "Criei uma pre-visualizacao com a fonte confirmada pelo schema da API. "
+                + "Revise o resultado e salve quando estiver de acordo.";
+    }
+
+    private boolean isGenericPreviewReadyMessage(String message) {
+        String normalized = normalizeText(message).replaceAll("[^a-z0-9]+", " ").trim();
+        return "preview ready".equals(normalized)
+                || "preview applied to the page".equals(normalized)
+                || "pre visualizacao pronta".equals(normalized);
     }
 
     private String advisoryCatalogAssistantMessage(

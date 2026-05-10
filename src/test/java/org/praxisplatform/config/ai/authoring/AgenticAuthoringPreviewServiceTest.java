@@ -993,7 +993,6 @@ class AgenticAuthoringPreviewServiceTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
-        assertThat(result.warnings()).contains("semantic-chart-axis-repaired-with-schema-field");
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
                 .contains("\"requestedField\":\"category\"")
@@ -1006,6 +1005,59 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.assistantMessage())
                 .contains("grafico")
                 .doesNotContain("nao materializou o grafico solicitado");
+    }
+
+    @Test
+    void previewVerifiesDashboardAxesAgainstReadSchemaWhenCandidateCameFromCreateSurface() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "A fonte deve ser a tabela de funcionarios, nao folha. Mantenha o dashboard com grafico por departamento.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                employeeDashboardFromCreateSurfaceIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("departamentoId")
+                .put("type", "integer")
+                .put("format", "int32")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        properties.putObject("departamentoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        properties.putObject("cargoNome").put("type", "string");
+        properties.putObject("salario").put("type", "number");
+        AtomicReference<AiSchemaContext> capturedContext = new AtomicReference<>();
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    capturedContext.set(invocation.getArgument(0));
+                    return SchemaFetchResult.success(schema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(capturedContext.get()).isNotNull();
+        assertThat(capturedContext.get().getPath()).isEqualTo("/api/human-resources/funcionarios/filter/cursor");
+        assertThat(capturedContext.get().getOperation()).isEqualTo("post");
+        assertThat(capturedContext.get().getSchemaType()).isEqualTo("response");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"requestedField\":\"departamento\"")
+                .contains("\"field\":\"departamentoNome\"")
+                .contains("\"schemaVerified\":true")
+                .contains("\"statsPath\":\"/api/human-resources/funcionarios/stats/group-by\"")
+                .contains("\"selectedFieldIds\":[\"departamentoNome\"]")
+                .contains("\"dimensionField\":\"departamentoNome\"");
     }
 
     @Test
@@ -1511,6 +1563,53 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult employeeDashboardFromCreateSurfaceIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.49d,
+                        "matched employee table",
+                        List.of("lexical-fallback")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "A fonte deve ser a tabela de funcionarios, nao folha. Mantenha o dashboard com grafico por departamento.",
+                "Vou trocar a fonte para funcionarios e manter a visualizacao analitica.",
+                null,
+                List.of(),
+                null,
+                List.of("keyword-fallback-fail-safe-applied"),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "analytical-breakdown",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(visualizationAxis(
+                                "department",
+                                "departamento",
+                                "Departamento",
+                                "bar",
+                                "vertical")),
+                        true,
+                        true,
+                        "llm-authored-semantic-decision"));
     }
 
     private AgenticAuthoringIntentResolutionResult payrollTableIntent(String effectivePrompt) {

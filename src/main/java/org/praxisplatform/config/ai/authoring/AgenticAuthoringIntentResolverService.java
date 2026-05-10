@@ -375,7 +375,11 @@ public class AgenticAuthoringIntentResolverService {
             operationKind = "create";
             changeKind = businessDashboardCreationChangeKind(prompt);
         }
-        AgenticAuthoringCandidate currentPageBoundCandidate = visualProjectionRefinement && !explicitLocalUiComposition
+        boolean dataSourceReplacementPrompt = isDataSourceReplacementPrompt(prompt)
+                && !isExplicitSourcePreservePrompt(prompt);
+        AgenticAuthoringCandidate currentPageBoundCandidate = visualProjectionRefinement
+                && !dataSourceReplacementPrompt
+                && !explicitLocalUiComposition
                 ? currentPageBoundResourceCandidate(currentPageSummary, candidates, artifactKind)
                 : null;
         if (currentPageBoundCandidate != null) {
@@ -384,6 +388,14 @@ public class AgenticAuthoringIntentResolverService {
             changeKind = "create_artifact";
             candidates = withPriorityCandidate(candidates, currentPageBoundCandidate);
             semanticPolicyRefinedVisualProjection = true;
+        }
+        if (isDataSourceRefinement(semanticRefinement) || dataSourceReplacementPrompt) {
+            operationKind = "create";
+            artifactKind = refinementReplacement(semanticRefinement, "artifactKind", artifactKind);
+            if ("unknown".equals(artifactKind)) {
+                artifactKind = "dashboard";
+            }
+            changeKind = "create_artifact";
         }
         AgenticAuthoringCandidate selectedCandidate = explicitLocalUiComposition
                 ? null
@@ -437,7 +449,7 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
-        if (semanticPolicyRefinedVisualProjection && currentPageBoundCandidate != null) {
+        if (semanticPolicyRefinedVisualProjection && currentPageBoundCandidate != null && !dataSourceReplacementPrompt) {
             selectedCandidate = currentPageBoundCandidate;
             candidates = withPriorityCandidate(candidates, selectedCandidate);
         }
@@ -761,11 +773,7 @@ public class AgenticAuthoringIntentResolverService {
         boolean tableRequested = containsAny(normalized,
                 "tabela", "table", "grid", "lista", "listagem");
         boolean filterRequested = containsAny(normalized, "filtro", "filtrar", "status", "situacao");
-        boolean sourceReplacementRequested = containsAny(normalized,
-                "usa clientes", "usar clientes", "use clientes", "clientes como fonte",
-                "fonte de clientes", "troca a fonte", "troque a fonte", "mude a fonte",
-                "outra fonte", "nova fonte");
-        if (sourceReplacementRequested && !explicitPreserve) {
+        if (isDataSourceReplacementPrompt(normalized) && !explicitPreserve) {
             return new AgenticAuthoringSemanticRefinement(
                     AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
                     "data_source",
@@ -957,17 +965,20 @@ public class AgenticAuthoringIntentResolverService {
     private List<String> semanticAxisFieldsFromPrompt(String prompt) {
         String normalized = normalize(prompt);
         List<String> fields = new java.util.ArrayList<>();
-        int commaIndex = normalized.indexOf(',');
-        if (commaIndex >= 0 && commaIndex + 1 < normalized.length()) {
-            String tail = normalized.substring(commaIndex + 1);
-            tail = tail.replaceAll("\\b(usando|com|para|em um|num|no|na)\\b.*$", "");
-            fields.addAll(axisTokens(tail));
-        }
         java.util.regex.Matcher matcher = java.util.regex.Pattern
                 .compile("\\bpor\\s+([a-z0-9_ -]{3,48})")
                 .matcher(normalized);
         while (matcher.find()) {
             fields.addAll(axisTokens(matcher.group(1)));
+        }
+        int commaIndex = normalized.indexOf(',');
+        if (fields.isEmpty()
+                && commaIndex >= 0
+                && commaIndex + 1 < normalized.length()
+                && !isDataSourceReplacementPrompt(normalized)) {
+            String tail = normalized.substring(commaIndex + 1);
+            tail = tail.replaceAll("\\b(usando|com|para|em um|num|no|na)\\b.*$", "");
+            fields.addAll(axisTokens(tail));
         }
         return fields.stream()
                 .map(this::fieldToken)
@@ -1000,6 +1011,7 @@ public class AgenticAuthoringIntentResolverService {
         return List.of(
                 "grafico", "graficos", "chart", "charts", "dashboard", "painel",
                 "indicador", "indicadores", "kpi", "kpis", "dados", "informacoes",
+                "filtro", "filtros", "filtragem",
                 "chamado", "chamados", "ocorrencia", "ocorrencias", "incidente", "incidentes"
         ).contains(token);
     }
@@ -2210,6 +2222,10 @@ public class AgenticAuthoringIntentResolverService {
                     .findFirst()
                     .orElse(null);
         }
+        if (isDataSourceReplacementPrompt(normalize(prompt)) && !candidates.isEmpty()) {
+            AgenticAuthoringCandidate promptAlignedCandidate = promptAlignedBusinessCandidate(prompt, candidates);
+            return promptAlignedCandidate == null ? candidates.get(0) : promptAlignedCandidate;
+        }
         if (shouldDeferResourceSelectionForGovernedChoice(prompt, operationKind, artifactKind, candidates)) {
             return null;
         }
@@ -2319,6 +2335,12 @@ public class AgenticAuthoringIntentResolverService {
                     .orElse(null);
         }
         return null;
+    }
+
+    private boolean isDataSourceRefinement(AgenticAuthoringSemanticRefinement semanticRefinement) {
+        return semanticRefinement != null
+                && semanticRefinement.active()
+                && "data_source".equals(semanticRefinement.refinementKind());
     }
 
     private boolean shouldPreferPromptAlignedCandidate(
@@ -2493,6 +2515,10 @@ public class AgenticAuthoringIntentResolverService {
                 valueOrDefault(candidate.resourcePath(), ""),
                 valueOrDefault(candidate.submitUrl(), ""),
                 valueOrDefault(candidate.reason(), "")));
+        if (negatesPayrollSubject(normalizedPrompt) && containsAny(candidateText,
+                "folha", "pagamento", "pagamentos", "salario", "salarios", "remuneracao")) {
+            return false;
+        }
         for (String token : candidateText.replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
             if (isGenericAnalyticalCandidateToken(token)) {
                 continue;
@@ -2559,19 +2585,56 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private boolean shouldDetachCurrentTarget(String prompt, String artifactKind, AgenticAuthoringTarget target) {
+        String normalized = normalize(prompt);
+        if (target != null
+                && target.resourcePath() != null
+                && !target.resourcePath().isBlank()
+                && isDataSourceReplacementPrompt(normalized)
+                && !isExplicitSourcePreservePrompt(normalized)) {
+            return true;
+        }
         if (target == null || !"praxis-dynamic-form".equals(target.componentId())) {
             return false;
         }
         if ("form".equals(artifactKind)) {
             return false;
         }
-        String normalized = normalize(prompt);
         return containsAny(normalized,
                 "nao quero cadastrar", "nao quero cadastro", "nao era isso", "em vez disso",
                 "dashboard", "painel", "indicador", "indicadores",
                 "master detail", "master-detail", "mestre detalhe", "mestre-detalhe",
                 "lista e detalhe", "lista com detalhe", "abrir detalhes", "abrir detalhe",
                 "acompanhar", "consultar", "buscar", "visualizar", "ver detalhes", "ver detalhe");
+    }
+
+    private boolean isDataSourceReplacementPrompt(String normalizedPrompt) {
+        if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
+            return false;
+        }
+        boolean sourceLanguage = containsAny(normalizedPrompt,
+                "fonte", "dados", "tabela de", "recurso", "source", "data source");
+        boolean sourceTargetLanguage = containsAny(normalizedPrompt,
+                "funcionario", "funcionarios", "colaborador", "colaboradores",
+                "cliente", "clientes", "accounts", "contas");
+        boolean sourceNegationLanguage = containsAny(normalizedPrompt,
+                "nao folha", "nao a folha", "nao de folha", "nao pagamento",
+                "em vez de folha", "ao inves de folha");
+        boolean sourceReplacementIntentLanguage = containsAny(normalizedPrompt,
+                "troca", "troque", "mude", "muda", "usar", "usa", "use",
+                "deve ser", "precisa ser", "como fonte", "nova fonte", "outra fonte");
+        return containsAny(normalizedPrompt,
+                "usa clientes", "usar clientes", "use clientes", "clientes como fonte",
+                "funcionarios como fonte", "colaboradores como fonte",
+                "fonte de clientes", "troca a fonte", "troque a fonte", "mude a fonte",
+                "outra fonte", "nova fonte", "fonte deve ser", "fonte precisa ser")
+                || (sourceLanguage && sourceTargetLanguage && sourceReplacementIntentLanguage)
+                || (sourceNegationLanguage && sourceTargetLanguage);
+    }
+
+    private boolean isExplicitSourcePreservePrompt(String normalizedPrompt) {
+        return containsAny(normalizedPrompt,
+                "mantem os dados", "mantenha os dados", "mantem a fonte", "mantenha a fonte",
+                "mantem o recurso", "mantenha o recurso", "mesma fonte", "mesmos dados", "preserve a fonte");
     }
 
     private boolean isAnalyticsResource(String resourcePath) {
@@ -2595,6 +2658,9 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean isSpecificPayrollAnalyticsPrompt(String prompt) {
         String normalized = normalize(prompt);
+        if (negatesPayrollSubject(normalized)) {
+            return false;
+        }
         boolean payrollSubject = containsAny(normalized,
                 "folha", "pagamento", "pagamentos", "salario", "salarios", "remuneracao",
                 "recebe mais", "ganha mais");
@@ -2618,10 +2684,20 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean isPayrollVisualizationPrompt(String prompt) {
         String normalized = normalize(prompt);
+        if (negatesPayrollSubject(normalized)) {
+            return false;
+        }
         return containsAny(normalized, "folha", "pagamento", "pagamentos", "salario", "salarios", "remuneracao")
                 && containsAny(normalized,
                 "visualizar", "ver", "analisar", "acompanhar", "dashboard", "painel",
                 "grafico", "graficos", "melhor forma", "opcoes", "opcoes", "recomenda");
+    }
+
+    private boolean negatesPayrollSubject(String normalizedPrompt) {
+        return containsAny(normalizedPrompt,
+                "nao folha", "nao a folha", "nao de folha", "nao pagamento",
+                "nao a fonte de folha", "nao folha de pagamento",
+                "em vez de folha", "ao inves de folha");
     }
 
     private boolean hasPayrollDashboardBreakdown(String prompt) {
