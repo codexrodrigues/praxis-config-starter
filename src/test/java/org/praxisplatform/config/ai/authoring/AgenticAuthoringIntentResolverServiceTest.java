@@ -5447,6 +5447,81 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void consultativePeopleTableFieldQuestionAnswersFieldsWithoutPromotingPreview() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "human-resources,funcionarios,pessoas,colaboradores,tabela",
+                        "Funcionarios",
+                        "Fonte principal de pessoas da empresa para tabelas e filtros.",
+                        "funcionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        new AgenticAuthoringApiCatalogConversationService(objectMapper, repository),
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/human-resources/funcionarios");
+        contextHints.put("submitUrl", "/api/human-resources/funcionarios");
+        contextHints.put("operation", "post");
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Mostre a lista de campos detectados na tabela Funcionarios.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-4",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "m1",
+                                "user",
+                                "Quais telas fazem sentido para pessoas da empresa?",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Posso ajudar a escolher o melhor tipo de pagina.",
+                                null)),
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.assistantMessage())
+                .contains("Para uma tabela de pessoas")
+                .contains("Nome completo")
+                .contains("Departamento")
+                .doesNotContain("/schemas/")
+                .doesNotContain("/api/");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .contains("people-table-create", "people-table-fields", "people-related-options");
+        assertThat(result.quickReplies())
+                .noneMatch(reply -> "confirm-dashboard".equals(reply.id())
+                        || "api-create-dashboard".equals(reply.id()));
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
     void governedResourceConfirmationUsesCanonicalContextWithoutReaskingLlm() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =

@@ -111,7 +111,8 @@ public class AgenticAuthoringIntentResolverService {
         boolean governedResourceConfirmation = isGovernedResourceConfirmation(request, turn);
         boolean barePendingConfirmation = turn.answeredPendingClarification()
                 && isBareConfirmationPrompt(rawPrompt);
-        boolean consultativeCatalogQuestion = isConsultativeCatalogQuestion(rawPrompt);
+        boolean consultativeCatalogQuestion = isConsultativeCatalogQuestion(rawPrompt)
+                || isConsultativeTableFieldQuestion(rawPrompt);
         String effectivePrompt = (consultativeCatalogQuestion
                 || (hasLlmIntentResolver && !governedResourceConfirmation && !barePendingConfirmation))
                 ? rawPrompt
@@ -133,7 +134,9 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = "api_catalog";
             changeKind = "answer_catalog_question";
         }
-        boolean shouldResolveLlmIntent = hasLlmIntentResolver && !governedResourceConfirmation;
+        boolean shouldResolveLlmIntent = hasLlmIntentResolver
+                && !governedResourceConfirmation
+                && !consultativeCatalogQuestion;
         List<AgenticAuthoringCandidate> candidates = shouldResolveLlmIntent
                 ? discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
                 : discoverCandidates(discoveryPrompt, artifactKind, target, tenantId, environment);
@@ -3246,7 +3249,9 @@ public class AgenticAuthoringIntentResolverService {
         boolean asksFields = containsAny(normalized,
                 "campo", "campos", "coluna", "colunas", "atributo", "atributos");
         boolean asksTablePlanning = containsAny(normalized,
-                "montar uma tabela", "criar uma tabela", "tabela de", "para tabela");
+                "montar uma tabela", "criar uma tabela", "tabela de", "tabela funcionarios",
+                "tabela colaboradores", "tabela pessoas", "para tabela", "campos detectados",
+                "lista de campos", "campos da tabela", "campos na tabela");
         boolean asksPeople = containsAny(normalized,
                 "pessoa", "pessoas", "funcionario", "funcionarios", "colaborador", "colaboradores");
         boolean asksTechnicalSchema = containsAny(normalized,
@@ -3277,7 +3282,7 @@ public class AgenticAuthoringIntentResolverService {
             return null;
         }
         if ("api_catalog".equals(artifactKind)) {
-            if (isConsultativeCatalogQuestion(prompt)) {
+            if (isConsultativeCatalogQuestion(prompt) || isConsultativeTableFieldQuestion(prompt)) {
                 return apiCatalogAssistantMessage(prompt, selectedCandidate, candidates);
             }
             if (apiCatalogConversationService != null) {
@@ -3522,7 +3527,7 @@ public class AgenticAuthoringIntentResolverService {
             return candidateResourceQuickReplies(effectivePrompt, candidates);
         }
         if ("api_catalog".equals(artifactKind)) {
-            if (isConsultativeCatalogQuestion(prompt)) {
+            if (isConsultativeCatalogQuestion(prompt) || isConsultativeTableFieldQuestion(prompt)) {
                 return relatedTableQuestionQuickReplies(effectivePrompt, candidates);
             }
             if (selectedCandidate == null && candidates != null && !candidates.isEmpty()) {
