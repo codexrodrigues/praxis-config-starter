@@ -1614,7 +1614,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("nextStep").asText())
                 .contains("tabela de pessoas");
         assertThat(result.quickReplies().get(1).contextHints().path("resourcePath").asText())
-                .startsWith("/api/");
+                .isBlank();
         assertThat(result.quickReplies().get(1).contextHints().path("presentation").path("returns").asText())
                 .contains("campos recomendados");
     }
@@ -5444,6 +5444,83 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(createDashboard.contextHints().path("submitUrl").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+    }
+
+    @Test
+    void consultativePeopleScreenQuestionSuggestsScreensWithoutPromotingPreview() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "human-resources,funcionarios,pessoas,colaboradores,tabela,dashboard",
+                        "Funcionarios",
+                        "Fonte principal de pessoas da empresa para tabelas, dashboards e filtros.",
+                        "funcionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.put("tool", "searchApiResources");
+        resourceDiscovery.put("retrievalQuery", "Quais telas fazem sentido para pessoas da empresa?");
+        resourceDiscovery.put("artifactKind", "api_catalog");
+        ObjectNode unrelatedCandidate = resourceDiscovery.putArray("candidates").addObject();
+        unrelatedCandidate.put("resourcePath", "/api/operations/vw-resumo-missoes");
+        unrelatedCandidate.put("submitUrl", "/api/operations/vw-resumo-missoes/filter");
+        unrelatedCandidate.put("operation", "post");
+        unrelatedCandidate.put("submitMethod", "post");
+        unrelatedCandidate.put("schemaUrl", "/schemas/filtered?path=/api/operations/vw-resumo-missoes/filter&operation=post&schemaType=request");
+        unrelatedCandidate.put("score", 0.98d);
+        unrelatedCandidate.put("reason", "analytics dashboard indicators");
+        unrelatedCandidate.putArray("evidence").add("tool-resource-discovery");
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        new AgenticAuthoringApiCatalogConversationService(objectMapper, repository),
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais telas fazem sentido para pessoas da empresa?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes()).contains("intent-confirmation-required");
+        assertThat(result.assistantMessage())
+                .contains("Nao vou criar outra tela automaticamente")
+                .contains("Opcoes relacionadas a pessoas")
+                .contains("funcionarios")
+                .doesNotContain("resumo missoes")
+                .doesNotContain("Preview applied");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .contains("people-table-create", "people-table-fields", "people-related-options");
+        assertThat(result.quickReplies())
+                .noneMatch(reply -> "confirm-dashboard".equals(reply.id())
+                        || "api-create-dashboard".equals(reply.id()));
+        Mockito.verifyNoInteractions(llmIntentResolver);
     }
 
     @Test

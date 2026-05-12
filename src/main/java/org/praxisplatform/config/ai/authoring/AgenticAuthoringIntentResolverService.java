@@ -3220,7 +3220,8 @@ public class AgenticAuthoringIntentResolverService {
                 "o que posso", "o que da para", "o que dá para", "sugira", "sugerir",
                 "compare", "comparar", "compara");
         boolean asksCatalog = containsAny(normalized,
-                "tabela", "tabelas", "outras fontes", "outra fonte", "outros recursos", "outro recurso");
+                "tabela", "tabelas", "tela", "telas", "pagina", "paginas",
+                "outras fontes", "outra fonte", "outros recursos", "outro recurso");
         boolean asksRelationship = containsAny(normalized,
                 "referencia", "referencias", "relacao", "relacionamento", "relacionadas", "relacionados",
                 "com pessoas", "pessoas", "funcionarios", "colaboradores");
@@ -3269,6 +3270,11 @@ public class AgenticAuthoringIntentResolverService {
             boolean answeredBareDomainClarification) {
         if (gate != null && gate.messages().contains("shared-rule-authoring-required")) {
             return sharedRuleAuthoringAssistantMessage(selectedCandidate);
+        }
+        if ("explore".equals(operationKind)
+                && "api_catalog".equals(artifactKind)
+                && (isConsultativeCatalogQuestion(prompt) || isConsultativeTableFieldQuestion(prompt))) {
+            return apiCatalogAssistantMessage(prompt, selectedCandidate, candidates);
         }
         if (gate != null && gate.messages().contains("resource-candidate-required")) {
             return missingResourceAssistantMessage(artifactKind);
@@ -3388,7 +3394,8 @@ public class AgenticAuthoringIntentResolverService {
                     + ". Se o catalogo expuser surfaces/actions, use /schemas/surfaces e /schemas/actions para confirmar filtros e operacoes.";
         }
         if (isConsultativeCatalogQuestion(prompt)) {
-            String options = usableCandidates.stream()
+            List<AgenticAuthoringCandidate> peopleCandidates = peopleCatalogCandidates(usableCandidates);
+            String options = peopleCandidates.stream()
                     .limit(3)
                     .map(candidate -> "- " + candidateLabel(candidate)
                             + ": boa para uma tabela navegavel com filtros e detalhes.")
@@ -3517,6 +3524,10 @@ public class AgenticAuthoringIntentResolverService {
             return confirmationQuickReplies(effectivePrompt, questions.get(0));
         }
         if (gate.messages().contains("resource-candidate-ambiguous") && selectedCandidate == null) {
+            if ("api_catalog".equals(artifactKind)
+                    && (isConsultativeCatalogQuestion(prompt) || isConsultativeTableFieldQuestion(prompt))) {
+                return relatedTableQuestionQuickReplies(effectivePrompt, candidates);
+            }
             return candidateResourceQuickReplies(effectivePrompt, candidates);
         }
         if ("explore".equals(operationKind)
@@ -4075,17 +4086,37 @@ public class AgenticAuthoringIntentResolverService {
         if (candidates == null || candidates.isEmpty()) {
             return null;
         }
+        return peopleCatalogCandidates(candidates).stream()
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<AgenticAuthoringCandidate> peopleCatalogCandidates(List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
         return candidates.stream()
                 .filter(candidate -> {
                     String path = normalize(valueOrDefault(candidate.resourcePath(), ""));
                     String label = normalize(candidateLabel(candidate));
+                    String reason = normalize(valueOrDefault(candidate.reason(), ""));
+                    String evidence = normalize(String.join(" ", candidate.evidence() == null
+                            ? List.of()
+                            : candidate.evidence()));
                     return path.contains("funcionario")
                             || path.contains("employee")
+                            || path.contains("colaborador")
                             || label.contains("funcionario")
-                            || label.contains("pessoa");
+                            || label.contains("pessoa")
+                            || label.contains("colaborador")
+                            || reason.contains("funcionario")
+                            || reason.contains("pessoa")
+                            || reason.contains("colaborador")
+                            || evidence.contains("funcionario")
+                            || evidence.contains("pessoa")
+                            || evidence.contains("colaborador");
                 })
-                .findFirst()
-                .orElse(candidates.get(0));
+                .toList();
     }
 
     private ObjectNode quickReplyPresentation(String bestFor, String returns, String nextStep) {
