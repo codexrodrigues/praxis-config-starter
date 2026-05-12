@@ -4039,6 +4039,9 @@ public class AgenticAuthoringIntentResolverService {
         }
         contextHints.put("artifactKind", "table");
         contextHints.put("changeKind", "create_table");
+        ObjectNode fieldQuestionHints = objectMapper.createObjectNode();
+        fieldQuestionHints.put("artifactKind", "table");
+        fieldQuestionHints.put("questionKind", "field_discovery");
         return List.of(
                 new AgenticAuthoringQuickReply(
                         "people-table-create",
@@ -4064,7 +4067,7 @@ public class AgenticAuthoringIntentResolverService {
                         "schema",
                         "resource",
                         withQuickReplyPresentation(
-                                contextHints.deepCopy(),
+                                fieldQuestionHints,
                                 "Boa quando voce quer conferir os campos disponiveis antes de materializar.",
                                 "Retorna campos recomendados para colunas, filtros e detalhes.",
                                 "Clique para pedir os campos da tabela.")),

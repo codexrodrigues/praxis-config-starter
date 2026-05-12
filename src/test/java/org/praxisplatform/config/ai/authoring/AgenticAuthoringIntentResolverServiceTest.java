@@ -5517,6 +5517,19 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies())
                 .extracting(AgenticAuthoringQuickReply::id)
                 .contains("people-table-create", "people-table-fields", "people-related-options");
+        AgenticAuthoringQuickReply createTableReply = result.quickReplies().stream()
+                .filter(reply -> "people-table-create".equals(reply.id()))
+                .findFirst()
+                .orElseThrow();
+        AgenticAuthoringQuickReply fieldsReply = result.quickReplies().stream()
+                .filter(reply -> "people-table-fields".equals(reply.id()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(createTableReply.contextHints().path("resourcePath").asText()).startsWith("/api/");
+        assertThat(createTableReply.contextHints().path("technicalDetails").isObject()).isTrue();
+        assertThat(fieldsReply.contextHints().path("resourcePath").asText()).isBlank();
+        assertThat(fieldsReply.contextHints().path("technicalDetails").isMissingNode()).isTrue();
+        assertThat(fieldsReply.contextHints().path("questionKind").asText()).isEqualTo("field_discovery");
         assertThat(result.quickReplies())
                 .noneMatch(reply -> "confirm-dashboard".equals(reply.id())
                         || "api-create-dashboard".equals(reply.id()));
