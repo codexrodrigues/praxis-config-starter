@@ -8,6 +8,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
 
     static final String CHART_REQUIRED_FAILURE = "semantic-preview-chart-required";
     static final String DASHBOARD_REQUIRED_FAILURE = "semantic-preview-dashboard-required";
+    static final String PRIMARY_COMPONENT_REQUIRED_FAILURE = "semantic-preview-primary-component-required";
     static final String RESOURCE_BINDING_MISMATCH_FAILURE = "semantic-preview-resource-binding-mismatch";
     static final String AXIS_SCHEMA_VERIFICATION_REQUIRED_FAILURE = "semantic-preview-axis-schema-verification-required";
     static final String MATERIALIZATION_MISMATCH_WARNING = "semantic-preview-materialization-mismatch";
@@ -30,6 +31,12 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                 && !reviewRequirementRegroundedByMaterialization(semanticDecision, materialization)) {
             failureCodes.add(reviewRequiredFailure(semanticDecision));
             warnings.add("semantic-decision-review-required");
+        }
+        String primaryComponent = requestedPrimaryComponent(semanticDecision);
+        if (!primaryComponent.isBlank()
+                && !containsComponent(materialization, primaryComponent)) {
+            failureCodes.add(PRIMARY_COMPONENT_REQUIRED_FAILURE);
+            warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
         if (requiresChartMaterialization(semanticDecision)
                 && !containsComponent(materialization, "praxis-chart")) {
@@ -64,6 +71,24 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         return "chart".equals(safe(semanticDecision.artifactKind()))
                 || "create_chart".equals(safe(semanticDecision.changeKind()))
                 || "charts".equals(safe(semanticDecision.visualIntent()));
+    }
+
+    private static String requestedPrimaryComponent(AgenticAuthoringSemanticDecision semanticDecision) {
+        if (semanticDecision == null || semanticDecision.visualizationDecision() == null) {
+            return "";
+        }
+        String componentId = safe(semanticDecision.visualizationDecision().primaryComponent());
+        if (componentId.isBlank() || "unknown".equals(componentId)) {
+            return "";
+        }
+        return looksLikeGovernedComponentId(componentId) ? componentId : "";
+    }
+
+    private static boolean looksLikeGovernedComponentId(String componentId) {
+        String value = safe(componentId);
+        return value.startsWith("praxis-")
+                || value.startsWith("pdx-")
+                || value.contains("-");
     }
 
     private static boolean hasResourceBindingMismatch(

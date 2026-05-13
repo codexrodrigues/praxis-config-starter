@@ -254,6 +254,146 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesLiteralSetValueEffectIntoProposedConfig() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(literalSetValuePayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "behavior": {
+                      "filtering": {
+                        "advancedFilters": {
+                          "enabled": false
+                        }
+                      }
+                    }
+                  },
+                  "plan": {
+                    "operationId": "filter.advanced.configure",
+                    "target": {},
+                    "input": {
+                      "enabled": true,
+                      "settings": {
+                        "mode": "filter"
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.patch().path("proposedConfig").path("behavior").path("filtering").path("enabled").asBoolean())
+                .isTrue();
+        assertThat(result.patch().path("proposedConfig").path("behavior").path("filtering")
+                .path("advancedFilters").path("settings").path("mode").asText()).isEqualTo("filter");
+    }
+
+    @Test
+    void validatesAdvancedFilterFieldsAgainstValidationContextWithoutPersistingSchemaInConfig() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(filterFieldValidationPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "ano" }
+                    ],
+                    "behavior": {
+                      "filtering": {
+                        "advancedFilters": {
+                          "enabled": false
+                        }
+                      }
+                    }
+                  },
+                  "validationContext": {
+                    "filterRequestSchema": {
+                      "type": "object",
+                      "properties": {
+                        "ano": { "type": "integer" },
+                        "mes": { "type": "integer" },
+                        "funcionarioId": { "type": "string" },
+                        "dataPagamentoBetween": { "type": "object" },
+                        "salarioBrutoBetween": { "type": "object" },
+                        "salarioLiquidoBetween": { "type": "object" }
+                      }
+                    }
+                  },
+                  "plan": {
+                    "operationId": "filter.advanced.configure",
+                    "target": {},
+                    "input": {
+                      "enabled": true,
+                      "settings": {
+                        "mode": "filter",
+                        "alwaysVisibleFields": ["ano", "mes", "funcionarioId"],
+                        "selectedFieldIds": [
+                          "dataPagamentoBetween",
+                          "salarioBrutoBetween",
+                          "salarioLiquidoBetween"
+                        ]
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("proposedConfig").has("filterRequestSchema")).isFalse();
+        assertThat(result.patch().path("proposedConfig").path("behavior").path("filtering")
+                .path("advancedFilters").path("settings").path("selectedFieldIds").toString())
+                .isEqualTo("[\"dataPagamentoBetween\",\"salarioBrutoBetween\",\"salarioLiquidoBetween\"]");
+    }
+
+    @Test
+    void rejectsAdvancedFilterFieldsWhenValidationContextDoesNotExposeFilterRequestField() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(filterFieldValidationPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "ano" }
+                    ]
+                  },
+                  "validationContext": {
+                    "filterRequestSchema": {
+                      "type": "object",
+                      "properties": {
+                        "ano": { "type": "integer" }
+                      }
+                    }
+                  },
+                  "plan": {
+                    "operationId": "filter.advanced.configure",
+                    "target": {},
+                    "input": {
+                      "enabled": true,
+                      "settings": {
+                        "mode": "filter",
+                        "selectedFieldIds": ["dataPagamentoBetween"]
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isFalse();
+        assertThat(result.failures())
+                .contains("validator fields-exist failed for filter.advanced.configure: unknown field dataPagamentoBetween");
+    }
+
+    @Test
     void compilesRemoveByKeyEffectIntoProposedConfig() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
         JsonNode request = objectMapper.readTree("""
@@ -1967,6 +2107,125 @@ class AgenticAuthoringManifestServiceTest {
                 .replace(
                         "\"validators\": [\"target-column-exists\"],",
                         "\"validators\": [\"target-column-exists\", \"not-implemented-validator\"],");
+    }
+
+    private String literalSetValuePayload() {
+        return """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-table",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "filter", "resolver": "filter-config" }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "filter.advanced.configure",
+                            "target": {
+                              "kind": "filter",
+                              "resolver": "filter-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["enabled"],
+                              "properties": {
+                                "enabled": { "type": "boolean" },
+                                "settings": {
+                                  "type": "object",
+                                  "properties": {
+                                    "mode": { "enum": ["filter"] }
+                                  }
+                                }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "behavior.filtering.enabled", "value": true },
+                              { "kind": "merge-object", "path": "behavior.filtering.advancedFilters" }
+                            ],
+                            "affectedPaths": [
+                              "behavior.filtering.enabled",
+                              "behavior.filtering.advancedFilters.enabled",
+                              "behavior.filtering.advancedFilters.settings"
+                            ],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-round-trip-preserve"],
+                            "submissionImpact": "config-only"
+                          }
+                        ],
+                        "validators": [
+                          { "validatorId": "editor-round-trip-preserve" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+    }
+
+    private String filterFieldValidationPayload() {
+        return """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-table",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "filter", "resolver": "filter-config" }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "filter.advanced.configure",
+                            "target": {
+                              "kind": "filter",
+                              "resolver": "filter-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["enabled"],
+                              "properties": {
+                                "enabled": { "type": "boolean" },
+                                "settings": {
+                                  "type": "object",
+                                  "properties": {
+                                    "mode": { "enum": ["filter"] },
+                                    "alwaysVisibleFields": { "type": "array", "items": { "type": "string" } },
+                                    "selectedFieldIds": { "type": "array", "items": { "type": "string" } }
+                                  }
+                                }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "behavior.filtering.enabled", "value": true },
+                              { "kind": "merge-object", "path": "behavior.filtering.advancedFilters" }
+                            ],
+                            "affectedPaths": [
+                              "behavior.filtering.enabled",
+                              "behavior.filtering.advancedFilters.enabled",
+                              "behavior.filtering.advancedFilters.settings"
+                            ],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["filter-fields-exist", "editor-round-trip-preserve"],
+                            "submissionImpact": "config-only"
+                          }
+                        ],
+                        "validators": [
+                          { "validatorId": "filter-fields-exist" },
+                          { "validatorId": "editor-round-trip-preserve" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
     }
 
     private String invalidTargetPayload() {

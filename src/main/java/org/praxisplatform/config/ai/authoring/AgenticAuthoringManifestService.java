@@ -77,6 +77,7 @@ public class AgenticAuthoringManifestService {
         List<String> failures = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         failures.addAll(manifestContractValidator.validate(manifest));
+        JsonNode validationConfig = validationConfig(request);
         ArrayNode normalizedOperations = objectMapper.createArrayNode();
         List<JsonNode> planOperations = operationsFromPlan(request == null ? null : request.plan());
         if (planOperations.isEmpty()) {
@@ -89,7 +90,7 @@ public class AgenticAuthoringManifestService {
                 failures.add("operation not found: " + operationId);
                 continue;
             }
-            validatePlanOperation(componentId, operation, planOperation, request == null ? null : request.config(), failures, warnings);
+            validatePlanOperation(componentId, operation, planOperation, validationConfig, failures, warnings);
             normalizedOperations.add(planOperation);
         }
         ObjectNode normalizedPlan = objectMapper.createObjectNode();
@@ -100,6 +101,37 @@ public class AgenticAuthoringManifestService {
                 List.copyOf(failures),
                 List.copyOf(warnings),
                 normalizedPlan);
+    }
+
+    private JsonNode validationConfig(AgenticAuthoringManifestEditPlanRequest request) {
+        JsonNode config = request == null ? null : request.config();
+        JsonNode validationContext = request == null ? null : request.validationContext();
+        if (validationContext == null || validationContext.isNull() || validationContext.isMissingNode()) {
+            return config;
+        }
+        ObjectNode merged = config != null && config.isObject()
+                ? config.deepCopy()
+                : objectMapper.createObjectNode();
+        mergeObject(merged, validationContext);
+        merged.set("validationContext", validationContext);
+        return merged;
+    }
+
+    private void mergeObject(ObjectNode target, JsonNode source) {
+        if (source == null || !source.isObject()) {
+            return;
+        }
+        Iterator<java.util.Map.Entry<String, JsonNode>> fields = source.fields();
+        while (fields.hasNext()) {
+            java.util.Map.Entry<String, JsonNode> field = fields.next();
+            JsonNode current = target.path(field.getKey());
+            JsonNode incoming = field.getValue();
+            if (current instanceof ObjectNode currentObject && incoming != null && incoming.isObject()) {
+                mergeObject(currentObject, incoming);
+            } else {
+                target.set(field.getKey(), incoming);
+            }
+        }
     }
 
     public AgenticAuthoringManifestCompileResult compilePatch(

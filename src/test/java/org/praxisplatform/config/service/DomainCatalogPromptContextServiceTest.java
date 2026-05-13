@@ -122,6 +122,84 @@ class DomainCatalogPromptContextServiceTest {
     }
 
     @Test
+    void usesDefaultServiceKeyWhenResourceHintOmitsTechnicalServiceKey() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+
+        when(ingestionService.contextLatest(
+                eq("praxis-service"),
+                eq("procurement.suppliers"),
+                eq("tenant-a"),
+                eq("dev"),
+                eq("node"),
+                eq(null),
+                eq(null),
+                eq("fornecedores"),
+                eq(12)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        new DomainCatalogReleaseResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:procurement.suppliers:latest",
+                                "praxis.domain-catalog/v0.1",
+                                "praxis-service",
+                                "Praxis Service",
+                                "test",
+                                Instant.parse("2026-04-21T20:00:00Z"),
+                                "sha256:test",
+                                "tenant-a",
+                                "dev",
+                                Instant.parse("2026-04-21T20:00:01Z")),
+                        "fornecedores",
+                        "node",
+                        null,
+                        null,
+                        List.of("Use governed resource context."),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:procurement.suppliers:latest",
+                                "node",
+                                "procurement.suppliers",
+                                null,
+                                null,
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "nodeKey": "procurement.suppliers",
+                                      "label": "Fornecedores"
+                                    }
+                                    """)))));
+
+        String promptContext = service.buildPromptContext(
+                "fornecedores",
+                objectMapper.readTree("""
+                    {
+                      "domainCatalog": {
+                        "resourceKey": "procurement.suppliers"
+                      }
+                    }
+                    """),
+                "tenant-a",
+                "dev");
+
+        assertThat(promptContext)
+                .contains("DOMAIN_CATALOG_CONTEXT")
+                .contains("releaseKey: praxis-service:procurement.suppliers:latest")
+                .contains("[node/-] Fornecedores");
+        verify(ingestionService).contextLatest(
+                "praxis-service",
+                "procurement.suppliers",
+                "tenant-a",
+                "dev",
+                "node",
+                null,
+                null,
+                "fornecedores",
+                12);
+    }
+
+    @Test
     void includesAliasItemsInPromptContext() throws Exception {
         DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
         DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);

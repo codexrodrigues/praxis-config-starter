@@ -5,11 +5,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.text.Normalizer;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Host-neutral page composition planner for resource-backed authoring.
@@ -36,21 +34,63 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return Optional.empty();
         }
         String artifactKind = safe(intent.artifactKind());
-        if (!List.of("table", "dashboard", "page").contains(artifactKind)) {
+        AgenticAuthoringVisualizationDecision visualizationDecision = intent.visualizationDecision();
+        boolean tabsRequested = isPrimaryComponent(visualizationDecision, "praxis-tabs");
+        if (!List.of("table", "dashboard", "page").contains(artifactKind)
+                && !(tabsRequested && "component".equals(artifactKind))) {
             return Optional.empty();
         }
-        AgenticAuthoringVisualizationDecision visualizationDecision = intent.visualizationDecision();
-        ObjectNode plan = switch (artifactKind) {
+        boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
+        ObjectNode plan = tabsRequested ? tabsPlan(candidate) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
             case "page" -> pagePlan(candidate);
             default -> tablePlan(candidate);
         };
+        String providerArtifactKind = chartOnly ? "chart" : artifactKind;
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
                 List.of(),
-                List.of("ui-composition-plan-provider:generic-resource-" + artifactKind),
+                List.of("ui-composition-plan-provider:generic-resource-" + providerArtifactKind),
                 plan,
                 emptyCompiledFormPatch()));
+    }
+
+    private boolean isPrimaryComponent(
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            String componentId) {
+        return visualizationDecision != null && componentId.equals(safe(visualizationDecision.primaryComponent()));
+    }
+
+    private boolean isChartOnlyRequest(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        if (!isPrimaryComponent(visualizationDecision, "praxis-chart")) {
+            return false;
+        }
+        String layoutKind = normalize(visualizationDecision.layoutKind()).replaceAll("[^a-z0-9]+", " ").trim();
+        String intent = normalize(visualizationDecision.intent()).replaceAll("[^a-z0-9]+", " ").trim();
+        if (List.of("chart", "single chart", "single visualization").contains(layoutKind)
+                || intent.contains("single chart")
+                || intent.contains("chart only")) {
+            return true;
+        }
+        if (!visualizationDecision.includeSummary() && !visualizationDecision.includeDetailTable()) {
+            return true;
+        }
+        String prompt = normalize(request == null ? "" : request.userPrompt());
+        boolean asksOnly = containsAny(prompt, "apenas", "somente", "so ", "only");
+        boolean deniesDashboardSupport = containsAny(prompt,
+                "nao crie tabela",
+                "sem tabela",
+                "nao crie filtros",
+                "sem filtros",
+                "nao crie filtro",
+                "sem filtro",
+                "nao crie kpi",
+                "sem kpi",
+                "nao crie kpis",
+                "sem kpis");
+        return asksOnly && deniesDashboardSupport;
     }
 
     private AgenticAuthoringCandidate selectedCandidate(AgenticAuthoringIntentResolutionResult intent) {
@@ -109,11 +149,51 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return plan;
     }
 
+    private ObjectNode singleChartPlan(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringCandidate candidate,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        ObjectNode plan = basePlan("single-chart-page");
+        ArrayNode widgets = plan.putArray("widgets");
+        List<DashboardDimension> dimensions = dashboardDimensions(visualizationDecision, candidate, request);
+        DashboardDimension dimension = dimensions.isEmpty() ? unresolvedDashboardDimension() : dimensions.get(0);
+        String chartKey = widgetKey(candidate, "chart-" + dimension.field());
+        addChart(widgets, candidate, chartKey, dimension);
+        addSemanticAxisProvenance(plan, visualizationDecision, List.of(dimension));
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "72px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        putCanvasItem(canvas.putObject("items"), chartKey, 1, 1, 12, 5);
+        ObjectNode constraints = plan.putObject("compositionConstraints");
+        constraints.put("mode", "single-chart");
+        constraints.put("includeSummary", false);
+        constraints.put("includeDetailTable", false);
+        constraints.put("includeFilters", false);
+        constraints.put("includeKpis", false);
+        return plan;
+    }
+
     private ObjectNode pagePlan(AgenticAuthoringCandidate candidate) {
         ObjectNode plan = basePlan("resource-master-detail");
         ArrayNode widgets = plan.putArray("widgets");
         addTable(widgets, candidate, widgetKey(candidate, "master"), "master");
         addDetail(widgets, candidate, widgetKey(candidate, "detail"));
+        return plan;
+    }
+
+    private ObjectNode tabsPlan(AgenticAuthoringCandidate candidate) {
+        ObjectNode plan = basePlan("resource-tabs-page");
+        ArrayNode widgets = plan.putArray("widgets");
+        String tabsKey = widgetKey(candidate, "tabs");
+        addTabs(widgets, candidate, tabsKey);
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "72px");
+        putCanvasItem(canvas.putObject("items"), tabsKey, 1, 1, 12, 8);
         return plan;
     }
 
@@ -137,6 +217,57 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode config = inputs.putObject("config");
         config.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
         config.putArray("columns");
+    }
+
+    private void addTabs(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-tabs");
+        widget.put("role", "workspace");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("tabsId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("enableCustomization", true);
+        ObjectNode config = inputs.putObject("config");
+        config.putObject("group").put("dynamicHeight", true).put("preserveContent", true);
+        ArrayNode tabs = config.putArray("tabs");
+        ObjectNode listTab = tabs.addObject();
+        listTab.put("id", "list");
+        listTab.put("textLabel", "Lista");
+        addNestedTable(listTab.putArray("widgets"), candidate, widgetKey(candidate, "tabs-list"));
+        ObjectNode detailsTab = tabs.addObject();
+        detailsTab.put("id", "details");
+        detailsTab.put("textLabel", "Detalhes");
+        addNestedDetail(detailsTab.putArray("widgets"), candidate, widgetKey(candidate, "tabs-detail"));
+    }
+
+    private void addNestedTable(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("id", "praxis-table");
+        widget.put("childWidgetKey", key);
+        ObjectNode outputs = widget.putObject("outputs");
+        outputs.put("rowClick", "emit");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
+        inputs.put("tableId", key);
+        inputs.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        inputs.putObject("config").putArray("columns");
+    }
+
+    private void addNestedDetail(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("id", "praxis-dynamic-form");
+        widget.put("childWidgetKey", key);
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
+        inputs.put("formId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("mode", "view");
+        inputs.put("schemaSource", "resource");
+        inputs.put("enableCustomization", true);
+        inputs.putNull("resourceId");
+        inputs.putObject("config")
+                .put("title", "Detalhes de " + titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
     }
 
     private void addChart(
@@ -222,32 +353,32 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         widget.put("key", key);
         widget.put("componentId", "praxis-rich-content");
         widget.put("role", "kpi-band");
-        ObjectNode document = widget.putObject("inputs").putObject("document");
-        document.put("kind", "praxis.rich-content.document");
-        document.put("version", "1.0.0");
-        ArrayNode kpis = document.putArray("kpis");
-        ObjectNode total = kpis.addObject();
+        ObjectNode document = richContentDocument(widget.putObject("inputs"));
+        ObjectNode statGroup = document.putArray("nodes").addObject();
+        statGroup.put("type", "statGroup");
+        statGroup.put("id", key + "-stats");
+        statGroup.put("title", "Indicadores");
+        statGroup.put("subtitle", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        statGroup.put("layout", "grid");
+        ArrayNode items = statGroup.putArray("items");
+        ObjectNode total = items.addObject();
         total.put("id", key + "-total");
-        total.put("label", "Total");
-        total.put("aggregation", "count");
-        total.put("schemaVerified", true);
-        total.put("provenance", "generic-dashboard-count-kpi");
-        for (DashboardDimension dimension : dimensions.stream().limit(2).toList()) {
-            ObjectNode kpi = kpis.addObject();
+        total.put("label", "Total de registros");
+        total.put("value", "-");
+        total.put("caption", "Aguardando contagem");
+        total.put("icon", "monitoring");
+        total.put("tone", "info");
+        for (DashboardDimension dimension : dimensions.stream().filter(this::isResolvedDimension).limit(2).toList()) {
+            ObjectNode kpi = items.addObject();
             kpi.put("id", key + "-" + dimension.field());
             kpi.put("label", dimension.label());
-            kpi.put("aggregation", dimension.metricAggregation());
-            if (!dimension.metricField().isBlank()) {
-                kpi.put("field", dimension.metricField());
-            }
+            kpi.put("value", "-");
+            kpi.put("caption", metricCaption(dimension));
+            kpi.put("icon", "query_stats");
+            kpi.put("tone", "neutral");
             kpi.put("dimensionField", dimension.field());
             kpi.put("schemaVerified", false);
-            kpi.put("schemaProbeStatus", "pending");
-            kpi.put("provenance", dimension.provenance());
         }
-        ObjectNode text = document.putArray("nodes").addObject();
-        text.put("type", "text");
-        text.put("text", "Indicadores de " + titleFromResourcePath(businessResourcePath(candidate.resourcePath())) + ".");
     }
 
     private void addFilter(
@@ -264,7 +395,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("filterId", key);
         inputs.put("showFilterSettings", true);
         ArrayNode selectedFields = inputs.putArray("selectedFieldIds");
-        for (DashboardDimension dimension : dimensions) {
+        for (DashboardDimension dimension : dimensions.stream().filter(this::isResolvedDimension).toList()) {
             selectedFields.add(dimension.field());
         }
     }
@@ -336,13 +467,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         canvas.put("gap", "16px");
         canvas.put("autoRows", "fixed");
         ObjectNode items = canvas.putObject("items");
-        putCanvasItem(items, widgetKey(candidate, "summary"), 1, 1, 12, 1);
-        putCanvasItem(items, widgetKey(candidate, "kpis"), 1, 2, 12, 1);
-        putCanvasItem(items, widgetKey(candidate, "filter"), 1, 3, 12, 1);
+        putCanvasItem(items, widgetKey(candidate, "summary"), 1, 1, 12, 2);
+        putCanvasItem(items, widgetKey(candidate, "kpis"), 1, 3, 12, 2);
+        putCanvasItem(items, widgetKey(candidate, "filter"), 1, 5, 12, 1);
 
         int chartCount = Math.max(1, dimensions.size());
         int chartColSpan = chartCount == 1 ? 12 : chartCount == 2 ? 6 : 4;
-        int chartRow = 4;
+        int chartRow = 6;
         int chartRowSpan = 4;
         for (int i = 0; i < dimensions.size(); i++) {
             DashboardDimension dimension = dimensions.get(i);
@@ -378,12 +509,44 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         widget.put("key", key);
         widget.put("componentId", "praxis-rich-content");
         widget.put("role", "supporting");
-        ObjectNode document = widget.putObject("inputs").putObject("document");
-        document.put("kind", "praxis.rich-content.document");
+        ObjectNode document = richContentDocument(widget.putObject("inputs"));
+        ObjectNode card = document.putArray("nodes").addObject();
+        card.put("type", "card");
+        card.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        card.put("subtitle", "Pre-visualizacao analitica");
+        card.put("variant", "filled");
+        card.put("tone", "info");
+        card.put("size", "sm");
+        card.put("density", "compact");
+        card.put("orientation", "horizontal");
+        card.putObject("media")
+                .put("kind", "icon")
+                .put("icon", "dashboard_customize")
+                .put("placement", "leading");
+        ArrayNode content = card.putArray("content");
+        ObjectNode body = content.addObject();
+        body.put("type", "text");
+        body.put("text", "Dashboard governado com indicadores, filtros, graficos e detalhe conectados pela fonte selecionada.");
+    }
+
+    private ObjectNode richContentDocument(ObjectNode inputs) {
+        ObjectNode document = inputs.putObject("document");
+        document.put("kind", "praxis.rich-content");
         document.put("version", "1.0.0");
-        ObjectNode text = document.putArray("nodes").addObject();
-        text.put("type", "text");
-        text.put("text", "Preview for " + titleFromResourcePath(businessResourcePath(candidate.resourcePath())) + ".");
+        return document;
+    }
+
+    private String metricCaption(DashboardDimension dimension) {
+        if (dimension == null) {
+            return "Recorte pendente de verificacao";
+        }
+        String aggregation = dimension.metricAggregation().isBlank()
+                ? "count"
+                : dimension.metricAggregation().toLowerCase(Locale.ROOT);
+        if (!dimension.metricField().isBlank()) {
+            return aggregation.toUpperCase(Locale.ROOT) + " de " + dimension.metricLabel();
+        }
+        return "Agrupado por " + dimension.label();
     }
 
     private void addDetail(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
@@ -454,6 +617,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 if (axis == null || safe(axis.field()).isBlank() || safe(axis.concept()).isBlank()) {
                     continue;
                 }
+                if (!isUsableDashboardAxis(axis)) {
+                    continue;
+                }
                 dimensions.add(new DashboardDimension(
                         safe(axis.concept()),
                         safe(axis.field()),
@@ -468,82 +634,64 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             }
         }
         if (dimensions.isEmpty()) {
-            dimensions.addAll(inferDashboardDimensions(candidate, request));
+            dimensions.add(unresolvedDashboardDimension());
         }
         return dimensions.stream().limit(3).toList();
     }
 
-    private List<DashboardDimension> inferDashboardDimensions(
-            AgenticAuthoringCandidate candidate,
-            AgenticAuthoringPlanRequest request) {
-        Set<String> terms = new LinkedHashSet<>();
-        addTerms(terms, request == null ? "" : request.userPrompt());
-        addTerms(terms, candidate == null ? "" : candidate.reason());
-        addTerms(terms, businessResourcePath(candidate == null ? "" : candidate.resourcePath()));
-        if (candidate != null && candidate.evidenceBundle() != null) {
-            for (AgenticAuthoringEvidenceBundle.Evidence evidence : candidate.evidenceBundle().evidence()) {
-                addTerms(terms, evidence.summary());
-                addTerms(terms, evidence.ref());
-                evidence.matchedTerms().forEach(term -> addTerms(terms, term));
+    private boolean isUsableDashboardAxis(AgenticAuthoringVisualizationAxisDecision axis) {
+        String field = normalize(axis.field()).replaceAll("[^a-z0-9]+", " ").trim();
+        String concept = normalize(axis.concept()).replaceAll("[^a-z0-9]+", " ").trim();
+        String label = normalize(axis.label()).replaceAll("[^a-z0-9]+", " ").trim();
+        String combined = String.join(" ", field, concept, label).trim();
+        if (field.isBlank() || concept.isBlank()) {
+            return false;
+        }
+        if (field.split("\\s+").length > 3 || concept.split("\\s+").length > 3) {
+            return false;
+        }
+        for (String token : List.of(
+                "crie",
+                "criar",
+                "quero",
+                "preciso",
+                "dashboard",
+                "painel",
+                "grafico",
+                "graficos",
+                "chart",
+                "charts",
+                "tabela",
+                "table",
+                "filtro",
+                "filtros",
+                "kpi",
+                "kpis")) {
+            if (combined.contains(token)) {
+                return false;
             }
         }
-        List<DashboardDimension> dimensions = new ArrayList<>();
-        addInferredDimensionIfRelevant(dimensions, terms, "status", "status", "Status", "bar", "vertical");
-        addInferredDimensionIfRelevant(dimensions, terms, "severity", "severity", "Severity", "bar", "vertical");
-        addInferredDimensionIfRelevant(dimensions, terms, "category", "category", "Category", "bar", "vertical");
-        addInferredDimensionIfRelevant(dimensions, terms, "type", "type", "Type", "bar", "vertical");
-        addInferredDimensionIfRelevant(dimensions, terms, "period", "createdAt", "Period", "line", "horizontal");
-        if (dimensions.isEmpty()) {
-            dimensions.add(new DashboardDimension(
-                    "category",
-                    "category",
-                    "Category",
-                    "Registros por Category",
-                    "bar",
-                    "vertical",
-                    "count",
-                    "",
-                    "Total",
-                    "generic-dashboard-field-inference"));
-        }
-        return dimensions;
+        return true;
     }
 
-    private void addInferredDimensionIfRelevant(
-            List<DashboardDimension> dimensions,
-            Set<String> terms,
-            String concept,
-            String field,
-            String label,
-            String chartType,
-            String orientation) {
-        if (terms.contains(concept)
-                || terms.contains(field.toLowerCase(Locale.ROOT))
-                || terms.contains(label.toLowerCase(Locale.ROOT))
-                || ("severity".equals(concept) && (terms.contains("gravidade") || terms.contains("severidade")))
-                || ("category".equals(concept) && (terms.contains("categoria") || terms.contains("classe")))
-                || ("type".equals(concept) && (terms.contains("tipo") || terms.contains("natureza")))
-                || ("period".equals(concept) && (terms.contains("data") || terms.contains("periodo") || terms.contains("tempo")))) {
-            dimensions.add(new DashboardDimension(
-                    concept,
-                    field,
-                    label,
-                    "Registros por " + label,
-                    chartType,
-                    orientation,
-                    "count",
-                    "",
-                    "Total",
-                    "generic-dashboard-field-inference"));
-        }
+    private DashboardDimension unresolvedDashboardDimension() {
+        return new DashboardDimension(
+                "unresolved",
+                "unresolved",
+                "Unresolved",
+                "Schema-grounded dimension required",
+                "bar",
+                "vertical",
+                "count",
+                "",
+                "Total",
+                "schema-grounding-required");
     }
 
-    private void addTerms(Set<String> terms, String value) {
-        for (String token : normalize(value).replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
-            if (token.length() >= 3) {
-                terms.add(token);
-            }
-        }
+    private boolean isResolvedDimension(DashboardDimension dimension) {
+        return dimension != null
+                && !"unresolved".equals(dimension.field())
+                && !"schema-grounding-required".equals(dimension.provenance());
     }
 
     private boolean looksLikeChartRequest(AgenticAuthoringPlanRequest request) {
@@ -664,6 +812,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return Normalizer.normalize(safe(value), Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "")
                 .toLowerCase(Locale.ROOT);
+    }
+
+    private boolean containsAny(String value, String... terms) {
+        String normalized = normalize(value);
+        for (String term : terms) {
+            if (!safe(term).isBlank() && normalized.contains(normalize(term))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String safe(String value) {

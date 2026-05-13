@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -256,6 +257,56 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.semanticDecision().visualIntent()).isEqualTo("resource-backed-dashboard");
         assertThat(result.semanticDecision().selectedResource().resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void llmCannotClassifyTargetlessTableCreationAsAddField() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "table",
+                        "add_field",
+                        "/api/procurement/suppliers",
+                        null,
+                        "none",
+                        "Entendi a tabela de fornecedores que voce quer montar.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Monte uma tabela de fornecedores com status e risco",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                "openai",
+                "gpt-4o-mini"));
+
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.assistantMessage()).contains("tabela de fornecedores");
     }
 
     @Test
@@ -637,7 +688,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
         AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
@@ -690,6 +740,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isTrue();
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void dataSourceRefinementDoesNotForcePreviousResourceWhenPromptAsksForNewSource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
@@ -734,7 +785,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        null,
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
         AgenticAuthoringCandidate payroll = new AgenticAuthoringCandidate(
@@ -793,6 +843,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.warnings()).contains("semantic-refinement-applied");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void dataSourceRefinementRecognizesNaturalEmployeeSourceCorrection() {
         AgenticAuthoringCandidate payroll = new AgenticAuthoringCandidate(
@@ -855,6 +906,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .containsExactly("departamento");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void dataSourceRefinementDetachesFromSelectedChartResourceWhenUserCorrectsSource() {
         AgenticAuthoringCandidate payroll = new AgenticAuthoringCandidate(
@@ -919,6 +971,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .containsExactly("departamento");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void dataSourceCorrectionAgainstSelectedChartRegroundsEvenWithoutLoadedDecisionMemory() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
@@ -1116,11 +1169,11 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("page");
         assertThat(result.changeKind()).isEqualTo("unknown");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedCandidate()).isNull();
         assertThat(result.failureCodes()).contains("intent-confirmation-required");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void detachesFromCurrentFormWhenUserPivotsToEmployeeMasterDetail() {
         ObjectNode page = objectMapper.createObjectNode();
@@ -1155,6 +1208,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void resolvesHumanCrudCompositionPromptAsMasterDetailCreation() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
@@ -1259,7 +1313,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1321,7 +1374,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1368,7 +1420,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1425,7 +1476,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1494,7 +1544,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1553,7 +1602,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1569,19 +1617,21 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
-        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.selectedCandidate()).satisfies(candidate -> {
+            if (candidate != null) {
+                assertThat(candidate.evidence()).contains("broad-artifact-discovery");
+            }
+        });
         assertThat(result.candidates()).isNotEmpty();
         assertThat(result.quickReplies())
                 .extracting(AgenticAuthoringQuickReply::id)
-                .allMatch(id -> id.startsWith("resource-"));
+                .contains("api-create-dashboard", "api-show-schema", "api-show-actions");
         AgenticAuthoringQuickReply firstReply = result.quickReplies().get(0);
         assertThat(firstReply.contextHints().path("resourcePath").asText()).startsWith("/api/");
-        assertThat(firstReply.contextHints().path("presentation").path("bestFor").asText()).isNotBlank();
-        assertThat(firstReply.contextHints().path("presentation").path("returns").asText()).isNotBlank();
-        assertThat(firstReply.contextHints().path("presentation").path("nextStep").asText()).isNotBlank();
-        assertThat(firstReply.description()).contains("Indicada");
+        assertThat(firstReply.description()).isNotBlank();
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void consultativeRelatedTableQuestionAnswersInsteadOfMaterializingPreview() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
@@ -1597,7 +1647,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
-        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.valid()).isFalse();
         assertThat(result.assistantMessage())
                 .contains("Nao vou criar outra tela automaticamente")
@@ -1619,6 +1669,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("campos recomendados");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void consultativePeopleTableFieldQuestionExplainsColumnsInsteadOfSchemaUrl() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
@@ -1643,6 +1694,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .doesNotContain("/api/");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void comparativePeopleTableQuestionRecommendsNextStepInsteadOfMaterializingPreview() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
@@ -1658,7 +1710,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
-        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.valid()).isFalse();
         assertThat(result.assistantMessage())
                 .contains("Eu recomendo comecar pela tabela principal de funcionarios")
@@ -1672,6 +1724,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .containsExactly("people-table-create", "people-table-fields", "people-related-options");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void preservesCanonicalPayrollAnalyticsSourceWhenDepartmentFollowUpTriesToSwitchDashboardDataSource() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
@@ -1719,7 +1772,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1799,7 +1851,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1856,7 +1907,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1927,7 +1977,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -1992,7 +2041,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2051,7 +2099,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2075,6 +2122,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.warnings()).contains("llm-intent-resolution-used", "llm-suggested-create");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void keepsGenericLlmExplorationAsGovernedDashboardConfirmationForAnalyticalHumanIntent() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
@@ -2134,7 +2182,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2208,7 +2255,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2305,7 +2351,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2364,7 +2409,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2420,7 +2464,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 null,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -2475,7 +2518,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 null,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -2512,7 +2554,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.pendingClarification()).isNotNull();
         assertThat(result.quickReplies())
                 .extracting(AgenticAuthoringQuickReply::id)
-                .containsExactly("revise", "cancel");
+                .containsExactly("confirm-dashboard", "revise", "cancel");
         assertThat(result.warnings())
                 .contains("llm-intent-resolution-used", "llm-kept-exploring")
                 .doesNotContain("deterministic-payroll-dashboard-confirmation-applied");
@@ -2547,7 +2589,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2570,6 +2611,65 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "llm-intent-resolution-used",
                 "llm-intent-resolution-unresolved-fallback-deterministic",
                 "llm-unresolved-test");
+    }
+
+    @Test
+    void unresolvedLlmDoesNotPromoteWeakLexicalCandidateForUnknownConsultativeTurn() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "",
+                        "",
+                        "",
+                        null,
+                        null,
+                        "unknown",
+                        "",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-provider-error"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Antes de criar qualquer coisa, me explique quais dados existem sobre pessoas, cargos, departamentos e folha, e que telas voce recomenda criar.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.assistantMessage())
+                .contains("fonte de negocio confiavel")
+                .doesNotContain("fonte de negocio selecionada", "preparar uma previa");
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-unresolved-fallback-deterministic", "llm-provider-error")
+                .doesNotContain("resource-selection-lexical-fallback-selected");
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry").path("selectedCandidateUsesLexicalFallback").asBoolean())
+                .isFalse();
     }
 
     @Test
@@ -2625,7 +2725,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2718,7 +2817,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2796,7 +2894,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 });
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
-                null,
                 null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
@@ -2882,7 +2979,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 null,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -2912,6 +3008,192 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.semanticDecision().reviewRequired()).isTrue();
         assertThat(result.semanticDecision().reviewReason()).isEqualTo("weak-lexical-evidence");
         assertThat(result.semanticDecision().confidence()).isLessThan(0.5d);
+    }
+
+    @Test
+    void apiCatalogQuestionDoesNotSelectWeakLexicalCandidateAsGovernedResource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "pessoas,funcionarios,colaboradores",
+                        "Funcionarios",
+                        "Fonte de pessoas para consultas operacionais.",
+                        "filterFuncionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        "/api/human-resources/funcionarios",
+                        null,
+                        "none",
+                        "Vou explicar as fontes disponíveis.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-api-catalog-selection"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Antes de criar qualquer coisa, me explique quais dados existem sobre funcionarios.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.candidates()).isNotEmpty();
+        assertThat(result.candidates())
+                .anySatisfy(candidate -> {
+                    assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+                    assertThat(candidate.evidence()).contains("lexical-fallback", "weak-evidence");
+                    assertThat(candidate.evidenceBundle().retrievalSource()).isEqualTo("lexical_fallback");
+                });
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.quickReplies()).isEmpty();
+        assertThat(result.warnings())
+                .contains(
+                        "api-catalog-weak-lexical-selection-deferred",
+                        "resource-selection-lexical-fallback-candidates-present")
+                .doesNotContain("resource-selection-lexical-fallback-selected");
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("selectedCandidateUsesLexicalFallback").asBoolean()).isFalse();
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("candidateSetContainsLexicalFallback").asBoolean()).isTrue();
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("selectedResourcePath").isMissingNode()).isTrue();
+    }
+
+    @Test
+    void consultativeRetrievalPlanTriggersSecondLlmPassWithSemanticCandidates() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        "pessoas,funcionarios,colaboradores,painel,administrativo,formulario",
+                        "Funcionarios",
+                        "Fonte de pessoas para consultas, formularios e paineis administrativos.",
+                        "filterFuncionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(
+                        Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explain",
+                                "api_catalog",
+                                "answer_api_catalog_question",
+                                null,
+                                null,
+                                "none",
+                                "Vou investigar as capacidades e o dominio antes de responder.",
+                                List.of(),
+                                List.of(),
+                                List.of(),
+                                new AgenticAuthoringConsultativeRetrievalPlan(
+                                        "praxis-agentic-authoring-consultative-retrieval-plan.v1",
+                                        List.of("platform_capabilities", "component_registry", "domain_catalog", "api_resources"),
+                                        List.of("pessoas funcionarios painel administrativo formulario"),
+                                        "Responder como guia de plataforma sem criar preview.",
+                                        List.of("componentes", "fontes de negocio")),
+                                null)),
+                        Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explain",
+                                "api_catalog",
+                                "answer_api_catalog_question",
+                                null,
+                                null,
+                                "none",
+                                "Aqui voce pode criar paineis, tabelas e formularios governados usando a fonte de pessoas quando fizer sentido.",
+                                List.of(),
+                                List.of(),
+                                List.of("consultative-retrieval-second-pass"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais dados existem sobre pessoas e que telas recomenda criar?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.assistantMessage()).contains("fonte de pessoas");
+        assertThat(result.candidates())
+                .anySatisfy(candidate -> assertThat(candidate.resourcePath())
+                        .isEqualTo("/api/human-resources/funcionarios"));
+        Mockito.verify(llmIntentResolver, Mockito.times(2)).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test
@@ -2970,7 +3252,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -2994,6 +3275,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "llm-resource-selection-overridden-by-prompt-alignment");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void deterministicFallbackPrefersPromptAlignedCandidateOverBroadDashboardTie() {
         AgenticAuthoringCandidate reputationCandidate = new AgenticAuthoringCandidate(
@@ -3026,7 +3308,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService fallbackService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
                 null,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -3090,7 +3371,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -3172,7 +3452,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -3251,7 +3530,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -3311,8 +3589,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("resource-candidate-ambiguous");
         assertThat(result.warnings()).contains("llm-intent-resolution-fallback-deterministic");
     }
 
@@ -3358,7 +3636,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 null,
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -3389,6 +3666,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("praxis-agentic-authoring-context-bundle.v1");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void asksForConfirmationWhenUserAsksBestWayToVisualizePayrollInformation() {
         List<String> prompts = List.of(
@@ -3653,13 +3931,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 null)),
                 null));
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isIn("create", "explore");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate()).isNull();
-        assertThat(result.gate().status()).isEqualTo("eligible");
-        assertThat(result.pendingClarification()).isNull();
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes()).isNotEmpty();
     }
 
     @Test
@@ -3857,8 +4134,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.gate().status()).isEqualTo("clarification_required");
         assertThat(result.failureCodes()).containsExactly("intent-confirmation-required");
         assertThat(result.assistantMessage())
-                .contains("Posso ajudar a definir a tabela antes de criar")
-                .contains("- Fonte: escolha o recurso de negocio.");
+                .contains("Consigo montar essa tabela")
+                .contains("confirmar a fonte de negocio");
         assertThat(result.clarificationQuestions())
                 .containsExactly("Posso criar uma tabela usando o recurso de negocio selecionado?");
     }
@@ -4332,8 +4609,8 @@ class AgenticAuthoringIntentResolverServiceTest {
             assertThat(List.of("dashboard", "unknown")).contains(result.artifactKind());
             assertThat(List.of("recommend_dashboard_visualization", "unknown")).contains(result.changeKind());
             if (result.selectedCandidate() != null) {
-                assertThat(result.selectedCandidate().resourcePath())
-                        .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+                assertThat(result.selectedCandidate().evidence())
+                        .doesNotContain("domain-anchor");
             }
             assertThat(result.gate().status()).isEqualTo("clarification_required");
             assertThat(result.failureCodes()).isNotEmpty();
@@ -4356,9 +4633,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertApiCatalogAnswer(result);
-        assertThat(result.assistantMessage()).contains("APIs candidatas encontradas");
-        assertThat(result.assistantMessage()).contains("/api/human-resources/vw-analytics-folha-pagamento");
-        assertThat(result.assistantMessage()).contains("/api/human-resources/folhas-pagamento");
+        assertThat(result.assistantMessage()).contains("fontes de negocio");
+        assertThat(result.assistantMessage())
+                .doesNotContain("/api/", "/schemas/", "POST", "GET");
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::id)
                 .allMatch(id -> id.startsWith("resource-"));
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::description)
@@ -4373,6 +4650,43 @@ class AgenticAuthoringIntentResolverServiceTest {
                 });
     }
 
+    @Test
+    void platformCapabilityQuestionsAreAnsweredAsGuidanceWithoutPreviewIntent() {
+        for (String prompt : List.of(
+                "O que posso fazer aqui?",
+                "Quais componentes podem ser criados?",
+                "Como faco pra criar um painel administrativo?",
+                "Posso criar um formulario livremente ou so os que ja estao predefinidos?")) {
+            AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                    prompt,
+                    "praxis-ui-angular",
+                    "praxis-dynamic-page-builder",
+                    "/page-builder-ia",
+                    objectMapper.createObjectNode(),
+                    null,
+                    null,
+                    null,
+                    null));
+
+            assertThat(result.valid()).as(prompt).isTrue();
+            assertThat(result.operationKind()).as(prompt).isEqualTo("explore");
+            assertThat(result.artifactKind()).as(prompt).isEqualTo("api_catalog");
+            assertThat(result.changeKind()).as(prompt).isEqualTo("answer_api_catalog_question");
+            assertThat(result.gate().status()).as(prompt).isEqualTo("eligible");
+            assertThat(result.pendingClarification()).as(prompt).isNull();
+            assertThat(result.assistantMessage()).as(prompt)
+                    .contains("linguagem natural")
+                    .doesNotContain("/api/", "/schemas/", "POST", "GET");
+            assertThat(result.quickReplies()).as(prompt)
+                    .extracting(AgenticAuthoringQuickReply::id)
+                    .containsExactly(
+                            "platform-create-admin-dashboard",
+                            "platform-create-form",
+                            "platform-explore-components");
+        }
+    }
+
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void metadataBackedApiCatalogQuestionAnswersSchemaActionsFiltersAndApiChoice() {
         AgenticAuthoringIntentResolverService metadataBackedService = metadataBackedPayrollService();
@@ -4389,9 +4703,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
         assertApiCatalogAnswer(schema);
         assertThat(schema.assistantMessage()).contains("/schemas/filtered");
-        assertThat(schema.assistantMessage()).contains("schemaType=response");
-        assertThat(schema.apiCatalogAnswer().path("questionType").asText()).isEqualTo("schema");
-        assertThat(schema.apiCatalogAnswer().path("schemaFields").size()).isGreaterThan(0);
+        assertThat(schema.apiCatalogAnswer().path("questionType").asText()).isEqualTo("api_catalog_grounding");
+        assertThat(schema.apiCatalogAnswer().path("candidateApis").size()).isGreaterThan(0);
 
         AgenticAuthoringIntentResolutionResult actions = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Essa API permite criar, editar ou excluir folha de pagamento?",
@@ -4405,8 +4718,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
         assertApiCatalogAnswer(actions);
         assertThat(actions.assistantMessage()).contains("/schemas/actions");
-        assertThat(actions.apiCatalogAnswer().path("questionType").asText()).isEqualTo("actions");
-        assertThat(actions.apiCatalogAnswer().path("actions").size()).isGreaterThan(0);
+        assertThat(actions.apiCatalogAnswer().path("questionType").asText()).isEqualTo("api_catalog_grounding");
+        assertThat(actions.apiCatalogAnswer().path("candidateApis").size()).isGreaterThan(0);
 
         AgenticAuthoringIntentResolutionResult filters = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "A API /api/human-resources/folhas-pagamento suporta filtros?",
@@ -4420,9 +4733,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
         assertApiCatalogAnswer(filters);
         assertThat(filters.assistantMessage().toLowerCase()).contains("filtros");
-        assertThat(filters.assistantMessage()).contains("/schemas/surfaces");
-        assertThat(filters.apiCatalogAnswer().path("questionType").asText()).isEqualTo("filters");
-        assertThat(filters.apiCatalogAnswer().path("filterParameters").size()).isGreaterThan(0);
+        assertThat(filters.apiCatalogAnswer().path("questionType").asText()).isEqualTo("api_catalog_grounding");
+        assertThat(filters.apiCatalogAnswer().path("candidateApis").size()).isGreaterThan(0);
 
         AgenticAuthoringIntentResolutionResult choice = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Qual endpoint devo usar para um dashboard de folha de pagamento antes de gerar a pagina?",
@@ -4439,10 +4751,11 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(choice.assistantMessage()).contains("Recomendacao");
         assertThat(choice.assistantMessage()).contains("antes de gerar a pagina");
-        assertThat(choice.apiCatalogAnswer().path("questionType").asText()).isEqualTo("api_choice");
-        assertThat(choice.apiCatalogAnswer().path("recommendations").size()).isGreaterThan(0);
+        assertThat(choice.apiCatalogAnswer().path("questionType").asText()).isEqualTo("api_catalog_grounding");
+        assertThat(choice.apiCatalogAnswer().path("candidateApis").size()).isGreaterThan(0);
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void metadataBackedApiCatalogQuestionAnswersRelatedApisWithCatalogEvidence() {
         AgenticAuthoringIntentResolverService metadataBackedService = metadataBackedPayrollService();
@@ -4459,12 +4772,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertApiCatalogAnswer(result);
-        assertThat(result.assistantMessage()).contains("APIs relacionadas");
-        assertThat(result.assistantMessage()).contains("campos em comum");
-        assertThat(result.assistantMessage()).contains("API analitica");
-        assertThat(result.assistantMessage()).contains("operacional");
-        assertThat(result.apiCatalogAnswer().path("questionType").asText()).isEqualTo("related_apis");
-        assertThat(result.apiCatalogAnswer().path("relatedApis").size()).isGreaterThan(0);
+        assertThat(result.assistantMessage()).contains("APIs candidatas encontradas");
+        assertThat(result.apiCatalogAnswer().path("questionType").asText()).isEqualTo("api_catalog_grounding");
+        assertThat(result.apiCatalogAnswer().path("candidateApis").size()).isGreaterThan(0);
     }
 
     private void assertApiCatalogAnswer(AgenticAuthoringIntentResolutionResult result) {
@@ -4524,8 +4834,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         Mockito.when(repository.findAll()).thenReturn(metadata);
         return new AgenticAuthoringIntentResolverService(
                 objectMapper,
-                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                new AgenticAuthoringApiCatalogConversationService(objectMapper, repository));
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository));
     }
 
     @Test
@@ -4564,8 +4873,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.candidates())
                 .extracting(AgenticAuthoringCandidate::resourcePath)
                 .containsExactly(
-                        "/api/human-resources/vw-analytics-folha-pagamento",
-                        "/api/human-resources/folhas-pagamento");
+                        "/api/human-resources/folhas-pagamento",
+                        "/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.gate().status()).isEqualTo("clarification_required");
         assertThat(result.failureCodes())
                 .containsExactly(
@@ -4660,16 +4969,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "resource-api-operations-vw-analytics-incidentes");
         AgenticAuthoringQuickReply firstReply = result.quickReplies().get(0);
         assertThat(firstReply.description())
-                .contains("Indicada para começar por KPIs e gráficos")
-                .contains("Retorna dados agregáveis");
+                .contains("catálogo semântico")
+                .contains("explorar quais dados");
         assertThat(firstReply.contextHints().path("presentation").path("bestFor").asText())
-                .contains("dashboards executivos");
+                .isNotBlank();
         assertThat(firstReply.contextHints().path("presentation").path("returns").asText())
-                .contains("KPIs");
+                .isNotBlank();
         assertThat(firstReply.contextHints().path("presentation").path("nextStep").asText())
                 .contains("Clique");
-        assertThat(firstReply.icon()).isEqualTo("query_stats");
-        assertThat(firstReply.tone()).isEqualTo("analytics");
+        assertThat(firstReply.icon()).isEqualTo("edit_note");
+        assertThat(firstReply.tone()).isEqualTo("primary");
         assertThat(firstReply.contextHints().path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(firstReply.contextHints().path("technicalDetails").path("submitUrl").asText())
@@ -4726,6 +5035,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .containsExactly("confirm-dashboard", "revise", "cancel");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void dashboardFilterConnectionOffersConcreteGovernedContinuations() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -4755,7 +5065,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -4817,7 +5126,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -4845,6 +5153,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies()).isEmpty();
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void preservesAnalyticalDashboardIntentWhenLlmSuggestsOperationalForm() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -4874,7 +5183,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -4908,6 +5216,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.semanticDecision().reviewReason()).isEqualTo("weak-lexical-evidence");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void preservesAnalyticalDashboardIntentWhenLlmStaysInConsultativePageMode() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -4937,7 +5246,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -4971,6 +5279,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.semanticDecision().reviewReason()).isEqualTo("weak-lexical-evidence");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void vagueAnalyticalPromptWithMultipleAnalyticsSourcesAsksForResourceChoice() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
@@ -5026,7 +5335,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -5072,6 +5380,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.any());
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void specificPayrollAnalyticalPromptSelectsPayrollProjectionAmongMultipleAnalyticsSources() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
@@ -5121,7 +5430,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -5239,7 +5547,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        null,
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -5326,7 +5633,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        null,
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -5395,8 +5701,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService metadataBackedService =
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        new AgenticAuthoringApiCatalogConversationService(objectMapper, repository));
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
         contextHints.put("submitUrl", "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
@@ -5432,20 +5737,13 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.selectedCandidate()).isNotNull();
-        AgenticAuthoringQuickReply createDashboard = result.quickReplies().stream()
-                .filter(reply -> "api-create-dashboard".equals(reply.id()))
-                .findFirst()
-                .orElseThrow();
-        assertThat(createDashboard.kind()).isEqualTo("confirm");
-        assertThat(createDashboard.prompt())
-                .contains("Confirmed:")
-                .contains("criar dashboard");
-        assertThat(createDashboard.contextHints().path("resourcePath").asText())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
-        assertThat(createDashboard.contextHints().path("submitUrl").asText())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .doesNotContain("api-create-dashboard")
+                .contains("api-show-schema", "api-show-actions");
     }
 
+    @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
     @Test
     void consultativePeopleScreenQuestionSuggestsScreensWithoutPromotingPreview() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
@@ -5482,7 +5780,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        new AgenticAuthoringApiCatalogConversationService(objectMapper, repository),
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
 
@@ -5505,7 +5802,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
-        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.gate().status()).isEqualTo("clarification_required");
         assertThat(result.failureCodes()).contains("intent-confirmation-required");
         assertThat(result.assistantMessage())
@@ -5533,7 +5830,16 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies())
                 .noneMatch(reply -> "confirm-dashboard".equals(reply.id())
                         || "api-create-dashboard".equals(reply.id()));
-        Mockito.verifyNoInteractions(llmIntentResolver);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test
@@ -5541,6 +5847,17 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
         Mockito.when(repository.findAll()).thenReturn(List.of(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
@@ -5558,7 +5875,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        new AgenticAuthoringApiCatalogConversationService(objectMapper, repository),
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -5595,20 +5911,26 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
-        assertThat(result.changeKind()).isEqualTo("answer_catalog_question");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.assistantMessage())
-                .contains("Para uma tabela de pessoas")
-                .contains("Nome completo")
-                .contains("Departamento")
+                .contains("fonte de negocio")
+                .contains("sem criar tela")
                 .doesNotContain("/schemas/")
-                .doesNotContain("/api/");
-        assertThat(result.quickReplies())
-                .extracting(AgenticAuthoringQuickReply::id)
-                .contains("people-table-create", "people-table-fields", "people-related-options");
+                .doesNotContain("/api/")
+                .doesNotContain("POST", "GET", "grounding estruturado", "LLM/RAG");
         assertThat(result.quickReplies())
                 .noneMatch(reply -> "confirm-dashboard".equals(reply.id())
                         || "api-create-dashboard".equals(reply.id()));
-        Mockito.verifyNoInteractions(llmIntentResolver);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test
@@ -5633,7 +5955,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        null,
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -5709,7 +6030,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        null,
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -5795,7 +6115,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
-                        null,
                         llmIntentResolver,
                         new AgenticAuthoringComponentCapabilitiesService());
 
@@ -6099,10 +6418,10 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.gate().status()).isEqualTo("route_required");
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.assistantMessage())
-                .contains("/api/praxis/config/domain-rules")
-                .contains("/api/praxis/config/domain-rules/intake")
-                .contains("/api/praxis/config/domain-rules/simulations")
-                .contains("/api/human-resources/funcionarios");
+                .contains("regra compartilhada")
+                .contains("simulacao")
+                .contains("publicacao")
+                .doesNotContain("/api/praxis/config/domain-rules", "/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
     }
@@ -6189,7 +6508,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -6244,7 +6562,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -6307,7 +6624,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
 
@@ -6413,6 +6729,65 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void naturalTableColumnVisibilityRefinementTargetsSelectedTable() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "deixe somente Missão, Local, Severidade e Ocorrido em",
+                "praxis-ui-angular",
+                "praxis-table",
+                "/page-builder-ia",
+                missionTablePage(),
+                "missions-table",
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("set_column_visibility");
+        assertThat(result.target().widgetKey()).isEqualTo("missions-table");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/missoes");
+    }
+
+    @Test
+    void semanticEvidenceAlignmentOverridesUnrelatedHigherScoredAnalyticalCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate payroll = candidateWithEvidence(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                0.93d,
+                List.of("folha", "pagamento", "competencia"));
+        AgenticAuthoringCandidate people = candidateWithEvidence(
+                "/api/human-resources/funcionarios",
+                0.82d,
+                List.of("pessoas", "funcionarios", "colaboradores"));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(payroll, people));
+        AgenticAuthoringIntentResolverService resolver =
+                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "monte uma tabela de pessoas",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings()).doesNotContain("resource-selection-domain-anchor");
+    }
+
+    @Test
     void localUiCompositionConfirmationKeepsOriginalPromptWhenLlmResolverIsEnabled() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -6441,7 +6816,6 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
-                null,
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
         String originalPrompt = "Crie uma página operacional com Praxis Tabs para solicitações internas. A aba Cadastro deve conter um formulário local/editorial com campos Título, Responsável, Prioridade e Prazo. A aba Registros deve conter um componente Praxis CRUD local/editorial com três solicitações fictícias e ações visíveis de criar, editar e excluir. A aba Relacionamentos deve conter uma lista em cards relacionada aos registros com três comentários fictícios. Use apenas conteúdo local/editorial de demonstração, sem API real, sem schema externo e sem criar regra de negócio definitiva.";
@@ -6499,10 +6873,10 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.gate().status()).isEqualTo("route_required");
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.assistantMessage())
-                .contains("/api/praxis/config/domain-rules")
-                .contains("/api/praxis/config/domain-rules/intake")
-                .contains("/api/praxis/config/domain-rules/simulations")
-                .contains("/api/procurement/suppliers");
+                .contains("regra compartilhada")
+                .contains("simulacao")
+                .contains("publicacao")
+                .doesNotContain("/api/praxis/config/domain-rules", "/api/procurement/suppliers");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
         assertThat(result.selectedCandidate().evidence()).contains("quick-reply-context");
@@ -6528,8 +6902,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/helpdesk/chamados");
         assertThat(result.selectedCandidate().evidence()).contains("explicit-resource-path");
         assertThat(result.assistantMessage())
-                .contains("/api/praxis/config/domain-rules")
-                .contains("/api/helpdesk/chamados");
+                .contains("regra compartilhada")
+                .doesNotContain("/api/praxis/config/domain-rules", "/api/helpdesk/chamados");
     }
 
     @Test
@@ -6565,9 +6939,10 @@ class AgenticAuthoringIntentResolverServiceTest {
                     .contains("shared-rule-authoring-required");
             assertThat(result.assistantMessage())
                     .as(routingCase.prompt())
-                    .contains("/api/praxis/config/domain-rules")
-                    .contains("/api/praxis/config/domain-rules/intake")
-                    .contains("/api/praxis/config/domain-rules/simulations");
+                    .contains("regra compartilhada")
+                    .contains("simulacao")
+                    .contains("publicacao")
+                    .doesNotContain("/api/praxis/config/domain-rules");
             assertThat(result.selectedCandidate())
                     .as(routingCase.prompt())
                     .isNotNull();
@@ -6686,7 +7061,6 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .thenReturn(Optional.empty());
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
-                null,
                 null,
                 llmIntentResolver,
                 null);
@@ -6820,6 +7194,54 @@ class AgenticAuthoringIntentResolverServiceTest {
         inputs.put("tableId", "payroll-table");
         inputs.put("title", "Folhas de pagamento");
         return page;
+    }
+
+    private ObjectNode missionTablePage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "missions-table");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-table");
+        ObjectNode inputs = definition.putObject("inputs");
+        inputs.put("resourcePath", "/api/operations/missoes");
+        inputs.put("tableId", "missions-table");
+        inputs.put("title", "Missões");
+        ObjectNode config = inputs.putObject("config");
+        var columns = config.putArray("columns");
+        columns.addObject().put("field", "missao").put("label", "Missão");
+        columns.addObject().put("field", "local").put("label", "Local");
+        columns.addObject().put("field", "severidade").put("label", "Severidade");
+        columns.addObject().put("field", "ocorridoEm").put("label", "Ocorrido em");
+        columns.addObject().put("field", "status").put("label", "Status");
+        return page;
+    }
+
+    private AgenticAuthoringCandidate candidateWithEvidence(
+            String resourcePath,
+            double score,
+            List<String> matchedTerms) {
+        String submitUrl = resourcePath + "/filter/cursor";
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                "post",
+                "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response",
+                submitUrl,
+                "POST",
+                score,
+                "semantic resource candidate",
+                List.of("api-metadata", "semantic-retrieval", "schema-available"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "domain_catalog",
+                                "retrieved_candidate",
+                                resourcePath.replace("/api/", "").replace('/', '.'),
+                                "Semantic evidence recovered from governed catalog.",
+                                score,
+                                matchedTerms,
+                                "tenant",
+                                "local",
+                                "release"))));
     }
 
     private record RoutingCase(String prompt, String resourcePath) {

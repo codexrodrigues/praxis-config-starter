@@ -5876,6 +5876,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             JsonNode value = resolvePath(input, inputPath);
             return value.isMissingNode() ? MissingNode.getInstance() : value;
         }
+        if (effect.has("value")) {
+            return effect.path("value");
+        }
         if (!tail.isBlank() && input != null && input.has(tail)) {
             return input.path(tail);
         }

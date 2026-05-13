@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.util.StringUtils;
 
 final class AgenticAuthoringContextBundle {
@@ -121,9 +123,195 @@ final class AgenticAuthoringContextBundle {
             ObjectMapper objectMapper,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         ObjectNode component = objectMapper.createObjectNode();
-        component.set("componentCapabilities", objectMapper.valueToTree(componentCapabilities));
+        component.set("componentCapabilities", compactComponentCapabilities(objectMapper, componentCapabilities));
+        component.set("authorableComponents", authorableComponents(objectMapper, componentCapabilities));
+        component.set("platformGuide", platformGuide(objectMapper, componentCapabilities));
+        component.put("formAuthoringPolicy", "Users can describe forms naturally, including fields and process goals. Praxis should ground final form materialization in governed domain resources, schemas, actions, and component capabilities; when grounding is incomplete, keep the form as a reviewable local/editorial draft instead of inventing business rules.");
+        component.put("selectionRule", "Select visualizationDecision.primaryComponent from authorableComponents[].componentId when the user asks for a governed component. Do not invent component ids.");
         component.put("exampleRule", "Prefer examples[].prompt, examples[].intent, and examples[].configHints from the matching component capability when inferring UI configuration.");
         return component;
+    }
+
+    private static ObjectNode compactComponentCapabilities(
+            ObjectMapper objectMapper,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ObjectNode compact = objectMapper.createObjectNode();
+        compact.put("version", componentCapabilities == null ? "" : valueOrEmpty(componentCapabilities.version()));
+        ArrayNode catalogs = compact.putArray("catalogs");
+        if (componentCapabilities != null && componentCapabilities.catalogs() != null) {
+            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : componentCapabilities.catalogs()) {
+                if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
+                    continue;
+                }
+                ObjectNode catalogNode = catalogs.addObject();
+                catalogNode.put("componentId", catalog.componentId());
+                catalogNode.put("version", valueOrEmpty(catalog.version()));
+                ArrayNode capabilities = catalogNode.putArray("capabilities");
+                if (catalog.capabilities() == null) {
+                    continue;
+                }
+                int count = 0;
+                for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : catalog.capabilities()) {
+                    if (capability == null || count >= 16) {
+                        continue;
+                    }
+                    ObjectNode capabilityNode = capabilities.addObject();
+                    capabilityNode.put("id", valueOrEmpty(capability.id()));
+                    capabilityNode.put("changeKind", valueOrEmpty(capability.changeKind()));
+                    capabilityNode.set("triggerTerms", limitedStrings(objectMapper, capability.triggerTerms(), 12));
+                    capabilityNode.set("fieldAliases", objectMapper.valueToTree(
+                            capability.fieldAliases() == null ? List.of() : capability.fieldAliases()));
+                    capabilityNode.set("examples", objectMapper.valueToTree(
+                            capability.examples() == null ? List.of() : capability.examples().stream().limit(2).toList()));
+                    count++;
+                }
+            }
+        }
+        return compact;
+    }
+
+    private static ArrayNode authorableComponents(
+            ObjectMapper objectMapper,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ArrayNode components = objectMapper.createArrayNode();
+        if (componentCapabilities == null || componentCapabilities.catalogs() == null) {
+            return components;
+        }
+        for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : componentCapabilities.catalogs()) {
+            if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
+                continue;
+            }
+            ObjectNode item = components.addObject();
+            item.put("componentId", catalog.componentId());
+            item.put("version", valueOrEmpty(catalog.version()));
+            item.put("purpose", componentPurpose(catalog));
+            item.put("bestFor", componentBestFor(catalog));
+            item.put("authoringBoundary", componentAuthoringBoundary(catalog));
+            ArrayNode changeKinds = item.putArray("changeKinds");
+            ArrayNode terms = item.putArray("semanticTerms");
+            Set<String> seenChangeKinds = new LinkedHashSet<>();
+            Set<String> seenTerms = new LinkedHashSet<>();
+            if (catalog.capabilities() != null) {
+                for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : catalog.capabilities()) {
+                    if (capability == null) {
+                        continue;
+                    }
+                    addLimited(changeKinds, seenChangeKinds, capability.changeKind(), 16);
+                    if (capability.triggerTerms() != null) {
+                        for (String term : capability.triggerTerms()) {
+                            addLimited(terms, seenTerms, term, 20);
+                        }
+                    }
+                }
+            }
+        }
+        return components;
+    }
+
+    private static ObjectNode platformGuide(
+            ObjectMapper objectMapper,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ObjectNode guide = objectMapper.createObjectNode();
+        guide.put("platformSummary", "Praxis is a governed AI authoring platform. The assistant should understand user intent, explain the current domain and available governed components, and materialize only decisions that pass catalog, schema, action, component, and review constraints.");
+        guide.put("consultativeUse", "For questions such as what can be done here, which components can be created, how to build an admin panel, or how free-form forms work, answer as guidance first and do not create a preview until the user asks to create or confirms a concrete direction.");
+        guide.set("componentFamilies", componentFamilies(objectMapper, componentCapabilities));
+        return guide;
+    }
+
+    private static ArrayNode componentFamilies(
+            ObjectMapper objectMapper,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ArrayNode families = objectMapper.createArrayNode();
+        if (componentCapabilities == null || componentCapabilities.catalogs() == null) {
+            return families;
+        }
+        for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : componentCapabilities.catalogs()) {
+            if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
+                continue;
+            }
+            ObjectNode family = families.addObject();
+            family.put("componentId", catalog.componentId());
+            family.put("purpose", componentPurpose(catalog));
+            family.put("bestFor", componentBestFor(catalog));
+        }
+        return families;
+    }
+
+    private static String componentPurpose(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog) {
+        String componentId = valueOrEmpty(catalog == null ? null : catalog.componentId()).toLowerCase();
+        if (componentId.contains("chart")) {
+            return "Visualizar metricas, distribuicoes e recortes analiticos em graficos governados.";
+        }
+        if (componentId.contains("table") || componentId.contains("grid")) {
+            return "Consultar, comparar e revisar registros em linhas e colunas.";
+        }
+        if (componentId.contains("form")) {
+            return "Capturar, editar ou submeter informacoes por uma operacao governada.";
+        }
+        if (componentId.contains("tabs")) {
+            return "Organizar uma experiencia em abas com secoes relacionadas.";
+        }
+        if (componentId.contains("stepper") || componentId.contains("wizard")) {
+            return "Conduzir processos em etapas com revisao progressiva.";
+        }
+        if (componentId.contains("filter")) {
+            return "Controlar filtros e recortes aplicados a outros componentes.";
+        }
+        if (componentId.contains("crud")) {
+            return "Oferecer listagem e acoes de criar, editar, consultar ou remover quando governado.";
+        }
+        return "Componente governado disponivel no catalogo de authoring.";
+    }
+
+    private static String componentBestFor(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog) {
+        String componentId = valueOrEmpty(catalog == null ? null : catalog.componentId()).toLowerCase();
+        if (componentId.contains("chart")) {
+            return "Dashboards, paineis administrativos e perguntas de acompanhamento por categoria, status, periodo ou responsavel.";
+        }
+        if (componentId.contains("table") || componentId.contains("grid")) {
+            return "Telas operacionais, detalhes conectados, listas auditaveis e comparacao de registros.";
+        }
+        if (componentId.contains("form")) {
+            return "Cadastros, solicitacoes, edicoes guiadas e fluxos de captura de dados.";
+        }
+        if (componentId.contains("tabs")) {
+            return "Paginas com multiplas visoes do mesmo assunto, como resumo, detalhes, historico e acoes.";
+        }
+        if (componentId.contains("stepper") || componentId.contains("wizard")) {
+            return "Fluxos com varias etapas, validacao gradual e revisao antes de concluir.";
+        }
+        if (componentId.contains("filter")) {
+            return "Exploracao de dados em dashboards, tabelas e paineis com recortes reutilizaveis.";
+        }
+        if (componentId.contains("crud")) {
+            return "Administracao de entidades quando as acoes governadas existirem no dominio.";
+        }
+        return semanticFallback(catalog);
+    }
+
+    private static String componentAuthoringBoundary(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog) {
+        String componentId = valueOrEmpty(catalog == null ? null : catalog.componentId()).toLowerCase();
+        if (componentId.contains("form")) {
+            return "Forms can be described freely by the user, but final fields/actions must be grounded in governed schema/action metadata or kept as a reviewable local/editorial draft.";
+        }
+        if (componentId.contains("crud")) {
+            return "CRUD surfaces require governed create/read/update/delete actions before being treated as operational business behavior.";
+        }
+        return "Use only governed component capabilities and domain/catalog evidence; do not invent fields, resources, or business behavior.";
+    }
+
+    private static String semanticFallback(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog) {
+        if (catalog == null || catalog.capabilities() == null) {
+            return "Authoring scenarios covered by this component capability catalog.";
+        }
+        return catalog.capabilities().stream()
+                .filter(capability -> capability != null && capability.triggerTerms() != null)
+                .flatMap(capability -> capability.triggerTerms().stream())
+                .filter(StringUtils::hasText)
+                .limit(6)
+                .reduce((left, right) -> left + ", " + right)
+                .map(terms -> "Pedidos relacionados a: " + terms + ".")
+                .orElse("Authoring scenarios covered by this component capability catalog.");
     }
 
     private static ObjectNode conversationContext(
@@ -166,12 +354,34 @@ final class AgenticAuthoringContextBundle {
         rules.add("Use the backend tool catalog as the menu of available retrieval operations; do not invent resources, endpoints, schemas, fields, or component capabilities.");
         rules.add("Use component capability examples to infer likely configuration choices before asking the user for low-level technical details.");
         rules.add("When more backend data is needed, return actionable quickReplies with contextHints.tool instead of a generic clarification.");
-        rules.add("assistantMessage must be friendly, contextual, and actionable; avoid terse labels such as 'alimentar tela'.");
+        rules.add("assistantMessage must read like a natural chat reply in the user's language. Avoid diagnostics, API terms, and terse labels such as 'alimentar tela'.");
         return rules;
     }
 
     private static String valueOrEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static void addLimited(ArrayNode node, Set<String> seen, String value, int limit) {
+        if (node.size() >= limit || !StringUtils.hasText(value)) {
+            return;
+        }
+        String normalized = value.trim();
+        if (seen.add(normalized)) {
+            node.add(normalized);
+        }
+    }
+
+    private static ArrayNode limitedStrings(ObjectMapper objectMapper, List<String> values, int limit) {
+        ArrayNode node = objectMapper.createArrayNode();
+        if (values == null) {
+            return node;
+        }
+        Set<String> seen = new LinkedHashSet<>();
+        for (String value : values) {
+            addLimited(node, seen, value, limit);
+        }
+        return node;
     }
 
     private static JsonNode objectNode(JsonNode node) {

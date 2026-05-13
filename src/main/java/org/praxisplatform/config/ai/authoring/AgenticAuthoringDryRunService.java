@@ -16,7 +16,6 @@ public class AgenticAuthoringDryRunService {
     private static final String PROFILE_CREATE_MINIMAL_FORM = "create-minimal-form";
     private static final String STATUS_PASSED = "passed";
     private static final String STATUS_FAILED = "failed";
-    private static final String TARGET_APP_HELPDESK = "praxis-helpdesk-ui";
     private static final String TARGET_COMPONENT_PAGE_BUILDER = "praxis-dynamic-page-builder";
     private static final String WIDGET_DYNAMIC_FORM = "praxis-dynamic-form";
     private static final String REQUEST_SCHEMA_HASH = "ae6e69c0d65cc4d0fd92631a82e4c0a86924f7539ee3645decafb66ca72c99ce";
@@ -105,8 +104,8 @@ public class AgenticAuthoringDryRunService {
         if (!profileId.equals(text(catalog, "profileId"))) {
             failures.add("profileId must be " + profileId);
         }
-        if (!TARGET_APP_HELPDESK.equals(text(catalog, "targetApp"))) {
-            failures.add("targetApp must be " + TARGET_APP_HELPDESK);
+        if (text(catalog, "targetApp").isBlank()) {
+            failures.add("targetApp is required");
         }
         if (!TARGET_COMPONENT_PAGE_BUILDER.equals(text(catalog, "targetComponent"))) {
             failures.add("targetComponent must be " + TARGET_COMPONENT_PAGE_BUILDER);
@@ -141,8 +140,8 @@ public class AgenticAuthoringDryRunService {
         if (!"post".equals(text(catalog.path("evidence").path("operationRef"), "method"))) {
             failures.add("operationRef.method must be post");
         }
-        if (!"/api/helpdesk/chamados".equals(text(catalog.path("evidence").path("operationRef"), "path"))) {
-            failures.add("operationRef.path must be /api/helpdesk/chamados");
+        if (text(catalog.path("evidence").path("operationRef"), "path").isBlank()) {
+            failures.add("operationRef.path is required");
         }
         return gate("page-create-catalog", failures);
     }
@@ -225,8 +224,8 @@ public class AgenticAuthoringDryRunService {
         if (!profileId.equals(text(replay, "profileId"))) {
             failures.add("replay profileId must be " + profileId);
         }
-        if (!TARGET_APP_HELPDESK.equals(text(replay.path("sourceScope"), "targetApp"))) {
-            failures.add("replay targetApp must be " + TARGET_APP_HELPDESK);
+        if (!text(catalog, "targetApp").equals(text(replay.path("sourceScope"), "targetApp"))) {
+            failures.add("replay targetApp must match catalog");
         }
         if (!text(catalog, "catalogReleaseId").equals(text(replay, "catalogReleaseId"))) {
             failures.add("replay catalogReleaseId must match catalog");

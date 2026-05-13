@@ -1,6 +1,6 @@
 # Platform Hygiene For Host-Neutral Agentic Authoring
 
-Status: selected hygiene baseline before the Lovable/ChatGPT behavior slice
+Status: implementation checkpoint started; host-specific starter fallbacks removed from the core authoring path
 Date: 2026-05-07
 Scope: remove quickstart-shaped intelligence from the canonical agentic authoring path
 
@@ -31,6 +31,47 @@ missions or employees exist.
 Host business language must enter through host-published metadata, domain
 catalog, RAG/project knowledge, examples and capabilities, not through Java
 branches in the starter.
+
+## 2026-05-11 Implementation Checkpoint
+
+The current backend cut removes the quickstart-shaped local intelligence from
+the core authoring path:
+
+- API Catalog Q&A no longer has a local conversation service that recommends
+  resources from starter rules; it now returns a grounding envelope for LLM/RAG
+  authoring and client audit.
+- Intent resolution no longer promotes exploratory LLM output into dashboards
+  by business keywords and no longer protects payroll/people/helpdesk resource
+  choices through Java heuristics.
+- Candidate catalog expansion keeps only structural authoring vocabulary; host
+  business synonyms must arrive through metadata, domain catalog, project
+  knowledge or RAG.
+- Project Knowledge is now injected into the turn request before the first LLM
+  intent-resolution call when the request carries a resolvable host scope,
+  instead of being used only after an initial deterministic selection.
+- LLM provider failures now return fail-honest unresolved intent diagnostics
+  (`llm-intent-resolution-failed`, `llm-provider-error`) instead of silently
+  falling back to a plausible deterministic decision.
+- Broad artifact discovery and generic dashboard axes are treated as
+  ungrounded: they require schema/RAG/LLM evidence or review, and cannot unlock
+  automatic apply as if the platform had inferred business semantics.
+- Resource selection no longer expands generic visual authoring words such as
+  dashboard, chart, indicator, KPI or metric into synthetic analytics tokens.
+  Those words may shape visualization/materialization after a source is
+  grounded, but they must not choose the business resource by themselves.
+- Candidate cards no longer infer icon, tone, executive-dashboard copy or
+  preferred source from path conventions such as `analytics`, `/vw-` or
+  `/stats/*`; host metadata and explicit context must carry that meaning.
+- Minimal form planning no longer ships a helpdesk reference plan or
+  hardcoded blocked fields. Without an intent-backed resource candidate it must
+  ask for grounding instead of inventing an endpoint.
+- Preview, dry-run and artifact defaults no longer encode helpdesk-specific
+  targets or filenames.
+
+Remaining hygiene work is the broader provider/RAG integration slice described
+below: provider calls still need stronger end-to-end evidence guarantees, and
+quickstart examples may continue to exist as host fixtures rather than starter
+runtime behavior.
 
 ## Why This Slice
 
@@ -423,6 +464,10 @@ Exit criteria:
   `UiCompositionPlan`; table-only materialization gets
   `semantic-preview-chart-required` and
   `semantic-preview-materialization-mismatch`.
+- governed `visualizationDecision.primaryComponent` values now require the
+  requested component to appear in the `UiCompositionPlan`; otherwise the
+  preview gets `semantic-preview-primary-component-required` and stays blocked
+  for review.
 - operational monitoring intent with analytical axes such as severity, status
   and owner must resolve to a dashboard or fail honestly; table-only
   materialization gets `semantic-preview-operational-dashboard-required` and
@@ -443,6 +488,9 @@ Exit criteria:
   `canApply=false`;
 - `selectedCandidateUsesDomainAnchor=true` forces `requiresReview=true` and
   `canApply=false`;
+- `selectedCandidateUsesBroadArtifactDiscovery=true` forces
+  `requiresReview=true` and `canApply=false` unless schema/RAG evidence later
+  verifies the selected resource;
 - frontend consumers are instructed to use `canApply`, not `preview.valid`, as
   the application gate.
 

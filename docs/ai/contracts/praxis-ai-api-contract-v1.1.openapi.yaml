@@ -171,7 +171,7 @@ paths:
                   summary: Heartbeat out-of-band (sem id)
                   value: |
                     event: message
-                    data: {"eventId":null,"streamId":"3f1c7d4c-32ab-4ae4-b7de-d1ae11f5db66","threadId":"34a1a6b9-09b4-4b85-81aa-66b7a95f9356","turnId":"6e9f398a-5bc0-4da5-840e-af5ad78b6bb8","seq":-1,"eventSchemaVersion":"v1","timestamp":"2026-02-22T06:44:10.000000Z","type":"heartbeat","payload":{"state":"alive","message":"keep-alive"}}
+                    data: {"eventId":null,"streamId":"3f1c7d4c-32ab-4ae4-b7de-d1ae11f5db66","threadId":"34a1a6b9-09b4-4b85-81aa-66b7a95f9356","turnId":"6e9f398a-5bc0-4da5-840e-af5ad78b6bb8","seq":-1,"eventSchemaVersion":"v1","timestamp":"2026-02-22T06:44:10.000000Z","type":"heartbeat","payload":{"state":"alive","phase":"intent.resolve.llm","summary":"Still waiting for the LLM to resolve the request against governed context.","lastEventType":"thought.step"}}
         '400':
           description: Last-Event-ID invalido
           content:
@@ -519,7 +519,7 @@ paths:
                   value: |
                     id: 94c6fdb6-1aef-49a6-89fe-1437a0023be4
                     event: thought.step
-                    data: {"eventId":"94c6fdb6-1aef-49a6-89fe-1437a0023be4","streamId":"3f1c7d4c-32ab-4ae4-b7de-d1ae11f5db66","threadId":"34a1a6b9-09b4-4b85-81aa-66b7a95f9356","turnId":"6e9f398a-5bc0-4da5-840e-af5ad78b6bb8","seq":2,"eventSchemaVersion":"v1","timestamp":"2026-04-15T21:10:00Z","type":"thought.step","payload":{"phase":"intent.resolve","summary":"Resolving authoring intent."}}
+                    data: {"eventId":"94c6fdb6-1aef-49a6-89fe-1437a0023be4","streamId":"3f1c7d4c-32ab-4ae4-b7de-d1ae11f5db66","threadId":"34a1a6b9-09b4-4b85-81aa-66b7a95f9356","turnId":"6e9f398a-5bc0-4da5-840e-af5ad78b6bb8","seq":2,"eventSchemaVersion":"v1","timestamp":"2026-04-15T21:10:00Z","type":"thought.step","payload":{"phase":"intent.resolve.llm","summary":"Asking the LLM to interpret the user request against governed context.","diagnostics":{"provider":"openai","model":"gpt-5-mini","hasProjectKnowledge":true}}}
         '400':
           description: Last-Event-ID invalido
           content:
@@ -1328,7 +1328,7 @@ components:
       required: false
       schema:
         type: string
-        default: 817d476f725d5c9dfaf3f967f6c0b466a438f649db801260528c70211ca5c2dd
+        default: 2e89c7636d739c378f2027916957f9a32566917c1cafbd6413e2a26eb197b256
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1358,7 +1358,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 817d476f725d5c9dfaf3f967f6c0b466a438f649db801260528c70211ca5c2dd
+        example: 2e89c7636d739c378f2027916957f9a32566917c1cafbd6413e2a26eb197b256
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2406,7 +2406,7 @@ components:
         primaryComponent:
           type: string
           nullable: true
-          description: Componente primario a materializar, como praxis-chart ou praxis-table.
+          description: ComponentId governado escolhido a partir do registry/capability catalog, como praxis-chart, praxis-table ou praxis-tabs.
         axes:
           type: array
           items:
@@ -2458,11 +2458,14 @@ components:
     AgenticAuthoringApiCatalogAnswer:
       type: object
       nullable: true
-      description: Payload estruturado de API Catalog Q&A para renderizacao sem parsear assistantMessage.
+      description: Payload estruturado de grounding para API Catalog Q&A. A resposta conversacional deve vir do assistantMessage authorado pelo LLM; este objeto expõe candidatos e evidências para auditoria/renderização.
       properties:
+        schemaVersion:
+          type: string
+          description: Versão do envelope de grounding, como praxis-agentic-authoring-api-catalog-grounding.v1.
         questionType:
           type: string
-          description: Tipo da pergunta de catalogo, como endpoints, schema, actions, filters, related_apis ou api_choice.
+          description: Tipo da pergunta ou envelope de catalogo. Para o fluxo LLM/RAG atual, o valor canonico e api_catalog_grounding.
         selectedApi:
           type: object
           nullable: true
@@ -2562,17 +2565,17 @@ components:
           type: string
           nullable: true
           description: Identidade semantica estavel do recurso quando ja resolvida por discovery/capabilities.
-          example: human-resources.funcionarios
+          example: example-domain.primary-resource
         releaseId:
           type: string
           nullable: true
           description: Identificador opcional de release do Domain Catalog usado pelo cliente/servidor.
-          example: domain-catalog:human-resources.funcionarios:v1
+          example: domain-catalog:example-domain.primary-resource:v1
         releaseKey:
           type: string
           nullable: true
           description: Chave opcional de release do Domain Catalog quando distinta de releaseId.
-          example: domain-catalog:human-resources.funcionarios:v1
+          example: domain-catalog:example-domain.primary-resource:v1
         type:
           type: string
           description: Tipo de item a recuperar no catalogo.
@@ -2595,12 +2598,12 @@ components:
           type: string
           nullable: true
           description: Consulta textual para reduzir o contexto ao vocabulario relevante.
-          example: cpf lgpd funcionarios
+          example: regulated field policy
         contextKey:
           type: string
           nullable: true
           description: Bounded context ou grupo funcional do catalogo.
-          example: human-resources
+          example: example-domain
         nodeType:
           type: string
           nullable: true
@@ -2659,12 +2662,12 @@ components:
           type: string
           nullable: true
           description: Chave do no de origem para filtrar relacionamentos.
-          example: funcionario.cpf
+          example: primary-resource.regulated-field
         targetNodeKey:
           type: string
           nullable: true
           description: Chave do no de destino para filtrar relacionamentos.
-          example: pessoa.documento
+          example: related-resource.regulated-field
         edgeType:
           type: string
           nullable: true
@@ -2674,7 +2677,7 @@ components:
           type: string
           nullable: true
           description: Consulta textual para reduzir os relacionamentos relevantes.
-          example: cpf lgpd funcionarios
+          example: regulated field policy
         limit:
           type: integer
           format: int32

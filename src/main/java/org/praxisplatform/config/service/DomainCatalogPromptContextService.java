@@ -9,6 +9,7 @@ import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyReport;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -23,17 +24,26 @@ public class DomainCatalogPromptContextService {
 
     private final DomainCatalogIngestionService domainCatalogIngestionService;
     private final DomainFederationQueryService domainFederationQueryService;
+    private final String defaultServiceKey;
 
     public DomainCatalogPromptContextService(DomainCatalogIngestionService domainCatalogIngestionService) {
-        this(domainCatalogIngestionService, null);
+        this(domainCatalogIngestionService, null, "praxis-service");
+    }
+
+    public DomainCatalogPromptContextService(
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            DomainFederationQueryService domainFederationQueryService) {
+        this(domainCatalogIngestionService, domainFederationQueryService, "praxis-service");
     }
 
     @Autowired
     public DomainCatalogPromptContextService(
             DomainCatalogIngestionService domainCatalogIngestionService,
-            DomainFederationQueryService domainFederationQueryService) {
+            DomainFederationQueryService domainFederationQueryService,
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String defaultServiceKey) {
         this.domainCatalogIngestionService = domainCatalogIngestionService;
         this.domainFederationQueryService = domainFederationQueryService;
+        this.defaultServiceKey = defaultServiceKey;
     }
 
     public String buildPromptContext(
@@ -66,7 +76,8 @@ public class DomainCatalogPromptContextService {
                 text(domainCatalog, "serviceKey"),
                 text(contextHints, "domainCatalogServiceKey"),
                 text(contextHints, "domainServiceKey"),
-                text(contextHints, "serviceKey"));
+                text(contextHints, "serviceKey"),
+                defaultServiceKey);
         if (!StringUtils.hasText(serviceKey)) {
             return null;
         }

@@ -12,7 +12,7 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
     private final AgenticAuthoringSemanticDecisionPolicy policy = new AgenticAuthoringSemanticDecisionPolicy();
 
     @Test
-    void clearsSelectedCandidateWhenLlmOnlyResolvedGenericAnalyticalExploration() {
+    void preservesCandidateWhenLlmResolutionDoesNotAuthorDomainSpecificOverride() {
         AgenticAuthoringCandidate payroll = candidate("/api/human-resources/vw-analytics-folha-pagamento");
         AgenticAuthoringCandidate reputation = candidate("/api/human-resources/vw-ranking-reputacao");
 
@@ -32,7 +32,7 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
                 null,
                 null));
 
-        assertThat(decision.selectedCandidate()).isNull();
+        assertThat(decision.selectedCandidate()).isSameAs(payroll);
         assertThat(decision.operationKind()).isEqualTo("explore");
         assertThat(decision.artifactKind()).isEqualTo("unknown");
     }

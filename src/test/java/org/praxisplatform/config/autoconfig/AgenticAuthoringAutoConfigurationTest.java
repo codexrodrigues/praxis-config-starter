@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
-import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiCatalogConversationService;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
@@ -47,7 +46,6 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context.getBean(AgenticAuthoringArtifactProperties.class).isHttpEnabled()).isFalse();
             assertThat(context).hasSingleBean(AgenticAuthoringArtifactSource.class);
             assertThat(context).hasSingleBean(AgenticAuthoringDryRunService.class);
-            assertThat(context).hasSingleBean(AgenticAuthoringApiCatalogConversationService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringIntentResolverService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringComponentCapabilitiesService.class);
             assertThat(context).hasSingleBean(AgenticAuthoringPatchCompilerService.class);

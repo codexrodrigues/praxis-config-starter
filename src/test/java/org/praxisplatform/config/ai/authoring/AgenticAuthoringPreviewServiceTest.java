@@ -290,7 +290,91 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).contains("semantic-preview-chart-required", "semantic-preview-dashboard-required");
         assertThat(result.warnings()).contains("semantic-preview-materialization-mismatch");
-        assertThat(result.assistantMessage()).contains("nao materializou o grafico solicitado");
+        assertThat(result.assistantMessage()).contains("ainda nao consegui montar o grafico pedido");
+    }
+
+    @Test
+    void previewBlocksMaterializationThatOmitsRequestedGovernedPrimaryComponent() throws Exception {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.putArray("widgets").addObject().put("key", "orders-table").put("componentId", "praxis-table");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        ObjectNode page = compiledFormPatch.putObject("patch").putObject("page");
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("id", "orders-table");
+        widget.putObject("definition").put("id", "praxis-table");
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:test-table"),
+                        plan,
+                        compiledFormPatch));
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/acme/orders",
+                "post",
+                "/schemas/filtered?path=/api/acme/orders/filter/cursor&operation=post&schemaType=response",
+                "/api/acme/orders/filter/cursor",
+                "POST",
+                0.93d,
+                "matched orders",
+                List.of("semantic-retrieval"));
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "guided-step-workspace",
+                "page",
+                "praxis-stepper",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie uma pagina em etapas para pedidos",
+                "Vou montar uma pagina em etapas.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                visualizationDecision);
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider))
+                .preview(new AgenticAuthoringPlanRequest(
+                        "Crie uma pagina em etapas para pedidos",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        intent), "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes())
+                .contains(AgenticAuthoringSemanticMaterializationPolicy.PRIMARY_COMPONENT_REQUIRED_FAILURE);
+        assertThat(result.warnings()).contains("semantic-preview-materialization-mismatch");
+        assertThat(result.uiCompositionPlan().path("widgets").toString()).contains("praxis-table");
+        assertThat(result.uiCompositionPlan().path("widgets").toString()).doesNotContain("praxis-stepper");
+        assertThat(result.assistantMessage())
+                .contains("ainda nao montou esse componente")
+                .doesNotContain("propriedades incompativeis com o componente de tabela");
     }
 
     @Test
@@ -514,7 +598,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("widgets").get(0).path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-ranking-reputacao");
         assertThat(result.assistantMessage())
-                .contains("nao materializou o grafico solicitado")
+                .contains("ainda nao consegui montar o grafico pedido")
                 .doesNotContain("Criei uma pre-visualizacao com tabela conectada");
         assertThat(result.assistantMessage())
                 .doesNotContain("- Tabela: conectada ao recurso para carregar schema e dados");
@@ -565,7 +649,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("widgets").toString()).contains("praxis-table");
         assertThat(result.uiCompositionPlan().path("widgets").toString()).doesNotContain("praxis-chart");
         assertThat(result.assistantMessage())
-                .contains("nao materializou o grafico solicitado")
+                .contains("ainda nao consegui montar o grafico pedido")
                 .doesNotContain("A tabela foi conectada ao recurso");
     }
 
@@ -592,7 +676,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("widgets").toString()).contains("praxis-table");
         assertThat(result.uiCompositionPlan().path("widgets").toString()).doesNotContain("praxis-chart");
         assertThat(result.assistantMessage())
-                .contains("nao materializou um dashboard de monitoramento")
+                .contains("dashboard operacional completo")
                 .doesNotContain("A tabela foi conectada ao recurso");
     }
 
@@ -766,7 +850,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).doesNotContain("semantic-decision-review-required:weak-lexical-evidence");
         assertThat(result.warnings()).doesNotContain("semantic-decision-review-required");
-        assertThat(result.assistantMessage()).contains("Criei uma pre-visualizacao com tabela conectada");
+        assertThat(result.assistantMessage()).contains("Montei uma primeira versao usando");
     }
 
     @Test
@@ -873,8 +957,8 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"schemaProbeStatus\":\"unsupported\"");
         assertThat(result.failureCodes()).contains("semantic-preview-axis-schema-verification-required");
         assertThat(result.assistantMessage())
-                .contains("eixos analiticos do grafico")
-                .contains("manter em revisao")
+                .contains("campos seguros para alguns graficos")
+                .contains("manter a proposta em revisao")
                 .doesNotContain("propriedades incompativeis")
                 .doesNotContain("cards ricos");
     }
@@ -924,6 +1008,51 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewPreservesSingleChartConstraintWithoutAddingDashboardSupportWidgets() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico de barras simples de incidentes por severidade. "
+                        + "Use a fonte Indicadores Incidentes e o campo Severidade. "
+                        + "Nao crie tabela, filtros nem KPIs.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                incidentSingleChartIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode severidade = schema.putObject("properties").putObject("severidade");
+        severidade.put("type", "string");
+        severidade.putObject("x-ui").put("label", "Severidade");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-chart-required");
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("single-chart-page");
+        assertThat(result.uiCompositionPlan().path("widgets")).hasSize(1);
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-chart");
+        assertThat(result.uiCompositionPlan().toString())
+                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
+                .doesNotContain("praxis-table")
+                .doesNotContain("praxis-filter")
+                .doesNotContain("kpi-band");
+        assertThat(result.assistantMessage())
+                .contains("Montei um grafico")
+                .contains("Nao inclui tabela, filtros nem KPIs")
+                .doesNotContain("dashboard")
+                .doesNotContain("tabela de detalhe");
+    }
+
+    @Test
     void previewReplacesAggregateCountAxisWithSchemaBackedGroupingDimension() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Gostei, mas prefiro graficos mantendo os mesmos dados da folha.",
@@ -966,7 +1095,7 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
-    void previewRepairsGenericInferredChartAxisWithSchemaBackedGroupingDimension() throws Exception {
+    void previewRequiresGroundingForGenericChartAxisWithoutLlmAxes() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Gostei, mas prefiro graficos com KPIs, filtros e tabela de detalhe preservando estes dados.",
                 "openai",
@@ -992,19 +1121,18 @@ class AgenticAuthoringPreviewServiceTest {
                 .preview(request, "tenant", "user", "local", "http://localhost");
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
+        assertThat(result.failureCodes()).contains("semantic-preview-axis-schema-verification-required");
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
-                .contains("\"requestedField\":\"category\"")
-                .contains("\"field\":\"departamento\"")
-                .contains("\"schemaVerified\":true")
-                .contains("\"statsPath\":\"/api/human-resources/vw-analytics-folha-pagamento/stats/group-by\"")
+                .contains("\"field\":\"unresolved\"")
+                .contains("\"schemaVerified\":false")
+                .contains("\"provenance\":\"schema-grounding-required\"")
                 .doesNotContain("Canvas item references unknown widget");
         assertThat(result.uiCompositionPlan().path("canvas").path("items").toString())
-                .contains("vw-analytics-folha-pagamento-chart-category");
+                .doesNotContain("vw-analytics-folha-pagamento-chart-unresolved");
         assertThat(result.assistantMessage())
-                .contains("grafico")
-                .doesNotContain("nao materializou o grafico solicitado");
+                .contains("ainda nao consegui montar o grafico pedido")
+                .contains("deixar a proposta em revisao");
     }
 
     @Test
@@ -1146,7 +1274,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(findColumn(tableColumns, "ativo").path("renderer").path("type").asText()).isEqualTo("chip");
         assertThat(result.assistantMessage())
                 .contains("valores formatados")
-                .contains("chips, icones e acoes por linha");
+                .contains("acoes por linha");
         assertThat(bindings.path(1).has("source")).isFalse();
         assertThat(bindings.path(1).has("target")).isFalse();
         assertThat(result.warnings()).contains(
@@ -1535,6 +1663,53 @@ class AgenticAuthoringPreviewServiceTest {
                                 "vertical")),
                         true,
                         true,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult incidentSingleChartIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "post",
+                        "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor&operation=post&schemaType=response",
+                        "/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor",
+                        "POST",
+                        0.96d,
+                        "matched incident indicators",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico de barras simples de incidentes por severidade.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "single-chart",
+                        "single_chart",
+                        "praxis-chart",
+                        List.of(visualizationAxis(
+                                "severity",
+                                "severidade",
+                                "Severidade",
+                                "bar",
+                                "vertical")),
+                        false,
+                        false,
                         "llm-authored-semantic-decision"));
     }
 

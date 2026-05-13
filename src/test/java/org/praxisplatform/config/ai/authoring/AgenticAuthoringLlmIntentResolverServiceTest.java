@@ -123,17 +123,27 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("\"candidateResources\"");
         assertThat(prompt).contains("/api/vendas/pedidos");
         assertThat(prompt).contains("\"componentContext\"");
+        assertThat(prompt).contains("\"authorableComponents\"");
+        assertThat(prompt).contains("\"componentId\" : \"praxis-chart\"");
+        assertThat(prompt).contains("\"platformGuide\"");
+        assertThat(prompt).contains("\"formAuthoringPolicy\"");
+        assertThat(prompt).contains("consultativeRetrievalPlan");
+        assertThat(prompt).contains("consultative platform guidance");
+        assertThat(prompt).contains("Praxis is a governed AI authoring platform");
+        assertThat(prompt).contains("Visualizar metricas");
+        assertThat(prompt).contains("Select visualizationDecision.primaryComponent from authorableComponents");
         assertThat(prompt).contains("\"examples\"");
         assertThat(prompt).contains("Use categoryField para o eixo X");
         assertThat(prompt).contains("\"toolCatalog\"");
         assertThat(prompt).contains("\"searchApiResources\"");
         assertThat(prompt).contains("/api/praxis/config/ai/authoring/resource-candidates");
         assertThat(prompt).contains("Avoid terse labels such as \"alimentar tela\"");
-        assertThat(prompt).contains("Format assistantMessage like a polished chat response");
+        assertThat(prompt).contains("Use assistantMessage as the natural chat reply");
         assertThat(prompt).contains("author 2 to 4 quickReplies for this exact conversation");
         assertThat(prompt).contains("contextHints.presentation.bestFor");
         assertThat(prompt).contains("resourceSearchQuery");
         assertThat(prompt).contains("visualizationDecision");
+        assertThat(prompt).contains("layoutKind` to `single_chart`");
         assertThat(result.visualizationDecision()).isNotNull();
         assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-chart");
         assertThat(result.visualizationDecision().axes()).hasSize(1);
@@ -292,6 +302,68 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
 
         assertThat(result.assistantMessage()).hasSizeLessThanOrEqualTo(700);
         assertThat(result.assistantMessage()).endsWith("...");
+    }
+
+    @Test
+    void resolveParsesConsultativeRetrievalPlanReturnedByProvider() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "explain",
+                  "artifactKind": "api_catalog",
+                  "changeKind": "answer_api_catalog_question",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "assistantMessage": "Vou investigar as capacidades e o dominio antes de responder.",
+                  "consultativeRetrievalPlan": {
+                    "schemaVersion": "praxis-agentic-authoring-consultative-retrieval-plan.v1",
+                    "requiredContext": ["platform_capabilities", "component_registry", "domain_catalog", "api_resources"],
+                    "semanticQueries": ["componentes governados para painel administrativo", "formularios governados do dominio atual"],
+                    "answerStrategy": "Explicar possibilidades sem criar preview.",
+                    "expectedEvidence": ["componentes authoraveis", "fontes de negocio", "politica de formulario"]
+                  },
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "O que posso fazer aqui?",
+                                "page-builder",
+                                "praxis-dynamic-page-builder",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "O que posso fazer aqui?",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.consultativeRetrievalPlan()).isNotNull();
+        assertThat(result.consultativeRetrievalPlan().requiredContext())
+                .contains("platform_capabilities", "component_registry", "domain_catalog", "api_resources");
+        assertThat(result.consultativeRetrievalPlan().semanticQueries())
+                .contains("componentes governados para painel administrativo");
     }
 
     @Test
@@ -461,6 +533,52 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .isEqualTo("api de cadastro de funcionario para formulario de RH");
         assertThat(resolution.quickReplies()).hasSize(1);
         assertThat(resolution.warnings()).contains("resource-selection-required");
+    }
+
+    @Test
+    void returnsFailHonestResolutionWhenProviderFails() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenThrow(new RuntimeException("provider quota exhausted"));
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution resolution = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "crie um dashboard",
+                                "page-builder",
+                                "praxis-chart",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "crie um dashboard",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.resolved()).isFalse();
+        assertThat(resolution.followUpKind()).isEqualTo("provider_error");
+        assertThat(resolution.warnings())
+                .contains("llm-intent-resolution-failed", "llm-provider-error")
+                .doesNotContain("provider quota exhausted");
+        assertThat(resolution.assistantMessage())
+                .contains("Tive um problema")
+                .contains("confirmar")
+                .doesNotContain("provider quota exhausted");
+        assertThat(resolution.clarificationQuestions())
+                .contains("Qual recurso de negocio deve orientar esta decisao?");
     }
 
     private AgenticAuthoringComponentCapabilitiesResult componentCapabilities() {

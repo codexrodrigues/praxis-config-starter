@@ -4,6 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 public record AgenticAuthoringManifestEditPlanRequest(
         JsonNode config,
-        JsonNode plan
+        JsonNode plan,
+        JsonNode validationContext
 ) {
+    public AgenticAuthoringManifestEditPlanRequest(JsonNode config, JsonNode plan) {
+        this(config, plan, null);
+    }
 }

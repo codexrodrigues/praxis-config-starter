@@ -12,8 +12,8 @@ public class AgenticAuthoringArtifactProperties {
     private String minimalFormPlanSchema = "minimal-form-plan.v1.schema.json";
     private String examplesGovernanceManifest = "examples-governance-manifest.v0.json";
     private String pageCreateCatalog = "page-create-catalog.v0.json";
-    private String compiledFormPatch = "compiled-form-patch.helpdesk-create-ticket.v0.json";
-    private String authoringReplayBundle = "authoring-replay-bundle.helpdesk-create-ticket.v0.json";
+    private String compiledFormPatch = "compiled-form-patch.v0.json";
+    private String authoringReplayBundle = "authoring-replay-bundle.v0.json";
     private boolean httpEnabled = false;
     private boolean dryRunEnabled = false;
     private Path reportPath;

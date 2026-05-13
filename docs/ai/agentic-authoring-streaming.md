@@ -100,6 +100,27 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 | `error` | `code`, `assistantMessage`, `message`, `phase` |
 | `cancelled` | `message`, `phase` |
 
+Durante turnos longos, especialmente quando a LLM esta resolvendo intencao ou
+revisando recursos recuperados por RAG/catalogos governados, o backend deve
+emitir fases conversacionais suficientes para evitar uma UI parada em um unico
+estado generico. As fases canonicas atuais de `thought.step` incluem:
+
+- `context.bundle`: contexto do turno recebido e normalizado.
+- `intent.resolve`: preparacao da resolucao semantica.
+- `intent.resolve.llm`: chamada ou revisao da LLM sobre a intencao do usuario.
+- `intent.resolve.grounding`: checagem da decisao contra evidencias governadas.
+- `resource.discovery`: recuperacao de recursos, schemas, capabilities ou
+  catalogos backend.
+- `projectKnowledge.retrieve`: recuperacao de Project Knowledge/RAG governado.
+- `preview.plan`: planejamento da materializacao governada.
+- `preview.compile`: compilacao ou reparo da preview materializada.
+
+`heartbeat` e out-of-band, nao persistido no event log, e deve carregar pelo
+menos `state=alive`, `phase`, `summary` e `lastEventType`. O `phase` deve
+refletir o ultimo evento nao terminal conhecido, permitindo que clientes mostrem
+mensagens como "a LLM ainda esta resolvendo a intencao" sem inventar logica
+local ou depender de timers opacos no frontend.
+
 O processamento assincrono do turno deve respeitar
 `praxis.ai.stream.processing-timeout-seconds` para evitar que o cliente fique
 preso em estados intermediarios quando retrieval, provider LLM ou compilacao de
@@ -190,6 +211,11 @@ Regra de aplicacao:
 - `preview.valid=true` nao implica `canApply=true`; uma tabela tecnicamente
   valida que contradiz `visualIntent=charts` deve retornar
   `decisionDiagnostics.decisionValid=false`,
+  `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
+- Quando a decisao pedir um `visualizationDecision.primaryComponent`
+  governado, a materializacao precisa conter esse componente. Se o preview
+  compilar, mas trocar o componente pedido por outro, deve retornar
+  `failureCodes=["semantic-preview-primary-component-required"]`,
   `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
 - `keywordFallbackApplied=true` deve forcar
   `decisionDiagnostics.requiresReview=true`,

@@ -40,12 +40,15 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("mode").asText()).isEqualTo("grid");
         assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("rowUnit").asText()).isEqualTo("72px");
-        assertThat(plan.path("canvas").path("items").path("orders-summary").path("rowSpan").asInt()).isEqualTo(1);
-        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("rowSpan").asInt()).isEqualTo(1);
+        assertThat(plan.path("canvas").path("items").path("orders-summary").path("rowSpan").asInt()).isEqualTo(2);
+        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("row").asInt()).isEqualTo(3);
+        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("rowSpan").asInt()).isEqualTo(2);
+        assertThat(plan.path("canvas").path("items").path("orders-filter").path("row").asInt()).isEqualTo(5);
         assertThat(plan.path("canvas").path("items").path("orders-filter").path("rowSpan").asInt()).isEqualTo(1);
+        assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("row").asInt()).isEqualTo(6);
         assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("colSpan").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("rowSpan").asInt()).isEqualTo(4);
-        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(8);
+        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(10);
         assertThat(plan.path("widgets")).hasSize(5);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
@@ -69,7 +72,23 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(kpiInputs.has("resourcePath")).isFalse();
         assertThat(kpiInputs.has("schemaUrl")).isFalse();
         assertThat(kpiInputs.has("kpis")).isFalse();
-        assertThat(kpiInputs.path("document").path("kpis")).hasSize(2);
+        assertThat(kpiInputs.path("document").path("kind").asText()).isEqualTo("praxis.rich-content");
+        assertThat(kpiInputs.path("document").path("nodes").path(0).path("type").asText()).isEqualTo("statGroup");
+        assertThat(kpiInputs.path("document").path("nodes").path(0).path("items")).hasSize(2);
+        assertThat(kpiInputs.path("document").path("nodes").toString())
+                .contains("Total de registros")
+                .contains("Aguardando contagem")
+                .contains("Agrupado por Status");
+        JsonNode summaryInputs = findWidgetInputs(plan, "praxis-rich-content", "supporting");
+        assertThat(summaryInputs.path("document").path("kind").asText()).isEqualTo("praxis.rich-content");
+        assertThat(summaryInputs.path("document").path("nodes").path(0).path("type").asText()).isEqualTo("card");
+        assertThat(summaryInputs.path("document").path("nodes").path(0).path("size").asText()).isEqualTo("sm");
+        assertThat(summaryInputs.path("document").path("nodes").path(0).path("density").asText()).isEqualTo("compact");
+        assertThat(summaryInputs.path("document").path("nodes").path(0).path("orientation").asText())
+                .isEqualTo("horizontal");
+        assertThat(summaryInputs.path("document").path("nodes").toString())
+                .contains("Pre-visualizacao analitica")
+                .doesNotContain("Preview for");
         JsonNode filterInputs = findWidgetInputs(plan, "praxis-filter");
         assertThat(filterInputs.has("schemaUrl")).isFalse();
         assertThat(filterInputs.has("schemaVerification")).isFalse();
@@ -111,7 +130,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("items").path("incidentes-chart-responsavel").path("colSpan").asInt())
                 .isEqualTo(4);
         assertThat(plan.path("canvas").path("items").path("incidentes-table").path("row").asInt())
-                .isEqualTo(8);
+                .isEqualTo(10);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
                         "praxis-rich-content",
@@ -146,6 +165,44 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("bindings").toString())
                 .contains("incidentes-filter.requestSearch->incidentes-chart-gravidade.queryContext")
                 .contains("incidentes-chart-gravidade.selectionChange->incidentes-table.queryContext");
+    }
+
+    @Test
+    void createsOnlyChartWhenUserExplicitlyRejectsDashboardSupportWidgets() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "single-chart",
+                "single_chart",
+                "praxis-chart",
+                List.of(axis("severity", "severidade", "Severidade", "bar", "vertical")),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico de barras simples de incidentes por severidade. "
+                        + "Use a fonte Indicadores Incidentes e o campo Severidade. "
+                        + "Nao crie tabela, filtros nem KPIs.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "dashboard", "create_artifact",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        decision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-chart");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("single-chart-page");
+        assertThat(plan.path("widgets")).hasSize(1);
+        assertThat(plan.path("widgets").findValuesAsText("componentId")).containsExactly("praxis-chart");
+        assertThat(plan.toString())
+                .contains("\"field\":\"severidade\"")
+                .contains("\"type\":\"bar\"")
+                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
+                .doesNotContain("praxis-table")
+                .doesNotContain("praxis-filter")
+                .doesNotContain("kpi-band");
+        assertThat(plan.path("compositionConstraints").path("mode").asText()).isEqualTo("single-chart");
     }
 
     @Test
@@ -197,7 +254,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void infersTraceablePendingAxisForGenericChartRequestWithoutLlmAxes() {
+    void requiresSchemaGroundedAxisForGenericChartRequestWithoutLlmAxes() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Quero graficos sobre pedidos por status",
                 "openai",
@@ -217,13 +274,40 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode plan = result.uiCompositionPlan();
         assertThat(plan.path("widgets").findValuesAsText("componentId")).contains("praxis-chart");
         assertThat(plan.path("widgets").toString())
-                .contains("\"field\":\"status\"")
+                .contains("\"field\":\"unresolved\"")
                 .contains("\"schemaVerified\":false")
                 .contains("\"schemaProbeStatus\":\"pending\"")
-                .contains("\"provenance\":\"generic-dashboard-field-inference\"");
+                .contains("\"provenance\":\"schema-grounding-required\"");
         assertThat(plan.path("diagnostics").path("semanticAxes").toString())
-                .contains("\"field\":\"status\"")
+                .contains("\"field\":\"unresolved\"")
                 .contains("\"schemaVerified\":false");
+    }
+
+    @Test
+    void rejectsPromptScaffoldAsDashboardAxis() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie dashboard de incidentes com KPIs, graficos, filtros e tabela",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                dashboardIntent("/api/risk-intelligence/vw-indicadores-incidentes", List.of(axis(
+                        "table",
+                        "tabela_crie_dashboard_de_incidentes",
+                        "Tabela Crie Dashboard De Incidentes",
+                        "bar",
+                        "vertical"))))).orElseThrow();
+
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"field\":\"unresolved\"")
+                .contains("\"provenance\":\"schema-grounding-required\"")
+                .doesNotContain("Tabela Crie Dashboard De Incidentes")
+                .doesNotContain("tabela_crie_dashboard_de_incidentes");
+        JsonNode kpiInputs = findWidgetInputs(result.uiCompositionPlan(), "praxis-rich-content", "kpi-band");
+        assertThat(kpiInputs.path("document").path("nodes").path(0).path("items")).hasSize(1);
+        assertThat(kpiInputs.path("document").path("nodes").toString()).doesNotContain("Unresolved");
+        JsonNode filterInputs = findWidgetInputs(result.uiCompositionPlan(), "praxis-filter");
+        assertThat(filterInputs.path("selectedFieldIds")).isEmpty();
     }
 
     @Test
@@ -298,6 +382,41 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 "gpt-5.4-mini",
                 "test-key",
                 intent("create", "form", "create_minimal_form", "/api/acme/orders")))).isEmpty();
+    }
+
+    @Test
+    void createsGovernedTabsPageWhenLlmSelectsTabsComponent() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "tabbed-resource-workspace",
+                "tabs",
+                "praxis-tabs",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma pagina com duas abas para listar e ver detalhes",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "create_artifact", "/api/acme/orders", decision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-tabs-page");
+        assertThat(plan.path("warnings").isMissingNode()).isTrue();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
+        JsonNode tabsWidget = plan.path("widgets").path(0);
+        assertThat(tabsWidget.path("componentId").asText()).isEqualTo("praxis-tabs");
+        assertThat(tabsWidget.path("inputs").path("config").path("tabs")).hasSize(2);
+        assertThat(tabsWidget.toString())
+                .contains("\"id\":\"praxis-table\"")
+                .contains("\"id\":\"praxis-dynamic-form\"")
+                .contains("\"resourcePath\":\"/api/acme/orders\"")
+                .doesNotContain("human-resources")
+                .doesNotContain("payroll");
+        assertThat(plan.path("canvas").path("items").path("orders-tabs").path("colSpan").asInt()).isEqualTo(12);
     }
 
     private AgenticAuthoringIntentResolutionResult dashboardIntent(

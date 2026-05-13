@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,7 +65,7 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
-    void generateMinimalFormPlanFlagsBlockedFields() throws Exception {
+    void generateMinimalFormPlanDoesNotApplyHostSpecificBlockedFields() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
         properties.setContractsDir(tempDir);
@@ -83,15 +82,17 @@ class AgenticAuthoringPlanServiceTest {
         AgenticAuthoringPlanResult result = service(properties)
                 .generateMinimalFormPlan(new AgenticAuthoringPlanRequest("Crie um formulario", null, null, null), null, null, null);
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.failureCodes()).contains("field not allowed: prioridadeId", "blocked field present: prioridadeId");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
     }
 
     @Test
-    void generateMinimalFormPlanUsesReferencePlanForResolvedQuickstartFuncionariosCreate() throws Exception {
+    void generateMinimalFormPlanUsesProviderForResolvedResourceCandidate() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
         properties.setContractsDir(tempDir);
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(funcionariosPlan());
 
         AgenticAuthoringPlanResult result = service(properties)
                 .generateMinimalFormPlan(
@@ -111,10 +112,7 @@ class AgenticAuthoringPlanServiceTest {
         assertThat(result.minimalFormPlan().path("targetApp").asText()).isEqualTo("praxis-ui-angular");
         assertThat(result.minimalFormPlan().path("submitActionRef").asText())
                 .isEqualTo("POST /api/human-resources/funcionarios");
-        assertThat(result.minimalFormPlan().path("fields"))
-                .extracting(field -> field.path("name").asText())
-                .contains("nomeCompleto", "cpf", "email", "telefone", "salario", "cargoId", "departamentoId");
-        verifyNoInteractions(providerManagementService);
+        assertThat(result.minimalFormPlan().path("fields")).extracting(field -> field.path("name").asText()).contains("nome");
     }
 
     @Test
@@ -629,26 +627,21 @@ class AgenticAuthoringPlanServiceTest {
         ObjectNode plan = objectMapper.createObjectNode();
         plan.put("version", "1.0.0");
         plan.put("profileId", "create-minimal-form");
-        plan.put("targetApp", "praxis-helpdesk-ui");
+        plan.put("targetApp", "");
         plan.put("targetComponentId", "praxis-dynamic-page-builder");
-        plan.put("apiUseCaseResolutionRef", "proofs/helpdesk-create-ticket-discovery.md#api-use-case");
-        plan.put("fieldSelectionPlanRef", "proofs/helpdesk-create-ticket-discovery.md#field-selection");
-        plan.put("submitActionRef", "POST /api/helpdesk/chamados");
+        plan.put("apiUseCaseResolutionRef", "");
+        plan.put("fieldSelectionPlanRef", "");
+        plan.put("submitActionRef", "");
         ArrayNode fields = plan.putArray("fields");
-        ObjectNode title = fields.addObject();
-        title.put("name", "titulo");
-        title.put("label", "Titulo");
-        title.put("controlType", "text");
-        title.put("required", true);
         ObjectNode description = fields.addObject();
         description.put("name", "descricao");
         description.put("label", "Descricao");
         description.put("controlType", "textarea");
         description.put("required", false);
         ObjectNode clarification = plan.putObject("clarificationNeed");
-        clarification.put("needed", false);
-        clarification.put("code", "none");
-        plan.putArray("sourceRefs").add("proofs/helpdesk-create-ticket-discovery.md");
+        clarification.put("needed", true);
+        clarification.put("code", "resource-candidate-required");
+        plan.putArray("sourceRefs");
         return plan;
     }
 

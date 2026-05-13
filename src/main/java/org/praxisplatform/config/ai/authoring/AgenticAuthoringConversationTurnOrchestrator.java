@@ -52,7 +52,7 @@ final class AgenticAuthoringConversationTurnOrchestrator {
         }
         String assistantMessage = normalize(pendingClarification == null ? null : pendingClarification.assistantMessage());
         boolean assistantAskedBreakdown = assistantMessage.contains("recorte")
-                || assistantMessage.contains("por departamento")
+                || assistantMessage.contains("dimensao")
                 || assistantMessage.contains("competencia");
         if (assistantAskedBreakdown) {
             return true;
@@ -63,7 +63,7 @@ final class AgenticAuthoringConversationTurnOrchestrator {
         return questions.stream()
                 .map(AgenticAuthoringConversationTurnOrchestrator::normalize)
                 .anyMatch(question -> question.contains("recorte")
-                        || question.contains("por departamento")
+                        || question.contains("dimensao")
                         || question.contains("competencia"));
     }
 

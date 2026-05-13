@@ -11,20 +11,7 @@ import java.util.List;
 public class AgenticAuthoringMinimalFormPlanValidator {
 
     static final String PROFILE_CREATE_MINIMAL_FORM = "create-minimal-form";
-    static final String TARGET_APP_HELPDESK = "praxis-helpdesk-ui";
     static final String TARGET_COMPONENT_PAGE_BUILDER = "praxis-dynamic-page-builder";
-    static final String SUBMIT_ACTION_REF = "POST /api/helpdesk/chamados";
-    private static final List<String> ALLOWED_FIELDS = List.of("titulo", "descricao");
-    private static final List<String> BLOCKED_FIELDS = List.of(
-            "organizacaoId",
-            "solicitanteId",
-            "statusAtualId",
-            "itemCatalogoId",
-            "prioridadeId",
-            "grupoResponsavelId",
-            "responsavelId",
-            "dataLimite"
-    );
 
     public List<String> validate(JsonNode plan) {
         return validate(plan, null);
@@ -35,57 +22,23 @@ public class AgenticAuthoringMinimalFormPlanValidator {
             return List.of("minimalFormPlan is required");
         }
         if (intentResolution == null || intentResolution.selectedCandidate() == null) {
-            return validateLegacyHelpdeskPlan(plan);
+            return validateUngroundedPlan(plan);
         }
         return validateIntentBackedPlan(plan, intentResolution);
     }
 
-    private List<String> validateLegacyHelpdeskPlan(JsonNode plan) {
+    private List<String> validateUngroundedPlan(JsonNode plan) {
         List<String> failures = new ArrayList<>();
         requireText(plan, "version", "1.0.0", failures);
         requireText(plan, "profileId", PROFILE_CREATE_MINIMAL_FORM, failures);
-        requireText(plan, "targetApp", TARGET_APP_HELPDESK, failures);
-        requireText(plan, "targetComponentId", TARGET_COMPONENT_PAGE_BUILDER, failures);
-        requireText(plan, "submitActionRef", SUBMIT_ACTION_REF, failures);
-        if (text(plan, "apiUseCaseResolutionRef").isBlank()) {
-            failures.add("apiUseCaseResolutionRef is required");
-        }
-        if (text(plan, "fieldSelectionPlanRef").isBlank()) {
-            failures.add("fieldSelectionPlanRef is required");
-        }
-        JsonNode fields = plan.path("fields");
-        if (!fields.isArray() || fields.isEmpty()) {
-            failures.add("fields must not be empty");
-        } else {
-            boolean hasTitle = false;
-            for (JsonNode field : fields) {
-                String name = text(field, "name");
-                if (!ALLOWED_FIELDS.contains(name)) {
-                    failures.add("field not allowed: " + name);
-                }
-                if ("titulo".equals(name)) {
-                    hasTitle = true;
-                    if (!field.path("required").asBoolean(false)) {
-                        failures.add("titulo must be required");
-                    }
-                }
-            }
-            if (!hasTitle) {
-                failures.add("titulo is required");
-            }
-            for (String blockedField : BLOCKED_FIELDS) {
-                if (containsField(fields, blockedField)) {
-                    failures.add("blocked field present: " + blockedField);
-                }
-            }
-        }
         JsonNode clarification = plan.path("clarificationNeed");
-        if (clarification.isObject() && clarification.path("needed").asBoolean(false)
-                && "none".equals(text(clarification, "code"))) {
-            failures.add("clarificationNeed.code must explain why clarification is needed");
+        if (!clarification.isObject() || !clarification.path("needed").asBoolean(false)) {
+            failures.add("clarificationNeed.needed must be true when no intent-backed resource candidate is available");
+        } else if (text(clarification, "code").isBlank() || "none".equals(text(clarification, "code"))) {
+            failures.add("clarificationNeed.code must explain the missing grounding");
         }
-        if (!plan.path("sourceRefs").isArray() || plan.path("sourceRefs").isEmpty()) {
-            failures.add("sourceRefs must not be empty");
+        if (!text(plan, "submitActionRef").isBlank()) {
+            failures.add("submitActionRef must be empty without an intent-backed resource candidate");
         }
         return List.copyOf(failures);
     }
@@ -120,11 +73,6 @@ public class AgenticAuthoringMinimalFormPlanValidator {
                 String controlType = text(field, "controlType");
                 if (controlType.isBlank()) {
                     failures.add("field controlType is required: " + name);
-                }
-                for (String blockedField : BLOCKED_FIELDS) {
-                    if (blockedField.equals(name)) {
-                        failures.add("blocked field present: " + blockedField);
-                    }
                 }
                 validateCurrentPageFieldScope(name, intentResolution, failures);
             }

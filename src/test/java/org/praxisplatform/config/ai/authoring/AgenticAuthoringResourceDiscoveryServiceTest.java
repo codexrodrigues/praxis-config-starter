@@ -88,12 +88,12 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.quickReplies().get(0).prompt())
                 .isEqualTo("Usar analytics folha pagamento como fonte de dados do painel.");
         assertThat(result.quickReplies().get(0).description())
-                .contains("Indicada para começar por KPIs e gráficos")
-                .contains("Retorna dados agregáveis");
+                .contains("Indicada para montar um painel")
+                .contains("schema confirmar os recortes");
         assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("bestFor").asText())
-                .contains("dashboards executivos");
+                .contains("schema confirmar os recortes");
         assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("returns").asText())
-                .contains("KPIs");
+                .contains("gráficos materializados por schema");
         assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("nextStep").asText())
                 .contains("Clique");
         assertThat(result.candidates().get(0).submitUrl())
@@ -353,6 +353,79 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     }
 
     @Test
+    void searchPromotesToolCandidatesThroughDomainCatalogGrounding() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                Mockito.mock(AgenticAuthoringDomainCatalogCandidateEnhancer.class);
+        AgenticAuthoringCandidate weakCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.48d,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of()));
+        AgenticAuthoringCandidate groundedCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.84d,
+                "domain_catalog grounded resource selection",
+                List.of(
+                        "api-metadata",
+                        AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING,
+                        "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of("domain_catalog", List.of()));
+        AgenticAuthoringCandidate ungroundedWeakCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries",
+                "post",
+                0.62d,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of()));
+        when(candidateCatalog.discover(
+                "funcionarios",
+                "api_catalog",
+                "tenant-a",
+                "dev",
+                null))
+                .thenReturn(List.of(weakCandidate));
+        when(enhancer.enhance(
+                "funcionarios",
+                List.of(weakCandidate),
+                "tenant-a",
+                "dev"))
+                .thenReturn(List.of(groundedCandidate, ungroundedWeakCandidate));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        candidateCatalog,
+                        objectMapper,
+                        "praxis-service",
+                        enhancer);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "funcionarios",
+                        null,
+                        "api_catalog",
+                        5),
+                new AiPrincipalContext("tenant-a", "user-a", "dev", false));
+
+        assertThat(result.candidates()).containsExactly(groundedCandidate);
+        assertThat(result.candidates().get(0).evidence())
+                .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                .doesNotContain("lexical-fallback", "weak-evidence");
+    }
+
+    @Test
     void evidenceBundleSupportsHostNeutralApiMetadataFixture() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         when(repository.findAll()).thenReturn(List.of(
@@ -388,7 +461,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     }
 
     @Test
-    void semanticRetrievalIsEnrichedWithAnalyticsProjectionForAnalyticalDashboardPrompts() {
+    void semanticRetrievalDoesNotInventAnalyticsProjectionForAnalyticalDashboardPrompts() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
         when(retrievalService.searchApiMetadata(
@@ -446,12 +519,11 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.candidates())
                 .extracting(AgenticAuthoringCandidate::resourcePath)
-                .contains("/api/human-resources/vw-analytics-folha-pagamento")
-                .contains("/api/human-resources/funcionarios");
+                .containsExactly("/api/human-resources/funcionarios");
         assertThat(result.candidates().get(0).resourcePath())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+                .isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.candidates().get(0).submitUrl())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+                .isEqualTo("/api/human-resources/funcionarios/stats/group-by");
     }
 
     @Test

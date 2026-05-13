@@ -52,23 +52,20 @@ public class AgenticAuthoringPlanService {
         }
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         effectiveRequest = withEffectivePrompt(effectiveRequest);
-        JsonNode plan = referenceMinimalFormPlan(effectiveRequest);
-        if (plan == null) {
-            plan = providerManagementService.generateJson(
-                    minimalFormPlanPrompt(effectiveRequest),
-                    AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
-                    AiCallConfig.builder()
-                            .provider(effectiveRequest.provider())
-                            .model(effectiveRequest.model())
-                            .apiKey(effectiveRequest.apiKey())
-                            .temperature(0.0d)
-                            .maxTokens(2048)
-                            .build(),
-                    tenantId,
-                    userId,
-                    environment
-            );
-        }
+        JsonNode plan = providerManagementService.generateJson(
+                minimalFormPlanPrompt(effectiveRequest),
+                AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
+                AiCallConfig.builder()
+                        .provider(effectiveRequest.provider())
+                        .model(effectiveRequest.model())
+                        .apiKey(effectiveRequest.apiKey())
+                        .temperature(0.0d)
+                        .maxTokens(2048)
+                        .build(),
+                tenantId,
+                userId,
+                environment
+        );
         plan = completeDeterministicEditPlan(plan, effectiveRequest);
         List<String> failures = validator.validate(plan, effectiveRequest.intentResolution());
         return new AgenticAuthoringPlanResult(
@@ -77,47 +74,6 @@ public class AgenticAuthoringPlanService {
                 warnings(effectiveRequest.intentResolution()),
                 plan
         );
-    }
-
-    private JsonNode referenceMinimalFormPlan(AgenticAuthoringPlanRequest request) {
-        AgenticAuthoringIntentResolutionResult intentResolution = request.intentResolution();
-        if (intentResolution == null
-                || intentResolution.selectedCandidate() == null
-                || !"create".equals(intentResolution.operationKind())
-                || !"form".equals(intentResolution.artifactKind())
-                || !"create_minimal_form".equals(intentResolution.changeKind())
-                || !"/api/human-resources/funcionarios".equals(intentResolution.selectedCandidate().resourcePath())) {
-            return null;
-        }
-        ObjectNode plan = objectMapper.createObjectNode();
-        plan.put("version", "1.0.0");
-        plan.put("profileId", "create-minimal-form");
-        plan.put("targetApp", intentResolution.targetApp());
-        plan.put("targetComponentId", intentResolution.targetComponentId());
-        plan.put("apiUseCaseResolutionRef", "intent-resolution:/api/human-resources/funcionarios");
-        plan.put("fieldSelectionPlanRef", intentResolution.selectedCandidate().schemaUrl());
-        plan.put("submitActionRef", "POST /api/human-resources/funcionarios");
-        ArrayNode fields = plan.putArray("fields");
-        addField(fields, "nomeCompleto", "Nome completo", "text", true);
-        addField(fields, "cpf", "CPF", "text", true);
-        addField(fields, "email", "Email", "email", false);
-        addField(fields, "telefone", "Telefone", "text", false);
-        addField(fields, "salario", "Salario", "number", false);
-        addField(fields, "cargoId", "Cargo", "select", false);
-        addField(fields, "departamentoId", "Departamento", "select", false);
-        ObjectNode clarification = plan.putObject("clarificationNeed");
-        clarification.put("needed", false);
-        clarification.put("code", "none");
-        plan.putArray("sourceRefs").add("intent-resolution").add(intentResolution.selectedCandidate().schemaUrl());
-        return plan;
-    }
-
-    private void addField(ArrayNode fields, String name, String label, String controlType, boolean required) {
-        ObjectNode field = fields.addObject();
-        field.put("name", name);
-        field.put("label", label);
-        field.put("controlType", controlType);
-        field.put("required", required);
     }
 
     private JsonNode completeDeterministicEditPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {
@@ -440,7 +396,7 @@ public class AgenticAuthoringPlanService {
     private String minimalFormPlanPrompt(AgenticAuthoringPlanRequest request) {
         AgenticAuthoringIntentResolutionResult intentResolution = request.intentResolution();
         if (intentResolution == null || intentResolution.selectedCandidate() == null) {
-            return legacyHelpdeskMinimalFormPlanPrompt(request);
+            return unboundMinimalFormPlanPrompt(request);
         }
         AgenticAuthoringCandidate candidate = intentResolution.selectedCandidate();
         String submitMethod = candidate.submitMethod() == null || candidate.submitMethod().isBlank()
@@ -628,7 +584,7 @@ public class AgenticAuthoringPlanService {
         }
     }
 
-    private String legacyHelpdeskMinimalFormPlanPrompt(AgenticAuthoringPlanRequest request) {
+    private String unboundMinimalFormPlanPrompt(AgenticAuthoringPlanRequest request) {
         String attachmentSummaries = attachmentSummariesJson(request);
         return """
                 You are generating an internal Praxis MinimalFormPlan.
@@ -643,20 +599,13 @@ public class AgenticAuthoringPlanService {
                 Hard constraints:
                 - version must be "1.0.0".
                 - profileId must be "create-minimal-form".
-                - targetApp must be "praxis-helpdesk-ui".
-                - targetComponentId must be "praxis-dynamic-page-builder".
-                - apiUseCaseResolutionRef must be "proofs/helpdesk-create-ticket-discovery.md#api-use-case".
-                - fieldSelectionPlanRef must be "proofs/helpdesk-create-ticket-discovery.md#field-selection".
-                - submitActionRef must be "POST /api/helpdesk/chamados".
-                - fields may include only titulo and descricao.
-                - titulo is required because the create schema requires it.
-                - descricao is allowed when the prompt describes the problem.
-                - Do not include organizacaoId, solicitanteId, statusAtualId, itemCatalogoId, prioridadeId,
-                  grupoResponsavelId, responsavelId or dataLimite.
-                - clarificationNeed.needed must be false and clarificationNeed.code must be "none" when the request
-                  can be satisfied with titulo and descricao.
+                - targetApp and targetComponentId must echo the request when available.
+                - If no intent-backed resource candidate, schema URL or submit URL is available, do not invent a business endpoint.
+                - In that case set clarificationNeed.needed=true with code "resource-candidate-required".
+                - apiUseCaseResolutionRef, fieldSelectionPlanRef and submitActionRef must be empty unless grounded by request context.
+                - fields must only be emitted from explicit request context, attachment metadata or schema-grounded evidence.
                 - Attachment summaries are metadata-only context. Do not assume access to file bytes, base64 content, blob URLs, or image pixels.
-                - sourceRefs must cite the discovery proof, page-create catalog and examples governance manifest.
+                - sourceRefs must cite only request context, attachment summaries or governed knowledge entries that actually influenced the plan.
                 """.formatted(request.userPrompt().trim(), attachmentSummaries);
     }
 

@@ -6,6 +6,7 @@ import java.util.Objects;
 final class AgenticAuthoringCandidateProvenancePolicy {
 
     static final String SEMANTIC_RETRIEVAL = "semantic_retrieval";
+    static final String DOMAIN_CATALOG = "domain_catalog";
     static final String LEXICAL_FALLBACK = "lexical_fallback";
     static final String BROAD_ARTIFACT_DISCOVERY = "broad_artifact_discovery";
     static final String CONTEXT_HINT = "context_hint";
@@ -19,6 +20,9 @@ final class AgenticAuthoringCandidateProvenancePolicy {
     static String retrievalSource(List<AgenticAuthoringCandidate> candidates) {
         if (candidates == null || candidates.isEmpty()) {
             return NONE;
+        }
+        if (hasEvidence(candidates, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
+            return DOMAIN_CATALOG;
         }
         if (hasEvidence(candidates, "semantic-retrieval")) {
             return SEMANTIC_RETRIEVAL;

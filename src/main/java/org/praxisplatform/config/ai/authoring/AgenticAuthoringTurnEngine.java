@@ -6,11 +6,16 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.SchemaFetchResult;
+import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.springframework.util.StringUtils;
 
 @Slf4j
@@ -25,8 +30,8 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer;
     private final AgenticAuthoringToolRegistry toolRegistry;
     private final AgenticAuthoringProjectKnowledgeService projectKnowledgeService;
-    private final AgenticAuthoringApiCatalogConversationService apiCatalogConversationService;
     private final AgenticAuthoringOrchestrator orchestrator;
+    private final SchemaRetrievalService schemaRetrievalService;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
     public AgenticAuthoringTurnEngine(
@@ -35,7 +40,15 @@ public class AgenticAuthoringTurnEngine {
             ObjectMapper objectMapper,
             AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
             AgenticAuthoringToolRegistry toolRegistry) {
-        this(intentResolverService, previewService, objectMapper, currentPageAnalyzer, toolRegistry, null, null);
+        this(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                currentPageAnalyzer,
+                toolRegistry,
+                null,
+                (AgenticAuthoringOrchestrator) null,
+                null);
     }
 
     public AgenticAuthoringTurnEngine(
@@ -45,17 +58,6 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
             AgenticAuthoringToolRegistry toolRegistry,
             AgenticAuthoringProjectKnowledgeService projectKnowledgeService) {
-        this(intentResolverService, previewService, objectMapper, currentPageAnalyzer, toolRegistry, projectKnowledgeService, null);
-    }
-
-    public AgenticAuthoringTurnEngine(
-            AgenticAuthoringIntentResolverService intentResolverService,
-            AgenticAuthoringPreviewService previewService,
-            ObjectMapper objectMapper,
-            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
-            AgenticAuthoringToolRegistry toolRegistry,
-            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
-            AgenticAuthoringApiCatalogConversationService apiCatalogConversationService) {
         this(
                 intentResolverService,
                 previewService,
@@ -63,7 +65,7 @@ public class AgenticAuthoringTurnEngine {
                 currentPageAnalyzer,
                 toolRegistry,
                 projectKnowledgeService,
-                apiCatalogConversationService,
+                (AgenticAuthoringOrchestrator) null,
                 null);
     }
 
@@ -74,16 +76,35 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
             AgenticAuthoringToolRegistry toolRegistry,
             AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
-            AgenticAuthoringApiCatalogConversationService apiCatalogConversationService,
             AgenticAuthoringOrchestrator orchestrator) {
+        this(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                currentPageAnalyzer,
+                toolRegistry,
+                projectKnowledgeService,
+                orchestrator,
+                null);
+    }
+
+    public AgenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringOrchestrator orchestrator,
+            SchemaRetrievalService schemaRetrievalService) {
         this.intentResolverService = intentResolverService;
         this.previewService = previewService;
         this.objectMapper = objectMapper;
         this.currentPageAnalyzer = currentPageAnalyzer;
         this.toolRegistry = toolRegistry;
         this.projectKnowledgeService = projectKnowledgeService;
-        this.apiCatalogConversationService = apiCatalogConversationService;
         this.orchestrator = orchestrator;
+        this.schemaRetrievalService = schemaRetrievalService;
     }
 
     AgenticAuthoringTurnOutcome execute(
@@ -107,7 +128,16 @@ public class AgenticAuthoringTurnEngine {
                     "diagnostics", safeDiagnostics(request)));
             eventSink.append("thought.step", Map.of(
                     "phase", "intent.resolve",
-                    "summary", "Resolving authoring intent."));
+                    "summary", "Preparing semantic intent resolution."));
+            request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
+            eventSink.append("thought.step", Map.of(
+                    "phase", "intent.resolve.llm",
+                    "summary", "Asking the LLM to interpret the user request against governed context.",
+                    "diagnostics", Map.of(
+                            "provider", safeText(request.provider()),
+                            "model", safeText(request.model()),
+                            "hasProjectKnowledge", request.contextHints() != null
+                                    && request.contextHints().path("projectKnowledge").isObject())));
             AgenticAuthoringIntentResolutionResult intentResolution = intentResolverService.resolve(
                     toIntentRequest(request),
                     principalContext.tenantId(),
@@ -118,6 +148,10 @@ public class AgenticAuthoringTurnEngine {
             }
             AgenticAuthoringTurnRoute route = routeClassifier.classify(request, intentResolution, state);
             state = state.withRouteClass(route.routeClass());
+            eventSink.append("thought.step", Map.of(
+                    "phase", "intent.resolve.grounding",
+                    "summary", "Checking resolved intent against governed resource evidence.",
+                    "diagnostics", intentGroundingDiagnostics(intentResolution, route)));
             emitIntentResolutionProgress(eventSink, intentResolution);
             AgenticAuthoringToolResult resourceDiscoveryResult = maybeRunResourceDiscoveryTool(
                     request,
@@ -134,8 +168,8 @@ public class AgenticAuthoringTurnEngine {
                     && !resourceDiscovery.candidates().isEmpty()
                     && !eventSink.terminalReached()) {
                 eventSink.append("thought.step", safeToolProjection(
-                        "intent.resolve",
-                        "Resolving authoring intent with backend resource candidates.",
+                        "intent.resolve.llm",
+                        "Asking the LLM to review backend resource candidates.",
                         Map.of(
                                 "tool", resourceDiscoveryResult.tool(),
                                 "candidateCount", resourceDiscovery.candidates().size())));
@@ -146,6 +180,10 @@ public class AgenticAuthoringTurnEngine {
                         principalContext.environment());
                 route = routeClassifier.classify(request, intentResolution, state);
                 state = state.withRouteClass(route.routeClass());
+                eventSink.append("thought.step", Map.of(
+                        "phase", "intent.resolve.grounding",
+                        "summary", "Checking refined intent against backend resource evidence.",
+                        "diagnostics", intentGroundingDiagnostics(intentResolution, route)));
                 emitIntentResolutionProgress(eventSink, intentResolution);
             }
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery =
@@ -166,7 +204,11 @@ public class AgenticAuthoringTurnEngine {
                         intentResolution);
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.plan",
-                        "summary", "Generating page preview plan."));
+                        "summary", "Planning governed page materialization.",
+                        "diagnostics", Map.of(
+                                "routeClass", safeText(route.routeClass()),
+                                "artifactKind", safeText(intentResolution.artifactKind()),
+                                "operationKind", safeText(intentResolution.operationKind()))));
                 AgenticAuthoringPlanRequest planRequest = toPlanRequest(previewRequest, intentResolution);
                 preview = StringUtils.hasText(schemaBaseUrl)
                         ? previewService.preview(
@@ -199,10 +241,12 @@ public class AgenticAuthoringTurnEngine {
                         preview,
                         route);
             }
-            String assistantMessage = advisoryCatalogAssistantMessage(request, route, intentResolution);
-            if (!StringUtils.hasText(assistantMessage)) {
-                assistantMessage = previewAssistantMessage(preview, intentResolution);
-            }
+            String assistantMessage = previewAssistantMessage(
+                    preview,
+                    intentResolution,
+                    resourceDiscovery,
+                    businessCatalogDiscovery,
+                    schemaBaseUrl);
             Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, preview, toolLoopResult);
             if (Boolean.TRUE.equals(decisionDiagnostics.get("semanticDecisionReviewGroundedByPreview"))) {
                 assistantMessage = groundedPreviewAssistantMessage(preview, intentResolution);
@@ -230,7 +274,7 @@ public class AgenticAuthoringTurnEngine {
             log.warn("[AgenticAuthoringTurnEngine] Stream processing failed: {}", ex.getMessage());
             AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("error", Map.of(
                     "message", ex.getMessage() != null ? ex.getMessage() : "Agentic authoring stream failed.",
-                    "assistantMessage", "The assistant could not finish this authoring request. Try again or ask support to review the diagnostics.",
+                    "assistantMessage", "Tive um problema para concluir essa conversa agora. Tente de novo com um pedido um pouco mais direto ou confirme qual fonte de negocio devo usar.",
                     "code", "agentic-authoring-processing-failed",
                     "phase", "agentic-authoring"));
             return terminalResult.appendedType("error")
@@ -281,7 +325,10 @@ public class AgenticAuthoringTurnEngine {
         if (eventSink.terminalReached()
                 || route == null
                 || route.allowsPreview()
-                || !isBusinessAnalyticsCatalogQuestion(request.userPrompt())) {
+                || !"advisory_authoring".equals(safeText(route.routeClass()))
+                || isPlatformGuidancePrompt(request == null ? "" : request.userPrompt())
+                || (!isAdvisoryCatalogIntent(intentResolution)
+                && !isUnresolvedAdvisoryIntent(intentResolution))) {
             return null;
         }
         if (existingDiscovery != null
@@ -295,7 +342,9 @@ public class AgenticAuthoringTurnEngine {
                 new AgenticAuthoringResourceCandidatesRequest(
                         businessCatalogResourceDiscoveryQuery(request, intentResolution),
                         request.userPrompt(),
-                        safeText(intentResolution == null ? "" : intentResolution.artifactKind()),
+                        isUnresolvedAdvisoryIntent(intentResolution)
+                                ? "api_catalog"
+                                : safeText(intentResolution == null ? "" : intentResolution.artifactKind()),
                         6));
         eventSink.append("thought.step", safeToolProjection(
                 "tool.start",
@@ -318,7 +367,6 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution) {
         StringBuilder query = new StringBuilder(safeText(request.userPrompt()));
-        query.append(" analytics dashboard indicadores graficos kpis metricas tendencias agregacoes");
         if (intentResolution != null && intentResolution.candidates() != null) {
             intentResolution.candidates().stream()
                     .map(AgenticAuthoringCandidate::resourcePath)
@@ -392,9 +440,37 @@ public class AgenticAuthoringTurnEngine {
         return discovery;
     }
 
+    private Map<String, Object> intentGroundingDiagnostics(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("routeClass", route == null ? "" : safeText(route.routeClass()));
+        diagnostics.put("operationKind", intentResolution == null ? "" : safeText(intentResolution.operationKind()));
+        diagnostics.put("artifactKind", intentResolution == null ? "" : safeText(intentResolution.artifactKind()));
+        diagnostics.put("changeKind", intentResolution == null ? "" : safeText(intentResolution.changeKind()));
+        diagnostics.put("candidateCount", intentResolution == null || intentResolution.candidates() == null
+                ? 0
+                : intentResolution.candidates().size());
+        AgenticAuthoringCandidate selectedCandidate = intentResolution == null ? null : intentResolution.selectedCandidate();
+        diagnostics.put("selectedResourcePath", selectedCandidate == null ? "" : safeText(selectedCandidate.resourcePath()));
+        AgenticAuthoringEvidenceBundle evidenceBundle = selectedCandidate == null ? null : selectedCandidate.evidenceBundle();
+        diagnostics.put("retrievalSource", evidenceBundle == null ? "" : safeText(evidenceBundle.retrievalSource()));
+        diagnostics.put("grounded", selectedCandidate != null
+                && selectedCandidate.evidence() != null
+                && selectedCandidate.evidence().stream()
+                .anyMatch(evidence -> "domain-catalog-grounding".equals(evidence)
+                        || "semantic-retrieval".equals(evidence)
+                        || "schema-grounding".equals(evidence)
+                        || "tool-search-api-resources".equals(evidence)));
+        return diagnostics;
+    }
+
     private List<AgenticAuthoringQuickReply> terminalQuickReplies(
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery) {
+        if (isAdvisoryCatalogIntent(intentResolution) || isUnresolvedAdvisoryIntent(intentResolution)) {
+            return List.of();
+        }
         if (businessCatalogDiscovery != null
                 && businessCatalogDiscovery.quickReplies() != null
                 && !businessCatalogDiscovery.quickReplies().isEmpty()) {
@@ -411,6 +487,9 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringIntentResolutionResult intentResolution) {
         if (projectKnowledgeService == null || eventSink.terminalReached()) {
+            return request;
+        }
+        if (request.contextHints() != null && request.contextHints().path("projectKnowledge").isObject()) {
             return request;
         }
         AgenticAuthoringProjectKnowledgeQuery query = projectKnowledgeQuery(request, principalContext, intentResolution);
@@ -587,6 +666,7 @@ public class AgenticAuthoringTurnEngine {
             diagnostics.put("keywordFallbackApplied", false);
             diagnostics.put("semanticPolicyApplied", false);
             diagnostics.put("selectedCandidateUsesLexicalFallback", false);
+            diagnostics.put("selectedCandidateUsesBroadArtifactDiscovery", false);
             diagnostics.put("selectedCandidateUsesDomainAnchor", false);
             diagnostics.put("uiCompositionPlanUsesReferenceProvider", uiCompositionPlanUsesReferenceProvider(preview));
             diagnostics.put("uiCompositionPlanUsesHardcodedAnchor", uiCompositionPlanUsesHardcodedAnchor(preview));
@@ -636,10 +716,16 @@ public class AgenticAuthoringTurnEngine {
                 telemetry.path("selectedCandidateUsesLexicalFallback").asBoolean(false)
                         && !previewResourceSchemaVerified(preview);
         diagnostics.put("selectedCandidateUsesLexicalFallback", selectedCandidateUsesLexicalFallback);
+        boolean selectedCandidateUsesBroadArtifactDiscovery =
+                telemetry.path("selectedCandidateUsesBroadArtifactDiscovery").asBoolean(false)
+                        && !previewResourceSchemaVerified(preview);
+        diagnostics.put("selectedCandidateUsesBroadArtifactDiscovery", selectedCandidateUsesBroadArtifactDiscovery);
         diagnostics.put("selectedCandidateUsesDomainAnchor",
                 telemetry.path("selectedCandidateUsesDomainAnchor").asBoolean(false));
         diagnostics.put("candidateSetContainsLexicalFallback",
                 telemetry.path("candidateSetContainsLexicalFallback").asBoolean(false));
+        diagnostics.put("candidateSetContainsBroadArtifactDiscovery",
+                telemetry.path("candidateSetContainsBroadArtifactDiscovery").asBoolean(false));
         diagnostics.put("candidateSetContainsDomainAnchor",
                 telemetry.path("candidateSetContainsDomainAnchor").asBoolean(false));
         diagnostics.put("uiCompositionPlanUsesReferenceProvider", uiCompositionPlanUsesReferenceProvider(preview));
@@ -766,6 +852,7 @@ public class AgenticAuthoringTurnEngine {
         return Boolean.TRUE.equals(diagnostics.get("keywordFallbackApplied"))
                 || Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewRequired"))
                 || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesLexicalFallback"))
+                || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesBroadArtifactDiscovery"))
                 || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))
                 || Boolean.FALSE.equals(diagnostics.get("decisionValid"))
                 || Boolean.FALSE.equals(diagnostics.get("toolLoopCompleted"))
@@ -786,6 +873,9 @@ public class AgenticAuthoringTurnEngine {
         }
         if (Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesLexicalFallback"))) {
             return "weak-lexical-evidence";
+        }
+        if (Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesBroadArtifactDiscovery"))) {
+            return "broad-artifact-discovery-requires-grounding";
         }
         if (Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))) {
             return "resource-selection-domain-anchor";
@@ -1146,8 +1236,8 @@ public class AgenticAuthoringTurnEngine {
         }
         if (contains(intentResolution.warnings(), "llm-intent-resolution-second-pass-used")) {
             eventSink.append("thought.step", Map.of(
-                    "phase", "intent.resolve",
-                    "summary", "Refined resource candidates were reviewed by the LLM.",
+                    "phase", "intent.resolve.llm",
+                    "summary", "The LLM reviewed refined backend resource candidates.",
                     "diagnostics", secondPassDiagnostics(intentResolution)));
         }
     }
@@ -1223,9 +1313,357 @@ public class AgenticAuthoringTurnEngine {
 
     private String previewAssistantMessage(
             AgenticAuthoringPreviewResult preview,
-            AgenticAuthoringIntentResolutionResult intentResolution) {
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
+            String schemaBaseUrl) {
+        String catalogMessage = consultativeCatalogAssistantMessage(
+                intentResolution,
+                resourceDiscovery,
+                businessCatalogDiscovery,
+                schemaBaseUrl);
+        if (!catalogMessage.isBlank()) {
+            return catalogMessage;
+        }
         String message = preview == null ? "" : safeText(preview.assistantMessage());
         return !message.isBlank() ? message : safeText(intentResolution.assistantMessage());
+    }
+
+    private String consultativeCatalogAssistantMessage(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
+            String schemaBaseUrl) {
+        if (isPlatformGuidancePrompt(intentResolution == null ? "" : intentResolution.effectivePrompt())) {
+            return safeText(intentResolution == null ? "" : intentResolution.assistantMessage());
+        }
+        if (!isAdvisoryCatalogIntent(intentResolution)) {
+            if (!isUnresolvedAdvisoryIntent(intentResolution)
+                    || !hasDiscoveryCandidates(resourceDiscovery, businessCatalogDiscovery)) {
+                return "";
+            }
+        }
+        List<AgenticAuthoringCandidate> candidates = catalogCandidates(resourceDiscovery, businessCatalogDiscovery, intentResolution);
+        if (candidates.isEmpty()) {
+            return "Ainda nao encontrei fontes de dados governadas suficientes para responder com seguranca. "
+                    + "Posso tentar de novo com um recorte de area, entidade ou processo mais especifico.";
+        }
+        List<CatalogSchemaSummary> schemaSummaries = candidates.stream()
+                .limit(4)
+                .map(candidate -> catalogSchemaSummary(candidate, schemaBaseUrl))
+                .toList();
+        List<CatalogSchemaSummary> confirmedSchemas = schemaSummaries.stream()
+                .filter(summary -> summary.schemaConfirmed() && !summary.fields().isEmpty())
+                .toList();
+        String sources = humanJoin(candidates.stream()
+                .limit(4)
+                .map(this::businessResourceLabel)
+                .filter(label -> !label.isBlank())
+                .distinct()
+                .toList());
+        if (sources.isBlank()) {
+            sources = "fontes governadas do catalogo";
+        }
+        if (confirmedSchemas.isEmpty()) {
+            return "Encontrei dados em " + sources + ", mas ainda nao consegui confirmar os campos disponiveis. "
+                    + "Por enquanto, consigo explicar as fontes disponiveis e recomendar telas em nivel de negocio; "
+                    + "antes de materializar graficos, tabelas ou formularios, preciso validar os campos da fonte escolhida.";
+        }
+        StringBuilder message = new StringBuilder();
+        message.append("Encontrei dados governados em ").append(sources).append(". ");
+        message.append("Pelos campos confirmados, da para trabalhar com ");
+        message.append(confirmedSchemas.stream()
+                .map(summary -> schemaBusinessSummary(summary.label(), summary.fields()))
+                .limit(3)
+                .reduce((left, right) -> left + "; " + right)
+                .orElse(""));
+        message.append(". ");
+        message.append("Eu recomendaria ").append(screenRecommendations(candidates, confirmedSchemas));
+        message.append(". Quando voce pedir para criar, eu materializo usando apenas campos confirmados.");
+        return message.toString();
+    }
+
+    private List<AgenticAuthoringCandidate> catalogCandidates(
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
+        addCandidates(candidates, businessCatalogDiscovery == null ? null : businessCatalogDiscovery.candidates());
+        addCandidates(candidates, resourceDiscovery == null ? null : resourceDiscovery.candidates());
+        if (intentResolution != null) {
+            addCandidates(candidates, intentResolution.candidates());
+            if (intentResolution.selectedCandidate() != null) {
+                addCandidates(candidates, List.of(intentResolution.selectedCandidate()));
+            }
+        }
+        Set<String> seen = new LinkedHashSet<>();
+        return candidates.stream()
+                .filter(candidate -> candidate != null && StringUtils.hasText(candidate.resourcePath()))
+                .filter(candidate -> seen.add(normalizeText(candidate.resourcePath())))
+                .toList();
+    }
+
+    private void addCandidates(List<AgenticAuthoringCandidate> target, List<AgenticAuthoringCandidate> candidates) {
+        if (target == null || candidates == null) {
+            return;
+        }
+        candidates.stream()
+                .filter(Objects::nonNull)
+                .forEach(target::add);
+    }
+
+    private CatalogSchemaSummary catalogSchemaSummary(AgenticAuthoringCandidate candidate, String schemaBaseUrl) {
+        String label = businessResourceLabel(candidate);
+        if (schemaRetrievalService == null) {
+            return new CatalogSchemaSummary(label, false, List.of());
+        }
+        AiSchemaContext context = schemaContext(candidate);
+        if (context == null) {
+            return new CatalogSchemaSummary(label, false, List.of());
+        }
+        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(context, schemaBaseUrl);
+        if (schemaResult == null || !schemaResult.isSuccess()) {
+            return new CatalogSchemaSummary(label, false, List.of());
+        }
+        return new CatalogSchemaSummary(label, true, schemaFieldLabels(schemaResult.getSchema()));
+    }
+
+    private AiSchemaContext schemaContext(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        Map<String, String> query = queryParameters(candidate.schemaUrl());
+        String path = firstNonBlank(query.get("path"), candidate.submitUrl(), candidate.resourcePath());
+        String operation = firstNonBlank(query.get("operation"), candidate.submitMethod(), candidate.operation(), "get");
+        String schemaType = firstNonBlank(query.get("schemaType"), "response");
+        String businessPath = businessResourcePath(firstNonBlank(path, candidate.submitUrl(), candidate.resourcePath()));
+        if (isStatsPath(path) || isStatsPath(candidate.submitUrl()) || isStatsPath(candidate.resourcePath())) {
+            path = businessPath + "/filter/cursor";
+            operation = "post";
+            schemaType = "response";
+        }
+        if (!businessPath.isBlank() && normalizeText(path).equals(normalizeText(businessPath))
+                && "get".equalsIgnoreCase(operation)) {
+            path = businessPath + "/filter/cursor";
+            operation = "post";
+            schemaType = "response";
+        }
+        if (path.isBlank() || operation.isBlank() || schemaType.isBlank()) {
+            return null;
+        }
+        return AiSchemaContext.builder()
+                .path(path)
+                .operation(operation)
+                .schemaType(schemaType)
+                .build();
+    }
+
+    private Map<String, String> queryParameters(String url) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        String value = safeText(url);
+        int queryIndex = value.indexOf('?');
+        if (queryIndex < 0 || queryIndex == value.length() - 1) {
+            return parameters;
+        }
+        for (String pair : value.substring(queryIndex + 1).split("&")) {
+            if (pair.isBlank()) {
+                continue;
+            }
+            int equals = pair.indexOf('=');
+            String key = equals >= 0 ? pair.substring(0, equals) : pair;
+            String parameterValue = equals >= 0 ? pair.substring(equals + 1) : "";
+            parameters.put(urlDecode(key), urlDecode(parameterValue));
+        }
+        return parameters;
+    }
+
+    private String urlDecode(String value) {
+        try {
+            return java.net.URLDecoder.decode(safeText(value), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ex) {
+            return safeText(value);
+        }
+    }
+
+    private String businessResourcePath(String path) {
+        String value = safeText(path).trim();
+        int queryIndex = value.indexOf('?');
+        if (queryIndex >= 0) {
+            value = value.substring(0, queryIndex);
+        }
+        value = value.replaceAll("/+$", "");
+        if (value.endsWith("/filter/cursor")) {
+            return value.substring(0, value.length() - "/filter/cursor".length());
+        }
+        if (value.endsWith("/stats")) {
+            return value.substring(0, value.length() - "/stats".length());
+        }
+        return value;
+    }
+
+    private boolean isStatsPath(String path) {
+        String normalized = safeText(path).toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("/stats");
+    }
+
+    private List<String> schemaFieldLabels(JsonNode schema) {
+        LinkedHashSet<String> labels = new LinkedHashSet<>();
+        collectSchemaFieldLabels(schema, labels);
+        return labels.stream().limit(6).toList();
+    }
+
+    private void collectSchemaFieldLabels(JsonNode node, Set<String> labels) {
+        if (node == null || node.isMissingNode() || node.isNull() || labels.size() >= 8) {
+            return;
+        }
+        JsonNode properties = node.path("properties");
+        if (properties.isObject()) {
+            properties.fields().forEachRemaining(entry -> {
+                if (labels.size() >= 8 || shouldHideField(entry.getKey(), entry.getValue())) {
+                    return;
+                }
+                String label = firstNonBlank(
+                        entry.getValue().path("x-ui").path("label").asText(""),
+                        humanizeToken(entry.getKey()));
+                if (!label.isBlank()) {
+                    labels.add(label);
+                }
+            });
+        }
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> collectSchemaFieldLabels(entry.getValue(), labels));
+        } else if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectSchemaFieldLabels(item, labels);
+            }
+        }
+    }
+
+    private boolean shouldHideField(String fieldName, JsonNode field) {
+        JsonNode ui = field == null ? com.fasterxml.jackson.databind.node.MissingNode.getInstance() : field.path("x-ui");
+        String label = normalizeText(firstNonBlank(
+                ui.path("label").asText(""),
+                field == null ? "" : field.path("title").asText("")));
+        String normalizedFieldName = normalizeText(humanizeToken(fieldName));
+        return ui.path("tableHidden").asBoolean(false)
+                || ui.path("formHidden").asBoolean(false)
+                || "password".equalsIgnoreCase(ui.path("controlType").asText(""))
+                || isTechnicalIdentifier(normalizedFieldName)
+                || Set.of(
+                        "id",
+                        "uuid",
+                        "created at",
+                        "updated at",
+                        "created by",
+                        "updated by",
+                        "field",
+                        "granularity",
+                        "metric",
+                        "metrics",
+                        "points",
+                        "operation",
+                        "alias",
+                        "start",
+                        "end")
+                .contains(label);
+    }
+
+    private boolean isTechnicalIdentifier(String value) {
+        String normalized = safeText(value);
+        return "id".equals(normalized)
+                || "uuid".equals(normalized)
+                || normalized.endsWith(" id")
+                || normalized.endsWith(" uuid");
+    }
+
+    private String schemaBusinessSummary(String label, List<String> fields) {
+        if (fields == null || fields.isEmpty()) {
+            return safeText(label);
+        }
+        return safeText(label) + " cobrindo " + humanJoin(fields);
+    }
+
+    private String screenRecommendations(
+            List<AgenticAuthoringCandidate> candidates,
+            List<CatalogSchemaSummary> confirmedSchemas) {
+        List<String> recommendations = new ArrayList<>();
+        recommendations.add("uma lista com filtros e detalhe para consulta operacional");
+        if (hasCandidate(candidates, "analytics")
+                || hasCandidate(candidates, "analit")
+                || hasCandidate(candidates, "indicador")
+                || hasCandidate(candidates, "folha")) {
+            recommendations.add("um dashboard para acompanhar indicadores e distribuicoes confirmadas pelo schema");
+        }
+        if (hasCandidate(candidates, "historico")
+                || hasCandidate(candidates, "eventos")
+                || hasCandidate(candidates, "history")
+                || hasField(confirmedSchemas, "data inicio")
+                || hasField(confirmedSchemas, "data fim")) {
+            recommendations.add("uma aba de historico ou linha do tempo para mudancas e eventos");
+        }
+        if (hasCandidate(candidates, "cargo")
+                || hasCandidate(candidates, "departamento")
+                || hasField(confirmedSchemas, "cargo")
+                || hasField(confirmedSchemas, "departamento")) {
+            recommendations.add("visoes de apoio para cargo, departamento e segmentacao");
+        }
+        return humanJoin(recommendations);
+    }
+
+    private boolean hasField(List<CatalogSchemaSummary> summaries, String token) {
+        String normalizedToken = normalizeText(token);
+        return summaries != null && summaries.stream()
+                .filter(Objects::nonNull)
+                .flatMap(summary -> summary.fields() == null ? java.util.stream.Stream.empty() : summary.fields().stream())
+                .anyMatch(field -> normalizeText(field).contains(normalizedToken));
+    }
+
+    private String businessResourceLabel(AgenticAuthoringCandidate candidate) {
+        String path = businessResourcePath(candidate == null ? "" : candidate.resourcePath());
+        if (path.isBlank()) {
+            return "";
+        }
+        int slash = path.lastIndexOf('/');
+        String last = slash >= 0 ? path.substring(slash + 1) : path;
+        return humanizeToken(last.replace("vw-", ""));
+    }
+
+    private String humanizeToken(String value) {
+        String[] parts = safeText(value)
+                .replace('_', '-')
+                .replaceAll("([a-z])([A-Z])", "$1-$2")
+                .split("-+");
+        List<String> words = new ArrayList<>();
+        for (String part : parts) {
+            if (part.isBlank()) {
+                continue;
+            }
+            words.add(part.substring(0, 1).toUpperCase(java.util.Locale.ROOT)
+                    + part.substring(1).toLowerCase(java.util.Locale.ROOT));
+        }
+        return String.join(" ", words);
+    }
+
+    private String humanJoin(List<String> values) {
+        List<String> clean = values == null
+                ? List.of()
+                : values.stream().filter(StringUtils::hasText).distinct().toList();
+        if (clean.isEmpty()) {
+            return "";
+        }
+        if (clean.size() == 1) {
+            return clean.get(0);
+        }
+        if (clean.size() == 2) {
+            return clean.get(0) + " e " + clean.get(1);
+        }
+        return String.join(", ", clean.subList(0, clean.size() - 1)) + " e " + clean.get(clean.size() - 1);
+    }
+
+    private boolean hasCandidate(List<AgenticAuthoringCandidate> candidates, String token) {
+        String normalizedToken = normalizeText(token);
+        return candidates != null && candidates.stream()
+                .anyMatch(candidate -> normalizeText(candidate.resourcePath()).contains(normalizedToken));
     }
 
     private String groundedPreviewAssistantMessage(
@@ -1239,11 +1677,11 @@ public class AgenticAuthoringTurnEngine {
         }
         String artifactKind = intentResolution == null ? "" : safeText(intentResolution.artifactKind());
         if ("dashboard".equals(artifactKind)) {
-            return "Criei uma pre-visualizacao de dashboard analitico com a fonte confirmada pelo schema da API. "
-                    + "Ele ja inclui grafico, filtros, KPIs e tabela de detalhe conectada; revise a pre-visualizacao "
+            return "Montei uma primeira versao de dashboard com a fonte confirmada. "
+                    + "Ela ja inclui grafico, filtros, KPIs e tabela de detalhe conectada; revise a pre-visualizacao "
                     + "e salve quando estiver de acordo.";
         }
-        return "Criei uma pre-visualizacao com a fonte confirmada pelo schema da API. "
+        return "Montei uma primeira versao com a fonte confirmada. "
                 + "Revise o resultado e salve quando estiver de acordo.";
     }
 
@@ -1254,50 +1692,69 @@ public class AgenticAuthoringTurnEngine {
                 || "pre visualizacao pronta".equals(normalized);
     }
 
-    private String advisoryCatalogAssistantMessage(
-            AgenticAuthoringTurnStreamRequest request,
-            AgenticAuthoringTurnRoute route,
-            AgenticAuthoringIntentResolutionResult intentResolution) {
-        if (apiCatalogConversationService == null
-                || route == null
-                || route.allowsPreview()
-                || !isBusinessAnalyticsCatalogQuestion(request.userPrompt())) {
-            return "";
-        }
-        AgenticAuthoringApiCatalogConversationService.ApiCatalogConversationAnswer answer =
-                apiCatalogConversationService.answer(
-                        request.userPrompt(),
-                        intentResolution == null ? null : intentResolution.selectedCandidate(),
-                        intentResolution == null || intentResolution.candidates() == null
-                                ? List.of()
-                                : intentResolution.candidates());
-        return answer == null ? "" : safeText(answer.assistantMessage());
-    }
-
-    private boolean isBusinessAnalyticsCatalogQuestion(String prompt) {
-        String normalized = normalizeText(prompt);
-        boolean asksForDiscovery = containsAnyText(normalized,
-                "catalogo", "catalog", "recursos", "recurso", "areas", "area", "dados", "disponiveis", "disponibilidade",
-                "quais", "descobrir", "descoberta", "opcoes", "fonte", "fontes");
-        boolean asksForAnalytics = containsAnyText(normalized,
-                "grafico", "graficos", "chart", "dashboard", "painel", "indicador", "indicadores", "kpi", "metricas", "analitica", "analitico");
-        boolean businessLanguage = containsAnyText(normalized,
-                "negocio", "gestor", "pessoas", "folha", "operacoes", "ativos", "compras", "riscos", "sem endpoints", "linguagem simples");
-        boolean postponesAuthoring = containsAnyText(normalized,
-                "ainda nao quero criar", "nao quero criar", "antes de escolher", "antes de criar", "primeiro descobrir");
-        return asksForDiscovery && asksForAnalytics && (businessLanguage || postponesAuthoring);
-    }
-
-    private boolean containsAnyText(String value, String... tokens) {
-        if (value == null || value.isBlank()) {
+    private boolean isAdvisoryCatalogIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
             return false;
         }
-        for (String token : tokens) {
-            if (token != null && !token.isBlank() && value.contains(token)) {
-                return true;
-            }
+        String operationKind = safeText(intentResolution.operationKind());
+        String artifactKind = safeText(intentResolution.artifactKind());
+        String changeKind = safeText(intentResolution.changeKind());
+        return ("explore".equals(operationKind) || "explain".equals(operationKind))
+                && "api_catalog".equals(artifactKind)
+                && ("answer_api_catalog_question".equals(changeKind)
+                || "answer_catalog_question".equals(changeKind)
+                || "api_catalog_followup".equals(changeKind));
+    }
+
+    private boolean isPlatformGuidancePrompt(String prompt) {
+        String normalized = normalizeText(prompt);
+        if (normalized.isBlank()) {
+            return false;
         }
-        return false;
+        boolean question = containsAny(normalized,
+                "o que posso", "o que consigo", "o que da para", "o que dá para",
+                "o que voce pode", "o que você pode", "como faco", "como faço",
+                "como criar", "como montar", "quais componentes", "que componentes",
+                "quais widgets", "que widgets", "quais telas", "que telas",
+                "quais paginas", "que paginas", "posso criar", "daria para criar",
+                "da para criar", "dá para criar", "posso montar", "posso fazer");
+        boolean platformSubject = containsAny(normalized,
+                "aqui", "praxis", "page builder", "builder", "assistente",
+                "componente", "componentes", "widget", "widgets",
+                "tela", "telas", "pagina", "paginas", "dashboard", "painel",
+                "formulario", "formulário", "tabela", "grafico", "gráfico",
+                "aba", "abas", "tabs", "stepper", "administrativo", "admin",
+                "livremente", "predefinido", "predefinidos", "pre definido", "pre definidos");
+        boolean dataCatalogSubject = containsAny(normalized,
+                "dados", "fonte", "fontes", "api", "apis", "schema", "schemas",
+                "campo", "campos", "recurso", "recursos", "entidade", "entidades");
+        boolean formPolicySubject = containsAny(normalized,
+                "formulario", "formulário", "livre", "livremente",
+                "predefinido", "predefinidos", "pre definido", "pre definidos",
+                "governado", "governada");
+        return question && platformSubject && (!dataCatalogSubject || formPolicySubject);
+    }
+
+    private boolean isUnresolvedAdvisoryIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
+            return false;
+        }
+        String operationKind = safeText(intentResolution.operationKind());
+        String artifactKind = safeText(intentResolution.artifactKind());
+        return !intentResolution.valid()
+                || "unknown".equals(operationKind)
+                || "unknown".equals(artifactKind);
+    }
+
+    private boolean hasDiscoveryCandidates(
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery) {
+        return (resourceDiscovery != null
+                && resourceDiscovery.candidates() != null
+                && !resourceDiscovery.candidates().isEmpty())
+                || (businessCatalogDiscovery != null
+                && businessCatalogDiscovery.candidates() != null
+                && !businessCatalogDiscovery.candidates().isEmpty());
     }
 
     private String normalizeText(String value) {
@@ -1305,6 +1762,18 @@ public class AgenticAuthoringTurnEngine {
                 .replaceAll("\\p{M}", "")
                 .toLowerCase()
                 .trim();
+    }
+
+    private boolean containsAny(String value, String... needles) {
+        if (value == null || value.isBlank() || needles == null) {
+            return false;
+        }
+        for (String needle : needles) {
+            if (needle != null && !needle.isBlank() && value.contains(normalizeText(needle))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Map<String, Object> safeDiagnostics(AgenticAuthoringTurnStreamRequest request) {
@@ -1324,8 +1793,23 @@ public class AgenticAuthoringTurnEngine {
         return value != null && !value.isBlank() ? value : fallback;
     }
 
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
     private String safeText(String value) {
         return value != null ? value : "";
+    }
+
+    record CatalogSchemaSummary(String label, boolean schemaConfirmed, List<String> fields) {
     }
 
     record AgenticAuthoringTurnState(

@@ -36,7 +36,7 @@
     {
       "id": "praxis-table.column.visibility@0.1.0",
       "changeKind": "set_column_visibility",
-      "triggerTerms": ["ocultar", "oculte", "esconder", "esconda"],
+      "triggerTerms": ["ocultar", "oculte", "esconder", "esconda", "deixe somente", "deixar somente", "somente", "apenas", "mantenha as colunas", "manter colunas"],
       "fieldAliases": [
         { "field": "salarioLiquido", "aliases": ["salario liquido", "salarioLiquido", "liquido"] },
         { "field": "salarioBruto", "aliases": ["salario bruto", "salarioBruto", "bruto"] },

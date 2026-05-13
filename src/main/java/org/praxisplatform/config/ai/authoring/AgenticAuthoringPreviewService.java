@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -657,8 +658,8 @@ public class AgenticAuthoringPreviewService {
         if (field.hasEnum()) {
             return true;
         }
-        if (containsAnyToken(field.fieldTokens(), "data", "date", "pagamento")
-                || containsAnyToken(field.labelTokens(), "data", "date", "pagamento")) {
+        if (containsAnyToken(field.fieldTokens(), "data", "date")
+                || containsAnyToken(field.labelTokens(), "data", "date")) {
             return false;
         }
         if (type.isBlank()) {
@@ -860,6 +861,9 @@ public class AgenticAuthoringPreviewService {
         if (kpis.isMissingNode()) {
             kpis = widget.path("inputs").path("document").path("kpis");
         }
+        if (kpis.isMissingNode()) {
+            kpis = widget.path("inputs").path("document").path("nodes").path(0).path("items");
+        }
         if (!(kpis instanceof ArrayNode kpiArray)) {
             return;
         }
@@ -1029,26 +1033,19 @@ public class AgenticAuthoringPreviewService {
         if (containsAnyToken(tokens, "categoria", "classe", "tipo", "natureza")) {
             score += 90;
         }
-        if (containsAnyToken(tokens, "departamento", "area", "equipe", "time", "setor")) {
-            score += 85;
-        }
         if (containsAnyToken(tokens, "mes", "competencia", "periodo")) {
             score += 80;
         }
         if (containsAnyToken(tokens, "ano", "exercicio")) {
             score += 75;
         }
-        if (containsAnyToken(tokens, "data", "created", "criacao", "pagamento")) {
+        if (containsAnyToken(tokens, "data", "created", "criacao")) {
             score += 60;
-        }
-        if (containsAnyToken(tokens, "funcionario", "responsavel", "owner", "pessoa", "cliente")) {
-            score += 45;
         }
         if (containsAnyToken(tokens, "id", "uuid", "codigo")) {
             score -= 80;
         }
         if (containsAnyToken(tokens,
-                "salario",
                 "valor",
                 "total",
                 "quantidade",
@@ -1177,16 +1174,16 @@ public class AgenticAuthoringPreviewService {
         boolean monitoringIntent = containsAny(prompt,
                 "monitorar", "acompanhar", "controlar", "painel de controle", "observabilidade");
         int operationalAxes = 0;
-        if (containsAny(prompt, "gravidade", "severidade", "prioridade", "risco", "riscos")) {
+        if (containsAny(prompt, "gravidade", "severidade", "prioridade")) {
             operationalAxes++;
         }
-        if (containsAny(prompt, "andamento", "status", "situacao", "etapa", "fila", "atendimento")) {
+        if (containsAny(prompt, "andamento", "status", "situacao", "etapa", "fila")) {
             operationalAxes++;
         }
-        if (containsAny(prompt, "responsavel", "dono", "owner", "equipe", "time")) {
+        if (containsAny(prompt, "responsavel", "dono", "owner")) {
             operationalAxes++;
         }
-        if (containsAny(prompt, "chamado", "chamados", "ocorrencia", "ocorrencias", "incidente", "incidentes", "caso", "casos")) {
+        if (containsAny(prompt, "ocorrencia", "ocorrencias", "caso", "casos")) {
             operationalAxes++;
         }
         return monitoringIntent && operationalAxes >= 2;
@@ -1242,13 +1239,17 @@ public class AgenticAuthoringPreviewService {
             List<String> failureCodes) {
         if (!valid) {
             if (failureCodes != null && failureCodes.contains("semantic-preview-chart-required")) {
-                return "Encontrei a fonte de dados, mas a pre-visualizacao nao materializou o grafico solicitado. Vou manter em revisao ate gerar um plano com componente analitico.";
+                return "Encontrei a fonte certa, mas ainda nao consegui montar o grafico pedido com seguranca. Vou deixar a proposta em revisao e ajustar a visualizacao antes de voce salvar.";
             }
             if (failureCodes != null && failureCodes.contains("semantic-preview-operational-dashboard-required")) {
-                return "Encontrei a fonte de dados, mas a pre-visualizacao nao materializou um dashboard de monitoramento. Vou manter em revisao ate gerar indicadores, grafico e detalhe operacional.";
+                return "Encontrei a fonte certa, mas a tela ainda nao virou um dashboard operacional completo. Vou manter em revisao ate incluir indicadores, graficos e detalhe conectado de forma coerente.";
             }
             if (failureCodes != null && failureCodes.contains("semantic-preview-axis-schema-verification-required")) {
-                return "Encontrei a fonte de dados, mas alguns eixos analiticos do grafico nao puderam ser confirmados ou usados com seguranca no schema. Vou manter em revisao ate regenerar o plano com eixos compativeis.";
+                return "Encontrei a base de dados, mas ainda nao consegui confirmar campos seguros para alguns graficos. Vou manter a proposta em revisao e sugerir eixos compativeis antes de aplicar.";
+            }
+            if (failureCodes != null
+                    && failureCodes.contains(AgenticAuthoringSemanticMaterializationPolicy.PRIMARY_COMPONENT_REQUIRED_FAILURE)) {
+                return "Entendi o componente que voce pediu, mas a pre-visualizacao ainda nao montou esse componente com seguranca. Vou manter em revisao e ajustar a tela antes de aplicar.";
             }
             if (failureCodes != null && failureCodes.stream()
                     .filter(Objects::nonNull)
@@ -1266,33 +1267,44 @@ public class AgenticAuthoringPreviewService {
         if (AgenticAuthoringSemanticMaterializationPolicy.containsComponent(uiCompositionPlan, "praxis-chart")) {
             SemanticAxisAssistantSummary axisSummary = semanticAxisAssistantSummary(uiCompositionPlan);
             String visualization = axisSummary.verifiedAxes().isEmpty()
-                    ? "grafico conectado ao recorte analitico solicitado"
-                    : "grafico por " + joinHuman(axisSummary.verifiedAxes()) + ", validado em /schemas/filtered";
+                    ? "inclui um grafico conectado ao recorte que voce pediu"
+                    : "inclui grafico por " + joinHuman(axisSummary.verifiedAxes());
             String governance = axisSummary.unsupportedAxes().isEmpty()
-                    ? "campos semanticos verificados antes da materializacao"
-                    : "nao criei graficos para " + joinHuman(axisSummary.unsupportedAxes())
-                    + " porque esses campos nao aparecem no schema da fonte";
-            return "Criei uma pre-visualizacao de dashboard analitico.\n\n"
-                    + "- Fonte governada: \"" + resourceLabel + "\".\n"
-                    + "- Visualizacao: " + visualization + ".\n"
-                    + "- Governanca: " + governance + ".\n"
-                    + "- Apoio: " + detailSupportAssistantLine(uiCompositionPlan) + ".";
+                    ? "conferi os campos antes de montar a proposta"
+                    : "deixei de fora " + joinHuman(axisSummary.unsupportedAxes())
+                    + " porque ainda nao encontrei esses campos com seguranca";
+            if (isSingleChartPlan(uiCompositionPlan)) {
+                return "Montei um grafico usando \"" + resourceLabel + "\". "
+                        + sentenceWithPeriod(visualization)
+                        + " " + sentenceWithPeriod(governance)
+                        + " Nao inclui tabela, filtros nem KPIs.";
+            }
+            return "Montei uma primeira versao de dashboard usando \"" + resourceLabel + "\". "
+                    + sentenceWithPeriod(visualization)
+                    + " " + sentenceWithPeriod(governance)
+                    + " Tambem mantive " + detailSupportAssistantLine(uiCompositionPlan).toLowerCase(Locale.ROOT)
+                    + " para apoiar a revisao.";
         }
         if (containsComponent(uiCompositionPlan, "praxis-table")) {
             if (containsRichTableRendering(uiCompositionPlan)) {
-                return "Criei uma pre-visualizacao com tabela semantica.\n\n"
-                        + "- Fonte governada: \"" + resourceLabel + "\".\n"
-                        + "- Tabela: colunas semanticas, valores formatados, chips, icones e acoes por linha.\n"
-                        + "- Proximo passo: revise os detalhes ou peca uma visualizacao analitica.";
+                return "Montei uma primeira versao usando \"" + resourceLabel + "\". "
+                        + "A tabela ja vem com colunas organizadas, valores formatados e acoes por linha. "
+                        + "Revise os detalhes ou me peca uma visualizacao analitica se quiser enxergar tendencias.";
             }
-            return "Criei uma pre-visualizacao com tabela conectada.\n\n"
-                    + "- Fonte de dados: \"" + resourceLabel + "\".\n"
-                    + "- Tabela: conectada ao recurso para carregar schema e dados.\n"
-                    + "- Proximo passo: revise as colunas, peca um grafico ou salve a pagina.";
+            return "Montei uma primeira versao usando \"" + resourceLabel + "\" como base. "
+                    + "Deixei a tabela conectada para voce revisar as informacoes e ajustar as colunas. "
+                    + "Se fizer sentido, posso transformar isso em um dashboard com graficos.";
         }
-        return "Criei uma pre-visualizacao para revisao.\n\n"
-                + "- Fonte de dados: \"" + resourceLabel + "\".\n"
-                + "- Proximo passo: revise o resultado e salve a pagina quando estiver de acordo.";
+        return "Montei uma primeira versao usando \"" + resourceLabel + "\". "
+                + "Revise o resultado e salve quando estiver de acordo.";
+    }
+
+    private String sentenceWithPeriod(String value) {
+        String normalized = value(value).trim();
+        if (normalized.isBlank()) {
+            return "";
+        }
+        return normalized.endsWith(".") ? normalized : normalized + ".";
     }
 
     private String governedReviewAssistantMessage(
@@ -1302,19 +1314,22 @@ public class AgenticAuthoringPreviewService {
         String resourceLabel = candidate == null || value(candidate.resourcePath()).isBlank()
                 ? "a fonte encontrada"
                 : titleFromResourcePath(candidate.resourcePath());
-        String prompt = normalize(intentResolution == null ? "" : intentResolution.effectivePrompt());
-        String subject = containsAny(prompt, "pessoa", "pessoas", "funcionario", "funcionarios", "colaborador", "colaboradores")
-                ? "pessoas da empresa"
-                : resourceLabel;
         if (containsComponent(uiCompositionPlan, "praxis-table")) {
-            return "Montei uma primeira pre-visualizacao de tabela para " + subject + ".\n\n"
+            return "Montei uma primeira pre-visualizacao de tabela para " + resourceLabel + ".\n\n"
                     + "- Fonte usada: \"" + resourceLabel + "\".\n"
                     + "- O que ja foi criado: uma tabela conectada, com colunas vindas do schema da fonte.\n"
                     + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
                     + "- Como prosseguir: confirme que esta fonte esta correta, peca ajustes nas colunas ou diga \"salvar esta tabela\".";
         }
         if (containsComponent(uiCompositionPlan, "praxis-chart")) {
-            return "Montei uma primeira pre-visualizacao de dashboard para " + subject + ".\n\n"
+            if (isSingleChartPlan(uiCompositionPlan)) {
+                return "Montei uma primeira pre-visualizacao de grafico para " + resourceLabel + ".\n\n"
+                        + "- Fonte usada: \"" + resourceLabel + "\".\n"
+                        + "- O que ja foi criado: um grafico conectado ao recorte pedido.\n"
+                        + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
+                        + "- Como prosseguir: confirme a fonte, peca outro recorte ou diga \"salvar este grafico\".";
+            }
+            return "Montei uma primeira pre-visualizacao de dashboard para " + resourceLabel + ".\n\n"
                     + "- Fonte usada: \"" + resourceLabel + "\".\n"
                     + "- O que ja foi criado: componentes analiticos conectados ao schema da fonte.\n"
                     + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
@@ -1407,6 +1422,12 @@ public class AgenticAuthoringPreviewService {
 
     private boolean containsComponent(JsonNode uiCompositionPlan, String componentId) {
         return AgenticAuthoringSemanticMaterializationPolicy.containsComponent(uiCompositionPlan, componentId);
+    }
+
+    private boolean isSingleChartPlan(JsonNode uiCompositionPlan) {
+        return uiCompositionPlan != null
+                && ("single-chart-page".equals(value(uiCompositionPlan.path("layoutPreset").asText()))
+                || "single-chart".equals(value(uiCompositionPlan.path("compositionConstraints").path("mode").asText())));
     }
 
     private boolean containsRichTableRendering(JsonNode uiCompositionPlan) {

@@ -3119,13 +3119,94 @@ public final class AgenticAuthoringValidatorRegistry {
     }
 
     private void validateInputFieldsExist(String operationId, JsonNode input, JsonNode config, List<String> failures) {
-        Set<String> existing = new HashSet<>();
-        config.path("columns").forEach(column -> existing.add(text(column, "field")));
-        config.path("fieldMetadata").forEach(field -> existing.add(text(field, "name")));
+        Set<String> existing = filterOperation(operationId) ? knownFilterFields(config) : knownTableFields(config);
         for (String field : inputFields(input)) {
             if (!field.isBlank() && !existing.contains(field)) {
                 failures.add("validator fields-exist failed for " + operationId + ": unknown field " + field);
             }
+        }
+    }
+
+    private boolean filterOperation(String operationId) {
+        return operationId != null && operationId.startsWith("filter.");
+    }
+
+    private Set<String> knownTableFields(JsonNode config) {
+        Set<String> existing = new HashSet<>();
+        collectFieldNames(config.path("columns"), existing);
+        collectFieldNames(config.path("fieldMetadata"), existing);
+        return existing;
+    }
+
+    private Set<String> knownFilterFields(JsonNode config) {
+        Set<String> existing = new HashSet<>();
+        for (String path : List.of(
+                "filterRequestFieldMetadata",
+                "filterFieldMetadata",
+                "filterSchemaFields",
+                "schemaVerification.filterFields",
+                "inputs.filterRequestFieldMetadata",
+                "inputs.filterFieldMetadata",
+                "inputs.filterSchemaFields",
+                "inputs.schemaVerification.filterFields")) {
+            collectFieldNames(resolvePath(config, path), existing);
+        }
+        for (String path : List.of(
+                "filterRequestSchema",
+                "filterSchema",
+                "requestSchema",
+                "schemas.filterRequest",
+                "schemas.filter",
+                "schemaVerification.filterRequestSchema",
+                "inputs.filterRequestSchema",
+                "inputs.filterSchema",
+                "inputs.requestSchema",
+                "inputs.schemas.filterRequest",
+                "inputs.schemas.filter",
+                "inputs.schemaVerification.filterRequestSchema")) {
+            collectJsonSchemaPropertyNames(resolvePath(config, path), existing);
+        }
+        if (existing.isEmpty()) {
+            existing.addAll(knownTableFields(config));
+        }
+        return existing;
+    }
+
+    private void collectFieldNames(JsonNode fieldsNode, Set<String> fields) {
+        if (fieldsNode == null || !fieldsNode.isArray()) {
+            return;
+        }
+        for (JsonNode field : fieldsNode) {
+            if (field.isTextual()) {
+                addIfNotBlank(fields, field.asText(""));
+            } else if (field.isObject()) {
+                addIfNotBlank(fields, firstNonBlank(text(field, "name"), text(field, "field"), text(field, "id")));
+            }
+        }
+    }
+
+    private void collectJsonSchemaPropertyNames(JsonNode schema, Set<String> fields) {
+        if (schema == null || schema.isMissingNode() || schema.isNull()) {
+            return;
+        }
+        JsonNode properties = schema.path("properties");
+        if (properties.isObject()) {
+            Iterator<String> names = properties.fieldNames();
+            while (names.hasNext()) {
+                addIfNotBlank(fields, names.next());
+            }
+        }
+        for (String combinator : List.of("allOf", "anyOf", "oneOf")) {
+            JsonNode branches = schema.path(combinator);
+            if (branches.isArray()) {
+                branches.forEach(branch -> collectJsonSchemaPropertyNames(branch, fields));
+            }
+        }
+    }
+
+    private void addIfNotBlank(Set<String> fields, String field) {
+        if (field != null && !field.isBlank()) {
+            fields.add(field);
         }
     }
 
@@ -3138,6 +3219,13 @@ public final class AgenticAuthoringValidatorRegistry {
         String field = text(input, "field");
         if (!field.isBlank()) {
             fields.add(field);
+        }
+        JsonNode settings = input.path("settings");
+        for (String fieldArray : List.of("alwaysVisibleFields", "selectedFieldIds")) {
+            JsonNode array = settings.path(fieldArray);
+            if (array.isArray()) {
+                array.forEach(fieldName -> fields.add(fieldName.asText("")));
+            }
         }
         return fields;
     }

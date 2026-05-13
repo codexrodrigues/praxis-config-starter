@@ -122,7 +122,7 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isBusinessAuthoringRequest(prompt)) {
             return "table";
         }
-        if (containsAny(prompt, "formulario", "form", "campo", "campos", "cadastrar", "cadastro", "abrir chamado")) {
+        if (containsAny(prompt, "formulario", "form", "campo", "campos", "cadastrar", "cadastro")) {
             return "form";
         }
         if (target != null && "praxis-dynamic-form".equals(target.componentId())
@@ -348,7 +348,6 @@ final class AgenticAuthoringKeywordFallbackResolver {
         return containsAny(prompt,
                 "painel bonito", "painel executivo", "painel gerencial", "painel analitico",
                 "painel analítico", "painel de controle", "painel de indicadores",
-                "pagamento", "pagamentos", "folha", "salario", "salarios", "remuneracao",
                 "visualizar", "ver", "visao", "visão", "acompanhar", "monitorar",
                 "analise", "analisar", "comparar", "comparativo");
     }
@@ -380,14 +379,8 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 "indicador", "indicadores", "visao", "visão", "tela", "detalhes", "status",
                 "prioridade", "valor", "valores", "custo", "custos", "evolucao", "evolução",
                 "atividade", "atividades", "responsavel", "responsável", "etapa", "local",
-                "locais", "base", "bases", "acesso", "acessos", "area", "areas",
-                "setor", "setores", "funcao", "funcoes", "função", "funções", "cargo",
-                "cargos", "estrutura", "time", "times", "fornecedor", "fornecedores",
-                "parceiro", "parceiros", "pedido", "pedidos", "contrato", "contratos",
-                "produto", "produtos", "item", "itens", "equipamento", "equipamentos",
-                "frota", "carro", "carros", "veiculo", "veiculos", "recurso", "recursos",
-                "ameaca", "ameacas", "perigo", "perigos", "severidade",
-                "atendimento", "atendimentos", "rua", "caso", "casos", "andamento");
+                "locais", "base", "bases", "acesso", "acessos", "estrutura",
+                "item", "itens", "recurso", "recursos", "severidade", "andamento");
     }
 
     private boolean isOperationalTrackingPrompt(String prompt) {
@@ -398,14 +391,11 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 && containsAny(prompt,
                 "status", "situacao", "situação", "prioridade", "detalhe", "detalhes",
                 "contato", "prazo", "periodo", "período", "disponibilidade", "manutencao",
-                "manutenção", "aprovacao", "aprovação", "vigencia", "vigência", "risco",
-                "riscos", "fornecedor", "parceiro", "frota", "carro", "veiculo", "veículo",
-                "item", "itens", "equipamento", "equipamentos", "atividade", "atividades",
+                "manutenção", "aprovacao", "aprovação", "vigencia", "vigência",
+                "item", "itens", "atividade", "atividades",
                 "responsavel", "responsável", "atraso", "atrasos", "base", "bases",
                 "acesso", "acessos", "local", "locais", "usado", "usados", "uso", "usos",
-                "area", "areas", "setor", "setores", "funcao", "funcoes", "cargo",
-                "cargos", "estrutura", "pedido", "pedidos", "contrato", "contratos",
-                "produto", "produtos", "atendimento", "atendimentos", "rua", "caso",
+                "estrutura", "contrato", "contratos", "caso",
                 "casos", "andamento", "recurso", "recursos");
     }
 
@@ -416,16 +406,16 @@ final class AgenticAuthoringKeywordFallbackResolver {
         boolean monitoringIntent = containsAny(prompt,
                 "monitorar", "acompanhar", "controlar", "painel de controle", "observabilidade");
         int operationalAxes = 0;
-        if (containsAny(prompt, "gravidade", "severidade", "prioridade", "risco", "riscos")) {
+        if (containsAny(prompt, "gravidade", "severidade", "prioridade")) {
             operationalAxes++;
         }
-        if (containsAny(prompt, "andamento", "status", "situacao", "situação", "etapa", "fila", "atendimento")) {
+        if (containsAny(prompt, "andamento", "status", "situacao", "situação", "etapa", "fila")) {
             operationalAxes++;
         }
-        if (containsAny(prompt, "responsavel", "responsável", "dono", "owner", "equipe", "time")) {
+        if (containsAny(prompt, "responsavel", "responsável", "dono", "owner")) {
             operationalAxes++;
         }
-        if (containsAny(prompt, "chamado", "chamados", "ocorrencia", "ocorrencias", "incidente", "incidentes", "caso", "casos")) {
+        if (containsAny(prompt, "ocorrencia", "ocorrencias", "caso", "casos")) {
             operationalAxes++;
         }
         return monitoringIntent && operationalAxes >= 2;

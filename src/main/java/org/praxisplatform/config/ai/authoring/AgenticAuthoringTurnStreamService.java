@@ -1,7 +1,11 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
@@ -12,8 +16,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.AiThread;
@@ -44,10 +48,12 @@ public class AgenticAuthoringTurnStreamService {
     private final AiTurnService turnService;
     private final AiTurnEventService turnEventService;
     private final AiStreamAccessTokenService streamAccessTokenService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final Map<UUID, Set<SseEmitter>> emittersByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> replayCursorByStream = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> replayTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledFuture<?>> heartbeatTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> processingTimeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
@@ -64,6 +70,9 @@ public class AgenticAuthoringTurnStreamService {
 
     @Value("${praxis.ai.stream.processing-poll-seconds:1}")
     private long processingPollSeconds;
+
+    @Value("${praxis.ai.stream.heartbeat-seconds:15}")
+    private long heartbeatSeconds;
 
     @Value("${praxis.ai.stream.processing-timeout-seconds:180}")
     private long processingTimeoutSeconds;
@@ -155,6 +164,7 @@ public class AgenticAuthoringTurnStreamService {
             replayCursorByStream.get(streamId).set(Math.max(replayCursorByStream.get(streamId).get(), event.getSeq()));
         }
         ensureReplay(streamId, principalContext);
+        ensureHeartbeat(streamId, replay.ownership());
         AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
         if (tail != null && turnEventService.isTerminalType(tail.getType())) {
             complete(streamId);
@@ -272,7 +282,7 @@ public class AgenticAuthoringTurnStreamService {
             try {
                 StreamAppendResult terminalResult = appendAndEmit(principalContext, streamId, threadId, turnId, "error", Map.of(
                         "message", "Agentic authoring stream timed out before producing a final response.",
-                        "assistantMessage", "The assistant took too long to finish this request. Try again with a narrower request or review the active context.",
+                        "assistantMessage", "Demorei demais para concluir essa resposta. Tente de novo com um pedido um pouco mais direto ou confirme qual fonte de negocio devo usar.",
                         "code", "agentic-authoring-timeout",
                         "phase", "agentic-authoring",
                         "timeoutSeconds", timeoutSeconds));
@@ -306,6 +316,99 @@ public class AgenticAuthoringTurnStreamService {
         }, Math.max(1, processingPollSeconds), Math.max(1, processingPollSeconds), TimeUnit.SECONDS));
     }
 
+    private void ensureHeartbeat(UUID streamId, AiTurnEventService.StreamOwnership ownership) {
+        if (heartbeatSeconds <= 0 || streamId == null) {
+            return;
+        }
+        heartbeatTasks.computeIfAbsent(streamId, ignored -> scheduler.scheduleAtFixedRate(
+                () -> heartbeat(streamId, ownership),
+                heartbeatSeconds,
+                heartbeatSeconds,
+                TimeUnit.SECONDS));
+    }
+
+    private void heartbeat(UUID streamId, AiTurnEventService.StreamOwnership ownership) {
+        try {
+            Set<SseEmitter> emitters = emittersByStream.get(streamId);
+            if (emitters == null || emitters.isEmpty()) {
+                stopHeartbeat(streamId);
+                return;
+            }
+            AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+            if (tail != null && turnEventService.isTerminalType(tail.getType())) {
+                stopHeartbeat(streamId);
+                return;
+            }
+            emitHeartbeatKeepAlive(streamId, ownership, tail);
+        } catch (Exception ex) {
+            log.debug("[AgenticAuthoringTurnStreamService] Heartbeat skipped for stream {}: {}",
+                    streamId,
+                    ex.getMessage());
+        }
+    }
+
+    private void emitHeartbeatKeepAlive(
+            UUID streamId,
+            AiTurnEventService.StreamOwnership ownership,
+            AiTurnEventEnvelope tail) {
+        Set<SseEmitter> emitters = emittersByStream.get(streamId);
+        if (emitters == null || emitters.isEmpty()) {
+            return;
+        }
+        AiTurnEventEnvelope heartbeatEnvelope = AiTurnEventEnvelope.builder()
+                .eventId(null)
+                .streamId(streamId)
+                .threadId(ownership != null ? ownership.threadId() : null)
+                .turnId(ownership != null ? ownership.turnId() : null)
+                .seq(-1L)
+                .eventSchemaVersion(eventSchemaVersion)
+                .timestamp(Instant.now())
+                .type("heartbeat")
+                .payload(objectMapper.valueToTree(Map.of(
+                        "state", "alive",
+                        "phase", heartbeatPhase(tail),
+                        "summary", heartbeatSummary(tail),
+                        "lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""))))
+                .build();
+        List<SseEmitter> failed = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                send(emitter, heartbeatEnvelope);
+            } catch (Exception ex) {
+                failed.add(emitter);
+            }
+        }
+        for (SseEmitter emitter : failed) {
+            unregister(streamId, emitter);
+        }
+    }
+
+    private String heartbeatPhase(AiTurnEventEnvelope tail) {
+        JsonNode payload = tail == null ? null : tail.getPayload();
+        String phase = payload == null ? "" : payload.path("phase").asText("");
+        return phase == null || phase.isBlank() ? "agentic-authoring" : phase;
+    }
+
+    private String heartbeatSummary(AiTurnEventEnvelope tail) {
+        String phase = heartbeatPhase(tail);
+        return switch (phase) {
+            case "intent.resolve", "intent.resolve.llm" ->
+                    "Estou entendendo seu pedido e comparando com o contexto governado.";
+            case "intent.resolve.grounding" ->
+                    "Estou validando a intencao com as evidencias disponiveis.";
+            case "resource.discovery", "tool.start", "tool.result" ->
+                    "Estou consultando recursos, schemas e capacidades do backend.";
+            case "projectKnowledge.retrieve" ->
+                    "Estou buscando conhecimento governado do projeto.";
+            case "preview.plan" ->
+                    "Estou planejando a materializacao governada da tela.";
+            case "preview.compile" ->
+                    "Estou preparando a pre-visualizacao governada.";
+            default ->
+                    "Ainda estou processando sua solicitacao.";
+        };
+    }
+
     private void send(SseEmitter emitter, AiTurnEventEnvelope event) {
         try {
             emitter.send(SseEmitter.event()
@@ -332,6 +435,7 @@ public class AgenticAuthoringTurnStreamService {
         if (processingTimeoutTask != null) {
             processingTimeoutTask.cancel(false);
         }
+        stopHeartbeat(streamId);
         ScheduledFuture<?> replayTask = replayTasks.remove(streamId);
         if (replayTask != null) {
             replayTask.cancel(false);
@@ -342,6 +446,13 @@ public class AgenticAuthoringTurnStreamService {
         }
         replayCursorByStream.remove(streamId);
         terminalByStream.remove(streamId);
+    }
+
+    private void stopHeartbeat(UUID streamId) {
+        ScheduledFuture<?> heartbeatTask = heartbeatTasks.remove(streamId);
+        if (heartbeatTask != null) {
+            heartbeatTask.cancel(false);
+        }
     }
 
     private boolean appendedType(StreamAppendResult result, String type) {
@@ -381,6 +492,8 @@ public class AgenticAuthoringTurnStreamService {
 
     @PreDestroy
     void shutdown() {
+        heartbeatTasks.values().forEach(task -> task.cancel(true));
+        heartbeatTasks.clear();
         executor.shutdownNow();
         scheduler.shutdownNow();
     }

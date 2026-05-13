@@ -97,6 +97,46 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateAdvancedFilterFieldsAgainstFilterRequestSchemaWhenAvailable() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operationWithValidators("filter.advanced.configure", false, "filter-fields-exist"),
+                plan("{}", """
+                        {
+                          "enabled": true,
+                          "settings": {
+                            "alwaysVisibleFields": ["ano", "mes", "funcionarioId"],
+                            "selectedFieldIds": ["dataPagamentoBetween", "salarioBrutoBetween", "missing"]
+                          }
+                        }
+                        """),
+                objectMapper.readTree("""
+                        {
+                          "columns": [
+                            { "field": "ano" }
+                          ],
+                          "filterRequestSchema": {
+                            "type": "object",
+                            "properties": {
+                              "ano": { "type": "integer" },
+                              "mes": { "type": "integer" },
+                              "funcionarioId": { "type": "string" },
+                              "dataPagamentoBetween": { "type": "object" },
+                              "salarioBrutoBetween": { "type": "object" }
+                            }
+                          }
+                        }
+                        """),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .containsExactly("validator fields-exist failed for filter.advanced.configure: unknown field missing");
+    }
+
+    @Test
     void shouldRequireResolvedFieldToBeLocalWhenValidatorDeclaresFieldIsLocal() throws Exception {
         List<String> failures = new ArrayList<>();
 

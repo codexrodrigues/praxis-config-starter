@@ -18,6 +18,7 @@ public class AgenticAuthoringResourceDiscoveryService {
     private final AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog;
     private final ObjectMapper objectMapper;
     private final String domainCatalogServiceKey;
+    private final AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer;
 
     public AgenticAuthoringResourceDiscoveryService(
             AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
@@ -29,9 +30,18 @@ public class AgenticAuthoringResourceDiscoveryService {
             AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
             ObjectMapper objectMapper,
             String domainCatalogServiceKey) {
+        this(candidateCatalog, objectMapper, domainCatalogServiceKey, null);
+    }
+
+    public AgenticAuthoringResourceDiscoveryService(
+            AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
+            ObjectMapper objectMapper,
+            String domainCatalogServiceKey,
+            AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer) {
         this.candidateCatalog = candidateCatalog;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.domainCatalogServiceKey = domainCatalogServiceKey;
+        this.domainCatalogCandidateEnhancer = domainCatalogCandidateEnhancer;
     }
 
     public AgenticAuthoringResourceCandidatesResult search(
@@ -65,6 +75,11 @@ public class AgenticAuthoringResourceDiscoveryService {
                         principalContext == null ? null : principalContext.tenantId(),
                         principalContext == null ? null : principalContext.environment(),
                         null);
+        candidates = groundCandidates(
+                retrievalQuery,
+                candidates,
+                principalContext == null ? null : principalContext.tenantId(),
+                principalContext == null ? null : principalContext.environment());
         int limit = limit(request);
         if (candidates.size() > limit) {
             candidates = candidates.subList(0, limit);
@@ -83,6 +98,45 @@ public class AgenticAuthoringResourceDiscoveryService {
                 List.copyOf(candidates),
                 quickReplies,
                 List.copyOf(warnings));
+    }
+
+    private List<AgenticAuthoringCandidate> groundCandidates(
+            String retrievalQuery,
+            List<AgenticAuthoringCandidate> candidates,
+            String tenantId,
+            String environment) {
+        if (domainCatalogCandidateEnhancer == null || candidates == null || candidates.isEmpty()) {
+            return candidates == null ? List.of() : candidates;
+        }
+        return pruneWeakLexicalCandidatesWhenGrounded(
+                domainCatalogCandidateEnhancer.enhance(retrievalQuery, candidates, tenantId, environment));
+    }
+
+    private List<AgenticAuthoringCandidate> pruneWeakLexicalCandidatesWhenGrounded(
+            List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return candidates == null ? List.of() : candidates;
+        }
+        boolean hasGroundedCandidate = candidates.stream()
+                .anyMatch(candidate -> hasEvidence(
+                        candidate,
+                        AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING));
+        if (!hasGroundedCandidate) {
+            return candidates;
+        }
+        return candidates.stream()
+                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .toList();
+    }
+
+    private boolean isWeakLexicalCandidate(AgenticAuthoringCandidate candidate) {
+        return hasEvidence(candidate, "lexical-fallback") || hasEvidence(candidate, "weak-evidence");
+    }
+
+    private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {
+        return candidate != null
+                && candidate.evidence() != null
+                && candidate.evidence().contains(evidence);
     }
 
     private String assistantMessage(List<AgenticAuthoringCandidate> candidates, String artifactKind) {
@@ -112,6 +166,7 @@ public class AgenticAuthoringResourceDiscoveryService {
             return List.of();
         }
         Map<String, List<AgenticAuthoringCandidate>> candidatesByResourcePath = candidates.stream()
+                .filter(candidate -> isStrongEnoughForQuickReply(candidate, artifactKind))
                 .collect(Collectors.groupingBy(
                         candidate -> valueOrDefault(candidate.resourcePath(), ""),
                         LinkedHashMap::new,
@@ -145,6 +200,16 @@ public class AgenticAuthoringResourceDiscoveryService {
                             contextHints);
                 })
                 .toList();
+    }
+
+    private boolean isStrongEnoughForQuickReply(AgenticAuthoringCandidate candidate, String artifactKind) {
+        if (candidate == null) {
+            return false;
+        }
+        if (!"api_catalog".equals(valueOrDefault(artifactKind, ""))) {
+            return true;
+        }
+        return candidate.score() >= 0.50d;
     }
 
     private String quickReplyId(AgenticAuthoringCandidate candidate) {
@@ -182,7 +247,6 @@ public class AgenticAuthoringResourceDiscoveryService {
     }
 
     private String candidateDescription(AgenticAuthoringCandidate candidate, String artifactKind) {
-        String path = valueOrDefault(candidate.resourcePath(), "");
         return switch (artifactKind) {
             case "dashboard", "page" -> "Fonte candidata para alimentar o painel.";
             case "table" -> "Fonte candidata para alimentar a tabela.";
@@ -192,12 +256,8 @@ public class AgenticAuthoringResourceDiscoveryService {
     }
 
     private String candidateFriendlyDescription(AgenticAuthoringCandidate candidate, String artifactKind) {
-        String path = valueOrDefault(candidate.resourcePath(), "").toLowerCase(Locale.ROOT);
         if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
-            if (path.contains("analytics") || path.contains("/vw-") || path.contains("stats")) {
-                return "Indicada para começar por KPIs e gráficos. Retorna dados agregáveis para comparar valores, volumes e tendências por recorte de negócio.";
-            }
-            return "Indicada para montar um painel operacional. Retorna registros que podem virar listas, indicadores e drill-downs.";
+            return "Indicada para montar um painel. Retorna dados que podem virar listas, indicadores e gráficos quando o schema confirmar os recortes.";
         }
         if ("table".equals(artifactKind)) {
             return "Indicada quando você quer uma lista navegável. Retorna registros para tabela, filtros e detalhes.";
@@ -210,15 +270,9 @@ public class AgenticAuthoringResourceDiscoveryService {
 
     private ObjectNode candidatePresentation(AgenticAuthoringCandidate candidate, String artifactKind) {
         ObjectNode presentation = objectMapper.createObjectNode();
-        String path = valueOrDefault(candidate.resourcePath(), "").toLowerCase(Locale.ROOT);
-        boolean analytics = path.contains("analytics") || path.contains("/vw-") || path.contains("stats");
         if ("dashboard".equals(artifactKind) || "page".equals(artifactKind)) {
-            presentation.put("bestFor", analytics
-                    ? "Boa para dashboards executivos, comparações e acompanhamento de tendências."
-                    : "Boa para painéis operacionais com acompanhamento de registros e drill-down.");
-            presentation.put("returns", analytics
-                    ? "Retorna dados preparados para agregações, KPIs, rankings e séries temporais."
-                    : "Retorna dados de negócio que podem alimentar cards, listas e gráficos simples.");
+            presentation.put("bestFor", "Boa para painéis com acompanhamento de registros, gráficos e drill-down quando o schema confirmar os recortes.");
+            presentation.put("returns", "Retorna dados de negócio que podem alimentar cards, listas e gráficos materializados por schema.");
             presentation.put("nextStep", "Clique para usar esta fonte como recorte inicial da pré-visualização.");
             return presentation;
         }
@@ -267,18 +321,10 @@ public class AgenticAuthoringResourceDiscoveryService {
     }
 
     private String candidateIcon(AgenticAuthoringCandidate candidate) {
-        String path = valueOrDefault(candidate.resourcePath(), "").toLowerCase(Locale.ROOT);
-        if (path.contains("analytics") || path.contains("/vw-")) {
-            return "query_stats";
-        }
         return "dataset";
     }
 
     private String candidateTone(AgenticAuthoringCandidate candidate) {
-        String path = valueOrDefault(candidate.resourcePath(), "").toLowerCase(Locale.ROOT);
-        if (path.contains("analytics") || path.contains("/vw-")) {
-            return "analytics";
-        }
         return "resource";
     }
 

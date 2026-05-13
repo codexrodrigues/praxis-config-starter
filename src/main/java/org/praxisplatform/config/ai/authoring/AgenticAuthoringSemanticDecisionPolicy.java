@@ -25,9 +25,6 @@ final class AgenticAuthoringSemanticDecisionPolicy {
         boolean dataSourceChoiceAnswer = input.resourceChoiceClarificationAnswer()
                 || (input.contextHintCandidate() != null && explicitDataSourceChoice);
 
-        if (isGenericAnalyticalLlmExploration(input.llmIntent(), prompt) && candidates.size() > 1) {
-            selectedCandidate = null;
-        }
         if (optionalDataSourceHint) {
             selectedCandidate = null;
         }
@@ -44,17 +41,7 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 && selectedCandidate != null
                 && candidates.size() > 1
                 && containsAny(prompt, "visualizar informacoes", "visualizar informacao", "visualizar dados")
-                && !explicitDataSourceChoice
-                && !isSpecificPayrollAnalyticsPrompt(prompt)) {
-            selectedCandidate = null;
-        }
-        if ("dashboard".equals(artifactKind)
-                && selectedCandidate != null
-                && candidates.size() > 1
-                && isAnalyticalComparisonPrompt(prompt)
-                && analyticsCandidateCount(candidates) > 1
-                && !explicitDataSourceChoice
-                && !isSpecificPayrollAnalyticsPrompt(prompt)) {
+                && !explicitDataSourceChoice) {
             selectedCandidate = null;
         }
         if ("form".equals(artifactKind)
@@ -63,55 +50,6 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 && candidates.size() > 1
                 && isBroadArtifactDiscoveryOnly(candidates)) {
             selectedCandidate = null;
-        }
-        if (selectedCandidate != null
-                && !isAnalyticsResource(selectedCandidate.resourcePath())
-                && List.of("dashboard", "page", "unknown").contains(artifactKind)
-                && isAnalyticalComparisonPrompt(String.join(" ", prompt, rawPrompt))
-                && !explicitDataSourceChoice
-                && !optionalDataSourceHint) {
-            AgenticAuthoringCandidate analyticsCandidate = singleAnalyticsCandidate(candidates);
-            if (analyticsCandidate != null) {
-                selectedCandidate = analyticsCandidate;
-            }
-        }
-        if (selectedCandidate != null
-                && !isAnalyticsResource(selectedCandidate.resourcePath())
-                && List.of("dashboard", "page", "unknown").contains(artifactKind)
-                && isPayrollVisualizationPrompt(String.join(" ", prompt, rawPrompt))
-                && !explicitDataSourceChoice
-                && !optionalDataSourceHint) {
-            AgenticAuthoringCandidate payrollAnalyticsCandidate = payrollAnalyticsCandidate(candidates);
-            if (payrollAnalyticsCandidate != null) {
-                selectedCandidate = payrollAnalyticsCandidate;
-            }
-        }
-        if (selectedCandidate != null
-                && List.of("dashboard", "page", "unknown").contains(artifactKind)
-                && isSpecificPayrollAnalyticsPrompt(String.join(" ", prompt, rawPrompt))
-                && !explicitDataSourceChoice
-                && !optionalDataSourceHint) {
-            AgenticAuthoringCandidate payrollAnalyticsCandidate = payrollAnalyticsCandidate(candidates);
-            if (payrollAnalyticsCandidate != null) {
-                selectedCandidate = payrollAnalyticsCandidate;
-            }
-        }
-        if (selectedCandidate == null
-                && List.of("dashboard", "page", "unknown").contains(artifactKind)
-                && isSpecificPayrollAnalyticsPrompt(String.join(" ", prompt, rawPrompt))
-                && !explicitDataSourceChoice
-                && !optionalDataSourceHint) {
-            AgenticAuthoringCandidate payrollAnalyticsCandidate = payrollAnalyticsCandidate(candidates);
-            if (payrollAnalyticsCandidate != null) {
-                selectedCandidate = payrollAnalyticsCandidate;
-            }
-        }
-        if ("table".equals(artifactKind)
-                && "explore".equals(operationKind)
-                && isPayrollVisualizationPrompt(String.join(" ", prompt, rawPrompt))
-                && containsAny(String.join(" ", prompt, rawPrompt), "por departamento", "por setor", "ranking", "comparar", "compare")) {
-            artifactKind = "dashboard";
-            changeKind = "recommend_dashboard_visualization";
         }
         if (!optionalDataSourceHint
                 && input.governedResourceConfirmation()
@@ -127,44 +65,6 @@ final class AgenticAuthoringSemanticDecisionPolicy {
             changeKind = "recommend_dashboard_visualization";
         }
         return new AgenticAuthoringSemanticDecision(operationKind, artifactKind, changeKind, selectedCandidate);
-    }
-
-    private boolean isGenericAnalyticalLlmExploration(AgenticAuthoringLlmIntentResolution llmIntent, String prompt) {
-        return llmIntent != null
-                && llmIntent.resolved()
-                && "explore".equals(valueOrDefault(llmIntent.operationKind(), "unknown"))
-                && "unknown".equals(valueOrDefault(llmIntent.artifactKind(), "unknown"))
-                && isAnalyticalComparisonPrompt(prompt);
-    }
-
-    private boolean isAnalyticalComparisonPrompt(String prompt) {
-        return containsAny(prompt,
-                "ranking", "rank", "top", "maior", "maiores", "menor", "menores",
-                "comparar", "compare", "comparativo", "por setor", "por departamento",
-                "por area", "por areas", "area", "areas",
-                "recebe mais", "ganha mais", "salario", "salarios", "remuneracao");
-    }
-
-    private boolean isSpecificPayrollAnalyticsPrompt(String prompt) {
-        boolean payrollSubject = containsAny(prompt,
-                "folha", "pagamento", "pagamentos", "salario", "salarios", "remuneracao",
-                "recebe mais", "ganha mais");
-        boolean analyticalCut = containsAny(prompt,
-                "ranking", "rank", "top", "maior", "maiores", "menor", "menores",
-                "por setor", "por departamento", "por area", "por areas", "setor", "departamento", "area", "areas");
-        return payrollSubject && analyticalCut;
-    }
-
-    private int analyticsCandidateCount(List<AgenticAuthoringCandidate> candidates) {
-        return (int) (candidates == null ? List.<AgenticAuthoringCandidate>of() : candidates)
-                .stream()
-                .filter(candidate -> candidate != null && isAnalyticsResource(candidate.resourcePath()))
-                .count();
-    }
-
-    private boolean isAnalyticsResource(String resourcePath) {
-        String normalized = normalize(resourcePath);
-        return normalized.contains("analytics") || normalized.contains("/vw-") || normalized.contains("/stats/");
     }
 
     private boolean isOptionalDataSourceHint(String prompt) {
@@ -183,34 +83,6 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 "caso precise, usar");
     }
 
-    private boolean isPayrollVisualizationPrompt(String prompt) {
-        return containsAny(prompt, "folha", "pagamento", "pagamentos", "salario", "salarios", "remuneracao",
-                "recebe mais", "ganha mais")
-                && containsAny(prompt,
-                "visualizar", "ver", "analisar", "acompanhar", "dashboard", "painel", "comparar", "compare",
-                "grafico", "graficos", "melhor forma", "opcao", "opcoes", "recomenda");
-    }
-
-    private AgenticAuthoringCandidate payrollAnalyticsCandidate(List<AgenticAuthoringCandidate> candidates) {
-        return (candidates == null ? List.<AgenticAuthoringCandidate>of() : candidates)
-                .stream()
-                .filter(candidate -> candidate != null && isAnalyticsResource(candidate.resourcePath()))
-                .filter(candidate -> containsAny(String.join(" ",
-                        valueOrDefault(candidate.resourcePath(), ""),
-                        valueOrDefault(candidate.submitUrl(), ""),
-                        valueOrDefault(candidate.reason(), "")),
-                        "folha", "pagamento", "salario", "salarios", "remuneracao"))
-                .findFirst()
-                .orElse(null);
-    }
-
-    private AgenticAuthoringCandidate singleAnalyticsCandidate(List<AgenticAuthoringCandidate> candidates) {
-        List<AgenticAuthoringCandidate> analyticsCandidates = (candidates == null ? List.<AgenticAuthoringCandidate>of() : candidates)
-                .stream()
-                .filter(candidate -> candidate != null && isAnalyticsResource(candidate.resourcePath()))
-                .toList();
-        return analyticsCandidates.size() == 1 ? analyticsCandidates.get(0) : null;
-    }
 
     private boolean isBroadArtifactDiscoveryOnly(List<AgenticAuthoringCandidate> candidates) {
         return candidates != null

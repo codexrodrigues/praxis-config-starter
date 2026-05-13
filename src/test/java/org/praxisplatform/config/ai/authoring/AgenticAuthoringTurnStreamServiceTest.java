@@ -110,7 +110,7 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         intentStarted.await(2, TimeUnit.SECONDS);
         ArgumentCaptor<String> eventTypes = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(4000).atLeast(4))
+        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(4000).atLeast(5))
                 .appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), eventTypes.capture(), any());
         releaseIntent.countDown();
         service.shutdown();
@@ -125,7 +125,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("code").asText())
                             .isEqualTo("agentic-authoring-timeout");
                     org.assertj.core.api.Assertions.assertThat(node.path("assistantMessage").asText())
-                            .contains("took too long");
+                            .contains("Demorei demais");
                     org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
                             .contains("timed out");
                 });
@@ -231,7 +231,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("code").asText())
                             .isEqualTo("agentic-authoring-processing-failed");
                     org.assertj.core.api.Assertions.assertThat(node.path("assistantMessage").asText())
-                            .contains("could not finish");
+                            .contains("Tive um problema");
                     org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
                             .isEqualTo("provider quota exhausted");
                 });
@@ -302,9 +302,9 @@ class AgenticAuthoringTurnStreamServiceTest {
                 .anySatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isEqualTo("intent.resolve");
+                            .isEqualTo("intent.resolve.llm");
                     org.assertj.core.api.Assertions.assertThat(node.path("summary").asText())
-                            .contains("reviewed by the LLM");
+                            .contains("reviewed refined backend resource candidates");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("secondPass").asBoolean())
                             .isTrue();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("selectedResourcePath").asText())
@@ -314,6 +314,47 @@ class AgenticAuthoringTurnStreamServiceTest {
                 });
         org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
                 .completeTurn(eq(threadId), any(UUID.class));
+    }
+
+    @Test
+    void connectSchedulesTransientHeartbeatForActiveStream() {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AiTurnEventService.StreamOwnership ownership = new AiTurnEventService.StreamOwnership(
+                streamId,
+                threadId,
+                turnId,
+                "tenant",
+                "user",
+                "local",
+                Instant.now().plusSeconds(60));
+        AiTurnEventEnvelope tail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(streamId)
+                .threadId(threadId)
+                .turnId(turnId)
+                .seq(2)
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "intent.resolve.llm")
+                        .put("summary", "Asking the LLM to interpret the user request against governed context."))
+                .build();
+
+        when(turnEventService.replay(streamId, null, principalContext))
+                .thenReturn(new AiTurnEventService.ReplayResult(ownership, List.of(), 0));
+        when(turnEventService.findLastEvent(streamId)).thenReturn(Optional.of(tail));
+        when(turnEventService.isTerminalType("thought.step")).thenReturn(false);
+
+        AgenticAuthoringTurnStreamService service = service();
+        ReflectionTestUtils.setField(service, "heartbeatSeconds", 1L);
+        ReflectionTestUtils.setField(service, "processingPollSeconds", 60L);
+        service.connect(streamId, null, principalContext);
+
+        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(2500).atLeast(2))
+                .findLastEvent(streamId);
+        service.shutdown();
     }
 
     @Test

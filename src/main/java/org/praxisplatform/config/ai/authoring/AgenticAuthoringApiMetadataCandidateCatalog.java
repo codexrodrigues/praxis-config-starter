@@ -21,6 +21,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             "com", "em", "no", "na", "nos", "nas", "crie", "criar", "gere", "gerar", "monte",
             "montar", "quero", "usar", "use", "visualizar", "ver", "mostre", "mostrar", "tabela",
             "lista", "listagem", "dashboard", "dashboards", "painel", "formulario", "form", "grafico", "chart",
+            "graficos", "indicador", "indicadores", "kpi", "kpis", "metrica", "metricas",
             "qual", "quais", "outra", "outras", "opcao", "opcoes", "voce", "antes", "indica", "indicar",
             "indique", "alternativa", "alternativas", "compare", "comparar", "recomende", "recomendar");
 
@@ -64,24 +65,18 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return semanticCandidates;
         }
         if (!semanticCandidates.isEmpty()) {
-            List<String> tokens = meaningfulTokens(expandGenericAuthoringVocabulary(normalizedPrompt));
-            return enrichAnalyticalDashboardCandidates(
-                    semanticCandidates,
-                    normalizedPrompt,
-                    artifactKind,
-                    expectedMethod,
-                    tokens);
+            return semanticCandidates;
         }
         List<String> originalTokens = meaningfulTokens(normalizedPrompt);
         if (originalTokens.isEmpty()) {
             return mergeCandidates(semanticCandidates, new BroadArtifactCandidateRetriever().retrieve(context));
         }
-        List<String> tokens = meaningfulTokens(expandGenericAuthoringVocabulary(normalizedPrompt));
+        List<String> tokens = meaningfulTokens(normalizedPrompt);
         List<AgenticAuthoringCandidate> lexicalCandidates =
                 new LexicalFallbackCandidateRetriever().retrieve(context.withTokens(tokens));
         List<AgenticAuthoringCandidate> mergedCandidates =
                 mergeCandidates(lexicalCandidates, semanticCandidates);
-        return enrichAnalyticalDashboardCandidates(mergedCandidates, normalizedPrompt, artifactKind, expectedMethod, tokens);
+        return mergedCandidates;
     }
 
     private List<AgenticAuthoringCandidate> mergeCandidates(
@@ -114,59 +109,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             merged.addAll(secondary);
         }
         return merged;
-    }
-
-    private List<AgenticAuthoringCandidate> enrichAnalyticalDashboardCandidates(
-            List<AgenticAuthoringCandidate> candidates,
-            String normalizedPrompt,
-            String artifactKind,
-            String expectedMethod,
-            List<String> tokens) {
-        if ("dashboard".equals(artifactKind)
-                && isAnalyticalBusinessQuestion(normalizedPrompt)
-                && !isOperationalAuthoringPrompt(normalizedPrompt)
-                && shouldEnrichAnalyticalDashboardCandidates(candidates)) {
-            List<AgenticAuthoringCandidate> enriched = new ArrayList<>(candidates);
-            enriched.addAll(discoverAnalyticalProjectionCandidates(artifactKind, expectedMethod, tokens));
-            return enriched.stream()
-                    .collect(LinkedHashMap<String, AgenticAuthoringCandidate>::new,
-                            (map, candidate) -> map.putIfAbsent(candidate.resourcePath(), candidate),
-                            Map::putAll)
-                    .values()
-                    .stream()
-                    .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
-                    .toList();
-        }
-        return candidates;
-    }
-
-    private boolean shouldEnrichAnalyticalDashboardCandidates(List<AgenticAuthoringCandidate> candidates) {
-        if (candidates == null || candidates.isEmpty()) {
-            return true;
-        }
-        return candidates.stream()
-                .noneMatch(candidate -> isAnalyticsResource(candidate.resourcePath())
-                        && candidate.score() >= 0.80d);
-    }
-
-    private List<AgenticAuthoringCandidate> discoverAnalyticalProjectionCandidates(
-            String artifactKind,
-            String expectedMethod,
-            List<String> tokens) {
-        if (repository == null || !"dashboard".equals(artifactKind)) {
-            return List.of();
-        }
-        return repository.findAll().stream()
-                .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
-                .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
-                .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
-                .filter(metadata -> isAnalyticsResource(baseResourcePath(metadata.getPath())))
-                .map(metadata -> toScoredCandidate(metadata, expectedMethod, artifactKind, tokens, null, null, null))
-                .filter(scored -> scored.score() >= 0.36d)
-                .sorted(CandidateRankingPolicy.byScoreDescending())
-                .limit(8)
-                .map(ScoredCandidate::candidate)
-                .toList();
     }
 
     private List<AgenticAuthoringCandidate> discoverBroadCandidates(String artifactKind, String expectedMethod) {
@@ -578,7 +520,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     private boolean hasGroupingToken(List<String> tokens) {
         return tokens != null && tokens.stream().anyMatch(token -> containsAny(token,
-                "area", "areas", "setor", "setores", "departamento", "departamentos",
                 "grupo", "agrupamento", "categoria", "categorias", "recorte"));
     }
 
@@ -608,35 +549,28 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 valueOrEmpty(metadata.getParameters())));
     }
 
-    private boolean isAnalyticsResource(String resourcePath) {
-        String normalized = resourcePath == null ? "" : resourcePath.toLowerCase(Locale.ROOT);
-        return normalized.contains("analytics") || normalized.contains("/vw-") || normalized.contains("/stats/");
-    }
-
     private double artifactScoreAdjustment(String artifactKind, String endpointText, String path) {
         double adjustment = 0d;
-        boolean analyticsLike = endpointText.contains("analytics") || endpointText.contains("analit") || path.contains("/vw-");
-        if (analyticsLike) {
-            adjustment += 0.05d;
-        }
+        boolean analyticalMetadata = containsAny(endpointText,
+                "analytics", "analit", "metric", "metrica", "indicador", "indicadores", "kpi", "dashboard");
         if ("dashboard".equals(artifactKind)) {
-            if (analyticsLike || endpointText.contains("dashboard")) {
-                adjustment += 0.26d;
+            if (analyticalMetadata) {
+                adjustment += 0.18d;
             }
             if (path.endsWith("/stats/group-by") || path.endsWith("/stats/timeseries")
                     || path.endsWith("/stats/distribution")) {
-                adjustment += 0.24d;
+                adjustment += 0.16d;
             }
             if (path.endsWith("/all") || path.endsWith("/by-ids") || path.contains("/{")) {
                 adjustment -= 0.18d;
             }
-            if (!analyticsLike && !path.contains("/stats/")) {
+            if (!analyticalMetadata && !path.contains("/stats/")) {
                 adjustment -= 0.12d;
             }
         }
         if ("table".equals(artifactKind)) {
-            if (analyticsLike) {
-                adjustment -= 0.14d;
+            if (analyticalMetadata && !endpointText.contains("operacional")) {
+                adjustment -= 0.10d;
             }
             if (path.endsWith("/filter") || path.endsWith("/filter/cursor")) {
                 adjustment += 0.18d;
@@ -646,19 +580,12 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             }
         }
         if ("page".equals(artifactKind)) {
-            if (analyticsLike) {
-                adjustment -= 0.14d;
-            }
             if (path.endsWith("/filter") || path.endsWith("/filter/cursor")) {
                 adjustment += 0.18d;
             }
         }
         if (endpointText.contains("legado")) {
             adjustment -= 0.20d;
-        }
-        if (containsAny(endpointText, "missao", "missoes", "mission", "missions")
-                && path.startsWith("/api/operations/")) {
-            adjustment += 0.12d;
         }
         return adjustment;
     }
@@ -682,66 +609,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             tokens.add(rawToken);
         }
         return new ArrayList<>(tokens);
-    }
-
-    private String expandGenericAuthoringVocabulary(String normalizedPrompt) {
-        if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
-            return "";
-        }
-        StringBuilder expanded = new StringBuilder(normalizedPrompt);
-        if (containsAny(normalizedPrompt, "grafico", "graficos", "chart", "dashboard", "painel",
-                "indicador", "indicadores", "kpi", "kpis", "metrica", "metricas")) {
-            expanded.append(" analytics analitico analitica metricas indicadores kpis agregacao agregacoes");
-        }
-        if (isEnterprisePeoplePrompt(normalizedPrompt)) {
-            expanded.append(" funcionario funcionarios empregado empregados colaborador colaboradores")
-                    .append(" recursos humanos human resources departamento departamentos cargo cargos status admissao");
-        }
-        if (containsAny(normalizedPrompt, "comparar", "compare", "ranking", "rank", "top",
-                "maior", "maiores", "menor", "menores",
-                "por setor", "por setores", "por departamento", "por departamentos", "por area", "por areas")) {
-            expanded.append(" grupo grupos agrupamento segmentacao recorte categoria categorias departamento departamentos area areas setor setores");
-        }
-        if (isAnalyticalBusinessQuestion(normalizedPrompt)
-                && !isOperationalAuthoringPrompt(normalizedPrompt)
-                && containsAny(normalizedPrompt,
-                "recebe", "recebem", "recebe mais", "ganha", "ganham", "ganha mais",
-                "remuneracao", "remuneracoes", "salario", "salarios", "pagamento", "pagamentos", "folha")) {
-            expanded.append(" folha pagamento pagamentos salario salarios remuneracao remuneracoes valor valores liquido liquida custo custos");
-        }
-        if (containsAny(normalizedPrompt, "evolucao", "historico", "tempo", "temporal", "serie", "series")) {
-            expanded.append(" timeseries serie temporal periodo data datas historico tendencia");
-        }
-        return expanded.toString();
-    }
-
-    private boolean isEnterprisePeoplePrompt(String normalizedPrompt) {
-        boolean peopleSubject = containsAny(normalizedPrompt,
-                "pessoa", "pessoas", "funcionario", "funcionarios",
-                "empregado", "empregados", "colaborador", "colaboradores");
-        boolean enterpriseContext = containsAny(normalizedPrompt,
-                "empresa", "companhia", "organizacao", "organizacoes",
-                "time", "times", "equipe", "equipes", "rh", "recursos humanos",
-                "departamento", "departamentos", "cargo", "cargos");
-        boolean detailOrFilterIntent = containsAny(normalizedPrompt,
-                "tabela", "lista", "listagem", "detalhe", "detalhes", "detalhada", "detalhado",
-                "filtro", "filtros", "conectada", "conectado", "drill", "drilldown", "drill-down");
-        return peopleSubject && enterpriseContext && detailOrFilterIntent;
-    }
-
-    private boolean isAnalyticalBusinessQuestion(String normalizedPrompt) {
-        return containsAny(normalizedPrompt,
-                "entender", "compreender", "analisar", "analise", "comparar", "compare",
-                "comparativo", "ranking", "rank", "top", "maior", "maiores", "menor", "menores",
-                "por setor", "por departamento", "por area", "agrup", "grupo", "recorte",
-                "indicador", "indicadores", "metric", "metrica", "total", "media");
-    }
-
-    private boolean isOperationalAuthoringPrompt(String normalizedPrompt) {
-        return containsAny(normalizedPrompt,
-                "formulario", "form", "campo", "campos", "cadastro", "cadastrar",
-                "tabela", "lista", "listagem", "operacional", "registrar",
-                "salvar", "gravar", "preencher", "editar", "alterar", "adicione", "adicionar");
     }
 
     private boolean containsAny(String value, String... tokens) {

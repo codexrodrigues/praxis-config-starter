@@ -16,10 +16,11 @@ public class AgenticAuthoringCandidateEligibilityGate {
         if ("unknown".equals(operationKind)) {
             messages.add("intent-operation-unknown");
         }
-        boolean apiCatalogQuestion = "explore".equals(operationKind)
+        boolean apiCatalogQuestion = ("explore".equals(operationKind) || "explain".equals(operationKind))
                 && "api_catalog".equals(artifactKind)
-                && "answer_api_catalog_question".equals(changeKind);
-        if ("explore".equals(operationKind) && !apiCatalogQuestion) {
+                && ("answer_api_catalog_question".equals(changeKind)
+                || "answer_catalog_question".equals(changeKind));
+        if (("explore".equals(operationKind) || "explain".equals(operationKind)) && !apiCatalogQuestion) {
             messages.add("intent-confirmation-required");
         }
         if ("unknown".equals(artifactKind)) {

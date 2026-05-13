@@ -75,7 +75,7 @@ Para upgrades com histórico de migrações, mantenha `classpath:db/migration`.
 praxis:
   ai:
     provider: gemini # gemini|openai|xai
-    timeout-seconds: 30
+    timeout-seconds: 75
     retry:
       max-attempts: 2
       initial-delay-ms: 500
@@ -439,6 +439,7 @@ Important:
 - `EventSource` cannot send custom request headers, so local authoring streams should use `PRAXIS_AI_STREAM_AUTH_MODE=signed-url-token` unless the host provides cookie/session authentication.
 - Signed stream tokens carry the resolved tenant/user/environment for that stream. When a valid signed token is present and the request has no server-authenticated principal, token identity is authoritative over local fallback identity.
 - The host must set a stable `PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET`; do not use a production secret in local examples or docs.
+- Long LLM/RAG turns should stay conversational through backend events, not frontend timers. The authoring stream emits semantic phases such as `intent.resolve.llm`, `intent.resolve.grounding`, `resource.discovery`, `preview.plan` and `preview.compile`; transient heartbeats include `phase` and `summary` from the latest known step.
 
 ### Downstream validation before release
 The recommended downstream validation target is `praxis-api-quickstart`.

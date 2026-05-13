@@ -83,8 +83,25 @@ public class AgenticAuthoringLlmIntentResolverService {
                     environment);
             return toResolution(result);
         } catch (RuntimeException ex) {
-            return Optional.empty();
+            return Optional.of(failedResolution(ex));
         }
+    }
+
+    private AgenticAuthoringLlmIntentResolution failedResolution(RuntimeException ex) {
+        return new AgenticAuthoringLlmIntentResolution(
+                false,
+                "unknown",
+                "unknown",
+                "unknown",
+                null,
+                null,
+                "provider_error",
+                "Tive um problema para concluir essa leitura agora. Posso continuar com o recurso mais provavel, mas antes de criar algo preciso confirmar se ele representa o dominio certo.",
+                List.of(),
+                List.of("Qual recurso de negocio deve orientar esta decisao?"),
+                List.of("llm-intent-resolution-failed", "llm-provider-error"),
+                null,
+                null);
     }
 
     JsonNode diagnosticSnapshot(
@@ -173,6 +190,8 @@ public class AgenticAuthoringLlmIntentResolverService {
         String assistantMessage = conciseAssistantMessage(nullableText(result, "assistantMessage"));
         AgenticAuthoringVisualizationDecision visualizationDecision =
                 visualizationDecision(result.path("visualizationDecision"));
+        AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan =
+                consultativeRetrievalPlan(result.path("consultativeRetrievalPlan"));
         if (!resolved
                 && operationKind.isBlank()
                 && artifactKind.isBlank()
@@ -181,6 +200,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 && quickReplies.isEmpty()
                 && clarificationQuestions.isEmpty()
                 && warnings.isEmpty()
+                && consultativeRetrievalPlan == null
                 && visualizationDecision == null) {
             return Optional.empty();
         }
@@ -196,7 +216,27 @@ public class AgenticAuthoringLlmIntentResolverService {
                 quickReplies,
                 clarificationQuestions,
                 warnings,
+                consultativeRetrievalPlan,
                 visualizationDecision));
+    }
+
+    private AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        List<String> requiredContext = strings(node.path("requiredContext"));
+        List<String> semanticQueries = strings(node.path("semanticQueries"));
+        List<String> expectedEvidence = strings(node.path("expectedEvidence"));
+        String answerStrategy = text(node, "answerStrategy");
+        if (requiredContext.isEmpty() && semanticQueries.isEmpty() && expectedEvidence.isEmpty() && answerStrategy.isBlank()) {
+            return null;
+        }
+        return new AgenticAuthoringConsultativeRetrievalPlan(
+                valueOrDefault(nullableText(node, "schemaVersion"), "praxis-agentic-authoring-consultative-retrieval-plan.v1"),
+                requiredContext,
+                semanticQueries,
+                answerStrategy,
+                expectedEvidence);
     }
 
     private AgenticAuthoringVisualizationDecision visualizationDecision(JsonNode node) {
@@ -206,7 +246,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         List<AgenticAuthoringVisualizationAxisDecision> axes = visualizationAxes(node.path("axes"));
         String intent = text(node, "intent");
         String layoutKind = text(node, "layoutKind");
-        String primaryComponent = text(node, "primaryComponent");
+        String primaryComponent = valueOrDefault(nullableText(node, "primaryComponentId"), text(node, "primaryComponent"));
         if (intent.isBlank() && layoutKind.isBlank() && primaryComponent.isBlank() && axes.isEmpty()) {
             return null;
         }
@@ -331,6 +371,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         arrayOfStrings(properties, "clarificationQuestions");
         arrayOfStrings(properties, "warnings");
         properties.set("visualizationDecision", visualizationDecisionSchema());
+        properties.set("consultativeRetrievalPlan", consultativeRetrievalPlanSchema());
 
         ObjectNode reply = objectMapper.createObjectNode();
         reply.put("type", "object");
@@ -363,6 +404,36 @@ public class AgenticAuthoringLlmIntentResolverService {
         return root.toString();
     }
 
+    private ObjectNode consultativeRetrievalPlanSchema() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        ArrayNode types = plan.putArray("type");
+        types.add("object").add("null");
+        ObjectNode properties = plan.putObject("properties");
+        properties.putObject("schemaVersion").put("type", "string");
+        ObjectNode requiredContext = properties.putObject("requiredContext");
+        requiredContext.put("type", "array");
+        ObjectNode requiredContextItems = requiredContext.putObject("items");
+        requiredContextItems.put("type", "string");
+        requiredContextItems.putArray("enum")
+                .add("platform_capabilities")
+                .add("component_registry")
+                .add("domain_catalog")
+                .add("api_resources")
+                .add("runtime_context")
+                .add("conversation_context");
+        arrayOfStrings(properties, "semanticQueries");
+        properties.putObject("answerStrategy").put("type", "string");
+        arrayOfStrings(properties, "expectedEvidence");
+        plan.putArray("required")
+                .add("schemaVersion")
+                .add("requiredContext")
+                .add("semanticQueries")
+                .add("answerStrategy")
+                .add("expectedEvidence");
+        plan.put("additionalProperties", false);
+        return plan;
+    }
+
     private ObjectNode visualizationDecisionSchema() {
         ObjectNode decision = objectMapper.createObjectNode();
         ArrayNode decisionTypes = decision.putArray("type");
@@ -370,8 +441,9 @@ public class AgenticAuthoringLlmIntentResolverService {
         ObjectNode properties = decision.putObject("properties");
         properties.putObject("schemaVersion").put("type", "string");
         properties.putObject("intent").put("type", "string");
-        stringEnum(properties, "layoutKind", List.of("dashboard", "table", "page", "master_detail", "unknown"));
-        stringEnum(properties, "primaryComponent", List.of("praxis-chart", "praxis-table", "praxis-dynamic-form", "praxis-rich-content", "unknown"));
+        properties.putObject("layoutKind").put("type", "string");
+        properties.putObject("primaryComponent").put("type", "string");
+        nullableString(properties, "primaryComponentId");
         properties.putObject("includeSummary").put("type", "boolean");
         properties.putObject("includeDetailTable").put("type", "boolean");
         properties.putObject("provenance").put("type", "string");
