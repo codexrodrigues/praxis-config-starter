@@ -80,6 +80,9 @@ public class SpringAiOpenAiService implements AiProvider {
     @Value("${praxis.ai.max-tokens:2048}")
     private int maxTokens;
 
+    @Value("${praxis.ai.openai.json-min-completion-tokens:8192}")
+    private int jsonMinCompletionTokens;
+
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
 
@@ -195,6 +198,9 @@ public class SpringAiOpenAiService implements AiProvider {
         try {
             return callOpenAiDirectly(prompt, config, jsonMode);
         } catch (Exception e) {
+            if (e instanceof AiProviderCallException callException) {
+                throw callException;
+            }
             throw new RuntimeException("Failed to call OpenAI directly", e);
         }
     }
@@ -204,6 +210,10 @@ public class SpringAiOpenAiService implements AiProvider {
         String resolvedModel = resolveModel(config);
         double resolvedTemp = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
+        boolean explicitMaxTokens = config != null && config.getMaxTokens() != null;
+        if (jsonMode && requiresMaxCompletionTokens(resolvedModel) && !explicitMaxTokens) {
+            resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinCompletionTokens));
+        }
         String resolvedUrl = resolveBaseUrl(baseUrl) + "/v1/chat/completions";
 
         try {
@@ -211,6 +221,7 @@ public class SpringAiOpenAiService implements AiProvider {
             root.put("model", resolvedModel);
             putTemperature(root, resolvedModel, resolvedTemp);
             putTokenLimit(root, resolvedModel, resolvedMaxTokens);
+            putReasoningEffort(root, resolvedModel, resolvedMaxTokens);
             if (jsonMode) {
                 ObjectNode fmt = root.putObject("response_format");
                 fmt.put("type", "json_object");
@@ -236,15 +247,40 @@ public class SpringAiOpenAiService implements AiProvider {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() >= 400) {
-                 throw new IllegalStateException("OpenAI Error " + response.statusCode() + ": " + response.body());
+                throw AiProviderCallException.fromHttpStatus(
+                        "openai",
+                        response.statusCode(),
+                        summarizeErrorBody(response.body()));
             }
 
             JsonNode resRoot = objectMapper.readTree(response.body());
             JsonNode contentNode = resRoot.path("choices").get(0).path("message").path("content");
-            return contentNode.asText();
+            String content = contentNode.isMissingNode() || contentNode.isNull() ? "" : contentNode.asText();
+            if (content == null || content.isBlank()) {
+                String finishReason = resRoot.path("choices").get(0).path("finish_reason").asText("");
+                throw AiProviderCallException.unknown(
+                        "openai",
+                        new IllegalStateException("OpenAI returned empty content"
+                                + (finishReason.isBlank() ? "" : " (finish_reason=" + finishReason + ")")));
+            }
+            return content;
 
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw AiProviderCallException.transport("openai", interruptedException);
+        } catch (java.net.http.HttpTimeoutException timeoutException) {
+            throw AiProviderCallException.timeout("openai", timeoutException);
         } catch (Exception e) {
-            throw new RuntimeException("Direct OpenAI call failed", e);
+            if (e instanceof AiProviderCallException callException) {
+                throw callException;
+            }
+            if (e instanceof IOException
+                    || e instanceof java.net.ConnectException
+                    || e instanceof java.net.SocketException
+                    || e instanceof java.net.UnknownHostException) {
+                throw AiProviderCallException.transport("openai", e);
+            }
+            throw AiProviderCallException.unknown("openai", e);
         }
     }
 
@@ -269,6 +305,7 @@ public class SpringAiOpenAiService implements AiProvider {
             root.put("model", resolvedModel);
             putTemperature(root, resolvedModel, resolvedTemp);
             putTokenLimit(root, resolvedModel, resolvedMaxTokens);
+            putReasoningEffort(root, resolvedModel, resolvedMaxTokens);
             root.put("stream", true);
             ArrayNode messages = root.putArray("messages");
             ObjectNode msg = messages.addObject();
@@ -383,6 +420,13 @@ public class SpringAiOpenAiService implements AiProvider {
         payload.put("temperature", resolvedTemp);
     }
 
+    private void putReasoningEffort(ObjectNode payload, String modelName, int maxTokens) {
+        if (!supportsMinimalReasoningEffort(modelName) || maxTokens > 2048) {
+            return;
+        }
+        payload.put("reasoning_effort", "minimal");
+    }
+
     private boolean requiresMaxCompletionTokens(String modelName) {
         if (modelName == null) {
             return false;
@@ -396,6 +440,13 @@ public class SpringAiOpenAiService implements AiProvider {
 
     private boolean usesFixedDefaultTemperature(String modelName) {
         return requiresMaxCompletionTokens(modelName);
+    }
+
+    private boolean supportsMinimalReasoningEffort(String modelName) {
+        if (modelName == null) {
+            return false;
+        }
+        return modelName.trim().toLowerCase().startsWith("gpt-5");
     }
 
     private String extractOpenAiDelta(String data) {

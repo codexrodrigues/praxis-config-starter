@@ -18,6 +18,8 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
 
     static final String DOMAIN_CATALOG_GROUNDING = "domain-catalog-grounding";
     private static final int CONTEXT_LIMIT = 8;
+    private static final int MAX_CANDIDATES_TO_GROUND = 6;
+    private static final int MAX_CONTEXT_QUERIES = 3;
 
     private final Supplier<DomainCatalogIngestionService> domainCatalogIngestionService;
     private final String serviceKey;
@@ -54,8 +56,14 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             return candidates;
         }
         List<AgenticAuthoringCandidate> enhanced = new ArrayList<>(candidates.size());
+        int groundingAttempts = 0;
         for (AgenticAuthoringCandidate candidate : candidates) {
-            enhanced.add(enhanceCandidate(service, query, candidate, tenantId, environment));
+            if (shouldAttemptGrounding(candidate) && groundingAttempts < MAX_CANDIDATES_TO_GROUND) {
+                enhanced.add(enhanceCandidate(service, query, candidate, tenantId, environment));
+                groundingAttempts++;
+            } else {
+                enhanced.add(candidate);
+            }
         }
         return enhanced;
     }
@@ -137,19 +145,9 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             String query,
             String tenantId,
             String environment) {
-        DomainCatalogContextResponse scopedContext = context(
-                service,
-                serviceKey,
-                resourceKey,
-                query,
-                tenantId,
-                environment);
-        if (scopedContext != null) {
-            return scopedContext;
-        }
         return context(
                 service,
-                "",
+                serviceKey,
                 resourceKey,
                 query,
                 tenantId,
@@ -195,7 +193,13 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             queries.add(meaningful);
         }
         queries.addAll(meaningfulQueryTerms(query));
-        return List.copyOf(queries);
+        return queries.stream().limit(MAX_CONTEXT_QUERIES).toList();
+    }
+
+    private boolean shouldAttemptGrounding(AgenticAuthoringCandidate candidate) {
+        return candidate != null
+                && !hasEvidence(candidate, DOMAIN_CATALOG_GROUNDING)
+                && !resourceKey(candidate.resourcePath()).isBlank();
     }
 
     private List<String> meaningfulQueryTerms(String query) {

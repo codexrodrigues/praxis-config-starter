@@ -49,7 +49,8 @@ class AgenticAuthoringTableCapabilityCatalogTest {
                         "rename_or_relabel",
                         "set_column_format",
                         "set_column_visibility",
-                        "set_column_order");
+                        "set_column_order",
+                        "configure_export");
     }
 
     @Test
@@ -83,6 +84,8 @@ class AgenticAuthoringTableCapabilityCatalogTest {
                 .contains("set_column_visibility");
         assertThat(catalog.resolveChangeKind("mova a coluna salario liquido para o inicio"))
                 .contains("set_column_order");
+        assertThat(catalog.resolveChangeKind("habilite exportacao apenas para linhas selecionadas"))
+                .contains("configure_export");
     }
 
     @Test
@@ -96,6 +99,9 @@ class AgenticAuthoringTableCapabilityCatalogTest {
         assertThat(catalog.resolveChangeKind(
                 "reordene a tabela de detalhes para colocar salario bruto antes de descontos e liquido, preservando as demais colunas do componente."))
                 .contains("set_column_order");
+        assertThat(catalog.resolveChangeKind(
+                "Na praxis-table, mostre um botao de exportar que leve somente as linhas selecionadas pelo usuario."))
+                .contains("configure_export");
     }
 
     @Test

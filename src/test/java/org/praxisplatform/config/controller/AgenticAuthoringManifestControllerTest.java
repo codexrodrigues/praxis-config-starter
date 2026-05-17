@@ -1,6 +1,7 @@
 package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -255,8 +256,10 @@ class AgenticAuthoringManifestControllerTest {
         when(manifestService.listEditableTargets("praxis-table")).thenReturn(targets);
         when(manifestService.listOperations("praxis-table")).thenReturn(operations);
         when(manifestService.resolveTarget("praxis-table", resolveRequest)).thenReturn(resolvedTarget);
-        when(manifestService.validateEditPlan("praxis-table", planRequest)).thenReturn(validationResult);
-        when(manifestService.compilePatch("praxis-table", planRequest)).thenReturn(compileResult);
+        when(manifestService.validateEditPlan(eq("praxis-table"), any(AgenticAuthoringManifestEditPlanRequest.class)))
+                .thenReturn(validationResult);
+        when(manifestService.compilePatch(eq("praxis-table"), any(AgenticAuthoringManifestEditPlanRequest.class)))
+                .thenReturn(compileResult);
 
         mockMvc.perform(get("/api/praxis/config/ai/authoring/manifests/{componentId}", "praxis-table"))
                 .andExpect(status().isOk())

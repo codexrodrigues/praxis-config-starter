@@ -2,6 +2,7 @@ package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.isNull;
@@ -301,7 +302,12 @@ class AgenticAuthoringControllerTest {
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance()
         );
-        when(previewService.preview(request, "tenant", "user", "local", null)).thenReturn(expected);
+        when(previewService.preview(
+                eq(request),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                nullable(String.class))).thenReturn(expected);
 
         ResponseEntity<?> response = controller().previewPage(request, "tenant", "user", "local");
 

@@ -66,6 +66,19 @@
           "configHints": ["columns order startsWith <schemaField>", "preservar definicoes das demais colunas"]
         }
       ]
+    },
+    {
+      "id": "praxis-table.export.selected-rows@0.1.0",
+      "changeKind": "configure_export",
+      "triggerTerms": ["exportar", "exportacao", "exportação", "linhas selecionadas", "selecionadas", "selecionados", "botao exportar", "botão exportar", "acao em massa", "ação em massa", "toolbar"],
+      "fieldAliases": [],
+      "examples": [
+        {
+          "prompt": "Habilite exportacao para apenas as linhas selecionadas.",
+          "intent": "Permitir que a tabela exporte somente as linhas selecionadas pelo usuario.",
+          "configHints": ["selection.enabled=true", "toolbar.actions inclui export", "export.enabled=true", "export.formats inclui csv ou xlsx", "export.general.scope=selected", "export.general.includeHeaders=true"]
+        }
+      ]
     }
   ]
 }

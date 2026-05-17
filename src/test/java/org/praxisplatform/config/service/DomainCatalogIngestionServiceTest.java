@@ -402,7 +402,7 @@ class DomainCatalogIngestionServiceTest {
 
         assertThat(context.release()).isNull();
         assertThat(context.retrievalGuidance())
-                .contains("This context may include items from the latest releases of multiple services; keep service boundaries explicit when citing or applying it.");
+                .contains("This context may include items from multiple latest releases or services; keep boundaries explicit when citing or applying it.");
         assertThat(context.items()).singleElement()
                 .satisfies(item -> {
                     assertThat(item.releaseKey()).isEqualTo("hr:latest");
@@ -707,6 +707,98 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void contextLatestWithServiceScopeSearchesLatestStructuredResourceReleases() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease folhaRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:human-resources.folhas-pagamento:2026-04-22T11:00:00Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-22T11:00:00Z"))
+                .createdAt(Instant.parse("2026-04-22T11:00:01Z"))
+                .build();
+        DomainCatalogRelease funcionariosRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:human-resources.funcionarios:2026-04-22T11:01:00Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-22T11:01:00Z"))
+                .createdAt(Instant.parse("2026-04-22T11:01:01Z"))
+                .build();
+        DomainCatalogRelease cargosRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:human-resources.cargos:2026-04-22T11:02:00Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-22T11:02:00Z"))
+                .createdAt(Instant.parse("2026-04-22T11:02:01Z"))
+                .build();
+        DomainCatalogItem folhaNode = nodeItem(folhaRelease, "human-resources.folhas-pagamento", "Folha de pagamento");
+        DomainCatalogItem funcionariosNode = nodeItem(funcionariosRelease, "human-resources.funcionarios", "Funcionarios");
+        DomainCatalogItem cargosNode = nodeItem(cargosRelease, "human-resources.cargos", "Cargos");
+
+        when(releaseRepository.findLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(folhaRelease, funcionariosRelease, cargosRelease));
+        when(itemRepository.search(
+                eq(folhaRelease.getReleaseKey()),
+                eq("node"),
+                eq(null),
+                eq(null),
+                eq("pessoas"),
+                any(Pageable.class)))
+                .thenReturn(List.of(folhaNode));
+        when(itemRepository.search(
+                eq(funcionariosRelease.getReleaseKey()),
+                eq("node"),
+                eq(null),
+                eq(null),
+                eq("pessoas"),
+                any(Pageable.class)))
+                .thenReturn(List.of(funcionariosNode));
+        when(itemRepository.search(
+                eq(cargosRelease.getReleaseKey()),
+                eq("node"),
+                eq(null),
+                eq(null),
+                eq("pessoas"),
+                any(Pageable.class)))
+                .thenReturn(List.of(cargosNode));
+
+        var context = service.contextLatest(
+                "praxis-service",
+                null,
+                "tenant-a",
+                "dev",
+                "node",
+                null,
+                null,
+                "pessoas",
+                10);
+
+        assertThat(context.release()).isNull();
+        assertThat(context.retrievalGuidance()).contains("This context may include items from multiple latest releases or services; keep boundaries explicit when citing or applying it.");
+        assertThat(context.items())
+                .extracting(DomainCatalogItemResponse::itemKey)
+                .containsExactly(
+                        "human-resources.folhas-pagamento.concept",
+                        "human-resources.funcionarios.concept",
+                        "human-resources.cargos.concept");
+    }
+
+    @Test
     void contextLatestAppliesAiVisibilityBeforeReturningLlmContext() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
@@ -946,6 +1038,24 @@ class DomainCatalogIngestionServiceTest {
 
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:v1");
         assertThat(response.itemCount()).isEqualTo(1);
+    }
+
+    private DomainCatalogItem nodeItem(DomainCatalogRelease release, String resourceKey, String label) {
+        return DomainCatalogItem.builder()
+                .release(release)
+                .itemType("node")
+                .itemKey(resourceKey + ".concept")
+                .contextKey(resourceKey.substring(0, resourceKey.lastIndexOf('.')))
+                .nodeType("concept")
+                .payload("""
+                    {
+                      "nodeKey": "%s.concept",
+                      "nodeType": "concept",
+                      "resourceKey": "%s",
+                      "label": "%s"
+                    }
+                    """.formatted(resourceKey, resourceKey, label))
+                .build();
     }
 
     private JsonNode sampleCatalog() throws Exception {

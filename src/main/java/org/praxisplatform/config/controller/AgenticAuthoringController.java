@@ -1,7 +1,12 @@
 package org.praxisplatform.config.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import java.io.IOException;
+import java.text.Normalizer;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyResult;
@@ -9,6 +14,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswer;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunErrorResponse;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
@@ -69,6 +76,7 @@ public class AgenticAuthoringController {
     private final AgenticAuthoringTurnStreamService turnStreamService;
     private final AiPrincipalContextResolver principalContextResolver;
     private final AiStreamAccessTokenService streamAccessTokenService;
+    private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
 
     @Autowired
     public AgenticAuthoringController(
@@ -83,7 +91,8 @@ public class AgenticAuthoringController {
             AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
             AgenticAuthoringTurnStreamService turnStreamService,
             AiPrincipalContextResolver principalContextResolver,
-            AiStreamAccessTokenService streamAccessTokenService) {
+            AiStreamAccessTokenService streamAccessTokenService,
+            AgenticAuthoringConsultativeAnswerService consultativeAnswerService) {
         this.dryRunService = dryRunService;
         this.artifactSource = artifactSource;
         this.intentResolverService = intentResolverService;
@@ -96,6 +105,36 @@ public class AgenticAuthoringController {
         this.turnStreamService = turnStreamService;
         this.principalContextResolver = principalContextResolver;
         this.streamAccessTokenService = streamAccessTokenService;
+        this.consultativeAnswerService = consultativeAnswerService;
+    }
+
+    public AgenticAuthoringController(
+            AgenticAuthoringDryRunService dryRunService,
+            AgenticAuthoringArtifactSource artifactSource,
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            AgenticAuthoringPreviewService previewService,
+            AgenticAuthoringApplyService applyService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            AgenticAuthoringTurnStreamService turnStreamService,
+            AiPrincipalContextResolver principalContextResolver,
+            AiStreamAccessTokenService streamAccessTokenService) {
+        this(
+                dryRunService,
+                artifactSource,
+                intentResolverService,
+                planService,
+                patchCompilerService,
+                previewService,
+                applyService,
+                componentCapabilitiesService,
+                resourceDiscoveryService,
+                turnStreamService,
+                principalContextResolver,
+                streamAccessTokenService,
+                null);
     }
 
     public AgenticAuthoringController(
@@ -118,6 +157,7 @@ public class AgenticAuthoringController {
                 applyService,
                 componentCapabilitiesService,
                 resourceDiscoveryService,
+                null,
                 null,
                 null,
                 null);
@@ -285,11 +325,173 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
             String baseUrl = currentContextBaseUrl();
-            AgenticAuthoringPreviewResult result = previewService.preview(request, tenantId, userId, environment, baseUrl);
+            Optional<AgenticAuthoringPreviewResult> consultativeFastPreview =
+                    previewConsultativeFastPath(request, tenantId, userId, environment);
+            if (consultativeFastPreview.isPresent()) {
+                return ResponseEntity.ok(consultativeFastPreview.get());
+            }
+            AgenticAuthoringPlanRequest effectiveRequest = withResolvedIntent(request, tenantId, userId, environment);
+            AgenticAuthoringPreviewResult result = previewService.preview(
+                    effectiveRequest,
+                    tenantId,
+                    userId,
+                    environment,
+                    baseUrl);
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException | IllegalStateException | IOException ex) {
             return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));
         }
+    }
+
+    private Optional<AgenticAuthoringPreviewResult> previewConsultativeFastPath(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (consultativeAnswerService == null
+                || request == null
+                || request.intentResolution() != null
+                || request.pendingClarification() != null
+                || (request.conversationMessages() != null && !request.conversationMessages().isEmpty())
+                || !shouldProbeConsultativeFastPath(request.userPrompt())) {
+            return Optional.empty();
+        }
+        AgenticAuthoringComponentCapabilitiesResult componentCapabilities =
+                componentCapabilitiesService == null ? null : componentCapabilitiesService.listCapabilities();
+        AgenticAuthoringConsultativeAnswer answer = consultativeAnswerService.answer(
+                        request,
+                        componentCapabilities,
+                        tenantId,
+                        userId,
+                        environment)
+                .orElse(null);
+        if (answer == null || answer.assistantMessage() == null || answer.assistantMessage().isBlank()) {
+            return Optional.empty();
+        }
+        String artifactKind = "domain_api".equals(answer.category()) ? "api_catalog" : "component";
+        String operationKind = "api_catalog".equals(artifactKind) ? "explore" : "explain";
+        List<String> warnings = new java.util.ArrayList<>(answer.warnings() == null ? List.of() : answer.warnings());
+        warnings.add("preview-consultative-fast-path-used");
+        warnings.add("preview-materialization-skipped-consultative-answer");
+        AgenticAuthoringIntentResolutionResult intentResolution = new AgenticAuthoringIntentResolutionResult(
+                true,
+                operationKind,
+                artifactKind,
+                answer.changeKind(),
+                "consultative",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult(
+                        "consultative-fast-path",
+                        "eligible",
+                        List.of()),
+                request.userPrompt(),
+                answer.assistantMessage(),
+                MissingNode.getInstance(),
+                List.of(),
+                null,
+                List.of(),
+                List.copyOf(warnings),
+                List.of(),
+                MissingNode.getInstance(),
+                MissingNode.getInstance(),
+                null);
+        return Optional.of(new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.copyOf(warnings),
+                MissingNode.getInstance(),
+                MissingNode.getInstance(),
+                new org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewDiagnostics(
+                        false,
+                        "",
+                        intentResolution.operationKind(),
+                        intentResolution.changeKind(),
+                        "consultative-fast-path"),
+                MissingNode.getInstance(),
+                answer.assistantMessage()));
+    }
+
+    private boolean shouldProbeConsultativeFastPath(String prompt) {
+        String normalized = normalize(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        boolean question = prompt != null && prompt.contains("?")
+                || containsAny(normalized,
+                "quais", "qual", "que ", "como ", "o que", "posso", "explique", "explicar", "recomenda");
+        boolean immediateMaterialization = containsAny(normalized,
+                "crie ", "criar agora", "monte ", "montar agora", "gere ", "gerar agora",
+                "adicione ", "remova ", "altere ", "salve ", "publique ", "aplique ");
+        return question && !immediateMaterialization;
+    }
+
+    private boolean containsAny(String value, String... tokens) {
+        for (String token : tokens) {
+            if (token != null && !token.isBlank() && value.contains(normalize(token))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String normalize(String value) {
+        String normalized = Normalizer.normalize(value == null ? "" : value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return normalized.toLowerCase(Locale.ROOT).trim();
+    }
+
+    private AgenticAuthoringPlanRequest withResolvedIntent(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (request == null
+                || request.intentResolution() != null
+                || intentResolverService == null
+                || request.pendingClarification() != null
+                || (request.conversationMessages() != null && !request.conversationMessages().isEmpty())) {
+            return request;
+        }
+        AgenticAuthoringIntentResolutionResult intentResolution = intentResolverService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        request.userPrompt(),
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        request.currentPage(),
+                        null,
+                        request.provider(),
+                        request.model(),
+                        request.apiKey(),
+                        request.sessionId(),
+                        request.clientTurnId(),
+                        request.conversationMessages(),
+                        request.pendingClarification(),
+                        request.attachmentSummaries(),
+                        request.contextHints()),
+                tenantId,
+                userId,
+                environment);
+        if (intentResolution == null) {
+            return request;
+        }
+        return new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                intentResolution,
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints());
     }
 
     private String currentContextBaseUrl() {

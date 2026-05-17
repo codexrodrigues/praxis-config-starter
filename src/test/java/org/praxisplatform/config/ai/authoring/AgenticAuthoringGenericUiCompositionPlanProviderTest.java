@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -168,6 +169,61 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void createsChartSurfaceOpenModalDrilldownFromContextualAction() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("surfaceActionId", "surface.open");
+        contextHints.put("surfacePresentation", "modal");
+        contextHints.put("surfaceWidgetId", "praxis-table");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Abra os registros da categoria selecionada do gráfico em um modal de detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                dashboardIntent("/api/risk-intelligence/vw-indicadores-incidentes",
+                        List.of(axis("severity", "severidade", "Severidade", "bar", "vertical"))),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-surface-drilldown");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-rich-content", "praxis-rich-content", "praxis-filter", "praxis-chart");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-table");
+        assertThat(plan.has("composition")).isFalse();
+        JsonNode link = plan.path("bindings").get(0);
+        assertThat(link.path("intent").asText()).isEqualTo("command-dispatch");
+        assertThat(link.path("from").path("port").asText()).isEqualTo("pointClick");
+        assertThat(link.path("to").path("kind").asText()).isEqualTo("global-action");
+        assertThat(link.path("to").path("actionId").asText()).isEqualTo("surface.open");
+        JsonNode payload = link.path("to").path("payload");
+        assertThat(payload.path("presentation").asText()).isEqualTo("modal");
+        assertThat(payload.path("widget").path("id").asText()).isEqualTo("praxis-table");
+        assertThat(payload.path("widget").path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(payload.path("widget").path("inputs").path("componentInstanceId").asText())
+                .isEqualTo(payload.path("widget").path("inputs").path("tableId").asText());
+        assertThat(payload.path("widget").path("inputs").path("queryContext").has("filters")).isTrue();
+        assertThat(payload.path("widget").path("bindingOrder").toString())
+                .isEqualTo("[\"tableId\",\"componentInstanceId\",\"resourcePath\",\"config\",\"queryContext\"]");
+        assertThat(payload.path("widget").path("inputs").path("config").path("columns").get(0).path("field").asText())
+                .isEqualTo("severidade");
+        assertThat(payload.path("bindings").get(0).path("from").asText())
+                .isEqualTo("payload.category");
+        assertThat(payload.path("bindings").get(0).path("to").asText())
+                .isEqualTo("widget.inputs.queryContext.filters.severidade");
+        assertThat(link.path("policy").path("distinctBy").asText()).isEqualTo("payload.category");
+        assertThat(plan.path("canvas").path("items").has("vw-indicadores-incidentes-table")).isFalse();
+    }
+
+    @Test
     void createsOnlyChartWhenUserExplicitlyRejectsDashboardSupportWidgets() {
         AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",
@@ -206,25 +262,66 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void normalizesAnalyticsCandidateToBusinessResourceForDashboardMaterialization() {
+    void createsOnlyTableWhenUserExplicitlyRejectsChartsKpisAndTabs() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "tabbed-resource-workspace",
+                "tabs",
+                "praxis-tabs",
+                List.of(axis("severity", "severidade", "Severidade", "bar", "vertical")),
+                false,
+                false,
+                List.of("praxis-tabs", "praxis-chart", "praxis-filter", "praxis-rich-content"),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
-                "Crie graficos de incidentes por gravidade",
+                "Crie apenas uma tabela de detalhes de incidentes com a fonte Indicadores Incidentes. "
+                        + "Nao crie graficos, filtros, KPIs nem abas.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "table", "create_artifact",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        decision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-table");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("single-table-page");
+        assertThat(plan.path("widgets")).hasSize(1);
+        assertThat(plan.path("widgets").path(0).path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(plan.toString())
+                .doesNotContain("praxis-tabs")
+                .doesNotContain("praxis-chart")
+                .doesNotContain("praxis-filter")
+                .doesNotContain("kpi");
+    }
+
+    @Test
+    void normalizesTimeseriesCandidateToBusinessResourceButPreservesTimeseriesStatsOperation() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie grafico temporal de incidentes por ocorrido em",
                 "openai",
                 "gpt-5.4-mini",
                 "test-key",
                 dashboardIntent("/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries", List.of(axis(
-                        "severity",
-                        "gravidade",
-                        "Gravidade",
-                        "bar",
-                        "vertical"))))).orElseThrow();
+                        "incidentDate",
+                        "ocorridoEm",
+                        "Ocorrido em",
+                        "line",
+                        "temporal"))))).orElseThrow();
 
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
                 .contains("\"resourcePath\":\"/api/risk-intelligence/vw-indicadores-incidentes\"")
                 .contains("\"schemaUrl\":\"/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor&operation=post&schemaType=response\"")
                 .contains("\"submitUrl\":\"/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor\"")
-                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
+                .contains("\"statsOperation\":\"timeseries\"")
+                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries\"")
+                .contains("\"granularity\":\"MONTH\"")
+                .contains("\"fillGaps\":false")
+                .contains("\"type\":\"time\"")
                 .doesNotContain("\"resourcePath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries\"");
     }
 
@@ -251,6 +348,37 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"metric\":{\"field\":\"salario_liquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
                 .contains("\"metric\":{\"operation\":\"SUM\",\"field\":\"salario_liquido\",\"alias\":\"salario_liquido\"}")
                 .contains("\"metrics\":[{\"aggregation\":\"sum\",\"field\":\"salario_liquido\",\"alias\":\"salario_liquido\"}]");
+    }
+
+    @Test
+    void foldsMetricOnlyAxisIntoRequestedGroupingAxis() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um grafico horizontal de folha por departamento somando salario liquido",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                dashboardIntent("/api/human-resources/vw-analytics-folha-pagamento", List.of(
+                        axis("dimension", "departamento", "Departamento", "horizontal-bar", "horizontal"),
+                        new AgenticAuthoringVisualizationAxisDecision(
+                                "metric",
+                                "salarioLiquido",
+                                "Salario liquido",
+                                "horizontal-bar",
+                                "horizontal",
+                                "sum",
+                                "salarioLiquido",
+                                "Soma do salario liquido",
+                                "llm-authored-semantic-axis"))))).orElseThrow();
+
+        String widgets = result.uiCompositionPlan().path("widgets").toString();
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-rich-content", "praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-table");
+        assertThat(widgets)
+                .contains("\"field\":\"departamento\"")
+                .contains("\"metric\":{\"field\":\"salarioLiquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
+                .contains("\"statsRequest\":{\"filter\":{},\"field\":\"departamento\"")
+                .contains("\"metrics\":[{\"aggregation\":\"sum\",\"field\":\"salarioLiquido\",\"alias\":\"salarioLiquido\"}]")
+                .doesNotContain("\"statsRequest\":{\"filter\":{},\"field\":\"salarioLiquido\"");
     }
 
     @Test
@@ -373,6 +501,58 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertRuntimeInputsDoNotContainGovernanceEvidence(plan);
     }
 
+    @Test
+    void honorsSelectedResourceInsteadOfSwitchingToRelatedAnalyticalCandidateForCharts() {
+        AgenticAuthoringCandidate selectedPeople = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "POST",
+                0.82d,
+                "LLM selected the people resource from governed evidence.",
+                List.of("semantic-retrieval", "llm-selected-resource"));
+        AgenticAuthoringCandidate relatedPayrollAnalytics = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/filter",
+                "POST",
+                0.93d,
+                "Related analytical source with stats support.",
+                List.of("semantic-retrieval", "stats group by"));
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "people-by-department",
+                "dashboard",
+                "praxis-chart",
+                List.of(axis("department", "departamento", "Departamento", "bar", "vertical")),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringIntentResolutionResult intent = intentWithCandidates(
+                "create",
+                "dashboard",
+                "create_artifact",
+                selectedPeople,
+                List.of(relatedPayrollAnalytics, selectedPeople),
+                visualizationDecision);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um dashboard de funcionarios por departamento",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent)).orElseThrow();
+
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"resourcePath\":\"/api/human-resources/funcionarios\"")
+                .contains("\"statsPath\":\"/api/human-resources/funcionarios/stats/group-by\"")
+                .contains("\"field\":\"departamento\"")
+                .doesNotContain("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
 
     @Test
     void ignoresFormIntentSoMinimalFormCompilerCanOwnIt() {
@@ -385,12 +565,12 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void createsGovernedTabsPageWhenLlmSelectsTabsComponent() {
+    void createsGovernedTabsPageWhenPromptAsksForTabsEvenIfPrimaryComponentIsChart() {
         AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",
                 "tabbed-resource-workspace",
-                "tabs",
-                "praxis-tabs",
+                "dashboard",
+                "praxis-chart",
                 List.of(),
                 true,
                 true,
@@ -409,6 +589,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
         JsonNode tabsWidget = plan.path("widgets").path(0);
         assertThat(tabsWidget.path("componentId").asText()).isEqualTo("praxis-tabs");
+        assertThat(tabsWidget.path("inputs").path("configPersistenceStrategy").asText()).isEqualTo("input-first");
         assertThat(tabsWidget.path("inputs").path("config").path("tabs")).hasSize(2);
         assertThat(tabsWidget.toString())
                 .contains("\"id\":\"praxis-table\"")
@@ -417,6 +598,336 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .doesNotContain("human-resources")
                 .doesNotContain("payroll");
         assertThat(plan.path("canvas").path("items").path("orders-tabs").path("colSpan").asInt()).isEqualTo(12);
+    }
+
+    @Test
+    void includesChartInsideTabsWhenTabbedPromptAsksForAnalyticalTab() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "tabbed chart workspace",
+                "tabs-with-chart",
+                "praxis-tabs",
+                List.of(axis("severity", "severidade", "Severidade", "bar", "vertical")),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma pagina com duas abas: uma aba com grafico de incidentes por severidade "
+                        + "e outra aba com detalhes de incidentes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "create_artifact",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        decision))).orElseThrow();
+
+        JsonNode tabsWidget = result.uiCompositionPlan().path("widgets").path(0);
+        assertThat(tabsWidget.path("inputs").path("configPersistenceStrategy").asText()).isEqualTo("input-first");
+        JsonNode tabs = tabsWidget.path("inputs").path("config").path("tabs");
+        assertThat(tabs).hasSize(2);
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Grafico", "Detalhes");
+        JsonNode chart = tabs.path(0).path("widgets").path(0);
+        assertThat(chart.path("id").asText()).isEqualTo("praxis-chart");
+        assertThat(chart.path("inputs").has("componentInstanceId")).isFalse();
+        assertThat(chart.path("inputs").path("config").toString())
+                .contains("\"field\":\"severidade\"")
+                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
+                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"");
+        assertThat(tabs.path(1).path("widgets").path(0).path("id").asText()).isEqualTo("praxis-table");
+        assertThat(result.uiCompositionPlan().toString())
+                .contains("praxis-chart")
+                .contains("praxis-table")
+                .doesNotContain("human-resources")
+                .doesNotContain("payroll");
+    }
+
+    @Test
+    void keepsListAndDetailTabsWhenAxesDescribeNonChartTabMetadata() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "pagina de funcionarios com abas lista e detalhes",
+                "tabs",
+                "praxis-tabs",
+                List.of(axis("primary_label", "nomeCompleto", "Nome do funcionario", "bar", "vertical")),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma pagina de funcionarios com duas abas: lista de pessoas e detalhes do funcionario.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "create_artifact", "/api/human-resources/funcionarios", decision))).orElseThrow();
+
+        JsonNode tabs = result.uiCompositionPlan()
+                .path("widgets")
+                .path(0)
+                .path("inputs")
+                .path("config")
+                .path("tabs");
+        assertThat(tabs).extracting(tab -> tab.path("textLabel").asText())
+                .containsExactly("Lista", "Detalhes");
+        assertThat(tabs.toString())
+                .contains("praxis-table", "praxis-dynamic-form")
+                .doesNotContain("praxis-chart");
+    }
+
+    @Test
+    void modifiesExistingChartTypeFromComponentCapabilityAction() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Altere o gráfico selecionado para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                chartModificationIntent())).orElseThrow();
+
+        assertThat(result.uiCompositionPlan()).isNull();
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-modification");
+        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config");
+        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        assertThat(chartConfig.path("series").get(0).path("type").asText()).isEqualTo("line");
+        assertThat(result.compiledFormPatch().path("compatibility").path("publicResponseKind").asText())
+                .isEqualTo("patch");
+    }
+
+    @Test
+    void modifiesOnlyExistingChartWhenTargetKeyDiffersFromRuntimeWidgetKey() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "runtime-generated-chart-key");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Altere o gráfico selecionado para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                chartModificationIntent())).orElseThrow();
+
+        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config");
+        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+    }
+
+    @Test
+    void modifiesExistingChartWhenIntentArtifactIsChart() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Trocar para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                chartModificationIntent("chart"))).orElseThrow();
+
+        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config");
+        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-modification");
+    }
+
+    @Test
+    void modifiesExistingChartTypeFromCanonicalCapabilityChangeKind() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Altere o grafico selecionado para linhas, mantendo os dados atuais.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                chartModificationIntent("chart", "praxis-chart", "praxis-chart.type.set@0.1.0"))).orElseThrow();
+
+        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config");
+        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        assertThat(chartConfig.path("series").get(0).path("type").asText()).isEqualTo("line");
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-modification");
+    }
+
+    @Test
+    void modifiesExistingChartWhenContextualActionTargetsPageBuilder() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Trocar para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                chartModificationIntent("dashboard", "praxis-dynamic-page-builder"))).orElseThrow();
+
+        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config");
+        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+    }
+
+    @Test
+    void surfaceOpenModalModificationEnablesChartSelectionAndAddsGlobalActionComposition() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode inputs = definition.putObject("inputs");
+        ObjectNode config = inputs.putObject("config");
+        config.put("type", "bar");
+        ObjectNode dataSource = config.putObject("dataSource");
+        dataSource.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        dataSource.put("schemaUrl", "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes");
+        ObjectNode axes = config.putObject("axes");
+        axes.putObject("x").put("field", "severidade").put("label", "Severidade");
+        config.putArray("series").addObject().put("type", "bar");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("surfaceActionId", "surface.open");
+        contextHints.put("surfacePresentation", "modal");
+        contextHints.put("surfaceWidgetId", "praxis-table");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Abra os registros da categoria selecionada do gráfico em um modal de detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                chartModificationIntent("chart", "praxis-chart", "enable_chart_drilldown"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        JsonNode patchedPage = result.compiledFormPatch().path("patch").path("page");
+        JsonNode chartConfig = patchedPage.path("widgets").get(0)
+                .path("definition").path("inputs").path("config");
+        JsonNode link = patchedPage.path("composition").path("links").get(0);
+
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-surface-open-modification");
+        assertThat(chartConfig.path("interactions").path("pointClick").asBoolean()).isTrue();
+        assertThat(chartConfig.path("interactions").path("selection").asBoolean()).isTrue();
+        assertThat(patchedPage.path("widgets").get(0).path("definition").path("outputs").path("pointClick").path("type").asText())
+                .isEqualTo("surface.open");
+        assertThat(patchedPage.path("widgets").get(0).path("definition").path("outputs").path("pointClick")
+                .path("params").path("bindings").get(0).path("to").asText())
+                .isEqualTo("widget.inputs.queryContext.filters.severidade");
+        assertThat(patchedPage.path("widgets").get(0).path("definition").path("outputs").path("selectionChange").asText())
+                .isEqualTo("emit");
+        assertThat(link.path("from").path("ref").path("port").asText()).isEqualTo("pointClick");
+        assertThat(link.path("to").path("ref").path("actionId").asText()).isEqualTo("surface.open");
+        assertThat(link.path("to").path("ref").path("payload").path("presentation").asText()).isEqualTo("modal");
+    }
+
+    @Test
+    void modifiesPreviewChartWhenHostCurrentPageIsNotMaterializedYet() {
+        ObjectNode previewPage = objectMapper.createObjectNode();
+        ObjectNode widget = previewPage.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.set("previewPage", previewPage);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Trocar para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                chartModificationIntent("dashboard", "praxis-dynamic-page-builder"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config");
+        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+    }
+
+    @Test
+    void modifiesTargetWidgetSnapshotWhenPageSnapshotIsNotAvailable() {
+        ObjectNode widget = objectMapper.createObjectNode();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "component-capability-catalog");
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("operationKind", "modify");
+        contextHints.put("artifactKind", "chart");
+        contextHints.put("changeKind", "set_chart_type");
+        contextHints.put("targetComponentId", "praxis-chart");
+        contextHints.put("targetWidgetKey", "incidentes-chart-severidade");
+        contextHints.set("targetWidgetSnapshot", widget);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Trocar para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                chartModificationIntent("chart", "praxis-chart"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config");
+        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        assertThat(chartConfig.path("series").get(0).path("type").asText()).isEqualTo("line");
     }
 
     private AgenticAuthoringIntentResolutionResult dashboardIntent(
@@ -466,6 +977,93 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         "selected resource candidate",
                         List.of("api-metadata", "semantic-retrieval")),
                 List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                visualizationDecision);
+    }
+
+    private AgenticAuthoringIntentResolutionResult chartModificationIntent() {
+        return chartModificationIntent("dashboard");
+    }
+
+    private AgenticAuthoringIntentResolutionResult chartModificationIntent(String artifactKind) {
+        return chartModificationIntent(artifactKind, "praxis-chart");
+    }
+
+    private AgenticAuthoringIntentResolutionResult chartModificationIntent(String artifactKind, String targetComponentId) {
+        return chartModificationIntent(artifactKind, targetComponentId, "set_chart_type");
+    }
+
+    private AgenticAuthoringIntentResolutionResult chartModificationIntent(
+            String artifactKind,
+            String targetComponentId,
+            String changeKind) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                artifactKind,
+                changeKind,
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "incidentes-chart-severidade",
+                        targetComponentId,
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "",
+                        "",
+                        ""),
+                new AgenticAuthoringCandidate(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "post",
+                        "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter&operation=post&schemaType=response",
+                        "/api/risk-intelligence/vw-indicadores-incidentes/filter",
+                        "POST",
+                        0.92d,
+                        "selected resource candidate",
+                        List.of("api-metadata", "semantic-retrieval")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+    }
+
+    private AgenticAuthoringIntentResolutionResult intentWithCandidates(
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                operationKind,
+                artifactKind,
+                changeKind,
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                selectedCandidate,
+                candidates,
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
                 null,
                 null,

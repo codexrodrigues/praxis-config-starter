@@ -24,6 +24,9 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 && (input.optionalDataSourceHint() || isOptionalDataSourceHint(rawPrompt));
         boolean dataSourceChoiceAnswer = input.resourceChoiceClarificationAnswer()
                 || (input.contextHintCandidate() != null && explicitDataSourceChoice);
+        boolean materializationRequest = isDirectMaterializationRequest(prompt)
+                || isDirectMaterializationRequest(currentPrompt)
+                || isDirectMaterializationRequest(rawPrompt);
 
         if (optionalDataSourceHint) {
             selectedCandidate = null;
@@ -51,6 +54,16 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 && isBroadArtifactDiscoveryOnly(candidates)) {
             selectedCandidate = null;
         }
+        if (materializationRequest
+                && ("explore".equals(operationKind)
+                || "explain".equals(operationKind)
+                || "api_catalog".equals(artifactKind)
+                || "unknown".equals(artifactKind))) {
+            operationKind = "create";
+            artifactKind = materializableArtifactKind(prompt, currentPrompt, rawPrompt, artifactKind);
+            changeKind = materializableChangeKind(prompt, currentPrompt, rawPrompt, changeKind);
+        }
+
         if (!optionalDataSourceHint
                 && input.governedResourceConfirmation()
                 && !currentPromptExplicitDataSourceChoice
@@ -60,11 +73,91 @@ final class AgenticAuthoringSemanticDecisionPolicy {
             operationKind = valueOrDefault(input.contextHintOperationKind(), "create");
             changeKind = valueOrDefault(input.contextHintChangeKind(), "create_artifact");
         } else if (dataSourceChoiceAnswer && (!input.governedResourceConfirmation() || explicitDataSourceChoice)) {
-            artifactKind = "dashboard";
-            operationKind = "explore";
-            changeKind = "recommend_dashboard_visualization";
+            if (materializationRequest) {
+                selectedCandidate = selectedCandidate != null ? selectedCandidate : input.contextHintCandidate();
+                artifactKind = materializableArtifactKind(prompt, currentPrompt, rawPrompt, artifactKind);
+                operationKind = "create";
+                changeKind = materializableChangeKind(prompt, currentPrompt, rawPrompt, changeKind);
+            } else {
+                artifactKind = "dashboard";
+                operationKind = "explore";
+                changeKind = "recommend_dashboard_visualization";
+            }
         }
         return new AgenticAuthoringSemanticDecision(operationKind, artifactKind, changeKind, selectedCandidate);
+    }
+
+    private boolean isDirectMaterializationRequest(String prompt) {
+        String normalized = normalize(prompt).replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        if (containsAny(normalized,
+                "como criar", "como crio", "como montar", "como faco", "como fazer",
+                "posso criar", "da para criar", "daria para criar", "o que posso criar")) {
+            return false;
+        }
+        String padded = " " + normalized + " ";
+        return padded.contains(" crie ")
+                || padded.contains(" criar agora ")
+                || padded.contains(" monte ")
+                || padded.contains(" gere ")
+                || padded.contains(" gerar agora ")
+                || padded.contains(" materialize ")
+                || padded.contains(" materializar ")
+                || padded.contains(" preview ")
+                || padded.contains(" pre visualizacao ")
+                || padded.contains(" create a ")
+                || padded.contains(" create an ")
+                || padded.contains(" build a ")
+                || padded.contains(" build an ")
+                || padded.contains(" generate a ")
+                || padded.contains(" generate an ");
+    }
+
+    private String materializableArtifactKind(
+            String prompt,
+            String currentPrompt,
+            String rawPrompt,
+            String fallbackArtifactKind) {
+        String normalized = normalize(prompt + " " + currentPrompt + " " + rawPrompt);
+        if (containsAny(normalized, "formulario", "formulário", " form ")) {
+            return "form";
+        }
+        if (containsAny(normalized, "tabela", " table ", "grid")) {
+            return "table";
+        }
+        if (containsAny(normalized, "pagina", "página", " page ")) {
+            return "page";
+        }
+        if (containsAny(normalized,
+                "grafico", "gráfico", "chart", "dashboard", "painel", "kpi", "indicador")) {
+            return "dashboard";
+        }
+        return "unknown".equals(valueOrDefault(fallbackArtifactKind, "unknown"))
+                || "api_catalog".equals(fallbackArtifactKind)
+                || "component".equals(fallbackArtifactKind)
+                ? "dashboard"
+                : fallbackArtifactKind;
+    }
+
+    private String materializableChangeKind(
+            String prompt,
+            String currentPrompt,
+            String rawPrompt,
+            String fallbackChangeKind) {
+        String normalized = normalize(prompt + " " + currentPrompt + " " + rawPrompt);
+        if (containsAny(normalized, "grafico", "gráfico", "chart")
+                && containsAny(normalized, "apenas", "somente", "only", "unico", "único")) {
+            return "create_chart";
+        }
+        if (!"unknown".equals(valueOrDefault(fallbackChangeKind, "unknown"))
+                && !"answer_api_catalog_question".equals(fallbackChangeKind)
+                && !"answer_component_catalog_question".equals(fallbackChangeKind)
+                && !"answer_component_capability_question".equals(fallbackChangeKind)) {
+            return fallbackChangeKind;
+        }
+        return "create_artifact";
     }
 
     private boolean isOptionalDataSourceHint(String prompt) {

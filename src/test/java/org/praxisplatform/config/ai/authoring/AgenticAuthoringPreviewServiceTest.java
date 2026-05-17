@@ -43,6 +43,96 @@ class AgenticAuthoringPreviewServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void previewReturnsConsultativeAnswerWithoutMaterializingPlan() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "explain",
+                "component",
+                "answer_component_capability_question",
+                "consultative",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("consultative", "eligible", List.of()),
+                "Como habilito exportacao de selecionados?",
+                "Use a capacidade governada da tabela para exportar apenas as linhas selecionadas.",
+                objectMapper.createObjectNode(),
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Como habilito exportacao de selecionados?",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+
+        AgenticAuthoringPreviewResult result = service().preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-used",
+                "preview-materialization-skipped-consultative-answer");
+        assertThat(result.assistantMessage())
+                .isEqualTo("Use a capacidade governada da tabela para exportar apenas as linhas selecionadas.");
+        assertThat(result.minimalFormPlan().isMissingNode()).isTrue();
+        assertThat(result.compiledFormPatch().isMissingNode()).isTrue();
+        verifyNoInteractions(planService, patchCompilerService);
+    }
+
+    @Test
+    void previewReturnsApiCatalogConsultativeAnswerWithoutMaterializingPlan() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "explore",
+                "api_catalog",
+                "answer_api_catalog_question",
+                "consultative",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("consultative", "eligible", List.of()),
+                "Quais APIs e dados estao relacionados a folha de pagamento?",
+                "Encontrei dados confirmados de folha de pagamento e posso sugerir telas sem criar preview agora.",
+                objectMapper.createObjectNode(),
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quais APIs e dados estao relacionados a folha de pagamento?",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+
+        AgenticAuthoringPreviewResult result = service().preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.warnings()).contains("preview-materialization-skipped-consultative-answer");
+        assertThat(result.assistantMessage())
+                .contains("dados confirmados de folha de pagamento");
+        verifyNoInteractions(planService, patchCompilerService);
+    }
+
+    @Test
     void previewReturnsPlanAndCompiledPatchWhenBothStagesPass() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest("Crie um formulario", "openai", "gpt-5.4-mini", "test-key");
         ObjectNode plan = objectMapper.createObjectNode();
@@ -288,7 +378,7 @@ class AgenticAuthoringPreviewServiceTest {
                         operationalMonitoringDashboardIntent()), "tenant", "user", "local");
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.failureCodes()).contains("semantic-preview-chart-required", "semantic-preview-dashboard-required");
+        assertThat(result.failureCodes()).contains("semantic-preview-chart-required");
         assertThat(result.warnings()).contains("semantic-preview-materialization-mismatch");
         assertThat(result.assistantMessage()).contains("ainda nao consegui montar o grafico pedido");
     }
@@ -598,15 +688,17 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("widgets").get(0).path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-ranking-reputacao");
         assertThat(result.assistantMessage())
-                .contains("ainda nao consegui montar o grafico pedido")
-                .doesNotContain("Criei uma pre-visualizacao com tabela conectada");
+                .contains("Montei uma primeira versao")
+                .contains("tabela conectada")
+                .doesNotContain("ainda nao consegui montar o grafico pedido");
         assertThat(result.assistantMessage())
                 .doesNotContain("- Tabela: conectada ao recurso para carregar schema e dados");
         assertThat(result.warnings()).contains(
                 "ui-composition-plan-provider:selected-resource-dashboard",
-                "semantic-preview-materialization-mismatch",
                 "compiled-form-patch-materialized-by-page-builder");
-        assertThat(result.failureCodes()).contains("semantic-preview-chart-required", "semantic-preview-dashboard-required");
+        assertThat(result.failureCodes()).doesNotContain(
+                "semantic-preview-chart-required",
+                "semantic-preview-dashboard-required");
         assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("accepted-create");
     }
 
@@ -644,7 +736,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .preview(request, "tenant", "user", "local");
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.failureCodes()).contains("semantic-preview-chart-required", "semantic-preview-dashboard-required");
+        assertThat(result.failureCodes()).contains("semantic-preview-chart-required");
         assertThat(result.warnings()).contains("semantic-preview-materialization-mismatch");
         assertThat(result.uiCompositionPlan().path("widgets").toString()).contains("praxis-table");
         assertThat(result.uiCompositionPlan().path("widgets").toString()).doesNotContain("praxis-chart");
@@ -654,7 +746,7 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
-    void previewRejectsTableOnlyMaterializationForOperationalMonitoringIntent() throws Exception {
+    void previewDoesNotOverrideLlmTableDecisionWithOperationalKeywordHeuristic() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Preciso monitorar chamados e ocorrencias em atendimento, gravidade, andamento e responsavel.",
                 "openai",
@@ -671,13 +763,12 @@ class AgenticAuthoringPreviewServiceTest {
                 .preview(request, "tenant", "user", "local");
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.failureCodes()).contains("semantic-preview-operational-dashboard-required");
-        assertThat(result.warnings()).contains("semantic-preview-materialization-mismatch");
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-operational-dashboard-required");
+        assertThat(result.warnings()).doesNotContain("semantic-preview-materialization-mismatch");
         assertThat(result.uiCompositionPlan().path("widgets").toString()).contains("praxis-table");
         assertThat(result.uiCompositionPlan().path("widgets").toString()).doesNotContain("praxis-chart");
         assertThat(result.assistantMessage())
-                .contains("dashboard operacional completo")
-                .doesNotContain("A tabela foi conectada ao recurso");
+                .doesNotContain("dashboard operacional completo");
     }
 
     @Test
@@ -721,6 +812,9 @@ class AgenticAuthoringPreviewServiceTest {
         properties.putObject("responsavel").put("type", "string");
         when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
                 .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+        assertThat(request.intentResolution().selectedCandidate()).isNotNull();
+        assertThat(request.intentResolution().visualizationDecision()).isNotNull();
+        assertThat(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper).plan(request)).isPresent();
 
         AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
                 planService,
@@ -740,6 +834,43 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("widgets").toString())
                 .contains("\"schemaVerified\":true")
                 .contains("\"schemaProbeStatus\":\"verified\"");
+    }
+
+    @Test
+    void previewUsesCompiledPagePatchAsSemanticMaterializationForChartModification() throws Exception {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode config = definition.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.putArray("series").addObject().put("type", "bar");
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
+                .preview(new AgenticAuthoringPlanRequest(
+                        "Altere o gráfico selecionado para linhas",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        page,
+                        chartTypeModificationIntent()),
+                        "tenant",
+                        "user",
+                        "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("config").path("type").asText())
+                .isEqualTo("line");
+        assertThat(result.assistantMessage())
+                .contains("Atualizei o grafico selecionado para linhas")
+                .doesNotContain("painel que voce quer montar");
     }
 
     @Test
@@ -1053,6 +1184,43 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewPreservesSelectedResourceForChartWhenCandidateIsTransactional() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico de barras simples de incidentes por severidade. "
+                        + "Nao crie tabela, filtros nem KPIs.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                incidentSingleChartIntentWithTransactionalSelectedCandidate());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode severidade = schema.putObject("properties").putObject("severidade");
+        severidade.put("type", "string");
+        severidade.putObject("x-ui").put("label", "Severidade");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("single-chart-page");
+        assertThat(result.uiCompositionPlan().path("widgets")).hasSize(1);
+        assertThat(result.uiCompositionPlan().toString())
+                .contains("\"statsPath\":\"/api/operations/incidentes/stats/group-by\"")
+                .doesNotContain("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
+                .doesNotContain("praxis-table")
+                .doesNotContain("praxis-filter")
+                .doesNotContain("kpi-band");
+    }
+
+    @Test
     void previewReplacesAggregateCountAxisWithSchemaBackedGroupingDimension() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Gostei, mas prefiro graficos mantendo os mesmos dados da folha.",
@@ -1095,14 +1263,306 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
-    void previewRequiresGroundingForGenericChartAxisWithoutLlmAxes() throws Exception {
+    void previewCanonicalizesChartMetricFieldAgainstFilteredSchema() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico de barras horizontais de folha por departamento somando Salario Liquido.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollAnalyticsDashboardIntentWithMetric("salario_liquido"));
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("departamento")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        properties.putObject("salarioLiquido")
+                .put("type", "number")
+                .putObject("x-ui")
+                .put("label", "Salário Líquido");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
+        assertThat(result.warnings())
+                .doesNotContain("semantic-chart-metric-schema-verification-unsupported-field")
+                .contains("semantic-chart-metric-aggregation-repaired-with-schema-field");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"requestedField\":\"salario_liquido\"")
+                .contains("\"field\":\"salarioLiquido\"")
+                .contains("\"alias\":\"salarioLiquido\"")
+                .contains("\"aggregation\":\"sum\"")
+                .contains("\"operation\":\"SUM\"")
+                .contains("\"schemaProbeStatus\":\"verified\"");
+        assertThat(plan).doesNotContain("\"field\":\"salario_liquido\"");
+    }
+
+    @Test
+    void previewRepairsPromptAlignedChartAxisBeforeGenericSchemaFallback() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico horizontal de folha de pagamento por departamento somando salario liquido. Use Analytics Folha Pagamento.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollAnalyticsDashboardIntentWithUnresolvedAxis());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("ano").put("type", "integer").putObject("x-ui").put("label", "Ano");
+        properties.putObject("departamento")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        properties.putObject("salarioLiquido")
+                .put("type", "number")
+                .putObject("x-ui")
+                .put("label", "Salário Líquido");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings())
+                .contains("semantic-chart-axis-repaired-with-prompt-aligned-schema-field")
+                .contains("semantic-chart-metric-inferred-from-schema-context");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"requestedField\":\"unresolved\"")
+                .contains("\"field\":\"departamento\"")
+                .contains("\"title\":\"Registros por Departamento")
+                .contains("\"statsPath\":\"/api/human-resources/vw-analytics-folha-pagamento/stats/group-by\"")
+                .contains("\"field\":\"salarioLiquido\"")
+                .contains("\"operation\":\"SUM\"")
+                .contains("\"schemaProbeStatus\":\"verified\"");
+        assertThat(plan).doesNotContain("\"dimensionField\":\"ano\"");
+    }
+
+    @Test
+    void previewRepairsStatusLikeChartAxisToSingleBooleanSchemaField() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico de pizza de funcionarios por status. Use a fonte Funcionarios. Nao crie tabela, filtros nem KPIs.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                employeeStatusPieChartIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("nomeCompleto")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Nome Completo");
+        properties.putObject("ativo")
+                .put("type", "boolean")
+                .put("description", "Indica se o colaborador esta ativo no cadastro; inativos podem ser retidos por auditoria.")
+                .putObject("x-ui")
+                .put("label", "Ativo");
+        properties.putObject("estadoCivil")
+                .put("type", "string")
+                .putArray("enum")
+                .add("SOLTEIRO")
+                .add("CASADO");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-chart-required");
+        assertThat(result.warnings())
+                .contains("semantic-chart-axis-repaired-with-prompt-aligned-schema-field")
+                .doesNotContain("semantic-axis-schema-verification-unsupported-axis")
+                .doesNotContain("semantic-preview-materialization-mismatch");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-chart");
+        assertThat(plan)
+                .contains("\"type\":\"pie\"")
+                .contains("\"requestedField\":\"status\"")
+                .contains("\"field\":\"ativo\"")
+                .contains("\"label\":\"Ativo\"")
+                .contains("\"statsPath\":\"/api/human-resources/funcionarios/stats/group-by\"")
+                .contains("\"schemaProbeStatus\":\"verified\"")
+                .doesNotContain("praxis-table")
+                .doesNotContain("praxis-filter")
+                .doesNotContain("kpi-band");
+    }
+
+    @Test
+    void previewRepairsUnresolvedTimeseriesAxisWithSchemaTemporalField() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico de linha da evolucao mensal de incidentes por data de ocorrido.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                unresolvedIncidentTimeseriesChartIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("severidade")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Severidade");
+        properties.putObject("ocorridoEm")
+                .put("type", "string")
+                .put("format", "date-time")
+                .put("description", "Marco temporal do fato.")
+                .putObject("x-ui")
+                .put("label", "Ocorrido em");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
+        assertThat(result.warnings())
+                .contains("semantic-chart-axis-repaired-with-prompt-aligned-schema-field")
+                .doesNotContain("semantic-axis-schema-verification-unsupported-axis");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"requestedField\":\"unresolved\"")
+                .contains("\"field\":\"ocorridoEm\"")
+                .contains("\"type\":\"time\"")
+                .contains("\"statsOperation\":\"timeseries\"")
+                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries\"")
+                .contains("\"granularity\":\"MONTH\"")
+                .contains("\"schemaProbeStatus\":\"verified\"");
+        assertThat(plan).doesNotContain("\"field\":\"unresolved\"");
+    }
+
+    @Test
+    void previewPromotesLineChartWithDateTimeAxisToTimeseries() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico de linha da evolucao mensal de incidentes por Ocorrido Em.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                incidentLineChartWithDateAxisButNoTemporalOperationIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("severidade")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Severidade");
+        properties.putObject("ocorridoEm")
+                .put("type", "string")
+                .put("format", "date-time")
+                .putObject("x-ui")
+                .put("label", "Ocorrido em");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-chart-required");
+        assertThat(result.warnings())
+                .contains("semantic-chart-temporal-operation-repaired-with-schema-field")
+                .doesNotContain("semantic-chart-group-by-unsupported-field-type");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"componentId\":\"praxis-chart\"")
+                .contains("\"field\":\"ocorridoEm\"")
+                .contains("\"type\":\"time\"")
+                .contains("\"statsOperation\":\"timeseries\"")
+                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries\"")
+                .contains("\"granularity\":\"MONTH\"")
+                .contains("\"schemaProbeStatus\":\"verified\"");
+    }
+
+    @Test
+    void previewPromotesSemanticTemporalAxisToTimeseriesEvenWhenChartTypeIsGeneric() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie apenas um grafico da evolucao mensal de incidentes por data de ocorrido.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                incidentGenericChartWithTemporalConceptIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("ocorridoEm")
+                .put("type", "string")
+                .put("format", "date-time")
+                .putObject("x-ui")
+                .put("label", "Ocorrido em");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-chart-required");
+        assertThat(result.warnings())
+                .contains("semantic-chart-temporal-operation-repaired-with-schema-field")
+                .doesNotContain("semantic-chart-group-by-unsupported-field-type");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"field\":\"ocorridoEm\"")
+                .contains("\"type\":\"time\"")
+                .contains("\"statsOperation\":\"timeseries\"")
+                .contains("\"schemaProbeStatus\":\"verified\"");
+    }
+
+    @Test
+    void previewOmitsUngroundedChartsWhenLlmProvidesNoAxes() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Gostei, mas prefiro graficos com KPIs, filtros e tabela de detalhe preservando estes dados.",
                 "openai",
                 "gpt-5.4-mini",
                 "test-key",
                 null,
-                payrollAnalyticsDashboardIntent());
+                payrollAnalyticsDashboardChartIntentWithoutAxes());
         ObjectNode schema = objectMapper.createObjectNode();
         ObjectNode properties = schema.putObject("properties");
         properties.putObject("departamento").put("type", "string").putObject("x-ui").put("label", "Departamento");
@@ -1124,6 +1584,8 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.failureCodes()).contains("semantic-preview-axis-schema-verification-required");
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
+                .contains("praxis-table")
+                .doesNotContain("praxis-chart")
                 .contains("\"field\":\"unresolved\"")
                 .contains("\"schemaVerified\":false")
                 .contains("\"provenance\":\"schema-grounding-required\"")
@@ -1131,8 +1593,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("canvas").path("items").toString())
                 .doesNotContain("vw-analytics-folha-pagamento-chart-unresolved");
         assertThat(result.assistantMessage())
-                .contains("ainda nao consegui montar o grafico pedido")
-                .contains("deixar a proposta em revisao");
+                .contains("ainda nao consegui montar o grafico pedido");
     }
 
     @Test
@@ -1619,6 +2080,367 @@ class AgenticAuthoringPreviewServiceTest {
                 objectMapper.createObjectNode());
     }
 
+    private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardChartIntentWithoutAxes() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched payroll analytics",
+                        List.of("payroll", "analytics")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Gostei, mas prefiro graficos com KPIs, filtros e tabela de detalhe preservando estes dados.",
+                "Vou criar uma pre-visualizacao governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "analytical-breakdown",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(),
+                        true,
+                        true,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntentWithMetric(String metricField) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched payroll analytics",
+                        List.of("payroll", "analytics")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico de barras horizontais de folha por departamento somando Salario Liquido.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "payroll-department-horizontal-chart",
+                        "single-chart",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "department",
+                                "departamento",
+                                "Departamento",
+                                "horizontal-bar",
+                                "horizontal",
+                                "count",
+                                metricField,
+                                "Salário Líquido",
+                                "llm-authored-semantic-axis")),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntentWithUnresolvedAxis() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched payroll analytics",
+                        List.of("payroll", "analytics")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico horizontal de folha de pagamento por departamento somando salario liquido. Use Analytics Folha Pagamento.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "payroll-unresolved-horizontal-chart",
+                        "single-chart",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "unresolved",
+                                "unresolved",
+                                "Schema-grounded dimension required",
+                                "horizontal-bar",
+                                "horizontal",
+                                "count",
+                                null,
+                                null,
+                                "llm-authored-semantic-axis")),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult employeeStatusPieChartIntent() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.95d,
+                "matched employees",
+                List.of("explicit-source-match", "domain-catalog-context"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico de pizza de funcionarios por status. Use a fonte Funcionarios. Nao crie tabela, filtros nem KPIs.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "single-pie-by-employee-status",
+                        "single-chart",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "grouping",
+                                "status",
+                                "Status do funcionário",
+                                "pie",
+                                "vertical",
+                                "count",
+                                null,
+                                "Total",
+                                "llm-authored-semantic-axis")),
+                        false,
+                        false,
+                        List.of("praxis-table", "praxis-filter", "praxis-rich-content"),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult unresolvedIncidentTimeseriesChartIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "post",
+                        "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor&operation=post&schemaType=response",
+                        "/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched incident indicators",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico de linha da evolucao mensal de incidentes por data de ocorrido.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "incident-monthly-evolution-line-chart",
+                        "single-chart",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "unresolved",
+                                "unresolved",
+                                "Unresolved",
+                                "line",
+                                "temporal",
+                                "count",
+                                null,
+                                "Total",
+                                "llm-authored-semantic-axis")),
+                        false,
+                        false,
+                        List.of("praxis-table", "praxis-filter", "praxis-rich-content", "praxis-kpi"),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult incidentLineChartWithDateAxisButNoTemporalOperationIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "post",
+                        "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor&operation=post&schemaType=response",
+                        "/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched incident indicators",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico de linha da evolucao mensal de incidentes por Ocorrido Em.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "incident-monthly-evolution-line-chart",
+                        "single-chart",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "time_dimension",
+                                "ocorridoEm",
+                                "Ocorrido Em (mes)",
+                                "line_chart",
+                                "vertical",
+                                "count",
+                                null,
+                                "Total",
+                                "llm-authored-semantic-axis")),
+                        false,
+                        false,
+                        List.of("praxis-table", "praxis-filter", "praxis-rich-content", "praxis-kpi"),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult incidentGenericChartWithTemporalConceptIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "chart",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "post",
+                        "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor&operation=post&schemaType=response",
+                        "/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched incident indicators",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico da evolucao mensal de incidentes por data de ocorrido.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "incident-monthly-evolution-chart",
+                        "single-chart",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "tempo_mensal",
+                                "ocorridoEm",
+                                "Mês de ocorrência",
+                                "bar",
+                                "vertical",
+                                "count",
+                                null,
+                                "Total",
+                                "llm-authored-semantic-axis")),
+                        false,
+                        false,
+                        List.of("praxis-table", "praxis-filter", "praxis-rich-content", "praxis-kpi"),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+    }
+
     private AgenticAuthoringIntentResolutionResult payrollCountAxisDashboardIntent() {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -1686,6 +2508,63 @@ class AgenticAuthoringPreviewServiceTest {
                         "matched incident indicators",
                         List.of("semantic-retrieval", "schema-probe-pending")),
                 List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie apenas um grafico de barras simples de incidentes por severidade.",
+                "Vou criar somente o grafico solicitado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "single-chart",
+                        "single_chart",
+                        "praxis-chart",
+                        List.of(visualizationAxis(
+                                "severity",
+                                "severidade",
+                                "Severidade",
+                                "bar",
+                                "vertical")),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult incidentSingleChartIntentWithTransactionalSelectedCandidate() {
+        AgenticAuthoringCandidate transactionalCandidate = new AgenticAuthoringCandidate(
+                "/api/operations/incidentes",
+                "post",
+                "/schemas/filtered?path=/api/operations/incidentes/filter/cursor&operation=post&schemaType=response",
+                "/api/operations/incidentes/filter/cursor",
+                "POST",
+                0.97d,
+                "matched incident operations",
+                List.of("semantic-retrieval", "schema-probe-pending"));
+        AgenticAuthoringCandidate analyticalCandidate = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/vw-indicadores-incidentes",
+                "post",
+                "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor&operation=post&schemaType=response",
+                "/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor",
+                "POST",
+                0.92d,
+                "matched incident indicators",
+                List.of("semantic-retrieval", "analytics-view", "schema-probe-pending"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                transactionalCandidate,
+                List.of(transactionalCandidate, analyticalCandidate),
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
                 "Crie apenas um grafico de barras simples de incidentes por severidade.",
                 "Vou criar somente o grafico solicitado.",
@@ -1903,6 +2782,46 @@ class AgenticAuthoringPreviewServiceTest {
                 objectMapper.createObjectNode(),
                 null,
                 operationalMonitoringVisualizationDecision());
+    }
+
+    private AgenticAuthoringIntentResolutionResult chartTypeModificationIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "dashboard",
+                "set_chart_type",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "incidentes-chart-severidade",
+                        "praxis-chart",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "",
+                        "",
+                        ""),
+                new AgenticAuthoringCandidate(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "post",
+                        "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter&operation=post&schemaType=response",
+                        "/api/risk-intelligence/vw-indicadores-incidentes/filter",
+                        "POST",
+                        0.94d,
+                        "matched incidents",
+                        List.of("component-capability-catalog", "semantic-retrieval")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Altere o gráfico selecionado para linhas",
+                "Vou ajustar o grafico selecionado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 
     private AgenticAuthoringVisualizationDecision operationalMonitoringVisualizationDecision() {

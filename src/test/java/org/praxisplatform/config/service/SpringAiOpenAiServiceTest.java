@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -95,6 +96,135 @@ class SpringAiOpenAiServiceTest {
         }
     }
 
+    @Test
+    void gpt5JsonCallRaisesCompletionBudgetForStructuredOutput() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
+        server.start();
+        try {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
+
+        JsonNode node = service.generateJson(
+                "prompt",
+                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"));
+
+        assertNotNull(node);
+        assertEquals(123, node.get("value").asInt());
+        assertEquals(8192, capturedRequest.get().path("max_completion_tokens").asInt());
+        assertTrue(capturedRequest.get().path("max_tokens").isMissingNode());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gpt5JsonCallHonorsExplicitCompletionBudget() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
+        server.start();
+        try {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
+
+        JsonNode node = service.generateJson(
+                "prompt",
+                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"),
+                AiCallConfig.builder().maxTokens(2200).build());
+
+        assertNotNull(node);
+        assertEquals(123, node.get("value").asInt());
+        assertEquals(2200, capturedRequest.get().path("max_completion_tokens").asInt());
+        assertTrue(capturedRequest.get().path("max_tokens").isMissingNode());
+        assertTrue(capturedRequest.get().path("reasoning_effort").isMissingNode());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gpt5JsonCallUsesMinimalReasoningForCompactExplicitBudget() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
+        server.start();
+        try {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
+
+        JsonNode node = service.generateJson(
+                "prompt",
+                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"),
+                AiCallConfig.builder().maxTokens(1800).build());
+
+        assertNotNull(node);
+        assertEquals(123, node.get("value").asInt());
+        assertEquals(1800, capturedRequest.get().path("max_completion_tokens").asInt());
+        assertEquals("minimal", capturedRequest.get().path("reasoning_effort").asText());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void directCallRaisesNormalizedProviderExceptionForEmptyContent() throws Exception {
+        HttpServer server = openAiServer("null");
+        server.start();
+        try {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+
+        AiProviderCallException ex = assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+        assertEquals("openai", ex.getProvider());
+        assertEquals(AiProviderCallException.Kind.UNKNOWN, ex.getKind());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void directCallRaisesNormalizedProviderExceptionForHttpFailures() throws Exception {
+        HttpServer server = errorServer(429, """
+                {"error":{"message":"quota exhausted for request req_secret_123"}}
+                """);
+        server.start();
+        try {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+
+        AiProviderCallException ex = assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+        assertEquals("openai", ex.getProvider());
+        assertEquals(AiProviderCallException.Kind.RATE_LIMIT, ex.getKind());
+        assertEquals(429, ex.getStatusCode());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private HttpServer openAiServer(String contentJsonLiteral) throws Exception {
         return openAiServer(contentJsonLiteral, "gpt-4o-mini", new AtomicReference<>());
     }
@@ -127,6 +257,19 @@ class SpringAiOpenAiServiceTest {
             byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        return server;
+    }
+
+    private HttpServer errorServer(int status, String body) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });

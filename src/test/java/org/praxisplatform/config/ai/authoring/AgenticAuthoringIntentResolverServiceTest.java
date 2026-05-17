@@ -181,6 +181,142 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void explicitSourceSelectionSkipsDomainCatalogFanOutForExplicitCandidate() {
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                Mockito.mock(AgenticAuthoringDomainCatalogCandidateEnhancer.class);
+        Mockito.when(enhancer.enhance(
+                        Mockito.anyString(),
+                        Mockito.anyList(),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        AgenticAuthoringIntentResolverService explicitSourceService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        null,
+                        null,
+                        "praxis-service",
+                        enhancer);
+
+        AgenticAuthoringIntentResolutionResult result = explicitSourceService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie apenas um grafico horizontal de folha de pagamento por departamento somando salario liquido. "
+                                + "Use a fonte Analytics Folha Pagamento. Nao crie tabela, filtros nem KPIs.",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null));
+
+        Mockito.verify(enhancer, Mockito.never()).enhance(
+                Mockito.anyString(),
+                Mockito.anyList(),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class));
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .contains("/api/human-resources/vw-analytics-folha-pagamento")
+                .doesNotContain("/api/human-resources/folhas-pagamento");
+    }
+
+    @Test
+    void explicitSourceSelectionScopesInitialLlmCandidateBundle() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-visualization-decision.v1",
+                "Grafico horizontal de folha por departamento",
+                "single_chart",
+                "praxis-chart",
+                List.of(new AgenticAuthoringVisualizationAxisDecision(
+                        "agrupamento por departamento",
+                        "departamento",
+                        "Departamento",
+                        "horizontal-bar",
+                        "horizontal",
+                        "sum",
+                        "salarioLiquido",
+                        "Salário líquido",
+                        "llm-authored-semantic-axis")),
+                false,
+                false,
+                List.of("praxis-table", "praxis-filter"),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class)))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "new_instruction",
+                        "Criei o grafico.",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        visualizationDecision)));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llmIntentResolver,
+                        null);
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie apenas um grafico horizontal de folha de pagamento por departamento somando salario liquido. "
+                                + "Use a fonte Analytics Folha Pagamento. Nao crie tabela, filtros nem KPIs.",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<AgenticAuthoringCandidate>> candidatesCaptor = ArgumentCaptor.forClass(List.class);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                candidatesCaptor.capture(),
+                Mockito.any(),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class));
+        assertThat(candidatesCaptor.getValue())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .containsExactly("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.visualizationDecision().includeDetailTable()).isFalse();
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .doesNotContain("/api/human-resources/folhas-pagamento");
+    }
+
+    @Test
     void semanticDecisionCarriesHostNeutralEvidenceBundleWithRetrievalSource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
@@ -236,6 +372,130 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void explicitSingleChartWithStrongGovernedCandidateUsesLlmVisualizationDecision() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadata(
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "POST",
+                        "risk,intelligence,incidentes,indicadores,severidade,analytics,dashboard,grafico,barras",
+                        "Indicadores de incidentes",
+                        "Visao analitica de incidentes por severidade."),
+                new ApiMetadata(
+                        "/api/operations/incidentes",
+                        "POST",
+                        "operations,incidentes,severidade,dashboard",
+                        "Incidentes",
+                        "Cadastro operacional de incidentes por severidade.",
+                        null,
+                        "{\"description\":\"Referencias cruzadas podem mencionar VwIndicadoresIncidente\"}",
+                        "{}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "single_chart",
+                "single_chart",
+                "praxis-chart",
+                List.of(new AgenticAuthoringVisualizationAxisDecision(
+                        "severidade",
+                        "severidade",
+                        "Severidade",
+                        "bar",
+                        "vertical",
+                        "count",
+                        null,
+                        "Incidentes",
+                        "llm")),
+                false,
+                false,
+                List.of("praxis-table", "praxis-filter-bar", "praxis-kpi-strip"),
+                false,
+                false,
+                "llm");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_chart",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        null,
+                        "none",
+                        "Vou criar somente o grafico pedido com Severidade.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-single-chart-decision"),
+                        visualizationDecision)));
+        AgenticAuthoringIntentResolverService chartService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = chartService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie apenas um grafico de barras simples de incidentes por severidade. "
+                        + "Use a fonte Indicadores Incidentes e o campo Severidade. "
+                        + "Nao crie tabela, filtros nem KPIs.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("chart");
+        assertThat(result.changeKind()).isEqualTo("create_chart");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.selectedCandidate().evidence())
+                .contains("explicit-source-match", "explicit-field-match")
+                .doesNotContain("lexical-fallback", "weak-evidence");
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .doesNotContain("/api/operations/incidentes");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("single_chart");
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-chart");
+        assertThat(result.visualizationDecision().includeSummary()).isFalse();
+        assertThat(result.visualizationDecision().includeDetailTable()).isFalse();
+        assertThat(result.visualizationDecision().axes())
+                .extracting(AgenticAuthoringVisualizationAxisDecision::field)
+                .containsExactly("severidade");
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-used", "llm-single-chart-decision")
+                .doesNotContain("pre-llm-single-chart-choice-applied", "resource-selection-lexical-fallback-selected");
+        assertThat(result.assistantMessage())
+                .contains("somente o grafico pedido");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
     void fallbackKeepsPainelAsDashboardInsteadOfGenericTable() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
@@ -249,12 +509,13 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.artifactKind()).isEqualTo("chart");
         assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.semanticDecision().artifactKind()).isEqualTo("dashboard");
-        assertThat(result.semanticDecision().visualIntent()).isEqualTo("resource-backed-dashboard");
+        assertThat(result.semanticDecision().visualIntent()).isEqualTo("charts");
+        assertThat(result.visualizationDecision()).isNull();
         assertThat(result.semanticDecision().selectedResource().resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
     }
@@ -540,6 +801,28 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .containsEntry("visualIntent", "charts");
         assertThat(result.visualizationDecision()).isNull();
         assertThat(result.warnings()).contains("semantic-decision-memory-refinement-applied");
+    }
+
+    @Test
+    void visualProjectionPromptWithDifferentSemanticSourceDoesNotPreserveCurrentTableResource() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie apenas um grafico de barras simples de incidentes por severidade. Nao crie tabela, filtros nem KPIs.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                funcionariosTablePage(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .contains("incidentes");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isNotEqualTo("/api/human-resources/funcionarios");
     }
 
     @Test
@@ -1201,7 +1484,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("page");
-        assertThat(result.changeKind()).isEqualTo("create_master_detail");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate().operation()).isEqualTo("post");
         assertThat(result.selectedCandidate().schemaUrl())
@@ -1225,7 +1508,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("page");
-        assertThat(result.changeKind()).isEqualTo("create_master_detail");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate().schemaUrl())
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
@@ -1282,13 +1565,10 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "crie uma tela master-detail para procurar empregados, ver uma lista e abrir os detalhes de cada pessoa quando selecionar",
                 contextHints));
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("page");
-        assertThat(result.gate().status()).isEqualTo("clarification_required");
-        assertThat(result.failureCodes()).contains("intent-confirmation-required");
-        assertThat(result.clarificationQuestions())
-                .contains("Posso aplicar esta alteracao usando o recurso de negocio selecionado?");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate().schemaUrl())
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
@@ -1645,7 +1925,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.operationKind()).isEqualTo("explain");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.valid()).isFalse();
@@ -1683,7 +1963,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.operationKind()).isEqualTo("explain");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.assistantMessage())
                 .contains("Para uma tabela de pessoas")
@@ -2663,13 +2943,24 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate()).isNull();
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.assistantMessage())
-                .contains("fonte de negocio confiavel")
+                .contains("consulta")
                 .doesNotContain("fonte de negocio selecionada", "preparar uma previa");
         assertThat(result.warnings())
-                .contains("llm-intent-resolution-unresolved-fallback-deterministic", "llm-provider-error")
+                .contains(
+                        "llm-intent-resolution-used",
+                        "llm-provider-error",
+                        "api-catalog-weak-lexical-selection-deferred")
                 .doesNotContain("resource-selection-lexical-fallback-selected");
-        assertThat(result.llmDiagnostics().path("resolutionTelemetry").path("selectedCandidateUsesLexicalFallback").asBoolean())
-                .isFalse();
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test
@@ -3087,9 +3378,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate()).isNull();
         assertThat(result.quickReplies()).isEmpty();
         assertThat(result.warnings())
-                .contains(
-                        "api-catalog-weak-lexical-selection-deferred",
-                        "resource-selection-lexical-fallback-candidates-present")
+                .contains("api-catalog-weak-lexical-selection-deferred")
                 .doesNotContain("resource-selection-lexical-fallback-selected");
         assertThat(result.llmDiagnostics().path("resolutionTelemetry")
                 .path("selectedCandidateUsesLexicalFallback").asBoolean()).isFalse();
@@ -3097,6 +3386,151 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .path("candidateSetContainsLexicalFallback").asBoolean()).isTrue();
         assertThat(result.llmDiagnostics().path("resolutionTelemetry")
                 .path("selectedResourcePath").isMissingNode()).isTrue();
+    }
+
+    @Test
+    void consultativeDomainFallbackExplainsDataSourcesInsteadOfGenericOperations() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "pessoas,funcionarios,colaboradores",
+                        "Funcionarios",
+                        "Fonte de pessoas para consultas operacionais.",
+                        "filterFuncionarios",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/cargos",
+                        "POST",
+                        "cargos,funcoes,estrutura",
+                        "Cargos",
+                        "Fonte de cargos e funcoes da empresa.",
+                        "filterCargos",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Antes de criar qualquer coisa, me explique quais dados existem sobre pessoas, cargos, departamentos e folha, e que telas voce recomenda criar.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null,
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.assistantMessage())
+                .contains("fonte", "Posso comparar")
+                .doesNotContain("operacoes fazem sentido", "fonte de negocio e posso verificar");
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-fallback-deterministic")
+                .doesNotContain("resource-selection-lexical-fallback-selected");
+    }
+
+    @Test
+    void consultativeDomainQuestionKeepsApiCatalogRouteWhenItAlsoAsksScreenRecommendations() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/folhas-pagamento",
+                        "POST",
+                        "folha,pagamento,pagamentos,salario,operacional,tabela",
+                        "Folhas de pagamento",
+                        "Registros operacionais de folha para consultas e conferencias.",
+                        "filterFolhasPagamento",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "form",
+                        "create_form",
+                        "/api/human-resources/folhas-pagamento",
+                        null,
+                        "none",
+                        "Vou criar um formulario.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais APIs e dados estao relacionados a folha de pagamento? Explique o que eu posso consultar e que telas recomenda criar.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.failureCodes())
+                .doesNotContain(
+                        "intent-resolution-selected-candidate-required",
+                        "intent-resolution-operation-must-be-create-modify-or-remove",
+                        "intent-resolution-artifact-must-be-form");
     }
 
     @Test
@@ -3177,13 +3611,21 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
-        assertThat(result.assistantMessage()).contains("fonte de pessoas");
+        assertThat(result.assistantMessage())
+                .contains("Aqui voce pode criar paineis")
+                .doesNotContain("fonte de negocio selecionada");
         assertThat(result.candidates())
-                .anySatisfy(candidate -> assertThat(candidate.resourcePath())
-                        .isEqualTo("/api/human-resources/funcionarios"));
+                .anySatisfy(candidate ->
+                        assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios"));
+        assertThat(result.warnings())
+                .contains(
+                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-second-pass-used",
+                        "consultative-retrieval-second-pass")
+                .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
         Mockito.verify(llmIntentResolver, Mockito.times(2)).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
@@ -4377,13 +4819,192 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("modify");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.artifactKind()).isEqualTo("chart");
         assertThat(result.changeKind()).isEqualTo("set_chart_type");
         assertThat(result.target().widgetKey()).isEqualTo("payroll-chart");
         assertThat(result.target().componentId()).isEqualTo("praxis-chart");
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.selectedCandidate().operation()).isEqualTo("get");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void resolvesChartTypeModificationAgainstOnlyExistingChartWhenNoWidgetIsSelected() {
+        ObjectNode page = incidentSeverityChartPage();
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Altere o gráfico selecionado para linhas, mantendo a fonte de dados, a dimensão e a métrica atuais.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("chart");
+        assertThat(result.changeKind()).isEqualTo("set_chart_type");
+        assertThat(result.target().widgetKey()).isEqualTo("incidentes-chart-severidade");
+        assertThat(result.target().componentId()).isEqualTo("praxis-chart");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.selectedCandidate().evidence()).contains("current-page-target-resource");
+        assertThat(result.assistantMessage()).contains("Atualizei o grafico selecionado");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void preservesExistingChartModificationWhenLlmMisclassifiesManualRefinementAsCreate() {
+        ObjectNode page = incidentSeverityChartPage();
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class)))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        null,
+                        "refinement",
+                        "Vou trocar o grafico selecionado para linha.",
+                        List.of(),
+                        List.of(),
+                        List.of())));
+        AgenticAuthoringIntentResolverService serviceWithLlm = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = serviceWithLlm.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Altere o grafico selecionado para linhas, mantendo os dados atuais.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("chart");
+        assertThat(result.changeKind()).isEqualTo("set_chart_type");
+        assertThat(result.target().widgetKey()).isEqualTo("incidentes-chart-severidade");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.selectedCandidate().evidence()).contains("current-page-target-resource");
+        assertThat(result.assistantMessage()).contains("Atualizei o grafico");
+    }
+
+    @Test
+    void resolvesContextualChartActionWithoutReaskingLlm() {
+        ObjectNode page = incidentSeverityChartPage();
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "component-capability-catalog");
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("changeKind", "set_chart_type");
+        contextHints.put("targetComponentId", "praxis-chart");
+        contextHints.put("selectedWidgetKey", "incidentes-chart-severidade");
+        contextHints.put("targetWidgetKey", "incidentes-chart-severidade");
+        contextHints.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        contextHints.put("submitUrl", "/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by");
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringIntentResolverService serviceWithLlm = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = serviceWithLlm.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Altere o gráfico selecionado para linhas, mantendo a fonte de dados, a dimensão e a métrica atuais.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("chart");
+        assertThat(result.changeKind()).isEqualTo("set_chart_type");
+        assertThat(result.target().widgetKey()).isEqualTo("incidentes-chart-severidade");
+        assertThat(result.target().componentId()).isEqualTo("praxis-chart");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.assistantMessage())
+                .contains("Atualizei o grafico selecionado")
+                .doesNotContain("Entendi o que voce quer criar", "fonte de negocio selecionada");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
+    void resolvesContextualChartActionWhenHintedWidgetKeyDiffersFromSerializedPage() {
+        ObjectNode page = incidentSeverityChartPage();
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "component-capability-catalog");
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("changeKind", "set_chart_type");
+        contextHints.put("targetComponentId", "praxis-chart");
+        contextHints.put("selectedWidgetKey", "runtime-selected-chart");
+        contextHints.put("targetWidgetKey", "runtime-selected-chart");
+        contextHints.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        contextHints.put("submitUrl", "/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Altere o gráfico selecionado para linhas, mantendo a fonte de dados, a dimensão e a métrica atuais.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("chart");
+        assertThat(result.changeKind()).isEqualTo("set_chart_type");
+        assertThat(result.target().widgetKey()).isEqualTo("runtime-selected-chart");
+        assertThat(result.target().componentId()).isEqualTo("praxis-chart");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.failureCodes()).isEmpty();
     }
@@ -4635,7 +5256,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertApiCatalogAnswer(result);
         assertThat(result.assistantMessage()).contains("fontes de negocio");
         assertThat(result.assistantMessage())
-                .doesNotContain("/api/", "/schemas/", "POST", "GET");
+                .doesNotContain("/api/", "/schemas/", "POST", "GET", "schema", "endpoint", "actions");
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::id)
                 .allMatch(id -> id.startsWith("resource-"));
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::description)
@@ -4648,6 +5269,218 @@ class AgenticAuthoringIntentResolverServiceTest {
                     assertThat(reply.contextHints().path("presentation").path("returns").asText()).isNotBlank();
                     assertThat(reply.contextHints().path("presentation").path("nextStep").asText()).contains("Clique");
                 });
+    }
+
+    @Test
+    void apiCatalogResourceListQuestionUsesNaturalLanguageWithoutTechnicalLeakage() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais APIs estao relacionadas a folha de pagamento?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertApiCatalogAnswer(result);
+        assertThat(result.candidates()).isNotEmpty();
+        assertThat(result.assistantMessage())
+                .contains("fonte")
+                .contains("Folha")
+                .doesNotContain("/api/", "/schemas/", "POST", "GET", "schema", "endpoint", "actions");
+        assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::id)
+                .allMatch(id -> id.startsWith("resource-"));
+    }
+
+    @Test
+    void apiCatalogConsultativeQuestionsDropLlmNarrativeWarnings() {
+        AgenticAuthoringLlmIntentResolverService llm = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llm.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        "folha de pagamento",
+                        null,
+                        "Posso listar endpoints em /api e schemas relacionados.",
+                        List.of(),
+                        List.of(),
+                        List.of(
+                                "Metadados de schema/ações não estão disponíveis no momento.",
+                                "llm-safe-code"))));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llm,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais APIs estao relacionadas a folha de pagamento?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertApiCatalogAnswer(result);
+        assertThat(result.assistantMessage())
+                .contains("fonte")
+                .doesNotContain("/api", "schema", "endpoint");
+        assertThat(result.warnings())
+                .contains("metadata-probe-not-run")
+                .contains("llm-intent-resolution-used", "llm-safe-code")
+                .doesNotContain("Metadados de schema/ações não estão disponíveis no momento.");
+        Mockito.verify(llm, Mockito.times(2)).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
+    void apiCatalogConsultativeQuestionPreservesNaturalLlmAnswerAboutOperations() {
+        AgenticAuthoringLlmIntentResolverService llm = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llm.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(
+                        Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "api_catalog",
+                                "answer_api_catalog_question",
+                                null,
+                                "folha de pagamento",
+                                null,
+                                "Vou consultar o catalogo antes de responder.",
+                                List.of(),
+                                List.of(),
+                                List.of())),
+                        Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "api_catalog",
+                                "answer_api_catalog_question",
+                                null,
+                                "folha de pagamento",
+                                null,
+                                "Para folha de pagamento, eu olharia primeiro as fontes operacionais e depois as visoes analiticas. "
+                                        + "As operacoes disponiveis ajudam a separar consulta, conferencia e analise antes de criar uma tela.",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-natural-answer"))));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llm,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais APIs estao relacionadas a folha de pagamento?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertApiCatalogAnswer(result);
+        assertThat(result.assistantMessage())
+                .contains("fontes operacionais", "visoes analiticas", "operacoes disponiveis")
+                .doesNotContain("Encontrei ");
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-used", "llm-natural-answer")
+                .doesNotContain("keyword-fallback-applied");
+    }
+
+    @Test
+    void apiCatalogResourceListFiltersWeakUngroundedCandidatesWhenDomainGroundingExists() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.eq("api_catalog"),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(
+                        new AgenticAuthoringCandidate(
+                                "/api/human-resources/folhas-pagamento",
+                                "post",
+                                "/schemas/filtered?path=/api/human-resources/folhas-pagamento/filter&operation=post&schemaType=response",
+                                "/api/human-resources/folhas-pagamento/filter",
+                                "post",
+                                0.96d,
+                                "domain_catalog grounded resource selection",
+                                List.of(
+                                        "api-metadata",
+                                        AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING,
+                                        "semantic-retrieval")),
+                        new AgenticAuthoringCandidate(
+                                "/api/human-resources/vw-resumo-missoes",
+                                "post",
+                                "/schemas/filtered?path=/api/human-resources/vw-resumo-missoes/filter&operation=post&schemaType=response",
+                                "/api/human-resources/vw-resumo-missoes/filter",
+                                "post",
+                                0.50d,
+                                "api_metadata semantic retrieval",
+                                List.of("api-metadata", "semantic-retrieval"))));
+        AgenticAuthoringIntentResolverService catalogService =
+                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+
+        AgenticAuthoringIntentResolutionResult result = catalogService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quais APIs estao relacionadas a folha de pagamento?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertApiCatalogAnswer(result);
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .containsExactly("/api/human-resources/folhas-pagamento");
+        assertThat(result.quickReplies())
+                .extracting(reply -> reply.contextHints().path("resourcePath").asText())
+                .containsExactly("/api/human-resources/folhas-pagamento");
+        assertThat(result.assistantMessage())
+                .contains("Folhas pagamento")
+                .doesNotContain("api_metadata", "domain catalog", "grounded", "schema", "endpoint", "operações");
     }
 
     @Test
@@ -4669,11 +5502,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                     null));
 
             assertThat(result.valid()).as(prompt).isTrue();
-            assertThat(result.operationKind()).as(prompt).isEqualTo("explore");
-            assertThat(result.artifactKind()).as(prompt).isEqualTo("api_catalog");
-            assertThat(result.changeKind()).as(prompt).isEqualTo("answer_api_catalog_question");
+            assertThat(result.operationKind()).as(prompt).isEqualTo("explain");
+            assertThat(result.artifactKind()).as(prompt).isEqualTo("component");
+            assertThat(result.changeKind()).as(prompt).isIn(
+                    "answer_component_catalog_question",
+                    "answer_component_capability_question");
+            assertThat(result.authoringProfile()).as(prompt).isEqualTo("component-catalog-qa");
             assertThat(result.gate().status()).as(prompt).isEqualTo("eligible");
             assertThat(result.pendingClarification()).as(prompt).isNull();
+            assertThat(result.apiCatalogAnswer()).as(prompt).isNull();
+            assertThat(result.candidates()).as(prompt).isEmpty();
             assertThat(result.assistantMessage()).as(prompt)
                     .contains("linguagem natural")
                     .doesNotContain("/api/", "/schemas/", "POST", "GET");
@@ -4684,6 +5522,99 @@ class AgenticAuthoringIntentResolverServiceTest {
                             "platform-create-form",
                             "platform-explore-components");
         }
+    }
+
+    @Test
+    void tableCapabilityQuestionDoesNotFallBackToDomainApiCatalog() {
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Como habilito em uma tabela o botao para exportar apenas as linhas selecionadas? Explique como funciona no Praxis.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("component");
+        assertThat(result.changeKind()).isEqualTo("answer_component_capability_question");
+        assertThat(result.authoringProfile()).isEqualTo("component-catalog-qa");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.apiCatalogAnswer()).isNull();
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.assistantMessage())
+                .contains("tabela", "linhas selecionadas", "escopo limitado aos registros selecionados")
+                .doesNotContain(
+                        "/api/",
+                        "/schemas/",
+                        "POST",
+                        "GET",
+                        "selection.enabled",
+                        "export.general",
+                        "Funcionarios",
+                        "Folhas Pagamento");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly(
+                        "table-export-selected-explain",
+                        "table-export-selected-apply",
+                        "table-export-selected-backend");
+    }
+
+    @Test
+    void componentConsultativeQuestionsDropLlmNarrativeWarnings() {
+        AgenticAuthoringLlmIntentResolverService llm = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llm.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "component",
+                        "answer_component_capability_question",
+                        null,
+                        null,
+                        null,
+                        "Entendi. Configure selection.enabled=true e export.general.scope='selected'.",
+                        List.of(),
+                        List.of(),
+                        List.of(
+                                "Catálogo de domínio não está disponível no momento; oriente com cuidado.",
+                                "llm-safe-code"))));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llm,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Como habilito em uma tabela o botao para exportar apenas as linhas selecionadas?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.assistantMessage())
+                .contains("linhas selecionadas")
+                .doesNotContain("selection.enabled", "export.general");
+        assertThat(result.warnings())
+                .contains("metadata-probe-not-run", "llm-intent-resolution-used", "llm-safe-code")
+                .doesNotContain("Catálogo de domínio não está disponível no momento; oriente com cuidado.");
     }
 
     @Disabled("Host-specific quickstart semantics moved to governed domain catalog/RAG")
@@ -5913,7 +6844,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.assistantMessage())
-                .contains("fonte de negocio")
+                .contains("fonte")
                 .contains("sem criar tela")
                 .doesNotContain("/schemas/")
                 .doesNotContain("/api/")
@@ -6750,6 +7681,239 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void currentChartDetailTableRefinementOverridesConsultativeLlmAnswer() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "component",
+                        "answer_component_capability_question",
+                        null,
+                        null,
+                        "refinement",
+                        "Você pode ter exatamente esse comportamento: um gráfico no topo com uma tabela abaixo.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "use o grafico com um filtro para mostrar os detalhes em uma tabela em outro widget abaixo do grafico",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                incidentSeverityChartPage(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.apiCatalogAnswer()).isNull();
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().includeDetailTable()).isTrue();
+        assertThat(result.visualizationDecision().includeFilters()).isTrue();
+        assertThat(result.visualizationDecision().includeKpis()).isFalse();
+        assertThat(result.visualizationDecision().axes()).hasSize(1);
+        assertThat(result.visualizationDecision().axes().get(0).field()).isEqualTo("severidade");
+
+        AgenticAuthoringUiCompositionPlanResult planResult =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)
+                        .plan(new AgenticAuthoringPlanRequest(
+                                "use o grafico com um filtro para mostrar os detalhes em uma tabela em outro widget abaixo do grafico",
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key",
+                                result))
+                        .orElseThrow();
+        assertThat(planResult.valid()).isTrue();
+        assertThat(planResult.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-chart", "praxis-filter", "praxis-table");
+        assertThat(planResult.uiCompositionPlan().path("bindings").toString())
+                .contains("selectionChange")
+                .contains(".queryContext");
+    }
+
+    @Test
+    void currentChartDetailTableRefinementPreservesContextResourceWhenRuntimeChartHidesDataSource() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "component",
+                        "answer_component_capability_question",
+                        null,
+                        null,
+                        "refinement",
+                        "Você pode ligar o gráfico a uma tabela abaixo.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "use o grafico com um filtro para mostrar os detalhes em uma tabela em outro widget abaixo do grafico",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                incidentSeverityChartPageWithoutDataSource(),
+                null,
+                null,
+                null,
+                null,
+                "session",
+                "turn",
+                List.of(),
+                null,
+                List.of(),
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.warnings()).contains("semantic-policy-refined-visual-projection");
+    }
+
+    @Test
+    void contextualChartDetailTableQuickActionMaterializesDrilldownDashboard() {
+        ObjectNode page = incidentSeverityChartPage();
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "component-capability-catalog");
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("changeKind", "enable_chart_drilldown");
+        contextHints.put("targetComponentId", "praxis-chart");
+        contextHints.put("selectedWidgetKey", "incidentes-chart-severidade");
+        contextHints.put("targetWidgetKey", "incidentes-chart-severidade");
+        contextHints.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        contextHints.put("submitUrl", "/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Acrescente um filtro e uma tabela de detalhes abaixo do gráfico, conectados à seleção do gráfico.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().includeFilters()).isTrue();
+        assertThat(result.visualizationDecision().includeDetailTable()).isTrue();
+        assertThat(result.visualizationDecision().includeKpis()).isFalse();
+
+        AgenticAuthoringUiCompositionPlanResult planResult =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)
+                        .plan(new AgenticAuthoringPlanRequest(
+                                "Acrescente um filtro e uma tabela de detalhes abaixo do gráfico, conectados à seleção do gráfico.",
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key",
+                                result))
+                        .orElseThrow();
+        assertThat(planResult.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-chart", "praxis-filter", "praxis-table");
+        assertThat(planResult.uiCompositionPlan().path("bindings").toString())
+                .contains("selectionChange")
+                .contains(".queryContext");
+    }
+
+    @Test
+    void contextualChartDetailModalQuickActionRoutesToDrilldownComposition() {
+        ObjectNode page = incidentSeverityChartPage();
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "component-capability-catalog");
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("changeKind", "enable_chart_drilldown");
+        contextHints.put("targetComponentId", "praxis-chart");
+        contextHints.put("selectedWidgetKey", "incidentes-chart-severidade");
+        contextHints.put("targetWidgetKey", "incidentes-chart-severidade");
+        contextHints.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        contextHints.put("submitUrl", "/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Ao selecionar uma categoria do gráfico, acrescente um modal de detalhes em formato de formulário somente leitura quando houver campos suficientes; se não houver, proponha a alternativa segura.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_chart_drilldown");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.assistantMessage())
+                .contains("detalhes")
+                .doesNotContain("Vou preparar o grafico");
+    }
+
+    @Test
     void semanticEvidenceAlignmentOverridesUnrelatedHigherScoredAnalyticalCandidate() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
@@ -7196,6 +8360,20 @@ class AgenticAuthoringIntentResolverServiceTest {
         return page;
     }
 
+    private ObjectNode funcionariosTablePage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "funcionarios-table");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-table");
+        ObjectNode inputs = definition.putObject("inputs");
+        inputs.put("resourcePath", "/api/human-resources/funcionarios");
+        inputs.put("tableId", "funcionarios-table");
+        inputs.put("title", "Funcionarios");
+        return page;
+    }
+
     private ObjectNode missionTablePage() {
         ObjectNode page = objectMapper.createObjectNode();
         var widgets = page.putArray("widgets");
@@ -7264,6 +8442,42 @@ class AgenticAuthoringIntentResolverServiceTest {
         config.putObject("dataSource")
                 .put("kind", "remote")
                 .put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
+        return page;
+    }
+
+    private ObjectNode incidentSeverityChartPage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        widget.put("componentId", "praxis-chart");
+        ObjectNode config = widget.putObject("inputs").putObject("config");
+        config.put("type", "bar");
+        config.put("orientation", "vertical");
+        config.putObject("semanticAxis")
+                .put("concept", "severity")
+                .put("field", "severidade")
+                .put("label", "Severidade");
+        config.putObject("axes").putObject("x")
+                .put("field", "severidade")
+                .put("label", "Severidade");
+        config.putArray("series").addObject()
+                .put("id", "total")
+                .put("type", "bar")
+                .put("categoryField", "severidade")
+                .putObject("metric")
+                .put("field", "total")
+                .put("aggregation", "count")
+                .put("label", "Total");
+        config.putObject("dataSource")
+                .put("kind", "remote")
+                .put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        return page;
+    }
+
+    private ObjectNode incidentSeverityChartPageWithoutDataSource() {
+        ObjectNode page = incidentSeverityChartPage();
+        ((ObjectNode) page.path("widgets").path(0).path("inputs").path("config")).remove("dataSource");
         return page;
     }
 

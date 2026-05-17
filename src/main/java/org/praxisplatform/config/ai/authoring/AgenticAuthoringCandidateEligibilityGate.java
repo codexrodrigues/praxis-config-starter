@@ -20,7 +20,13 @@ public class AgenticAuthoringCandidateEligibilityGate {
                 && "api_catalog".equals(artifactKind)
                 && ("answer_api_catalog_question".equals(changeKind)
                 || "answer_catalog_question".equals(changeKind));
-        if (("explore".equals(operationKind) || "explain".equals(operationKind)) && !apiCatalogQuestion) {
+        boolean componentCatalogQuestion = ("explore".equals(operationKind) || "explain".equals(operationKind))
+                && "component".equals(artifactKind)
+                && ("answer_component_catalog_question".equals(changeKind)
+                || "answer_component_capability_question".equals(changeKind));
+        if (("explore".equals(operationKind) || "explain".equals(operationKind))
+                && !apiCatalogQuestion
+                && !componentCatalogQuestion) {
             messages.add("intent-confirmation-required");
         }
         if ("unknown".equals(artifactKind)) {
@@ -43,7 +49,7 @@ public class AgenticAuthoringCandidateEligibilityGate {
         if ("create".equals(operationKind) && selectedCandidate == null && !hasCandidates) {
             messages.add("resource-candidate-required");
         }
-        if (!apiCatalogQuestion && selectedCandidate == null && candidates != null && candidates.size() > 1) {
+        if (!apiCatalogQuestion && !componentCatalogQuestion && selectedCandidate == null && candidates != null && candidates.size() > 1) {
             messages.add("resource-candidate-ambiguous");
         }
         String status = messages.isEmpty() ? "eligible" : "clarification_required";

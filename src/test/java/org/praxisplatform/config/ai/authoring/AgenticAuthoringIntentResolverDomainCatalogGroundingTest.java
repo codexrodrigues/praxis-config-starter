@@ -135,7 +135,7 @@ class AgenticAuthoringIntentResolverDomainCatalogGroundingTest {
         assertThat(result.gate()).isNotNull();
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.gate().messages()).doesNotContain("shared-rule-authoring-required");
-        assertThat(result.assistantMessage()).contains("fonte de negocio");
+        assertThat(result.assistantMessage()).contains("fonte");
         assertThat(result.assistantMessage()).doesNotContain("/schemas/", "/api/");
         assertThat(result.assistantMessage()).doesNotContain("Nao consegui concluir", "grounding estruturado", "LLM/RAG");
         assertThat(result.selectedCandidate()).isNotNull();

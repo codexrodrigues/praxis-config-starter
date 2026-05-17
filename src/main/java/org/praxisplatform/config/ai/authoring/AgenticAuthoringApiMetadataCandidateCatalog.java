@@ -64,7 +64,12 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (repository == null) {
             return semanticCandidates;
         }
-        if (!semanticCandidates.isEmpty()) {
+        boolean explicitSourceReference = hasExplicitSourceReference(normalizedPrompt);
+        if (!explicitSourceReference
+                && !"api_catalog".equals(artifactKind)
+                && !"dashboard".equals(artifactKind)
+                && !semanticCandidates.isEmpty()
+                && strongSemanticRetrieval(semanticCandidates)) {
             return semanticCandidates;
         }
         List<String> originalTokens = meaningfulTokens(normalizedPrompt);
@@ -74,9 +79,34 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         List<String> tokens = meaningfulTokens(normalizedPrompt);
         List<AgenticAuthoringCandidate> lexicalCandidates =
                 new LexicalFallbackCandidateRetriever().retrieve(context.withTokens(tokens));
+        List<AgenticAuthoringCandidate> explicitSourceCandidates = lexicalCandidates.stream()
+                .filter(candidate -> hasEvidence(candidate, "explicit-source-match"))
+                .toList();
+        if (!"api_catalog".equals(artifactKind) && !explicitSourceCandidates.isEmpty()) {
+            return mergeCandidates(explicitSourceCandidates, List.of());
+        }
         List<AgenticAuthoringCandidate> mergedCandidates =
                 mergeCandidates(lexicalCandidates, semanticCandidates);
         return mergedCandidates;
+    }
+
+    private boolean hasExplicitSourceReference(String normalizedPrompt) {
+        return !explicitPhraseTerms(normalizedPrompt, "fonte", "source", "recurso").isEmpty();
+    }
+
+    private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {
+        return candidate != null
+                && candidate.evidence() != null
+                && candidate.evidence().contains(evidence);
+    }
+
+    private boolean strongSemanticRetrieval(List<AgenticAuthoringCandidate> candidates) {
+        return candidates != null
+                && candidates.stream()
+                .filter(candidate -> candidate != null && candidate.evidence().contains("semantic-retrieval"))
+                .mapToDouble(AgenticAuthoringCandidate::score)
+                .max()
+                .orElse(0d) >= 0.70d;
     }
 
     private List<AgenticAuthoringCandidate> mergeCandidates(
@@ -204,6 +234,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             metadata,
                             context.expectedMethod(),
                             context.artifactKind(),
+                            context.normalizedPrompt(),
                             context.tokens(),
                             context.tenantId(),
                             context.environment(),
@@ -273,12 +304,20 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             ApiMetadata metadata,
             String expectedMethod,
             String artifactKind,
+            String normalizedPrompt,
             List<String> tokens,
             String tenantId,
             String environment,
             String releaseId) {
         String endpointText = searchableText(metadata);
+        String sourceIdentityText = sourceIdentityText(metadata);
         String path = normalize(metadata.getPath());
+        List<String> explicitSourceTerms = explicitPhraseTerms(normalizedPrompt, "fonte", "source", "recurso");
+        List<String> explicitFieldTerms = explicitPhraseTerms(normalizedPrompt, "campo", "field", "coluna", "eixo");
+        boolean explicitSourceMatch = !explicitSourceTerms.isEmpty()
+                && explicitSourceTerms.stream().allMatch(token -> matchesToken(sourceIdentityText, token));
+        boolean explicitFieldMatch = !explicitFieldTerms.isEmpty()
+                && explicitFieldTerms.stream().allMatch(token -> matchesToken(endpointText, token));
         double score = expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()) ? 0.34d : 0.20d;
         int matches = 0;
         for (String token : tokens) {
@@ -293,11 +332,25 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         score += artifactScoreAdjustment(artifactKind, endpointText, path);
         score = Math.min(0.98d, score);
         score += dashboardOperationScoreAdjustment(artifactKind, path, tokens);
+        if (explicitSourceMatch) {
+            score = Math.max(score, 0.86d);
+        }
+        if (explicitFieldMatch) {
+            score += explicitSourceMatch ? 0.04d : 0.07d;
+        }
         score = Math.max(0d, Math.min(0.99d, score));
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
         String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
+        boolean explicitMetadataMatch = explicitSourceMatch;
+        List<String> evidence = explicitMetadataMatch
+                ? explicitMetadataEvidence(explicitFieldMatch)
+                : List.of("api-metadata", "lexical-fallback", "weak-evidence",
+                        "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending");
+        List<String> evidenceTerms = explicitMetadataMatch
+                ? mergeTerms(explicitSourceTerms, explicitFieldTerms, tokens)
+                : tokens;
         return new ScoredCandidate(new AgenticAuthoringCandidate(
                 resourcePath,
                 submitMethod,
@@ -305,20 +358,22 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 submitUrl,
                 submitMethod,
                 score,
-                "api_metadata weak lexical fallback evidence",
-                List.of("api-metadata", "lexical-fallback", "weak-evidence", "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending"),
+                explicitMetadataMatch
+                        ? "api_metadata explicit source evidence"
+                        : "api_metadata weak lexical fallback evidence",
+                evidence,
                 evidenceBundle(
-                        "lexical_fallback",
+                        explicitMetadataMatch ? "explicit_source_match" : "lexical_fallback",
                         resourcePath,
                         submitUrl,
                         submitMethod,
                         compactReasonText(searchableText(metadata)),
-                        Math.min(score, 0.49d),
-                        tokens,
+                        explicitMetadataMatch ? Math.max(0.78d, Math.min(score, 0.92d)) : Math.min(score, 0.49d),
+                        evidenceTerms,
                         tenantId,
                         environment,
                         releaseId,
-                        true)),
+                        !explicitMetadataMatch)),
                 score);
     }
 
@@ -549,6 +604,18 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 valueOrEmpty(metadata.getParameters())));
     }
 
+    private String sourceIdentityText(ApiMetadata metadata) {
+        if (metadata == null) {
+            return "";
+        }
+        return normalize(String.join(" ",
+                valueOrEmpty(metadata.getPath()),
+                valueOrEmpty(metadata.getTags()),
+                valueOrEmpty(metadata.getSummary()),
+                valueOrEmpty(metadata.getDescription()),
+                valueOrEmpty(metadata.getOperationId())));
+    }
+
     private double artifactScoreAdjustment(String artifactKind, String endpointText, String path) {
         double adjustment = 0d;
         boolean analyticalMetadata = containsAny(endpointText,
@@ -609,6 +676,87 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             tokens.add(rawToken);
         }
         return new ArrayList<>(tokens);
+    }
+
+    private List<String> explicitPhraseTerms(String normalizedPrompt, String... anchors) {
+        String[] words = normalize(normalizedPrompt).replaceAll("[^a-z0-9]+", " ").trim().split("\\s+");
+        if (words.length == 0) {
+            return List.of();
+        }
+        Set<String> terms = new LinkedHashSet<>();
+        for (int i = 0; i < words.length; i++) {
+            if (!containsWord(anchors, words[i])) {
+                continue;
+            }
+            for (int j = i + 1; j < words.length; j++) {
+                String word = words[j];
+                if (isExplicitPhraseBoundary(word)) {
+                    break;
+                }
+                if (word.length() >= 4 && !isExplicitPhraseFiller(word)) {
+                    terms.add(word);
+                }
+            }
+            if (!terms.isEmpty()) {
+                break;
+            }
+        }
+        return List.copyOf(terms);
+    }
+
+    private boolean containsWord(String[] words, String value) {
+        if (words == null || value == null) {
+            return false;
+        }
+        for (String word : words) {
+            if (value.equals(word)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isExplicitPhraseFiller(String word) {
+        return containsWord(new String[] {
+                "a", "as", "o", "os", "um", "uma", "de", "da", "das", "do", "dos", "para", "por",
+                "com", "em", "no", "na", "nos", "nas", "usar", "use", "usando"
+        }, word);
+    }
+
+    private boolean isExplicitPhraseBoundary(String word) {
+        return containsWord(new String[] {
+                "campo", "campos", "field", "fields", "coluna", "colunas", "eixo", "eixos",
+                "nao", "sem", "tabela", "tabelas", "filtro", "filtros", "kpi", "kpis",
+                "dashboard", "dashboards", "grafico", "graficos", "chart", "charts", "somente",
+                "apenas", "only"
+        }, word);
+    }
+
+    private List<String> explicitMetadataEvidence(boolean explicitFieldMatch) {
+        List<String> evidence = new ArrayList<>();
+        evidence.add("api-metadata");
+        evidence.add("explicit-source-match");
+        if (explicitFieldMatch) {
+            evidence.add("explicit-field-match");
+        }
+        evidence.add("schema-available");
+        evidence.add("actions-probe-pending");
+        evidence.add("capabilities-probe-pending");
+        return List.copyOf(evidence);
+    }
+
+    private List<String> mergeTerms(List<String> primary, List<String> secondary, List<String> tertiary) {
+        Set<String> terms = new LinkedHashSet<>();
+        if (primary != null) {
+            terms.addAll(primary);
+        }
+        if (secondary != null) {
+            terms.addAll(secondary);
+        }
+        if (tertiary != null) {
+            terms.addAll(tertiary);
+        }
+        return List.copyOf(terms);
     }
 
     private boolean containsAny(String value, String... tokens) {

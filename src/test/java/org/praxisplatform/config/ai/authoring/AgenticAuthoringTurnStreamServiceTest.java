@@ -110,7 +110,9 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         intentStarted.await(2, TimeUnit.SECONDS);
         ArgumentCaptor<String> eventTypes = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(4000).atLeast(5))
+        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(4000))
+                .appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), eq("error"), any());
+        org.mockito.Mockito.verify(turnEventService, atLeastOnce())
                 .appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), eventTypes.capture(), any());
         releaseIntent.countDown();
         service.shutdown();
@@ -355,6 +357,51 @@ class AgenticAuthoringTurnStreamServiceTest {
         org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(2500).atLeast(2))
                 .findLastEvent(streamId);
         service.shutdown();
+    }
+
+    @Test
+    void heartbeatSummaryUsesUserFacingStatusMessageWhenAvailable() {
+        AiTurnEventEnvelope tail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("status")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "intent.resolve.llm")
+                        .put("message", "Estou resolvendo sua intencao com o contexto governado antes de escolher recursos ou componentes."))
+                .build();
+
+        String summary = ReflectionTestUtils.invokeMethod(service(), "heartbeatSummary", tail);
+
+        org.assertj.core.api.Assertions.assertThat(summary)
+                .isEqualTo("Estou resolvendo sua intencao com o contexto governado antes de escolher recursos ou componentes.");
+    }
+
+    @Test
+    void heartbeatSummaryUsesSpecificIntentResolutionFallbacks() {
+        AiTurnEventEnvelope intentResolve = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "intent.resolve")
+                        .put("summary", "Preparing semantic intent resolution."))
+                .build();
+        AiTurnEventEnvelope llmResolve = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "intent.resolve.llm")
+                        .put("summary", "Resolving the user request against governed context."))
+                .build();
+
+        String intentSummary = ReflectionTestUtils.invokeMethod(service(), "heartbeatSummary", intentResolve);
+        String llmSummary = ReflectionTestUtils.invokeMethod(service(), "heartbeatSummary", llmResolve);
+
+        org.assertj.core.api.Assertions.assertThat(intentSummary)
+                .isEqualTo("Estou organizando o pedido, a pagina atual e as restricoes governadas.");
+        org.assertj.core.api.Assertions.assertThat(llmSummary)
+                .isEqualTo("Estou resolvendo a intencao com o contexto governado antes de escolher recursos ou componentes.");
     }
 
     @Test

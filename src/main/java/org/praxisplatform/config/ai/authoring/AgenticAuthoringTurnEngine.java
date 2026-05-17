@@ -32,6 +32,8 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringProjectKnowledgeService projectKnowledgeService;
     private final AgenticAuthoringOrchestrator orchestrator;
     private final SchemaRetrievalService schemaRetrievalService;
+    private final AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService;
+    private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
     public AgenticAuthoringTurnEngine(
@@ -48,6 +50,7 @@ public class AgenticAuthoringTurnEngine {
                 toolRegistry,
                 null,
                 (AgenticAuthoringOrchestrator) null,
+                null,
                 null);
     }
 
@@ -66,6 +69,8 @@ public class AgenticAuthoringTurnEngine {
                 toolRegistry,
                 projectKnowledgeService,
                 (AgenticAuthoringOrchestrator) null,
+                null,
+                null,
                 null);
     }
 
@@ -85,6 +90,8 @@ public class AgenticAuthoringTurnEngine {
                 toolRegistry,
                 projectKnowledgeService,
                 orchestrator,
+                null,
+                null,
                 null);
     }
 
@@ -97,6 +104,53 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
             AgenticAuthoringOrchestrator orchestrator,
             SchemaRetrievalService schemaRetrievalService) {
+        this(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                currentPageAnalyzer,
+                toolRegistry,
+                projectKnowledgeService,
+                orchestrator,
+                schemaRetrievalService,
+                null,
+                null);
+    }
+
+    public AgenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringOrchestrator orchestrator,
+            SchemaRetrievalService schemaRetrievalService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService) {
+        this(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                currentPageAnalyzer,
+                toolRegistry,
+                projectKnowledgeService,
+                orchestrator,
+                schemaRetrievalService,
+                componentCapabilitiesService,
+                null);
+    }
+
+    public AgenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringOrchestrator orchestrator,
+            SchemaRetrievalService schemaRetrievalService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            AgenticAuthoringConsultativeAnswerService consultativeAnswerService) {
         this.intentResolverService = intentResolverService;
         this.previewService = previewService;
         this.objectMapper = objectMapper;
@@ -105,6 +159,8 @@ public class AgenticAuthoringTurnEngine {
         this.projectKnowledgeService = projectKnowledgeService;
         this.orchestrator = orchestrator;
         this.schemaRetrievalService = schemaRetrievalService;
+        this.componentCapabilitiesService = componentCapabilitiesService;
+        this.consultativeAnswerService = consultativeAnswerService;
     }
 
     AgenticAuthoringTurnOutcome execute(
@@ -119,6 +175,7 @@ public class AgenticAuthoringTurnEngine {
             AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink,
             String schemaBaseUrl) {
+        request = withServerComponentCapabilities(request);
         AgenticAuthoringTurnState state = initialState(request);
         request = withActiveDecisionContext(request, state.activeSemanticDecision());
         try {
@@ -126,13 +183,29 @@ public class AgenticAuthoringTurnEngine {
                     "phase", "context.bundle",
                     "summary", "Authoring context received.",
                     "diagnostics", safeDiagnostics(request)));
+            AgenticAuthoringTurnOutcome fastConsultativeOutcome = maybeAnswerConsultativeFastPath(
+                    request,
+                    principalContext,
+                    eventSink,
+                    state);
+            if (fastConsultativeOutcome != null) {
+                return fastConsultativeOutcome;
+            }
+            emitStatus(
+                    eventSink,
+                    "intent.resolve",
+                    "Estou organizando o pedido, o contexto da pagina e as restricoes informadas.");
             eventSink.append("thought.step", Map.of(
                     "phase", "intent.resolve",
                     "summary", "Preparing semantic intent resolution."));
             request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
+            emitStatus(
+                    eventSink,
+                    "intent.resolve.llm",
+                    "Estou resolvendo sua intencao com o contexto governado antes de escolher recursos ou componentes.");
             eventSink.append("thought.step", Map.of(
                     "phase", "intent.resolve.llm",
-                    "summary", "Asking the LLM to interpret the user request against governed context.",
+                    "summary", "Resolving the user request against governed context.",
                     "diagnostics", Map.of(
                             "provider", safeText(request.provider()),
                             "model", safeText(request.model()),
@@ -148,6 +221,10 @@ public class AgenticAuthoringTurnEngine {
             }
             AgenticAuthoringTurnRoute route = routeClassifier.classify(request, intentResolution, state);
             state = state.withRouteClass(route.routeClass());
+            emitStatus(
+                    eventSink,
+                    "intent.resolve.grounding",
+                    "Estou conferindo a decisao com as evidencias governadas disponiveis.");
             eventSink.append("thought.step", Map.of(
                     "phase", "intent.resolve.grounding",
                     "summary", "Checking resolved intent against governed resource evidence.",
@@ -166,7 +243,12 @@ public class AgenticAuthoringTurnEngine {
                     && resourceDiscovery != null
                     && resourceDiscovery.candidates() != null
                     && !resourceDiscovery.candidates().isEmpty()
+                    && !isAdvisoryCatalogIntent(intentResolution)
                     && !eventSink.terminalReached()) {
+                emitStatus(
+                        eventSink,
+                        "intent.resolve.llm",
+                        "Encontrei candidatos no backend e estou pedindo para a LLM revisar a escolha.");
                 eventSink.append("thought.step", safeToolProjection(
                         "intent.resolve.llm",
                         "Asking the LLM to review backend resource candidates.",
@@ -180,6 +262,10 @@ public class AgenticAuthoringTurnEngine {
                         principalContext.environment());
                 route = routeClassifier.classify(request, intentResolution, state);
                 state = state.withRouteClass(route.routeClass());
+                emitStatus(
+                        eventSink,
+                        "intent.resolve.grounding",
+                        "Estou validando a escolha refinada com as evidencias do backend.");
                 eventSink.append("thought.step", Map.of(
                         "phase", "intent.resolve.grounding",
                         "summary", "Checking refined intent against backend resource evidence.",
@@ -197,11 +283,17 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringPreviewResult preview = null;
             AgenticAuthoringToolLoopResult toolLoopResult = null;
             if (route.allowsPreview() && intentResolution.valid()) {
+                AgenticAuthoringTurnStreamRequest contextualPreviewRequest =
+                        withImplicitChartDetailModalActionContext(request, intentResolution);
                 AgenticAuthoringTurnStreamRequest previewRequest = withProjectKnowledgeContext(
-                        request,
+                        contextualPreviewRequest,
                         principalContext,
                         eventSink,
                         intentResolution);
+                emitStatus(
+                        eventSink,
+                        "preview.plan",
+                        "Entendi a intencao e estou planejando a materializacao governada.");
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.plan",
                         "summary", "Planning governed page materialization.",
@@ -222,6 +314,12 @@ public class AgenticAuthoringTurnEngine {
                                 principalContext.tenantId(),
                                 principalContext.userId(),
                                 principalContext.environment());
+                emitStatus(
+                        eventSink,
+                        "preview.compile",
+                        preview.valid()
+                                ? "Estou preparando a pre-visualizacao para revisao."
+                                : "A pre-visualizacao precisa de uma revisao de seguranca antes de continuar.");
                 eventSink.append("thought.step", Map.of(
                         "phase", "preview.compile",
                         "summary", preview.valid() ? "Compiled preview payload." : "Preview requires backend repair classification.",
@@ -257,7 +355,9 @@ public class AgenticAuthoringTurnEngine {
             resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
             resultPayload.put("assistantMessage", safeText(assistantMessage));
-            resultPayload.put("quickReplies", terminalQuickReplies(intentResolution, businessCatalogDiscovery));
+            resultPayload.put(
+                    "quickReplies",
+                    terminalQuickReplies(request, intentResolution, businessCatalogDiscovery, preview));
             resultPayload.put("canApply", preview != null
                     && preview.valid()
                     && !requiresDecisionReview(decisionDiagnostics)
@@ -281,6 +381,248 @@ public class AgenticAuthoringTurnEngine {
                     ? AgenticAuthoringTurnOutcome.expired(state)
                     : AgenticAuthoringTurnOutcome.noop(state);
         }
+    }
+
+    private void emitStatus(
+            AgenticAuthoringTurnEventSink eventSink,
+            String phase,
+            String message) {
+        if (eventSink == null || eventSink.terminalReached()) {
+            return;
+        }
+        eventSink.append("status", Map.of(
+                "state", "in_progress",
+                "phase", safeText(phase),
+                "message", safeText(message),
+                "summary", safeText(message)));
+    }
+
+    private AgenticAuthoringTurnOutcome maybeAnswerConsultativeFastPath(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringTurnState state) {
+        if (eventSink.terminalReached()) {
+            return null;
+        }
+        String consultativeBypassReason = consultativeFastPathBypassReason(request);
+        if (!consultativeBypassReason.isBlank()) {
+            eventSink.append("thought.step", Map.of(
+                    "phase", "consultative.fast-path.skipped",
+                    "summary", "Current page refinement requires governed materialization.",
+                    "diagnostics", Map.of(
+                            "serviceAvailable", consultativeAnswerService != null,
+                            "reason", consultativeBypassReason)));
+            return null;
+        }
+        if (consultativeAnswerService == null) {
+            log.info("[AgenticAuthoring] Consultative fast path unavailable; service bean was not injected.");
+            eventSink.append("thought.step", Map.of(
+                    "phase", "consultative.fast-path.skipped",
+                    "summary", "Consultative fast path service unavailable.",
+                    "diagnostics", Map.of("serviceAvailable", false)));
+            return null;
+        }
+        emitStatus(
+                eventSink,
+                "consultative.intent",
+                "Estou verificando se esta e uma pergunta para responder diretamente, sem criar pre-visualizacao.");
+        AgenticAuthoringConsultativeAnswer answer = consultativeAnswerService.answer(
+                        request,
+                        request.componentCapabilities(),
+                        principalContext.tenantId(),
+                        principalContext.userId(),
+                        principalContext.environment())
+                .orElse(null);
+        log.info("[AgenticAuthoring] Consultative fast path evaluated: answerPresent={}", answer != null);
+        eventSink.append("thought.step", Map.of(
+                "phase", "consultative.fast-path.probe",
+                "summary", "Consultative fast path evaluated.",
+                "diagnostics", Map.of(
+                        "serviceAvailable", true,
+                        "answerPresent", answer != null)));
+        if (answer == null || eventSink.terminalReached()) {
+            return null;
+        }
+        eventSink.append("thought.step", Map.of(
+                "phase", "consultative.answer",
+                "summary", "Answered consultative turn through the fast grounded path.",
+                "diagnostics", Map.of(
+                        "category", safeText(answer.category()),
+                        "hasApiCatalogProjection", answer.apiCatalogProjection() != null
+                                && answer.apiCatalogProjection().hasResources())));
+        AgenticAuthoringIntentResolutionResult intentResolution =
+                consultativeIntentResolution(request, state, answer);
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null);
+        decisionDiagnostics.put("routeClass", "consultative_fast_path");
+        decisionDiagnostics.put("consultativeFastPath", true);
+        Map<String, Object> resultPayload = new LinkedHashMap<>();
+        resultPayload.put("intentResolution", intentResolution);
+        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("assistantMessage", safeText(answer.assistantMessage()));
+        resultPayload.put("quickReplies", List.of());
+        resultPayload.put("canApply", false);
+        resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        return terminalResult.appendedType("result")
+                ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass("consultative_fast_path"))
+                : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private boolean shouldBypassConsultativeFastPathForCurrentPageMaterialization(
+            AgenticAuthoringTurnStreamRequest request) {
+        return !consultativeFastPathBypassReason(request).isBlank();
+    }
+
+    private String consultativeFastPathBypassReason(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null) {
+            return "";
+        }
+        if (isContextualPreviewAction(request.contextHints())) {
+            return "contextual-preview-action";
+        }
+        JsonNode currentPageSummary = currentPageAnalyzer.summarize(
+                request.currentPage(),
+                request.selectedWidgetKey());
+        String prompt = normalizeText(request.userPrompt());
+        if (prompt.isBlank()
+                || !currentPageHasArtifact(currentPageSummary, "dashboard")) {
+            return "";
+        }
+        boolean referencesCurrentChart = containsAny(prompt,
+                "grafico", "chart", "visualizacao");
+        boolean requestsPageChange = containsAny(prompt,
+                "use", "usar", "usando",
+                "adicione", "adicionar",
+                "inclua", "incluir",
+                "coloque", "colocar",
+                "mostre", "mostrar",
+                "exiba", "exibir",
+                "crie", "criar",
+                "abra", "abrir",
+                "altere", "alterar",
+                "mude", "mudar");
+        boolean asksForMaterializedDetail = containsAny(prompt,
+                "tabela", "table", "lista", "listagem", "grid",
+                "detalhe", "detalhes",
+                "registro", "registros",
+                "linha", "linhas",
+                "item selecionado", "selecionado",
+                "drill", "drilldown", "drill-down",
+                "filtro", "filtrar", "filtre", "conectado", "vinculado");
+        return referencesCurrentChart && requestsPageChange && asksForMaterializedDetail
+                ? "current-page-materialization-refinement"
+                : "";
+    }
+
+    private boolean isContextualPreviewAction(JsonNode contextHints) {
+        if (contextHints == null || contextHints.isNull()) {
+            return false;
+        }
+        String source = contextHintText(contextHints, "source");
+        String kind = contextHintText(contextHints, "kind");
+        String changeKind = contextHintText(contextHints, "changeKind");
+        String targetComponentId = firstNonBlank(
+                contextHintText(contextHints, "targetComponentId"),
+                contextHintText(contextHints, "selectedComponentId"));
+        return "component-capability-catalog".equals(source)
+                || "contextual-preview-action".equals(kind)
+                || (!changeKind.isBlank() && !targetComponentId.isBlank());
+    }
+
+    private String contextHintText(JsonNode contextHints, String fieldName) {
+        return contextHints == null || fieldName == null ? "" : safeText(contextHints.path(fieldName).asText(""));
+    }
+
+    private boolean currentPageHasArtifact(JsonNode currentPageSummary, String artifactKind) {
+        JsonNode widgets = currentPageSummary == null
+                ? null
+                : currentPageSummary.path("structuralInspection").path("widgets");
+        if (widgets == null || !widgets.isArray()) {
+            return false;
+        }
+        for (JsonNode widget : widgets) {
+            if (artifactKind.equals(widget.path("artifactKind").asText(""))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private AgenticAuthoringIntentResolutionResult consultativeIntentResolution(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringTurnState state,
+            AgenticAuthoringConsultativeAnswer answer) {
+        String artifactKind = "domain_api".equals(answer.category()) ? "api_catalog" : "component";
+        ObjectNode diagnostics = objectMapper.createObjectNode();
+        diagnostics.put("schemaVersion", "praxis-agentic-authoring-llm-diagnostics.v1");
+        ObjectNode telemetry = diagnostics.putObject("resolutionTelemetry");
+        telemetry.put("llmResolutionAttempted", true);
+        telemetry.put("llmResolved", true);
+        telemetry.put("keywordFallbackApplied", false);
+        telemetry.put("fallbackPolicy", "consultative-fast-path");
+        telemetry.put("semanticPolicyApplied", false);
+        telemetry.put("selectedCandidateUsesLexicalFallback", false);
+        telemetry.put("selectedCandidateUsesBroadArtifactDiscovery", false);
+        telemetry.put("selectedCandidateUsesDomainAnchor", false);
+        telemetry.put("candidateSetContainsLexicalFallback", false);
+        telemetry.put("candidateSetContainsBroadArtifactDiscovery", false);
+        telemetry.put("candidateSetContainsDomainAnchor", false);
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "explain",
+                artifactKind,
+                safeText(answer.changeKind()),
+                "consultative",
+                safeText(request.targetApp()),
+                nonBlank(request.targetComponentId(), "praxis-dynamic-page-builder"),
+                state == null ? null : state.structuralTarget(),
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("consultative-fast-path", "eligible", List.of()),
+                safeText(request.userPrompt()),
+                safeText(answer.assistantMessage()),
+                answer.apiCatalogProjection() == null
+                        ? objectMapper.createObjectNode()
+                        : objectMapper.valueToTree(answer.apiCatalogProjection()),
+                List.of(),
+                null,
+                List.of(),
+                answer.warnings(),
+                List.of(),
+                currentPageAnalyzer.summarize(request.currentPage(), request.selectedWidgetKey()),
+                diagnostics,
+                null);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withServerComponentCapabilities(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null
+                || (request.componentCapabilities() != null
+                && request.componentCapabilities().catalogs() != null
+                && !request.componentCapabilities().catalogs().isEmpty())) {
+            return request;
+        }
+        AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilitiesService == null
+                ? new AgenticAuthoringComponentCapabilitiesService().listCapabilities()
+                : componentCapabilitiesService.listCapabilities();
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints(),
+                componentCapabilities,
+                request.activeSemanticDecision());
     }
 
     private AgenticAuthoringToolResult maybeRunResourceDiscoveryTool(
@@ -481,6 +823,373 @@ public class AgenticAuthoringTurnEngine {
                 : List.of();
     }
 
+    private List<AgenticAuthoringQuickReply> terminalQuickReplies(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
+            AgenticAuthoringPreviewResult preview) {
+        List<AgenticAuthoringQuickReply> replies = terminalQuickReplies(intentResolution, businessCatalogDiscovery);
+        List<AgenticAuthoringQuickReply> contextual = contextualPreviewQuickReplies(request, intentResolution, preview);
+        if (contextual.isEmpty()) {
+            return replies;
+        }
+        Map<String, AgenticAuthoringQuickReply> merged = new LinkedHashMap<>();
+        replies.forEach(reply -> {
+            if (reply != null && StringUtils.hasText(reply.id())) {
+                merged.put(reply.id(), reply);
+            }
+        });
+        contextual.forEach(reply -> {
+            if (reply != null && StringUtils.hasText(reply.id())) {
+                merged.putIfAbsent(reply.id(), reply);
+            }
+        });
+        return List.copyOf(merged.values());
+    }
+
+    private List<AgenticAuthoringQuickReply> contextualPreviewQuickReplies(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview) {
+        if (preview == null || !preview.valid() || isAdvisoryCatalogIntent(intentResolution)) {
+            return List.of();
+        }
+        AgenticAuthoringComponentCapabilitiesResult capabilities = componentCapabilities(request);
+        if (capabilities == null || capabilities.catalogs() == null || capabilities.catalogs().isEmpty()) {
+            return List.of();
+        }
+        boolean hasChart = previewContainsComponent(preview, "praxis-chart");
+        boolean hasTable = previewContainsComponent(preview, "praxis-table");
+        String chartWidgetKey = previewComponentWidgetKey(preview, "praxis-chart");
+        String tableWidgetKey = previewComponentWidgetKey(preview, "praxis-table");
+        JsonNode previewPage = previewMaterializedPage(preview);
+        JsonNode chartWidgetSnapshot = previewComponentWidget(previewPage, "praxis-chart", chartWidgetKey);
+        JsonNode tableWidgetSnapshot = previewComponentWidget(previewPage, "praxis-table", tableWidgetKey);
+        AgenticAuthoringCandidate selectedCandidate = intentResolution == null
+                ? null
+                : intentResolution.selectedCandidate();
+        List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
+        if (hasChart && supportsCapability(capabilities, "praxis-chart", "set_chart_type")) {
+            replies.add(contextualQuickReply(
+                    "chart-change-line",
+                    "Trocar para linhas",
+                    "Altere o gráfico selecionado para linhas, mantendo a fonte de dados, a dimensão e a métrica atuais se esse tipo fizer sentido para os dados exibidos.",
+                    "show_chart",
+                    "set_chart_type",
+                    "praxis-chart.type.set@0.1.0",
+                    "praxis-chart",
+                    chartWidgetKey,
+                    selectedCandidate,
+                    previewPage,
+                    chartWidgetSnapshot));
+            replies.add(contextualQuickReply(
+                    "chart-change-donut",
+                    "Ver como donut",
+                    "Mostre o gráfico selecionado como donut somente se a dimensão atual representar uma composição categórica; caso não faça sentido, explique a alternativa visual mais adequada.",
+                    "donut_large",
+                    "set_chart_type",
+                    "praxis-chart.type.set@0.1.0",
+                    "praxis-chart",
+                    chartWidgetKey,
+                    selectedCandidate,
+                    previewPage,
+                    chartWidgetSnapshot));
+        }
+        if (hasChart && supportsCapability(capabilities, "praxis-chart", "enable_chart_drilldown")) {
+            replies.add(contextualQuickReply(
+                    "chart-add-detail-table",
+                    "Detalhes em tabela",
+                    "Acrescente um filtro e uma tabela de detalhes abaixo do gráfico, conectados à seleção do gráfico.",
+                    "table_view",
+                    "enable_chart_drilldown",
+                    "praxis-chart.drilldown.enable@0.1.0",
+                    "praxis-chart",
+                    chartWidgetKey,
+                    selectedCandidate,
+                    previewPage,
+                    chartWidgetSnapshot));
+            ObjectNode surfaceHints = objectMapper.createObjectNode();
+            surfaceHints.put("surfacePresentation", "modal");
+            surfaceHints.put("surfaceActionId", "surface.open");
+            surfaceHints.put("surfaceWidgetId", "praxis-table");
+            replies.add(contextualQuickReply(
+                    "chart-add-detail-modal",
+                    "Detalhes em modal",
+                    "Abra os registros da categoria selecionada do gráfico em um modal de detalhes.",
+                    "open_in_new",
+                    "enable_chart_drilldown",
+                    "praxis-chart.drilldown.enable@0.1.0",
+                    "praxis-chart",
+                    chartWidgetKey,
+                    selectedCandidate,
+                    previewPage,
+                    chartWidgetSnapshot,
+                    surfaceHints));
+        }
+        if (hasTable && supportsCapability(capabilities, "praxis-table", "configure_export")) {
+            replies.add(contextualQuickReply(
+                    "table-export-selected-rows",
+                    "Exportar selecionadas",
+                    "Habilite seleção na tabela e adicione uma ação para exportar apenas as linhas selecionadas.",
+                    "download",
+                    "configure_export",
+                    "praxis-table.export.selected-rows@0.1.0",
+                    "praxis-table",
+                    tableWidgetKey,
+                    selectedCandidate,
+                    previewPage,
+                    tableWidgetSnapshot));
+        }
+        return replies.size() <= 5 ? replies : List.copyOf(replies.subList(0, 5));
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult componentCapabilities(AgenticAuthoringTurnStreamRequest request) {
+        if (request != null
+                && request.componentCapabilities() != null
+                && request.componentCapabilities().catalogs() != null
+                && !request.componentCapabilities().catalogs().isEmpty()) {
+            return request.componentCapabilities();
+        }
+        return componentCapabilitiesService == null ? null : componentCapabilitiesService.listCapabilities();
+    }
+
+    private AgenticAuthoringQuickReply contextualQuickReply(
+            String id,
+            String label,
+            String prompt,
+            String icon,
+            String changeKind,
+            String capabilityId,
+            String componentId,
+            String widgetKey,
+            AgenticAuthoringCandidate selectedCandidate,
+            JsonNode previewPage,
+            JsonNode targetWidgetSnapshot) {
+        return contextualQuickReply(
+                id,
+                label,
+                prompt,
+                icon,
+                changeKind,
+                capabilityId,
+                componentId,
+                widgetKey,
+                selectedCandidate,
+                previewPage,
+                targetWidgetSnapshot,
+                null);
+    }
+
+    private AgenticAuthoringQuickReply contextualQuickReply(
+            String id,
+            String label,
+            String prompt,
+            String icon,
+            String changeKind,
+            String capabilityId,
+            String componentId,
+            String widgetKey,
+            AgenticAuthoringCandidate selectedCandidate,
+            JsonNode previewPage,
+            JsonNode targetWidgetSnapshot,
+            JsonNode extraContextHints) {
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.put("source", "component-capability-catalog");
+        hints.put("kind", "contextual-preview-action");
+        hints.put("operationKind", "modify");
+        hints.put("artifactKind", contextualArtifactKind(componentId));
+        hints.put("changeKind", changeKind);
+        hints.put("capabilityId", capabilityId);
+        if (StringUtils.hasText(componentId)) {
+            hints.put("targetComponentId", componentId);
+            hints.put("selectedComponentId", componentId);
+        }
+        if (StringUtils.hasText(widgetKey)) {
+            hints.put("targetWidgetKey", widgetKey);
+            hints.put("selectedWidgetKey", widgetKey);
+        }
+        if (selectedCandidate != null && StringUtils.hasText(selectedCandidate.resourcePath())) {
+            hints.put("resourcePath", selectedCandidate.resourcePath());
+            hints.put("submitUrl", firstNonBlank(selectedCandidate.submitUrl(), selectedCandidate.resourcePath()));
+            hints.put("operation", firstNonBlank(selectedCandidate.operation(), selectedCandidate.submitMethod(), "get"));
+            hints.put("submitMethod", firstNonBlank(selectedCandidate.submitMethod(), selectedCandidate.operation(), "get"));
+            if (StringUtils.hasText(selectedCandidate.schemaUrl())) {
+                hints.put("schemaUrl", selectedCandidate.schemaUrl());
+            }
+        }
+        if (previewPage != null && previewPage.isObject()) {
+            hints.set("previewPage", previewPage.deepCopy());
+        }
+        if (targetWidgetSnapshot != null && targetWidgetSnapshot.isObject()) {
+            hints.set("targetWidgetSnapshot", targetWidgetSnapshot.deepCopy());
+        }
+        if (extraContextHints != null && extraContextHints.isObject()) {
+            extraContextHints.fields().forEachRemaining(entry -> hints.set(entry.getKey(), entry.getValue().deepCopy()));
+        }
+        return new AgenticAuthoringQuickReply(
+                id,
+                "suggestion",
+                label,
+                prompt,
+                "Ação sugerida a partir das capacidades confirmadas do componente.",
+                icon,
+                "suggestion",
+                hints);
+    }
+
+    private String contextualArtifactKind(String componentId) {
+        if ("praxis-chart".equals(componentId)) {
+            return "chart";
+        }
+        if ("praxis-table".equals(componentId)) {
+            return "table";
+        }
+        if ("praxis-dynamic-form".equals(componentId)) {
+            return "form";
+        }
+        return "page";
+    }
+
+    private JsonNode previewMaterializedPage(AgenticAuthoringPreviewResult preview) {
+        if (preview == null) {
+            return null;
+        }
+        JsonNode page = preview.compiledFormPatch().path("patch").path("page");
+        if (page.isObject() && page.path("widgets").isArray() && !page.path("widgets").isEmpty()) {
+            return page;
+        }
+        return null;
+    }
+
+    private JsonNode previewComponentWidget(JsonNode page, String componentId, String widgetKey) {
+        if (page == null || !page.isObject() || !page.path("widgets").isArray() || !StringUtils.hasText(componentId)) {
+            return null;
+        }
+        JsonNode fallback = null;
+        for (JsonNode widget : page.path("widgets")) {
+            if (!widget.isObject()) {
+                continue;
+            }
+            String widgetComponentId = firstNonBlank(
+                    widget.path("componentId").asText(""),
+                    widget.path("definition").path("id").asText(""),
+                    widget.path("id").asText(""));
+            if (!componentId.equals(widgetComponentId)) {
+                continue;
+            }
+            if (!StringUtils.hasText(widgetKey)) {
+                return widget;
+            }
+            String key = firstNonBlank(
+                    widget.path("key").asText(""),
+                    widget.path("widgetKey").asText(""),
+                    widget.path("id").asText(""));
+            if (widgetKey.equals(key)) {
+                return widget;
+            }
+            if (fallback == null) {
+                fallback = widget;
+            }
+        }
+        return fallback;
+    }
+
+    private boolean hasCapabilityCatalog(
+            AgenticAuthoringComponentCapabilitiesResult capabilities,
+            String componentId) {
+        return capabilities != null
+                && capabilities.catalogs() != null
+                && capabilities.catalogs().stream()
+                .anyMatch(catalog -> componentId.equals(catalog.componentId()));
+    }
+
+    private boolean supportsCapability(
+            AgenticAuthoringComponentCapabilitiesResult capabilities,
+            String componentId,
+            String changeKind) {
+        return capabilities != null
+                && capabilities.catalogs() != null
+                && capabilities.catalogs().stream()
+                .filter(catalog -> componentId.equals(catalog.componentId()))
+                .flatMap(catalog -> catalog.capabilities() == null ? java.util.stream.Stream.empty() : catalog.capabilities().stream())
+                .anyMatch(capability -> changeKind.equals(capability.changeKind()));
+    }
+
+    private boolean previewContainsComponent(AgenticAuthoringPreviewResult preview, String componentId) {
+        return containsText(preview.uiCompositionPlan(), componentId)
+                || containsText(preview.compiledFormPatch(), componentId);
+    }
+
+    private String previewComponentWidgetKey(AgenticAuthoringPreviewResult preview, String componentId) {
+        String fromPlan = componentWidgetKey(preview == null ? null : preview.uiCompositionPlan(), componentId);
+        if (StringUtils.hasText(fromPlan)) {
+            return fromPlan;
+        }
+        return componentWidgetKey(preview == null ? null : preview.compiledFormPatch(), componentId);
+    }
+
+    private String componentWidgetKey(JsonNode node, String componentId) {
+        if (node == null || node.isMissingNode() || node.isNull() || !StringUtils.hasText(componentId)) {
+            return "";
+        }
+        if (node.isObject()) {
+            String nodeComponentId = firstNonBlank(
+                    node.path("componentId").asText(""),
+                    node.path("definition").path("id").asText(""),
+                    node.path("id").asText(""));
+            if (componentId.equals(nodeComponentId)) {
+                return firstNonBlank(
+                        node.path("key").asText(""),
+                        node.path("widgetKey").asText(""),
+                        node.path("id").asText(""));
+            }
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                String key = componentWidgetKey(fields.next().getValue(), componentId);
+                if (StringUtils.hasText(key)) {
+                    return key;
+                }
+            }
+            return "";
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                String key = componentWidgetKey(child, componentId);
+                if (StringUtils.hasText(key)) {
+                    return key;
+                }
+            }
+        }
+        return "";
+    }
+
+    private boolean containsText(JsonNode node, String expected) {
+        if (node == null || node.isMissingNode() || node.isNull() || !StringUtils.hasText(expected)) {
+            return false;
+        }
+        if (node.isTextual()) {
+            return expected.equals(node.asText());
+        }
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                if (expected.equals(field.getKey()) || containsText(field.getValue(), expected)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (containsText(child, expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private AgenticAuthoringTurnStreamRequest withProjectKnowledgeContext(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
@@ -496,6 +1205,10 @@ public class AgenticAuthoringTurnEngine {
         if (!hasProjectKnowledgeScope(query)) {
             return request;
         }
+        emitStatus(
+                eventSink,
+                "projectKnowledge.retrieve",
+                "Estou buscando conhecimento governado do projeto para responder com mais contexto.");
         List<AgenticAuthoringProjectKnowledgeProjection> projections = projectKnowledgeService.retrieve(query);
         if (projections.isEmpty()) {
             return request;
@@ -508,6 +1221,126 @@ public class AgenticAuthoringTurnEngine {
                 ? request.contextHints().deepCopy()
                 : objectMapper.createObjectNode();
         contextHints.set("projectKnowledge", projectKnowledgeContext(projections));
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                contextHints,
+                request.componentCapabilities(),
+                request.activeSemanticDecision());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withImplicitChartDetailModalActionContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (!isImplicitChartDetailModalAction(request, intentResolution)) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        if (isContextualPreviewAction(contextHints)) {
+            return request;
+        }
+        AgenticAuthoringTarget target = null;
+        if (StringUtils.hasText(request.selectedWidgetKey())) {
+            target = currentPageAnalyzer.resolveTarget(request.currentPage(), request.selectedWidgetKey());
+        }
+        if (target == null || !"praxis-chart".equals(target.componentId())) {
+            target = currentPageAnalyzer.resolveFirstComponentTarget(request.currentPage(), "praxis-chart");
+        }
+        if (target == null) {
+            return request;
+        }
+        JsonNode targetWidgetSnapshot =
+                previewComponentWidget(request.currentPage(), "praxis-chart", target.widgetKey());
+        AgenticAuthoringCandidate selectedCandidate =
+                intentResolution == null ? null : intentResolution.selectedCandidate();
+
+        contextHints.put("source", "component-capability-catalog");
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("operationKind", "modify");
+        contextHints.put("artifactKind", "chart");
+        contextHints.put("changeKind", "enable_chart_drilldown");
+        contextHints.put("capabilityId", "praxis-chart.drilldown.enable@0.1.0");
+        contextHints.put("targetComponentId", "praxis-chart");
+        contextHints.put("selectedComponentId", "praxis-chart");
+        if (StringUtils.hasText(target.widgetKey())) {
+            contextHints.put("targetWidgetKey", target.widgetKey());
+            contextHints.put("selectedWidgetKey", target.widgetKey());
+        }
+        String resourcePath = firstNonBlank(
+                selectedCandidate == null ? "" : selectedCandidate.resourcePath(),
+                target.resourcePath());
+        if (StringUtils.hasText(resourcePath)) {
+            contextHints.put("resourcePath", resourcePath);
+            contextHints.put("submitUrl", firstNonBlank(
+                    selectedCandidate == null ? "" : selectedCandidate.submitUrl(),
+                    target.submitUrl(),
+                    resourcePath));
+            contextHints.put("operation", firstNonBlank(
+                    selectedCandidate == null ? "" : selectedCandidate.operation(),
+                    target.submitMethod(),
+                    "get"));
+            contextHints.put("submitMethod", firstNonBlank(
+                    selectedCandidate == null ? "" : selectedCandidate.submitMethod(),
+                    target.submitMethod(),
+                    "get"));
+        }
+        String schemaUrl = firstNonBlank(
+                selectedCandidate == null ? "" : selectedCandidate.schemaUrl(),
+                target.schemaUrl());
+        if (StringUtils.hasText(schemaUrl)) {
+            contextHints.put("schemaUrl", schemaUrl);
+        }
+        if (request.currentPage() != null && request.currentPage().isObject()) {
+            contextHints.set("previewPage", request.currentPage().deepCopy());
+        }
+        if (targetWidgetSnapshot != null && targetWidgetSnapshot.isObject()) {
+            contextHints.set("targetWidgetSnapshot", targetWidgetSnapshot.deepCopy());
+        }
+        contextHints.put("surfacePresentation", "modal");
+        contextHints.put("surfaceActionId", "surface.open");
+        contextHints.put("surfaceWidgetId", "praxis-table");
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private boolean isImplicitChartDetailModalAction(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (request == null
+                || intentResolution == null
+                || !"modify".equals(safeText(intentResolution.operationKind()))
+                || !"enable_chart_drilldown".equals(safeText(intentResolution.changeKind()))) {
+            return false;
+        }
+        String targetComponentId = firstNonBlank(
+                intentResolution.target() == null ? "" : intentResolution.target().componentId(),
+                intentResolution.targetComponentId());
+        if (StringUtils.hasText(targetComponentId)
+                && !"praxis-chart".equals(targetComponentId)
+                && !"praxis-dynamic-page-builder".equals(targetComponentId)) {
+            return false;
+        }
+        String prompt = normalizeText(firstNonBlank(request.userPrompt(), intentResolution.effectivePrompt()));
+        return containsAny(prompt, "modal", "dialogo", "dialog", "janela", "popup")
+                && containsAny(prompt, "detalhe", "detalhes", "registro", "registros", "categoria selecionada");
+    }
+
+    private AgenticAuthoringTurnStreamRequest copyWithContextHints(
+            AgenticAuthoringTurnStreamRequest request,
+            JsonNode contextHints) {
         return new AgenticAuthoringTurnStreamRequest(
                 request.userPrompt(),
                 request.targetApp(),
@@ -957,7 +1790,9 @@ public class AgenticAuthoringTurnEngine {
         if (intentResolution == null || hasToolDiscoveredCandidates(intentResolution)) {
             return false;
         }
-        return contains(intentResolution.failureCodes(), "resource-candidate-required");
+        return contains(intentResolution.failureCodes(), "resource-candidate-required")
+                || (intentResolution.gate() != null
+                && contains(intentResolution.gate().messages(), "resource-candidate-required"));
     }
 
     private String resourceDiscoveryQuery(
@@ -1026,6 +1861,11 @@ public class AgenticAuthoringTurnEngine {
         ArrayNode candidates = resourceDiscovery.putArray("candidates");
         for (AgenticAuthoringCandidate candidate : discovery.candidates()) {
             candidates.add(candidateContext(candidate));
+        }
+        if (discovery.consultativeProjection() != null && discovery.consultativeProjection().hasResources()) {
+            resourceDiscovery.set(
+                    "consultativeProjection",
+                    objectMapper.valueToTree(discovery.consultativeProjection()));
         }
         return new AgenticAuthoringTurnStreamRequest(
                 request.userPrompt(),
@@ -1343,6 +2183,10 @@ public class AgenticAuthoringTurnEngine {
                 return "";
             }
         }
+        String projectionMessage = consultativeProjectionAssistantMessage(businessCatalogDiscovery, resourceDiscovery);
+        if (!projectionMessage.isBlank()) {
+            return projectionMessage;
+        }
         List<AgenticAuthoringCandidate> candidates = catalogCandidates(resourceDiscovery, businessCatalogDiscovery, intentResolution);
         if (candidates.isEmpty()) {
             return "Ainda nao encontrei fontes de dados governadas suficientes para responder com seguranca. "
@@ -1381,6 +2225,20 @@ public class AgenticAuthoringTurnEngine {
         message.append("Eu recomendaria ").append(screenRecommendations(candidates, confirmedSchemas));
         message.append(". Quando voce pedir para criar, eu materializo usando apenas campos confirmados.");
         return message.toString();
+    }
+
+    private String consultativeProjectionAssistantMessage(
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery) {
+        AgenticAuthoringConsultativeApiCatalogProjection projection =
+                businessCatalogDiscovery == null ? null : businessCatalogDiscovery.consultativeProjection();
+        if (projection == null || !projection.hasResources()) {
+            projection = resourceDiscovery == null ? null : resourceDiscovery.consultativeProjection();
+        }
+        if (projection == null || !projection.hasResources()) {
+            return "";
+        }
+        return safeText(projection.assistantMessage());
     }
 
     private List<AgenticAuthoringCandidate> catalogCandidates(

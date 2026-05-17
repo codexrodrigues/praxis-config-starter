@@ -17,6 +17,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
+import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 
@@ -28,6 +29,257 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     private AiProviderManagementService providerManagementService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void resolveCanUseFastLlmIntentPassWhenCompactEvidenceIsSufficient() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "chart",
+                  "changeKind": "create_chart",
+                  "selectedResourcePath": "/api/risk-intelligence/vw-indicadores-incidentes",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "assistantMessage": "Criei uma pre-visualizacao com um grafico simples por Severidade.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "incident-severity-chart",
+                    "layoutKind": "single_chart",
+                    "primaryComponent": "praxis-chart",
+                    "axes": [
+                      {
+                        "concept": "severidade",
+                        "field": "severidade",
+                        "label": "Severidade",
+                        "chartType": "bar",
+                        "orientation": "vertical",
+                        "metricAggregation": "count",
+                        "metricField": null,
+                        "metricLabel": "Total",
+                        "provenance": "llm-authored-semantic-axis"
+                      }
+                    ],
+                    "includeSummary": false,
+                    "includeDetailTable": false,
+                    "excludedComponentIds": ["praxis-table", "praxis-kpi"],
+                    "includeFilters": false,
+                    "includeKpis": false,
+                    "provenance": "llm-authored-semantic-decision"
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie apenas um grafico de barras simples de incidentes por severidade. Use a fonte Indicadores Incidentes. Nao crie tabela, filtros nem KPIs.",
+                        "page-builder",
+                        "praxis-chart",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                "Crie apenas um grafico de barras simples de incidentes por severidade. Use a fonte Indicadores Incidentes. Nao crie tabela, filtros nem KPIs.",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(
+                        new AgenticAuthoringCandidate(
+                                "/api/risk-intelligence/vw-indicadores-incidentes",
+                                "GET",
+                                "/schemas/filtered/risk-intelligence.vw-indicadores-incidentes",
+                                "/api/risk-intelligence/vw-indicadores-incidentes",
+                                "POST",
+                                0.98d,
+                                "Fonte indicada explicitamente pelo usuario.",
+                                List.of("explicit-source-match"),
+                                AgenticAuthoringEvidenceBundle.of(
+                                        "explicit_source_match",
+                                        List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                                                "api_metadata",
+                                                "retrieved_candidate",
+                                                "/api/risk-intelligence/vw-indicadores-incidentes",
+                                                "Indicadores de incidentes com campo severidade.",
+                                                0.92d,
+                                                List.of("indicadores", "incidentes", "severidade"),
+                                                "",
+                                                "",
+                                                "")))),
+                        weakCandidate("/api/risk-intelligence/ameacas"),
+                        weakCandidate("/api/human-resources/funcionarios"),
+                        weakCandidate("/api/assets/equipamentos")),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-fast-intent-context.v1")
+                .contains("Decide from the user's meaning, not from backend keywords.")
+                .contains("\"candidateResources\"")
+                .contains("/api/risk-intelligence/vw-indicadores-incidentes")
+                .contains("Indicadores de incidentes com campo severidade.")
+                .doesNotContain("/api/human-resources/funcionarios")
+                .doesNotContain("contextBundle:");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+        assertThat(result.artifactKind()).isEqualTo("chart");
+        assertThat(result.selectedResourcePath())
+                .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("single_chart");
+        assertThat(result.visualizationDecision().includeDetailTable()).isFalse();
+        assertThat(result.visualizationDecision().includeFilters()).isFalse();
+        assertThat(result.visualizationDecision().includeKpis()).isFalse();
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void resolveCompletesFastIntentResourceWhenDistinctExplicitCandidateIsUnambiguous() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "chart",
+                  "changeKind": "create_chart",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "assistantMessage": "Criei uma pre-visualizacao com um grafico simples.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "payroll-chart",
+                    "layoutKind": "single_chart",
+                    "primaryComponent": "praxis-chart",
+                    "axes": [
+                      {
+                        "concept": "departamento",
+                        "field": "departamento",
+                        "label": "Departamento",
+                        "chartType": "horizontal-bar",
+                        "orientation": "horizontal",
+                        "metricAggregation": "sum",
+                        "metricField": "salarioLiquido",
+                        "metricLabel": "Salario liquido",
+                        "provenance": "llm-authored-semantic-axis"
+                      }
+                    ],
+                    "includeSummary": false,
+                    "includeDetailTable": false,
+                    "excludedComponentIds": ["praxis-table", "praxis-kpi", "praxis-filter"],
+                    "includeFilters": false,
+                    "includeKpis": false,
+                    "provenance": "llm-authored-semantic-decision"
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie apenas um grafico horizontal de folha de pagamento por departamento somando salario liquido. Use a fonte Analytics Folha Pagamento.",
+                        "page-builder",
+                        "praxis-chart",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                "Crie apenas um grafico horizontal de folha de pagamento por departamento somando salario liquido. Use a fonte Analytics Folha Pagamento.",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "GET",
+                        "/schemas/filtered/human-resources.vw-analytics-folha-pagamento",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "POST",
+                        0.98d,
+                        "Fonte indicada explicitamente pelo usuario e confirmada no catalogo.",
+                        List.of("explicit-source-match", "domain-catalog-context"),
+                        AgenticAuthoringEvidenceBundle.of(
+                                "explicit_source_match",
+                                List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                                        "api_metadata",
+                                        "retrieved_candidate",
+                                        "/api/human-resources/vw-analytics-folha-pagamento",
+                                        "Analytics de folha com departamento e salarioLiquido.",
+                                        0.92d,
+                                        List.of("analytics", "folha", "departamento", "salarioLiquido"),
+                                        "",
+                                        "",
+                                        ""))))),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        String prompt = promptCaptor.getValue();
+        JsonNode compactContext = objectMapper.readTree(prompt.substring(prompt.indexOf("Compact context:")
+                + "Compact context:".length()).trim());
+        assertThat(prompt).contains("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(compactContext.path("candidateResources")).hasSize(1);
+        assertThat(compactContext.path("candidateResources").get(0).path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedResourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
 
     @Test
     void resolveSendsStructuredContextBundleAndToolCatalogToProvider() throws Exception {
@@ -148,7 +400,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-chart");
         assertThat(result.visualizationDecision().axes()).hasSize(1);
         assertThat(result.visualizationDecision().axes().get(0).field()).isEqualTo("status");
-        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(3600);
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(4096);
     }
 
     @Test
@@ -581,6 +833,90 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("Qual recurso de negocio deve orientar esta decisao?");
     }
 
+    @Test
+    void classifiesNormalizedProviderRateLimitFailureWithoutLeakingProviderBody() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenThrow(AiProviderCallException.fromHttpStatus(
+                "openai",
+                429,
+                "quota exceeded for request id req_secret_123"));
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution resolution = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "crie um dashboard",
+                                "page-builder",
+                                "praxis-chart",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "crie um dashboard",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.resolved()).isFalse();
+        assertThat(resolution.warnings())
+                .contains("llm-intent-resolution-failed", "llm-provider-error", "llm-provider-rate-limit")
+                .doesNotContain("quota exceeded for request id req_secret_123");
+        assertThat(resolution.assistantMessage())
+                .doesNotContain("quota")
+                .doesNotContain("req_secret_123");
+    }
+
+    @Test
+    void classifiesLegacyProviderFailureMessagesWhenProviderDoesNotExposeStructuredKind() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenThrow(new RuntimeException("OpenAI Error 401: invalid api key sk-test-secret"));
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution resolution = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "crie um dashboard",
+                                "page-builder",
+                                "praxis-chart",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "crie um dashboard",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.warnings())
+                .contains("llm-provider-auth-error")
+                .doesNotContain("OpenAI Error 401: invalid api key sk-test-secret");
+        assertThat(resolution.assistantMessage()).doesNotContain("sk-test-secret");
+    }
+
     private AgenticAuthoringComponentCapabilitiesResult componentCapabilities() {
         return new AgenticAuthoringComponentCapabilitiesResult(
                 "0",
@@ -598,5 +934,17 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                                         "crie um grafico por status",
                                         "Agrupar pedidos por status",
                                         List.of("Use categoryField para o eixo X", "Use valueField para a metrica"))))))));
+    }
+
+    private AgenticAuthoringCandidate weakCandidate(String resourcePath) {
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                "post",
+                "/schemas/filtered?path=" + resourcePath + "/filter/cursor&operation=post&schemaType=response",
+                resourcePath + "/filter/cursor",
+                "post",
+                0.42d,
+                "weak lexical candidate",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"));
     }
 }

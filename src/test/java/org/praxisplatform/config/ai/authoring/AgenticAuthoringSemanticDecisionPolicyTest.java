@@ -210,6 +210,59 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
         assertThat(decision.selectedCandidate()).isSameAs(analytics);
     }
 
+    @Test
+    void dataSourceAnswerForExistingMaterializationRequestCreatesPreview() {
+        AgenticAuthoringCandidate incidents = candidate("/api/risk-intelligence/vw-indicadores-incidentes");
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "Crie apenas um grafico de linha da evolucao mensal de incidentes por data de ocorrido.",
+                "Use a fonte Indicadores Incidentes e o campo Ocorrido em.",
+                "explore",
+                "api_catalog",
+                "answer_api_catalog_question",
+                incidents,
+                List.of(incidents),
+                incidents,
+                null,
+                false,
+                false,
+                false,
+                null,
+                null,
+                null));
+
+        assertThat(decision.operationKind()).isEqualTo("create");
+        assertThat(decision.artifactKind()).isEqualTo("dashboard");
+        assertThat(decision.changeKind()).isEqualTo("create_chart");
+        assertThat(decision.selectedCandidate()).isSameAs(incidents);
+    }
+
+    @Test
+    void directSingleChartCommandCannotBeLaunderedIntoApiCatalogAnswer() {
+        AgenticAuthoringCandidate incidents = candidate("/api/risk-intelligence/vw-indicadores-incidentes");
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "Crie apenas um grafico de barras simples de incidentes por severidade.",
+                "explore",
+                "api_catalog",
+                "answer_api_catalog_question",
+                incidents,
+                List.of(incidents),
+                incidents,
+                null,
+                false,
+                false,
+                false,
+                null,
+                null,
+                null));
+
+        assertThat(decision.operationKind()).isEqualTo("create");
+        assertThat(decision.artifactKind()).isEqualTo("dashboard");
+        assertThat(decision.changeKind()).isEqualTo("create_chart");
+        assertThat(decision.selectedCandidate()).isSameAs(incidents);
+    }
+
     private AgenticAuthoringSemanticDecisionPolicy.Input input(
             String prompt,
             String operationKind,

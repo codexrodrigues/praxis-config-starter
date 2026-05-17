@@ -529,8 +529,11 @@ export interface AgenticAuthoringVisualizationDecisionContract {
   axes?: AgenticAuthoringVisualizationAxisDecisionContract[];
   includeSummary?: boolean | null;
   includeDetailTable?: boolean | null;
+  excludedComponentIds?: string[];
+  includeFilters?: boolean | null;
+  includeKpis?: boolean | null;
   provenance?: string | null;
-  [key: string]: AiJsonValue | AgenticAuthoringVisualizationAxisDecisionContract[] | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringVisualizationAxisDecisionContract[] | string[] | undefined;
 }
 
 export interface AgenticAuthoringResourceCandidatesRequestContract {
@@ -702,6 +705,7 @@ export interface AgenticAuthoringComponentCapabilitiesResultContract {
 export interface AgenticAuthoringManifestEditPlanRequestContract {
   config?: AiJsonObject | null;
   plan?: AiJsonObject | null;
+  validationContext?: AiJsonObject | null;
 }
 
 export interface AgenticAuthoringResolveTargetRequestContract {

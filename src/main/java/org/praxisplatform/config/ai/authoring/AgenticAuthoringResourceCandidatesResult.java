@@ -10,6 +10,27 @@ public record AgenticAuthoringResourceCandidatesResult(
         String assistantMessage,
         List<AgenticAuthoringCandidate> candidates,
         List<AgenticAuthoringQuickReply> quickReplies,
-        List<String> warnings
+        List<String> warnings,
+        AgenticAuthoringConsultativeApiCatalogProjection consultativeProjection
 ) {
+    public AgenticAuthoringResourceCandidatesResult(
+            boolean valid,
+            String tool,
+            String retrievalQuery,
+            String artifactKind,
+            String assistantMessage,
+            List<AgenticAuthoringCandidate> candidates,
+            List<AgenticAuthoringQuickReply> quickReplies,
+            List<String> warnings) {
+        this(
+                valid,
+                tool,
+                retrievalQuery,
+                artifactKind,
+                assistantMessage,
+                candidates,
+                quickReplies,
+                warnings,
+                null);
+    }
 }

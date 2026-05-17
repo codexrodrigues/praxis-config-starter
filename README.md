@@ -440,6 +440,7 @@ Important:
 - Signed stream tokens carry the resolved tenant/user/environment for that stream. When a valid signed token is present and the request has no server-authenticated principal, token identity is authoritative over local fallback identity.
 - The host must set a stable `PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET`; do not use a production secret in local examples or docs.
 - Long LLM/RAG turns should stay conversational through backend events, not frontend timers. The authoring stream emits semantic phases such as `intent.resolve.llm`, `intent.resolve.grounding`, `resource.discovery`, `preview.plan` and `preview.compile`; transient heartbeats include `phase` and `summary` from the latest known step.
+- Authoring streams use `praxis.ai.authoring.stream.heartbeat-seconds` for conversational keep-alives. Its default is shorter than the generic AI stream heartbeat so the UI can keep showing useful progress during slow LLM/RAG work.
 
 ### Downstream validation before release
 The recommended downstream validation target is `praxis-api-quickstart`.

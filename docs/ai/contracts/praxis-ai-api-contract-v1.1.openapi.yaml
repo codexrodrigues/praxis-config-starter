@@ -1328,7 +1328,7 @@ components:
       required: false
       schema:
         type: string
-        default: 2e89c7636d739c378f2027916957f9a32566917c1cafbd6413e2a26eb197b256
+        default: 41b7f29594c63f60fe7900020f85c8761612090a4551f4e9d2530a0f78fd0a85
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1358,7 +1358,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 2e89c7636d739c378f2027916957f9a32566917c1cafbd6413e2a26eb197b256
+        example: 41b7f29594c63f60fe7900020f85c8761612090a4551f4e9d2530a0f78fd0a85
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1385,6 +1385,16 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+        validationContext:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: >
+            Contexto governado usado somente por validadores/compiladores de authoring.
+            Não deve ser persistido no config materializado. Para praxis-table, pode
+            carregar o schema request de filtro canônico em filterRequestSchema ou
+            metadados equivalentes em filterRequestFieldMetadata, permitindo validar
+            campos de filtro que não são colunas visíveis da tabela.
       additionalProperties: false
 
     AgenticAuthoringResolveTargetRequest:
@@ -2109,6 +2119,97 @@ components:
           type: array
           items:
             type: string
+        consultativeProjection:
+          $ref: '#/components/schemas/AgenticAuthoringConsultativeApiCatalogProjection'
+      additionalProperties: true
+
+    AgenticAuthoringConsultativeApiCatalogProjection:
+      type: object
+      description: Projecao consultiva governada para perguntas sobre APIs, dados e usos possiveis de um recorte de dominio.
+      properties:
+        query:
+          type: string
+        assistantMessage:
+          type: string
+          nullable: true
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringConsultativeApiCatalogResource'
+        warnings:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    AgenticAuthoringConsultativeApiCatalogResource:
+      type: object
+      properties:
+        resourceKey:
+          type: string
+        resourcePath:
+          type: string
+        label:
+          type: string
+        role:
+          type: string
+          enum: [operational, analytical, reference]
+        description:
+          type: string
+          nullable: true
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringConsultativeApiCatalogField'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringConsultativeApiCatalogAction'
+        endpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringConsultativeApiCatalogEndpoint'
+        evidence:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    AgenticAuthoringConsultativeApiCatalogField:
+      type: object
+      properties:
+        name:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringConsultativeApiCatalogAction:
+      type: object
+      properties:
+        name:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    AgenticAuthoringConsultativeApiCatalogEndpoint:
+      type: object
+      properties:
+        kind:
+          type: string
+        method:
+          type: string
+        path:
+          type: string
+        label:
+          type: string
       additionalProperties: true
 
     AgenticAuthoringIntentResolutionResult:
@@ -2415,6 +2516,17 @@ components:
           type: boolean
           nullable: true
         includeDetailTable:
+          type: boolean
+          nullable: true
+        excludedComponentIds:
+          type: array
+          description: Componentes governados explicitamente excluidos pela decisao semantica, como praxis-table, praxis-filter, praxis-tabs ou praxis-chart.
+          items:
+            type: string
+        includeFilters:
+          type: boolean
+          nullable: true
+        includeKpis:
           type: boolean
           nullable: true
         provenance:

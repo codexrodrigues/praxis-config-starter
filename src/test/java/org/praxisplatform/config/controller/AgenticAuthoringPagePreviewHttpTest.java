@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -29,7 +30,11 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCandidate;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswer;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
@@ -175,6 +180,109 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("quickReplies")).hasSize(1);
         assertThat(body.path("quickReplies").get(0).path("prompt").asText())
                 .contains("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void pagePreviewResolvesIntentWhenRequestHasNoResolvedIntent() throws Exception {
+        AgenticAuthoringIntentResolverService intentResolverService = mock(AgenticAuthoringIntentResolverService.class);
+        AgenticAuthoringPreviewService previewService = mock(AgenticAuthoringPreviewService.class);
+        AgenticAuthoringIntentResolutionResult intentResolution = consultativeComponentIntent();
+        when(intentResolverService.resolve(any(), isNull(), isNull(), isNull()))
+                .thenReturn(intentResolution);
+        when(previewService.preview(any(), isNull(), isNull(), isNull(), any()))
+                .thenReturn(new org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of("preview-materialization-skipped-consultative-answer"),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        objectMapper.createObjectNode(),
+                        "Resposta consultiva."));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                intentResolverService,
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Como habilito exportacao de linhas selecionadas?");
+        request.put("provider", "openai");
+        request.put("model", "gpt-5-mini");
+
+        mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<AgenticAuthoringPlanRequest> requestCaptor =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).preview(requestCaptor.capture(), isNull(), isNull(), isNull(), any());
+        assertThat(requestCaptor.getValue().intentResolution()).isSameAs(intentResolution);
+    }
+
+    @Test
+    void pagePreviewAnswersConsultativeQuestionWithFastPathBeforeMaterialization() throws Exception {
+        AgenticAuthoringIntentResolverService intentResolverService = mock(AgenticAuthoringIntentResolverService.class);
+        AgenticAuthoringPreviewService previewService = mock(AgenticAuthoringPreviewService.class);
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                mock(AgenticAuthoringConsultativeAnswerService.class);
+        when(consultativeAnswerService.answer(
+                any(AgenticAuthoringPlanRequest.class),
+                any(),
+                isNull(),
+                isNull(),
+                isNull()))
+                .thenReturn(Optional.of(new AgenticAuthoringConsultativeAnswer(
+                        "domain_api",
+                        "answer_api_catalog_question",
+                        "Você pode consultar dados confirmados de folha e montar telas de análise sem criar nada agora.",
+                        null,
+                        List.of("domain-api-consultative-projection-used"))));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                intentResolverService,
+                mock(AgenticAuthoringPlanService.class),
+                mock(AgenticAuthoringPatchCompilerService.class),
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                new AgenticAuthoringComponentCapabilitiesService(),
+                mock(AgenticAuthoringResourceDiscoveryService.class),
+                null,
+                null,
+                null,
+                consultativeAnswerService)).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Quais APIs e dados existem sobre folha de pagamento?");
+        request.put("provider", "openai");
+        request.put("model", "gpt-5-mini");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("assistantMessage").asText()).contains("dados confirmados de folha");
+        assertThat(body.path("minimalFormPlan").isMissingNode() || body.path("minimalFormPlan").isNull()).isTrue();
+        assertThat(body.path("warnings")).extracting(JsonNode::asText)
+                .contains(
+                        "domain-api-consultative-projection-used",
+                        "preview-consultative-fast-path-used",
+                        "preview-materialization-skipped-consultative-answer");
+        verify(intentResolverService, never()).resolve(any(), isNull(), isNull(), isNull());
+        verify(previewService, never()).preview(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -1163,5 +1271,31 @@ class AgenticAuthoringPagePreviewHttpTest {
         intent.putArray("failureCodes").add("shared-rule-authoring-required");
         intent.putObject("currentPageSummary");
         return intent;
+    }
+
+    private AgenticAuthoringIntentResolutionResult consultativeComponentIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "explain",
+                "component",
+                "answer_component_capability_question",
+                "consultative",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("consultative", "eligible", List.of()),
+                "Como habilito exportacao de linhas selecionadas?",
+                "Resposta consultiva.",
+                objectMapper.createObjectNode(),
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 }

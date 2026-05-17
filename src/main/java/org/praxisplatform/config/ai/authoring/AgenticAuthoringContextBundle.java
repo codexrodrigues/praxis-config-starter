@@ -11,6 +11,13 @@ import org.springframework.util.StringUtils;
 
 final class AgenticAuthoringContextBundle {
 
+    private static final int MAX_COMPACT_CAPABILITIES_PER_COMPONENT = 8;
+    private static final int MAX_COMPACT_TRIGGER_TERMS = 8;
+    private static final int MAX_COMPACT_FIELD_ALIASES = 6;
+    private static final int MAX_COMPACT_ALIASES_PER_FIELD = 6;
+    private static final int MAX_COMPACT_EXAMPLES = 1;
+    private static final int MAX_COMPACT_CONFIG_HINTS = 3;
+
     private AgenticAuthoringContextBundle() {
     }
 
@@ -152,17 +159,18 @@ final class AgenticAuthoringContextBundle {
                 }
                 int count = 0;
                 for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : catalog.capabilities()) {
-                    if (capability == null || count >= 16) {
+                    if (capability == null || count >= MAX_COMPACT_CAPABILITIES_PER_COMPONENT) {
                         continue;
                     }
                     ObjectNode capabilityNode = capabilities.addObject();
                     capabilityNode.put("id", valueOrEmpty(capability.id()));
                     capabilityNode.put("changeKind", valueOrEmpty(capability.changeKind()));
-                    capabilityNode.set("triggerTerms", limitedStrings(objectMapper, capability.triggerTerms(), 12));
-                    capabilityNode.set("fieldAliases", objectMapper.valueToTree(
-                            capability.fieldAliases() == null ? List.of() : capability.fieldAliases()));
-                    capabilityNode.set("examples", objectMapper.valueToTree(
-                            capability.examples() == null ? List.of() : capability.examples().stream().limit(2).toList()));
+                    capabilityNode.set("triggerTerms", limitedStrings(
+                            objectMapper,
+                            capability.triggerTerms(),
+                            MAX_COMPACT_TRIGGER_TERMS));
+                    capabilityNode.set("fieldAliases", compactFieldAliases(objectMapper, capability.fieldAliases()));
+                    capabilityNode.set("examples", compactExamples(objectMapper, capability.examples()));
                     count++;
                 }
             }
@@ -380,6 +388,52 @@ final class AgenticAuthoringContextBundle {
         Set<String> seen = new LinkedHashSet<>();
         for (String value : values) {
             addLimited(node, seen, value, limit);
+        }
+        return node;
+    }
+
+    private static ArrayNode compactFieldAliases(
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentFieldAlias> aliases) {
+        ArrayNode node = objectMapper.createArrayNode();
+        if (aliases == null) {
+            return node;
+        }
+        int count = 0;
+        Set<String> seenFields = new LinkedHashSet<>();
+        for (AgenticAuthoringComponentCapabilitiesResult.ComponentFieldAlias alias : aliases) {
+            if (alias == null || count >= MAX_COMPACT_FIELD_ALIASES) {
+                continue;
+            }
+            String field = valueOrEmpty(alias.field());
+            if (field.isBlank() || !seenFields.add(field)) {
+                continue;
+            }
+            ObjectNode item = node.addObject();
+            item.put("field", field);
+            item.set("aliases", limitedStrings(objectMapper, alias.aliases(), MAX_COMPACT_ALIASES_PER_FIELD));
+            count++;
+        }
+        return node;
+    }
+
+    private static ArrayNode compactExamples(
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample> examples) {
+        ArrayNode node = objectMapper.createArrayNode();
+        if (examples == null) {
+            return node;
+        }
+        int count = 0;
+        for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample example : examples) {
+            if (example == null || count >= MAX_COMPACT_EXAMPLES) {
+                continue;
+            }
+            ObjectNode item = node.addObject();
+            item.put("prompt", valueOrEmpty(example.prompt()));
+            item.put("intent", valueOrEmpty(example.intent()));
+            item.set("configHints", limitedStrings(objectMapper, example.configHints(), MAX_COMPACT_CONFIG_HINTS));
+            count++;
         }
         return node;
     }

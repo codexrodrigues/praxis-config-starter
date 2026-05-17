@@ -43,11 +43,6 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             failureCodes.add(CHART_REQUIRED_FAILURE);
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
-        if ("dashboard".equals(safe(semanticDecision.artifactKind()))
-                && !containsComponent(materialization, "praxis-chart")) {
-            failureCodes.add(DASHBOARD_REQUIRED_FAILURE);
-            warnings.add(MATERIALIZATION_MISMATCH_WARNING);
-        }
         if (hasResourceBindingMismatch(semanticDecision, materialization)) {
             failureCodes.add(RESOURCE_BINDING_MISMATCH_FAILURE);
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
@@ -65,12 +60,8 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             return false;
         }
         AgenticAuthoringVisualizationDecision visualizationDecision = semanticDecision.visualizationDecision();
-        if (visualizationDecision != null && "praxis-chart".equals(safe(visualizationDecision.primaryComponent()))) {
-            return true;
-        }
-        return "chart".equals(safe(semanticDecision.artifactKind()))
-                || "create_chart".equals(safe(semanticDecision.changeKind()))
-                || "charts".equals(safe(semanticDecision.visualIntent()));
+        return visualizationDecision != null
+                && "praxis-chart".equals(safe(visualizationDecision.primaryComponent()));
     }
 
     private static String requestedPrimaryComponent(AgenticAuthoringSemanticDecision semanticDecision) {
@@ -81,10 +72,10 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         if (componentId.isBlank() || "unknown".equals(componentId)) {
             return "";
         }
-        return looksLikeGovernedComponentId(componentId) ? componentId : "";
+        return isGovernedComponentId(componentId) ? componentId : "";
     }
 
-    private static boolean looksLikeGovernedComponentId(String componentId) {
+    private static boolean isGovernedComponentId(String componentId) {
         String value = safe(componentId);
         return value.startsWith("praxis-")
                 || value.startsWith("pdx-")

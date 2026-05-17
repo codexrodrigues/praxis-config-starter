@@ -5,6 +5,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeApiCatalogProjectionService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCurrentPageAnalyzer;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
@@ -111,6 +113,18 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public AgenticAuthoringConsultativeApiCatalogProjectionService agenticAuthoringConsultativeApiCatalogProjectionService(
+            ObjectProvider<DomainCatalogIngestionService> domainCatalogIngestionService,
+            ObjectProvider<ApiMetadataRepository> apiMetadataRepository,
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey) {
+        return new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                domainCatalogIngestionService::getIfAvailable,
+                apiMetadataRepository.getIfAvailable(),
+                domainCatalogServiceKey);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public AgenticAuthoringIntentResolverService agenticAuthoringIntentResolverService(
             ObjectMapper objectMapper,
             AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
@@ -188,13 +202,28 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringResourceDiscoveryService agenticAuthoringResourceDiscoveryService(
             AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
             ObjectProvider<AgenticAuthoringDomainCatalogCandidateEnhancer> domainCatalogCandidateEnhancer,
+            ObjectProvider<AgenticAuthoringConsultativeApiCatalogProjectionService> consultativeApiCatalogProjectionService,
             ObjectMapper objectMapper,
             @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey) {
         return new AgenticAuthoringResourceDiscoveryService(
                 apiMetadataCandidateCatalog,
                 objectMapper,
                 domainCatalogServiceKey,
-                domainCatalogCandidateEnhancer.getIfAvailable());
+                domainCatalogCandidateEnhancer.getIfAvailable(),
+                consultativeApiCatalogProjectionService.getIfAvailable());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(AiProviderManagementService.class)
+    public AgenticAuthoringConsultativeAnswerService agenticAuthoringConsultativeAnswerService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            ObjectProvider<AgenticAuthoringConsultativeApiCatalogProjectionService> consultativeApiCatalogProjectionService) {
+        return new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                consultativeApiCatalogProjectionService.getIfAvailable());
     }
 
     @Bean
@@ -322,6 +351,8 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<AgenticAuthoringOrchestrator> orchestrator,
             ObjectProvider<AgenticAuthoringProjectKnowledgeService> projectKnowledgeService,
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
+            ObjectProvider<AgenticAuthoringConsultativeAnswerService> consultativeAnswerService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -331,7 +362,9 @@ public class AgenticAuthoringAutoConfiguration {
                 toolRegistry,
                 projectKnowledgeService.getIfAvailable(),
                 orchestrator.getIfAvailable(),
-                schemaRetrievalService.getIfAvailable());
+                schemaRetrievalService.getIfAvailable(),
+                componentCapabilitiesService,
+                consultativeAnswerService.getIfAvailable());
     }
 
     @Bean

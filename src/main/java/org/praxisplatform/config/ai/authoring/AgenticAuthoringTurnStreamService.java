@@ -71,7 +71,7 @@ public class AgenticAuthoringTurnStreamService {
     @Value("${praxis.ai.stream.processing-poll-seconds:1}")
     private long processingPollSeconds;
 
-    @Value("${praxis.ai.stream.heartbeat-seconds:15}")
+    @Value("${praxis.ai.authoring.stream.heartbeat-seconds:${praxis.ai.stream.heartbeat-seconds:5}}")
     private long heartbeatSeconds;
 
     @Value("${praxis.ai.stream.processing-timeout-seconds:180}")
@@ -367,6 +367,7 @@ public class AgenticAuthoringTurnStreamService {
                 .payload(objectMapper.valueToTree(Map.of(
                         "state", "alive",
                         "phase", heartbeatPhase(tail),
+                        "message", heartbeatSummary(tail),
                         "summary", heartbeatSummary(tail),
                         "lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""))))
                 .build();
@@ -390,10 +391,21 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private String heartbeatSummary(AiTurnEventEnvelope tail) {
+        JsonNode payload = tail == null ? null : tail.getPayload();
+        String explicitMessage = payload == null ? "" : payload.path("message").asText("");
+        if (explicitMessage != null && !explicitMessage.isBlank()) {
+            return explicitMessage;
+        }
         String phase = heartbeatPhase(tail);
         return switch (phase) {
-            case "intent.resolve", "intent.resolve.llm" ->
-                    "Estou entendendo seu pedido e comparando com o contexto governado.";
+            case "consultative.intent" ->
+                    "Estou separando pergunta consultiva de pedido de criacao para seguir pelo caminho certo.";
+            case "consultative.answer" ->
+                    "Encontrei evidencias governadas e estou transformando isso em uma resposta clara.";
+            case "intent.resolve" ->
+                    "Estou organizando o pedido, a pagina atual e as restricoes governadas.";
+            case "intent.resolve.llm" ->
+                    "Estou resolvendo a intencao com o contexto governado antes de escolher recursos ou componentes.";
             case "intent.resolve.grounding" ->
                     "Estou validando a intencao com as evidencias disponiveis.";
             case "resource.discovery", "tool.start", "tool.result" ->

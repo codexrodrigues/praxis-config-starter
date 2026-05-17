@@ -9,20 +9,28 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
 
 public class AgenticAuthoringLlmIntentResolverService {
 
+    private static final Logger log = LoggerFactory.getLogger(AgenticAuthoringLlmIntentResolverService.class);
     private static final String SYSTEM_PROMPT_TEMPLATE_ID = "ai-authoring/page-builder-system-prompt.v1.md";
     private static final String SYSTEM_PROMPT_TEMPLATE = loadSystemPromptTemplate();
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
+    private static final int MAX_FAST_INTENT_RESOLUTION_TOKENS = 1800;
+    private static final int MAX_INTENT_RESOLUTION_TOKENS = 4096;
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
@@ -59,6 +67,19 @@ public class AgenticAuthoringLlmIntentResolverService {
         List<AgenticAuthoringCandidate> usableCandidates =
                 candidateOptions == null ? List.of() : candidateOptions;
         try {
+            Optional<AgenticAuthoringLlmIntentResolution> fastResolution = fastIntentResolution(
+                    request,
+                    effectivePrompt,
+                    currentPageSummary,
+                    target,
+                    usableCandidates,
+                    componentCapabilities,
+                    tenantId,
+                    userId,
+                    environment);
+            if (fastResolution.isPresent()) {
+                return fastResolution;
+            }
             PromptInput promptInput = promptInput(
                     request,
                     effectivePrompt,
@@ -76,7 +97,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .model(request.model())
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
-                            .maxTokens(3600)
+                            .maxTokens(MAX_INTENT_RESOLUTION_TOKENS)
                             .build(),
                     tenantId,
                     userId,
@@ -88,6 +109,11 @@ public class AgenticAuthoringLlmIntentResolverService {
     }
 
     private AgenticAuthoringLlmIntentResolution failedResolution(RuntimeException ex) {
+        Throwable rootCause = rootCause(ex);
+        log.warn(
+                "[AgenticAuthoringLlmIntentResolver] Provider intent resolution failed; kind={} cause={}",
+                providerFailureKind(rootCause),
+                safeProviderFailureSummary(rootCause));
         return new AgenticAuthoringLlmIntentResolution(
                 false,
                 "unknown",
@@ -99,9 +125,418 @@ public class AgenticAuthoringLlmIntentResolverService {
                 "Tive um problema para concluir essa leitura agora. Posso continuar com o recurso mais provavel, mas antes de criar algo preciso confirmar se ele representa o dominio certo.",
                 List.of(),
                 List.of("Qual recurso de negocio deve orientar esta decisao?"),
-                List.of("llm-intent-resolution-failed", "llm-provider-error"),
+                providerFailureWarnings(rootCause),
                 null,
                 null);
+    }
+
+    private List<String> providerFailureWarnings(Throwable error) {
+        LinkedHashSet<String> warnings = new LinkedHashSet<>();
+        warnings.add("llm-intent-resolution-failed");
+        warnings.add("llm-provider-error");
+        warnings.add("llm-provider-" + providerFailureKind(error));
+        return List.copyOf(warnings);
+    }
+
+    private Optional<AgenticAuthoringLlmIntentResolution> fastIntentResolution(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            JsonNode currentPageSummary,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringCandidate> candidateOptions,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String tenantId,
+            String userId,
+            String environment) {
+        List<AgenticAuthoringCandidate> fastCandidates = fastIntentCandidateOptions(candidateOptions);
+        if (!shouldTryFastIntentResolution(request, target, fastCandidates)) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode result = providerManagementService.generateJson(
+                    fastIntentPrompt(
+                            request,
+                            effectivePrompt,
+                            currentPageSummary,
+                            target,
+                            fastCandidates,
+                            componentCapabilities),
+                    AiJsonSchema.ofSchema(schema()),
+                    AiCallConfig.builder()
+                            .provider(request.provider())
+                            .model(request.model())
+                            .apiKey(request.apiKey())
+                            .temperature(0.0d)
+                            .maxTokens(MAX_FAST_INTENT_RESOLUTION_TOKENS)
+                            .build(),
+                    tenantId,
+                    userId,
+                    environment);
+            Optional<AgenticAuthoringLlmIntentResolution> resolution =
+                    toResolution(result).map(value -> withFastCandidateResourceWhenUnambiguous(value, fastCandidates));
+            if (resolution.isPresent() && fastIntentResolutionComplete(resolution.get())) {
+                return resolution.map(this::withFastIntentWarning);
+            }
+            resolution.ifPresent(value -> log.debug(
+                    "[AgenticAuthoringLlmIntentResolver] Fast intent pass fell back; reason={} resolved={} operation={} artifact={} selectedResourcePresent={} visualizationPresent={} axes={}",
+                    fastIntentRejectionReason(value),
+                    value.resolved(),
+                    valueOrDefault(value.operationKind(), ""),
+                    valueOrDefault(value.artifactKind(), ""),
+                    StringUtils.hasText(value.selectedResourcePath()),
+                    value.visualizationDecision() != null,
+                    value.visualizationDecision() == null || value.visualizationDecision().axes() == null
+                            ? 0
+                            : value.visualizationDecision().axes().size()));
+        } catch (RuntimeException ex) {
+            log.debug("[AgenticAuthoringLlmIntentResolver] Fast intent pass failed; kind={} cause={}",
+                    providerFailureKind(rootCause(ex)),
+                    safeProviderFailureSummary(rootCause(ex)));
+        }
+        return Optional.empty();
+    }
+
+    private String fastIntentRejectionReason(AgenticAuthoringLlmIntentResolution resolution) {
+        if (resolution == null) {
+            return "empty-resolution";
+        }
+        if (!resolution.resolved()) {
+            return "unresolved";
+        }
+        if (!"create".equals(valueOrDefault(resolution.operationKind(), ""))) {
+            return "operation-not-create";
+        }
+        String artifactKind = valueOrDefault(resolution.artifactKind(), "");
+        if (!List.of("chart", "dashboard", "table", "page").contains(artifactKind)) {
+            return "unsupported-artifact-kind";
+        }
+        if (!StringUtils.hasText(resolution.selectedResourcePath())) {
+            return "missing-selected-resource";
+        }
+        if (List.of("chart", "dashboard").contains(artifactKind)) {
+            AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
+            if (decision == null) {
+                return "missing-visualization-decision";
+            }
+            if (!StringUtils.hasText(decision.primaryComponent())) {
+                return "missing-primary-component";
+            }
+            if (decision.axes() == null || decision.axes().isEmpty()) {
+                return "missing-axes";
+            }
+        }
+        return "unknown";
+    }
+
+    private boolean shouldTryFastIntentResolution(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringCandidate> candidateOptions) {
+        if (request == null
+                || request.pendingClarification() != null
+                || request.activeSemanticDecision() != null
+                || (request.conversationMessages() != null && !request.conversationMessages().isEmpty())
+                || candidateOptions == null
+                || candidateOptions.isEmpty()) {
+            return false;
+        }
+        if (target != null && StringUtils.hasText(target.widgetKey())) {
+            return false;
+        }
+        return candidateOptions.stream()
+                .anyMatch(candidate -> hasEvidence(candidate, "explicit-source-match")
+                        || hasEvidence(candidate, "context-hint")
+                        || hasEvidence(candidate, "quick-reply-context")
+                        || hasEvidence(candidate, "current-page")
+                        || hasEvidence(candidate, "explicit-resource-path"));
+    }
+
+    private List<AgenticAuthoringCandidate> fastIntentCandidateOptions(List<AgenticAuthoringCandidate> candidateOptions) {
+        if (candidateOptions == null || candidateOptions.isEmpty()) {
+            return List.of();
+        }
+        List<AgenticAuthoringCandidate> explicitCandidates = candidateOptions.stream()
+                .filter(candidate -> hasEvidence(candidate, "explicit-source-match"))
+                .toList();
+        List<AgenticAuthoringCandidate> trustedCandidates = candidateOptions.stream()
+                .filter(candidate -> hasEvidence(candidate, "context-hint")
+                        || hasEvidence(candidate, "quick-reply-context")
+                        || hasEvidence(candidate, "current-page")
+                        || hasEvidence(candidate, "explicit-resource-path")
+                        || hasEvidence(candidate, "domain-catalog-context"))
+                .toList();
+        List<AgenticAuthoringCandidate> scoped = new ArrayList<>();
+        if (!explicitCandidates.isEmpty()) {
+            scoped.addAll(explicitCandidates);
+            scoped.addAll(trustedCandidates);
+        } else if (!trustedCandidates.isEmpty()) {
+            scoped.addAll(trustedCandidates);
+        } else {
+            scoped.addAll(candidateOptions.stream().limit(3).toList());
+        }
+        return distinctCandidatesByResourcePath(scoped).stream()
+                .limit(3)
+                .toList();
+    }
+
+    private List<AgenticAuthoringCandidate> distinctCandidatesByResourcePath(
+            List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        List<AgenticAuthoringCandidate> distinct = new ArrayList<>();
+        for (AgenticAuthoringCandidate candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            String resourcePath = valueOrDefault(candidate.resourcePath(), "");
+            String key = resourcePath.isBlank() ? "candidate@" + distinct.size() : resourcePath;
+            if (seen.add(key)) {
+                distinct.add(candidate);
+            }
+        }
+        return List.copyOf(distinct);
+    }
+
+    private boolean fastIntentResolutionComplete(AgenticAuthoringLlmIntentResolution resolution) {
+        if (resolution == null || !resolution.resolved()) {
+            return false;
+        }
+        if (!"create".equals(valueOrDefault(resolution.operationKind(), ""))) {
+            return false;
+        }
+        String artifactKind = valueOrDefault(resolution.artifactKind(), "");
+        if (!List.of("chart", "dashboard", "table", "page").contains(artifactKind)) {
+            return false;
+        }
+        if (!StringUtils.hasText(resolution.selectedResourcePath())) {
+            return false;
+        }
+        if (List.of("chart", "dashboard").contains(artifactKind)) {
+            AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
+            return decision != null
+                    && StringUtils.hasText(decision.primaryComponent())
+                    && decision.axes() != null
+                    && !decision.axes().isEmpty();
+        }
+        return true;
+    }
+
+    private AgenticAuthoringLlmIntentResolution withFastCandidateResourceWhenUnambiguous(
+            AgenticAuthoringLlmIntentResolution resolution,
+            List<AgenticAuthoringCandidate> fastCandidates) {
+        if (resolution == null
+                || StringUtils.hasText(resolution.selectedResourcePath())
+                || fastCandidates == null
+                || fastCandidates.isEmpty()) {
+            return resolution;
+        }
+        List<AgenticAuthoringCandidate> distinctCandidates = distinctCandidatesByResourcePath(fastCandidates);
+        if (distinctCandidates.size() != 1
+                || !StringUtils.hasText(distinctCandidates.get(0).resourcePath())) {
+            return resolution;
+        }
+        return new AgenticAuthoringLlmIntentResolution(
+                resolution.resolved(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                distinctCandidates.get(0).resourcePath(),
+                resolution.resourceSearchQuery(),
+                resolution.followUpKind(),
+                resolution.assistantMessage(),
+                resolution.quickReplies(),
+                resolution.clarificationQuestions(),
+                resolution.warnings(),
+                resolution.consultativeRetrievalPlan(),
+                resolution.visualizationDecision());
+    }
+
+    private AgenticAuthoringLlmIntentResolution withFastIntentWarning(
+            AgenticAuthoringLlmIntentResolution resolution) {
+        List<String> warnings = new ArrayList<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        if (!warnings.contains("llm-fast-intent-resolution-used")) {
+            warnings.add("llm-fast-intent-resolution-used");
+        }
+        return new AgenticAuthoringLlmIntentResolution(
+                resolution.resolved(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.selectedResourcePath(),
+                resolution.resourceSearchQuery(),
+                resolution.followUpKind(),
+                resolution.assistantMessage(),
+                resolution.quickReplies(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.consultativeRetrievalPlan(),
+                resolution.visualizationDecision());
+    }
+
+    private String fastIntentPrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            JsonNode currentPageSummary,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringCandidate> candidateOptions,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("schemaVersion", "praxis-agentic-authoring-fast-intent-context.v1");
+        context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
+        context.put("route", valueOrDefault(request.currentRoute(), ""));
+        context.set("currentPageSummary", currentPageSummary == null ? objectMapper.createObjectNode() : currentPageSummary);
+        if (target != null) {
+            ObjectNode targetNode = context.putObject("target");
+            targetNode.put("widgetKey", valueOrDefault(target.widgetKey(), ""));
+            targetNode.put("componentId", valueOrDefault(target.componentId(), ""));
+        }
+        ArrayNode resources = context.putArray("candidateResources");
+        for (AgenticAuthoringCandidate candidate : candidateOptions == null ? List.<AgenticAuthoringCandidate>of() : candidateOptions) {
+            ObjectNode item = resources.addObject();
+            item.put("resourcePath", valueOrDefault(candidate.resourcePath(), ""));
+            item.put("operation", valueOrDefault(candidate.operation(), ""));
+            item.put("reason", valueOrDefault(candidate.reason(), ""));
+            ArrayNode evidence = item.putArray("evidence");
+            for (String value : candidate.evidence() == null ? List.<String>of() : candidate.evidence()) {
+                if (StringUtils.hasText(value)) {
+                    evidence.add(value);
+                }
+            }
+            AgenticAuthoringEvidenceBundle evidenceBundle = candidate.evidenceBundle();
+            if (evidenceBundle != null) {
+                ObjectNode bundle = item.putObject("evidenceBundle");
+                bundle.put("retrievalSource", valueOrDefault(evidenceBundle.retrievalSource(), ""));
+                ArrayNode evidenceItems = bundle.putArray("items");
+                List<AgenticAuthoringEvidenceBundle.Evidence> values =
+                        evidenceBundle.evidence() == null ? List.of() : evidenceBundle.evidence();
+                for (int index = 0; index < Math.min(values.size(), 3); index++) {
+                    AgenticAuthoringEvidenceBundle.Evidence evidenceItem = values.get(index);
+                    if (evidenceItem == null) {
+                        continue;
+                    }
+                    ObjectNode evidenceNode = evidenceItems.addObject();
+                    evidenceNode.put("source", valueOrDefault(evidenceItem.source(), ""));
+                    evidenceNode.put("kind", valueOrDefault(evidenceItem.kind(), ""));
+                    evidenceNode.put("ref", valueOrDefault(evidenceItem.ref(), ""));
+                    evidenceNode.put("summary", valueOrDefault(evidenceItem.summary(), ""));
+                    ArrayNode matchedTerms = evidenceNode.putArray("matchedTerms");
+                    List<String> terms = evidenceItem.matchedTerms() == null ? List.of() : evidenceItem.matchedTerms();
+                    for (int termIndex = 0; termIndex < Math.min(terms.size(), 12); termIndex++) {
+                        String term = terms.get(termIndex);
+                        if (StringUtils.hasText(term)) {
+                            matchedTerms.add(term);
+                        }
+                    }
+                }
+            }
+        }
+        ArrayNode components = context.putArray("authorableComponents");
+        if (componentCapabilities != null && componentCapabilities.catalogs() != null) {
+            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : componentCapabilities.catalogs()) {
+                if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
+                    continue;
+                }
+                ObjectNode component = components.addObject();
+                component.put("componentId", catalog.componentId());
+                ArrayNode capabilities = component.putArray("capabilities");
+                List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> values =
+                        catalog.capabilities() == null ? List.of() : catalog.capabilities();
+                for (int index = 0; index < Math.min(values.size(), 4); index++) {
+                    AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability = values.get(index);
+                    if (capability != null && StringUtils.hasText(capability.changeKind())) {
+                        capabilities.add(capability.changeKind());
+                    }
+                }
+            }
+        }
+        return """
+                You are the fast semantic intent resolver for Praxis governed page authoring.
+                Return only one JSON object matching the supplied schema.
+
+                Decide from the user's meaning, not from backend keywords.
+                Select selectedResourcePath only from candidateResources.
+                When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
+                Select visualizationDecision.primaryComponent only from authorableComponents.
+                For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
+                For chart axes, use the grouping/time field in axes[].field and numeric measures in metricField/metricAggregation.
+                Field names may be proposed from the user's wording and candidate evidence; canonical schema validation runs after this step and may correct or reject them.
+                If the requested source/component cannot be resolved with this compact evidence, set resolved=false and leave visualizationDecision null.
+                Keep assistantMessage short and natural in the user's language.
+                Always include quickReplies, clarificationQuestions, warnings, visualizationDecision and consultativeRetrievalPlan fields.
+
+                Compact context:
+                %s
+                """.formatted(context.toPrettyString());
+    }
+
+    private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {
+        return candidate != null
+                && candidate.evidence() != null
+                && candidate.evidence().stream().anyMatch(evidence::equals);
+    }
+
+    private String providerFailureKind(Throwable error) {
+        if (error instanceof AiProviderCallException callException) {
+            return switch (callException.getKind()) {
+                case AUTH -> "auth-error";
+                case RATE_LIMIT -> "rate-limit";
+                case CAPACITY -> "capacity";
+                case TIMEOUT -> "timeout";
+                case TRANSPORT -> "transport-error";
+                case CLIENT_ERROR -> "client-error";
+                case SERVER_ERROR -> "server-error";
+                case UNKNOWN -> "unknown-error";
+            };
+        }
+        String message = (error == null ? "" : String.valueOf(error.getMessage())).toLowerCase(Locale.ROOT);
+        if (message.contains("401") || message.contains("403") || message.contains("unauthorized")
+                || message.contains("forbidden") || message.contains("api key")) {
+            return "auth-error";
+        }
+        if (message.contains("429") || message.contains("rate limit") || message.contains("quota")) {
+            return "rate-limit";
+        }
+        if (message.contains("timeout") || message.contains("timed out")) {
+            return "timeout";
+        }
+        if (message.contains("connect") || message.contains("socket") || message.contains("unknownhost")) {
+            return "transport-error";
+        }
+        if (message.contains("500") || message.contains("502") || message.contains("503")
+                || message.contains("504")) {
+            return "server-error";
+        }
+        if (message.contains("400") || message.contains("bad request") || message.contains("client error")) {
+            return "client-error";
+        }
+        return "unknown-error";
+    }
+
+    private Throwable rootCause(Throwable error) {
+        Throwable current = error;
+        while (current != null && current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current == null ? error : current;
+    }
+
+    private String safeProviderFailureSummary(Throwable error) {
+        if (error == null) {
+            return "unknown";
+        }
+        String name = error.getClass().getSimpleName();
+        if (error instanceof AiProviderCallException callException) {
+            String status = callException.getStatusCode() == null
+                    ? "none"
+                    : String.valueOf(callException.getStatusCode());
+            return name + "{provider=" + callException.getProvider()
+                    + ", kind=" + callException.getKind()
+                    + ", status=" + status + "}";
+        }
+        return name;
     }
 
     JsonNode diagnosticSnapshot(
@@ -258,6 +693,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 axes,
                 node.path("includeSummary").asBoolean(true),
                 node.path("includeDetailTable").asBoolean(true),
+                strings(node.path("excludedComponentIds")),
+                node.path("includeFilters").asBoolean(true),
+                node.path("includeKpis").asBoolean(true),
                 valueOrDefault(nullableText(node, "provenance"), "llm-authored-semantic-decision"));
     }
 
@@ -356,7 +794,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         ObjectNode properties = root.putObject("properties");
         properties.putObject("resolved").put("type", "boolean");
         stringEnum(properties, "operationKind", List.of("create", "modify", "remove", "compose", "connect", "explore", "explain", "unknown"));
-        stringEnum(properties, "artifactKind", List.of("dashboard", "table", "form", "page", "api_catalog", "component", "unknown"));
+        stringEnum(properties, "artifactKind", List.of("dashboard", "chart", "table", "form", "page", "api_catalog", "component", "unknown"));
         properties.putObject("changeKind").put("type", "string");
         nullableString(properties, "selectedResourcePath");
         nullableString(properties, "resourceSearchQuery");
@@ -397,6 +835,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("artifactKind")
                 .add("changeKind")
                 .add("followUpKind")
+                .add("visualizationDecision")
+                .add("consultativeRetrievalPlan")
                 .add("quickReplies")
                 .add("clarificationQuestions")
                 .add("warnings");
@@ -446,6 +886,9 @@ public class AgenticAuthoringLlmIntentResolverService {
         nullableString(properties, "primaryComponentId");
         properties.putObject("includeSummary").put("type", "boolean");
         properties.putObject("includeDetailTable").put("type", "boolean");
+        arrayOfStrings(properties, "excludedComponentIds");
+        properties.putObject("includeFilters").put("type", "boolean");
+        properties.putObject("includeKpis").put("type", "boolean");
         properties.putObject("provenance").put("type", "string");
 
         ObjectNode axis = objectMapper.createObjectNode();
@@ -482,6 +925,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("axes")
                 .add("includeSummary")
                 .add("includeDetailTable")
+                .add("excludedComponentIds")
+                .add("includeFilters")
+                .add("includeKpis")
                 .add("provenance");
         decision.put("additionalProperties", false);
         return decision;

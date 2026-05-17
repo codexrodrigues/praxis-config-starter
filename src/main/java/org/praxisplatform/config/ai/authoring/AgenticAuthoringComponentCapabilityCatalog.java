@@ -62,13 +62,13 @@ final class AgenticAuthoringComponentCapabilityCatalog {
 
     boolean supports(String changeKind, String normalizedPrompt) {
         return capabilities.stream()
-                .anyMatch(capability -> capability.changeKind().equals(changeKind)
+                .anyMatch(capability -> capability.matchesChangeKind(changeKind)
                         && capability.matches(normalizedPrompt));
     }
 
     Optional<String> resolveField(String changeKind, String normalizedPrompt) {
         return capabilities.stream()
-                .filter(capability -> capability.changeKind().equals(changeKind))
+                .filter(capability -> capability.matchesChangeKind(changeKind))
                 .flatMap(capability -> capability.fieldAliases().stream())
                 .filter(alias -> alias.matches(normalizedPrompt))
                 .map(ComponentFieldAlias::field)
@@ -161,6 +161,10 @@ final class AgenticAuthoringComponentCapabilityCatalog {
 
         boolean matches(String normalizedPrompt) {
             return containsAny(normalizedPrompt, triggerTerms);
+        }
+
+        boolean matchesChangeKind(String value) {
+            return changeKind.equals(value) || id.equals(value);
         }
 
         int matchScore(String normalizedPrompt) {

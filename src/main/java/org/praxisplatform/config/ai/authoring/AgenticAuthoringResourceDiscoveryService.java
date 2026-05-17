@@ -19,6 +19,7 @@ public class AgenticAuthoringResourceDiscoveryService {
     private final ObjectMapper objectMapper;
     private final String domainCatalogServiceKey;
     private final AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer;
+    private final AgenticAuthoringConsultativeApiCatalogProjectionService consultativeApiCatalogProjectionService;
 
     public AgenticAuthoringResourceDiscoveryService(
             AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
@@ -38,10 +39,25 @@ public class AgenticAuthoringResourceDiscoveryService {
             ObjectMapper objectMapper,
             String domainCatalogServiceKey,
             AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer) {
+        this(
+                candidateCatalog,
+                objectMapper,
+                domainCatalogServiceKey,
+                domainCatalogCandidateEnhancer,
+                null);
+    }
+
+    public AgenticAuthoringResourceDiscoveryService(
+            AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
+            ObjectMapper objectMapper,
+            String domainCatalogServiceKey,
+            AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer,
+            AgenticAuthoringConsultativeApiCatalogProjectionService consultativeApiCatalogProjectionService) {
         this.candidateCatalog = candidateCatalog;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.domainCatalogServiceKey = domainCatalogServiceKey;
         this.domainCatalogCandidateEnhancer = domainCatalogCandidateEnhancer;
+        this.consultativeApiCatalogProjectionService = consultativeApiCatalogProjectionService;
     }
 
     public AgenticAuthoringResourceCandidatesResult search(
@@ -80,6 +96,16 @@ public class AgenticAuthoringResourceDiscoveryService {
                 candidates,
                 principalContext == null ? null : principalContext.tenantId(),
                 principalContext == null ? null : principalContext.environment());
+        AgenticAuthoringConsultativeApiCatalogProjection consultativeProjection = consultativeProjection(
+                retrievalQuery,
+                artifactKind,
+                candidates,
+                principalContext == null ? null : principalContext.tenantId(),
+                principalContext == null ? null : principalContext.environment());
+        if (consultativeProjection != null && consultativeProjection.hasResources()) {
+            warnings.add("domain-api-consultative-projection-used");
+            warnings.addAll(consultativeProjection.warnings());
+        }
         int limit = limit(request);
         if (candidates.size() > limit) {
             candidates = candidates.subList(0, limit);
@@ -94,10 +120,28 @@ public class AgenticAuthoringResourceDiscoveryService {
                 TOOL_NAME,
                 retrievalQuery,
                 artifactKind,
-                assistantMessage(candidates, artifactKind),
+                assistantMessage(candidates, artifactKind, consultativeProjection),
                 List.copyOf(candidates),
                 quickReplies,
-                List.copyOf(warnings));
+                List.copyOf(warnings),
+                consultativeProjection);
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection consultativeProjection(
+            String retrievalQuery,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates,
+            String tenantId,
+            String environment) {
+        if (consultativeApiCatalogProjectionService == null
+                || !"api_catalog".equals(valueOrDefault(artifactKind, ""))) {
+            return null;
+        }
+        return consultativeApiCatalogProjectionService.project(
+                retrievalQuery,
+                candidates == null ? List.of() : candidates,
+                tenantId,
+                environment);
     }
 
     private List<AgenticAuthoringCandidate> groundCandidates(
@@ -139,7 +183,13 @@ public class AgenticAuthoringResourceDiscoveryService {
                 && candidate.evidence().contains(evidence);
     }
 
-    private String assistantMessage(List<AgenticAuthoringCandidate> candidates, String artifactKind) {
+    private String assistantMessage(
+            List<AgenticAuthoringCandidate> candidates,
+            String artifactKind,
+            AgenticAuthoringConsultativeApiCatalogProjection consultativeProjection) {
+        if (consultativeProjection != null && consultativeProjection.hasResources()) {
+            return consultativeProjection.assistantMessage();
+        }
         if (candidates == null || candidates.isEmpty()) {
             return switch (artifactKind) {
                 case "dashboard", "page" -> "Nao encontrei uma API compativel para alimentar este painel. Descreva melhor o dado de negocio, por exemplo area, entidade, indicador ou recorte esperado.";
@@ -147,6 +197,9 @@ public class AgenticAuthoringResourceDiscoveryService {
                 case "form" -> "Nao encontrei uma API de criacao compativel para este formulario. Informe qual recurso de negocio deve ser cadastrado.";
                 default -> "Nao encontrei APIs candidatas para esse pedido. Descreva o dado de negocio que deve alimentar a tela.";
             };
+        }
+        if ("api_catalog".equals(valueOrDefault(artifactKind, ""))) {
+            return "Encontrei APIs relacionadas ao recorte de negocio. Escolha a fonte mais alinhada ou peca para eu detalhar campos, acoes e usos possiveis antes de criar a tela.";
         }
         String artifactLabel = switch (artifactKind) {
             case "dashboard", "page" -> "painel";

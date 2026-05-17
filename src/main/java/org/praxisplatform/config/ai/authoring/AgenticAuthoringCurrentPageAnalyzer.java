@@ -30,11 +30,11 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         summary.put("widgetsCount", widgets.size());
         ArrayNode forms = summary.putArray("formWidgets");
         for (JsonNode widget : widgets) {
-            String componentId = text(widget.path("definition"), "id");
+            String componentId = componentId(widget);
             if (!WIDGET_DYNAMIC_FORM.equals(componentId)) {
                 continue;
             }
-            JsonNode inputs = widget.path("definition").path("inputs");
+            JsonNode inputs = inputs(widget);
             ObjectNode form = forms.addObject();
             form.put("widgetKey", text(widget, "key"));
             form.put("componentId", componentId);
@@ -75,8 +75,8 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         if (selected.isMissingNode()) {
             return null;
         }
-        JsonNode inputs = selected.path("definition").path("inputs");
-        String componentId = text(selected.path("definition"), "id");
+        JsonNode inputs = inputs(selected);
+        String componentId = componentId(selected);
         return new AgenticAuthoringTarget(
                 text(selected, "key"),
                 componentId,
@@ -85,6 +85,26 @@ public class AgenticAuthoringCurrentPageAnalyzer {
                 text(inputs, "submitUrl"),
                 resolveSubmitMethod(componentId, inputs)
         );
+    }
+
+    public AgenticAuthoringTarget resolveFirstComponentTarget(JsonNode currentPage, String componentId) {
+        if (componentId == null || componentId.isBlank()) {
+            return null;
+        }
+        for (JsonNode widget : widgets(currentPage)) {
+            if (componentId.equals(componentId(widget))) {
+                JsonNode inputs = inputs(widget);
+                return new AgenticAuthoringTarget(
+                        text(widget, "key"),
+                        componentId,
+                        resolveResourcePath(inputs),
+                        text(inputs, "schemaUrl"),
+                        text(inputs, "submitUrl"),
+                        resolveSubmitMethod(componentId, inputs)
+                );
+            }
+        }
+        return null;
     }
 
     private JsonNode selectedWidget(JsonNode currentPage, String selectedWidgetKey) {
@@ -101,7 +121,7 @@ public class AgenticAuthoringCurrentPageAnalyzer {
 
     private JsonNode firstFormWidget(JsonNode currentPage) {
         for (JsonNode widget : widgets(currentPage)) {
-            if (WIDGET_DYNAMIC_FORM.equals(text(widget.path("definition"), "id"))) {
+            if (WIDGET_DYNAMIC_FORM.equals(componentId(widget))) {
                 return widget;
             }
         }
@@ -121,8 +141,8 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         if (selected.isMissingNode()) {
             return null;
         }
-        JsonNode inputs = selected.path("definition").path("inputs");
-        String componentId = text(selected.path("definition"), "id");
+        JsonNode inputs = inputs(selected);
+        String componentId = componentId(selected);
         return new AgenticAuthoringTarget(
                 text(selected, "key"),
                 componentId,
@@ -138,6 +158,27 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         return widgets.isArray() ? widgets : objectMapper.createArrayNode();
     }
 
+    private String componentId(JsonNode widget) {
+        String definitionId = text(widget.path("definition"), "id");
+        if (!definitionId.isBlank()) {
+            return definitionId;
+        }
+        String componentId = text(widget, "componentId");
+        if (!componentId.isBlank()) {
+            return componentId;
+        }
+        String id = text(widget, "id");
+        return id.startsWith("praxis-") ? id : "";
+    }
+
+    private JsonNode inputs(JsonNode widget) {
+        JsonNode definitionInputs = widget.path("definition").path("inputs");
+        if (!definitionInputs.isMissingNode()) {
+            return definitionInputs;
+        }
+        return widget.path("inputs");
+    }
+
     private void inspectWidget(
             JsonNode widget,
             ArrayNode widgets,
@@ -145,10 +186,9 @@ public class AgenticAuthoringCurrentPageAnalyzer {
             ArrayNode fields,
             ArrayNode serverBindings,
             ArrayNode transientBindings) {
-        JsonNode definition = widget.path("definition");
-        JsonNode inputs = definition.path("inputs");
+        JsonNode inputs = inputs(widget);
         String widgetKey = text(widget, "key");
-        String componentId = text(definition, "id");
+        String componentId = componentId(widget);
         String resourcePath = resolveResourcePath(inputs);
         String schemaUrl = text(inputs, "schemaUrl");
         String submitUrl = text(inputs, "submitUrl");

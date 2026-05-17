@@ -127,7 +127,7 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
     }
 
     @Test
-    void fallsBackToTenantCatalogsWhenConfiguredServiceKeyHasNoContext() {
+    void doesNotFanOutToTenantCatalogsWhenConfiguredServiceKeyHasNoContext() {
         DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
         Mockito.when(domainCatalogIngestionService.contextLatest(
                         Mockito.eq("praxis-service"),
@@ -183,9 +183,18 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 enhancer.enhance("funcionarios", List.of(lexicalCandidate), "default", "dev");
 
         assertThat(enhanced.get(0).evidence())
-                .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
-                .doesNotContain("lexical-fallback", "weak-evidence");
-        assertThat(enhanced.get(0).evidenceBundle().retrievalSource()).isEqualTo("domain_catalog");
+                .contains("lexical-fallback", "weak-evidence")
+                .doesNotContain(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING);
+        Mockito.verify(domainCatalogIngestionService, Mockito.never()).contextLatest(
+                Mockito.eq(""),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.anyInt());
     }
 
     @Test
@@ -322,6 +331,58 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 Mockito.any(),
                 Mockito.eq("funcionarios"),
                 Mockito.anyInt());
+    }
+
+    @Test
+    void boundsDomainCatalogGroundingAttemptsForLargeCandidateSets() {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of()));
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        List<AgenticAuthoringCandidate> candidates = java.util.stream.IntStream.range(0, 12)
+                .mapToObj(index -> new AgenticAuthoringCandidate(
+                        "/api/domain/resource-" + index,
+                        "get",
+                        "",
+                        "/api/domain/resource-" + index,
+                        "get",
+                        0.40d,
+                        "api_metadata weak lexical fallback evidence",
+                        List.of("api-metadata", "lexical-fallback", "weak-evidence")))
+                .toList();
+
+        List<AgenticAuthoringCandidate> enhanced =
+                enhancer.enhance("folha pagamento pessoas cargos", candidates, "default", "dev");
+
+        assertThat(enhanced).hasSize(12);
+        Mockito.verify(domainCatalogIngestionService, Mockito.times(18)).contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.anyString(),
+                Mockito.eq("default"),
+                Mockito.eq("dev"),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.eq(8));
     }
 
     private DomainCatalogItemResponse item(String itemType, String itemKey, String label) {
