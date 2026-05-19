@@ -13,6 +13,7 @@ import java.util.List;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOption;
+import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -288,6 +289,41 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
         assertThat(defaults.get(0)).contains("Badge");
     }
 
+    @Test
+    void tableContinuationWithRecoverableTargetProbesManifestPlannerBeforeClarification() throws Exception {
+        AiOrchestratorService service = newService();
+        JsonNode currentState = objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "ativo",
+                      "header": "Ativo",
+                      "type": "boolean",
+                      "conditionalRenderers": [
+                        { "when": { "var": "ativo" }, "renderer": { "type": "badge", "text": "Ativo" } }
+                      ]
+                    }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .userPrompt("agora deixe esse indicador mais discreto e com texto curto")
+                .build();
+
+        Boolean shouldProbe = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldProbeTableActionsForMissingContext",
+                true,
+                List.of(newComponentAction("column.renderer.set")),
+                List.of("indicator id or selector", "preferred short text"),
+                request,
+                currentState,
+                List.of(newColumnDescriptor("ativo", "Ativo")));
+
+        assertThat(shouldProbe).isTrue();
+    }
+
     private AiOrchestratorService newService() {
         return new AiOrchestratorService(
                 null,
@@ -309,6 +345,33 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
         Constructor<?> constructor = type.getDeclaredConstructor(String.class, String.class);
         constructor.setAccessible(true);
         return constructor.newInstance(field, header);
+    }
+
+    private Object newComponentAction(String id) throws Exception {
+        Class<?> type = Class.forName("org.praxisplatform.config.service.AiOrchestratorService$ComponentAction");
+        Constructor<?> constructor = type.getDeclaredConstructor(
+                String.class,
+                List.class,
+                JsonNode.class,
+                String.class,
+                String.class,
+                JsonNode.class,
+                List.class,
+                List.class,
+                String.class,
+                Boolean.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(
+                id,
+                List.of(),
+                null,
+                "COLUMN",
+                "OBJECT",
+                null,
+                List.of(),
+                List.of(),
+                id,
+                true);
     }
 
     private Object newContextOption(String value, String label, String example) {

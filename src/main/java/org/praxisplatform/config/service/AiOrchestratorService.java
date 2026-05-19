@@ -546,12 +546,13 @@ public class AiOrchestratorService {
         List<AiActionItem> expectedActions = List.of();
         boolean createOnlyPlan = false;
         List<String> missingContext = intent.getMissingContext();
-        boolean shouldProbeTableActions = isTable
-                && !componentActions.isEmpty()
-                && missingContext != null
-                && missingContext.stream()
-                .map(this::normalizeMissingKey)
-                .anyMatch(key -> key.contains("column"));
+        boolean shouldProbeTableActions = shouldProbeTableActionsForMissingContext(
+                isTable,
+                componentActions,
+                missingContext,
+                request,
+                currentState,
+                columnDescriptors);
         if (shouldProbeTableActions) {
             actionPlan = extractTableActionPlan(
                     modelPrompt,
@@ -2952,6 +2953,31 @@ public class AiOrchestratorService {
         return actionPlan == null
                 || actionPlan.getActions() == null
                 || actionPlan.getActions().isEmpty();
+    }
+
+    private boolean shouldProbeTableActionsForMissingContext(
+            boolean isTable,
+            List<ComponentAction> componentActions,
+            List<String> missingContext,
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<ColumnDescriptor> columns) {
+        if (!isTable || componentActions == null || componentActions.isEmpty()) {
+            return false;
+        }
+        boolean missingColumn = missingContext != null
+                && missingContext.stream()
+                .map(this::normalizeMissingKey)
+                .anyMatch(key -> key.contains("column"));
+        if (missingColumn) {
+            return true;
+        }
+        String prompt = request != null ? request.getUserPrompt() : null;
+        String normalizedPrompt = normalizeText(prompt);
+        if (!looksLikeContextualTableContinuation(normalizedPrompt)) {
+            return false;
+        }
+        return resolveContinuationColumn(request, currentState, columns) != null;
     }
 
     private AiActionPlan deriveFallbackTableManifestActionPlan(
