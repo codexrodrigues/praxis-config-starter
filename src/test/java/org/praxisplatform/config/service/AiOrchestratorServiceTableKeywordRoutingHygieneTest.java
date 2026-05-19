@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.praxisplatform.config.dto.AiIntentClassification;
+import org.praxisplatform.config.dto.AiOption;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -120,6 +122,43 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 .isEqualTo("000.000.000-00");
     }
 
+    @Test
+    void tableFormatOptionsFromLlmIntentBecomeGuidedActionPayloads() {
+        AiOrchestratorService service = newService();
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("format")
+                .targetField("salario")
+                .options(List.of("Moeda BRL", "Numero compacto"))
+                .build();
+
+        Boolean shouldOfferChoice = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldOfferFormatChoiceFromLlmIntent",
+                true,
+                intent,
+                null);
+        assertThat(shouldOfferChoice).isTrue();
+
+        List<?> contextOptions = List.of(
+                newContextOption("BRL|symbol|2", "Moeda BRL", "R$ 12.700,00"),
+                newContextOption("compact", "Compacto", "12.7k"));
+        @SuppressWarnings("unchecked")
+        List<AiOption> payloads = (List<AiOption>) ReflectionTestUtils.invokeMethod(
+                service,
+                "buildFormatOptionPayloads",
+                "salario",
+                contextOptions);
+
+        assertThat(payloads).hasSize(2);
+        assertThat(payloads.get(0).getLabel()).isEqualTo("Moeda BRL");
+        assertThat(payloads.get(0).getContextHints().path("optionSelected").path("targetField").asText())
+                .isEqualTo("salario");
+        assertThat(payloads.get(0).getContextHints().path("optionSelected").path("selection").path("value").asText())
+                .isEqualTo("BRL|symbol|2");
+        assertThat(payloads.get(0).getContextHints().path("presentation").path("ctaLabel").asText())
+                .isEqualTo("Aplicar formato");
+    }
+
     private AiOrchestratorService newService() {
         return new AiOrchestratorService(
                 null,
@@ -134,5 +173,16 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 null,
                 mock(AiThreadService.class),
                 mock(AiMessageService.class));
+    }
+
+    private Object newContextOption(String value, String label, String example) {
+        try {
+            Class<?> type = Class.forName("org.praxisplatform.config.service.AiOrchestratorService$ContextOption");
+            var constructor = type.getDeclaredConstructor(String.class, String.class, String.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(value, label, example);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 }

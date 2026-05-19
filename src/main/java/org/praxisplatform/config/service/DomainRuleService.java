@@ -1486,7 +1486,9 @@ public class DomainRuleService {
         }
 
         List<DomainRuleMaterialization> candidates;
+        boolean explicitMaterializationOrder = false;
         if (request.materializationIds() != null && !request.materializationIds().isEmpty()) {
+            explicitMaterializationOrder = true;
             candidates = request.materializationIds().stream()
                     .map(id -> materializationRepository.findById(id)
                             .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + id)))
@@ -1506,6 +1508,7 @@ public class DomainRuleService {
                         environment,
                         materializationOutcomes);
             } else {
+                candidates = orderedMaterializations(candidates);
                 candidates.forEach(materialization ->
                         addMaterializationOutcome(
                                 materializationOutcomes,
@@ -1513,6 +1516,9 @@ public class DomainRuleService {
                                 isDerivedMaterialization(materialization) ? "reused" : "selected_existing",
                                 null));
             }
+        }
+        if (!explicitMaterializationOrder) {
+            candidates = orderedMaterializations(candidates);
         }
 
         return candidates.stream()
@@ -1546,6 +1552,34 @@ public class DomainRuleService {
         return materialization != null
                 && StringUtils.hasText(materialization.getSourceHash())
                 && materialization.getSourceHash().startsWith("derived:sha256:");
+    }
+
+    private List<DomainRuleMaterialization> orderedMaterializations(List<DomainRuleMaterialization> materializations) {
+        if (materializations == null || materializations.size() < 2) {
+            return materializations != null ? materializations : List.of();
+        }
+        return materializations.stream()
+                .sorted(materializationComparator())
+                .toList();
+    }
+
+    private Comparator<DomainRuleMaterialization> materializationComparator() {
+        return Comparator
+                .comparingInt((DomainRuleMaterialization item) -> materializationLayerPriority(item.getTargetLayer()))
+                .thenComparing(DomainRuleMaterialization::getTargetLayer, Comparator.nullsLast(String::compareTo))
+                .thenComparing(DomainRuleMaterialization::getTargetArtifactType, Comparator.nullsLast(String::compareTo))
+                .thenComparing(DomainRuleMaterialization::getTargetArtifactKey, Comparator.nullsLast(String::compareTo))
+                .thenComparing(DomainRuleMaterialization::getMaterializationKey, Comparator.nullsLast(String::compareTo));
+    }
+
+    private int materializationLayerPriority(String targetLayer) {
+        return switch (targetLayer != null ? targetLayer : "") {
+            case "option_source" -> 10;
+            case "backend_validation" -> 20;
+            case "workflow_action" -> 30;
+            case "approval_policy" -> 40;
+            default -> 100;
+        };
     }
 
     private List<DomainRuleMaterialization> createEligibleMaterializationsFromPredictions(
@@ -2032,6 +2066,7 @@ public class DomainRuleService {
             return materializationRepository
                     .findByTenantIdAndEnvironmentAndRuleDefinition_Id(resolvedTenant, resolvedEnvironment, ruleDefinitionId)
                     .stream()
+                    .sorted(materializationComparator())
                     .map(this::toResponse)
                     .toList();
         }
@@ -2047,6 +2082,7 @@ public class DomainRuleService {
                             targetArtifactKey.trim())
                     .stream()
                     .filter(materialization -> !StringUtils.hasText(status) || status.trim().equals(materialization.getStatus()))
+                    .sorted(materializationComparator())
                     .map(this::toResponse)
                     .toList();
         }
@@ -2054,12 +2090,14 @@ public class DomainRuleService {
             return materializationRepository
                     .findByTenantIdAndEnvironmentAndStatus(resolvedTenant, resolvedEnvironment, status.trim())
                     .stream()
+                    .sorted(materializationComparator())
                     .map(this::toResponse)
                     .toList();
         }
         return materializationRepository.findAll().stream()
                 .filter(materialization -> matchesScope(materialization.getTenantId(), resolvedTenant))
                 .filter(materialization -> matchesScope(materialization.getEnvironment(), resolvedEnvironment))
+                .sorted(materializationComparator())
                 .map(this::toResponse)
                 .toList();
     }
@@ -2092,6 +2130,8 @@ public class DomainRuleService {
                             normalize(tenantId),
                             normalize(environment),
                             definitionId)
+                    .stream()
+                    .sorted(materializationComparator())
                     .forEach(materialization -> addMaterializationTimelineEvents(events, materialization));
         }
         events.sort(Comparator

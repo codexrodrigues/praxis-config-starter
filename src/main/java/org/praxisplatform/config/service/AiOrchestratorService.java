@@ -455,6 +455,20 @@ public class AiOrchestratorService {
         if (isTable) {
             warnings.add("table-computed-keyword-fast-path-disabled");
         }
+        if (shouldOfferFormatChoiceFromLlmIntent(isTable, intent, selectedFormat)) {
+            ClarificationPayload payload = buildFormatClarificationPayload(
+                    intent,
+                    formatOptions,
+                    request != null ? request.getDataProfile() : null);
+            if (payload != null && !payload.options.isEmpty()) {
+                warnings.add("format-choice-offered-from-llm-intent-options");
+                return finalizeResponse(clarification(
+                        buildFormatChoiceMessage(intent, columnDescriptors),
+                        payload.options,
+                        payload.payloads),
+                        memoryContext);
+            }
+        }
         AiActionPlan actionPlan = null;
         List<AiActionItem> expectedActions = List.of();
         boolean createOnlyPlan = false;
@@ -592,7 +606,10 @@ public class AiOrchestratorService {
                     if (isTable
                             && "format".equalsIgnoreCase(intent.getCategory())
                             && isSensitiveMaskField(intent.getTargetField())) {
-                        ClarificationPayload payload = buildFormatClarificationPayload(intent, formatOptions);
+                        ClarificationPayload payload = buildFormatClarificationPayload(
+                                intent,
+                                formatOptions,
+                                request != null ? request.getDataProfile() : null);
                         return finalizeResponse(clarification(
                                 buildClarificationMessage(intent, request),
                                 payload.options,
@@ -9011,6 +9028,13 @@ public class AiOrchestratorService {
     private ClarificationPayload buildFormatClarificationPayload(
             AiIntentClassification intent,
             List<ContextOption> formatOptions) {
+        return buildFormatClarificationPayload(intent, formatOptions, null);
+    }
+
+    private ClarificationPayload buildFormatClarificationPayload(
+            AiIntentClassification intent,
+            List<ContextOption> formatOptions,
+            JsonNode dataProfile) {
         if (intent == null) {
             return new ClarificationPayload(List.of(), List.of());
         }
@@ -9022,11 +9046,116 @@ public class AiOrchestratorService {
             List<AiOption> payloads = buildMaskOptionPayloads(targetField, choices);
             return new ClarificationPayload(labels, payloads);
         }
-        List<String> labels = intent.getOptions() != null
+        choices = filterFormatOptionsForField(targetField, choices, dataProfile);
+        List<AiOption> payloads = buildFormatOptionPayloads(targetField, choices);
+        List<String> labels = !payloads.isEmpty()
+                ? buildAiOptionLabels(payloads)
+                : intent.getOptions() != null
                 ? intent.getOptions()
                 : buildOptionLabels(choices);
-        List<AiOption> payloads = buildOptionPayloads(choices);
         return new ClarificationPayload(labels, payloads);
+    }
+
+    private List<ContextOption> filterFormatOptionsForField(
+            String targetField,
+            List<ContextOption> options,
+            JsonNode dataProfile) {
+        if (options == null || options.isEmpty() || isBlank(targetField)) {
+            return options != null ? options : List.of();
+        }
+        String inferredType = extractInferredType(dataProfile, targetField);
+        if (isBlank(inferredType)) {
+            return options;
+        }
+        String normalizedType = normalizeText(inferredType);
+        List<ContextOption> filtered = new ArrayList<>();
+        for (ContextOption option : options) {
+            if (option == null) continue;
+            String haystack = normalizeText(String.join(" ",
+                    option.value != null ? option.value : "",
+                    option.label != null ? option.label : "",
+                    option.example != null ? option.example : ""));
+            if (isNumericFormatType(normalizedType) && isNumericFormatOption(haystack)) {
+                filtered.add(option);
+            } else if (isDateLikeType(normalizedType) && isDateFormatOption(option.value)) {
+                filtered.add(option);
+            } else if (isBooleanType(normalizedType, null) && haystack.contains("boolean")) {
+                filtered.add(option);
+            } else if (normalizedType.contains("string") && haystack.contains("string")) {
+                filtered.add(option);
+            }
+        }
+        if (filtered.isEmpty()) {
+            return options;
+        }
+        return filtered.stream().limit(12).collect(Collectors.toList());
+    }
+
+    private boolean isNumericFormatType(String normalizedType) {
+        if (normalizedType == null) {
+            return false;
+        }
+        return normalizedType.contains("number")
+                || normalizedType.contains("numeric")
+                || normalizedType.contains("decimal")
+                || normalizedType.contains("integer")
+                || normalizedType.contains("currency")
+                || normalizedType.contains("money");
+    }
+
+    private boolean isDateLikeType(String normalizedType) {
+        if (normalizedType == null) {
+            return false;
+        }
+        return normalizedType.contains("date")
+                || normalizedType.contains("time")
+                || normalizedType.contains("timestamp");
+    }
+
+    private boolean isNumericFormatOption(String normalizedOption) {
+        if (normalizedOption == null) {
+            return false;
+        }
+        return normalizedOption.contains("number")
+                || normalizedOption.contains("currency")
+                || normalizedOption.contains("brl")
+                || normalizedOption.contains("usd")
+                || normalizedOption.contains("eur")
+                || normalizedOption.contains("percent");
+    }
+
+    private boolean shouldOfferFormatChoiceFromLlmIntent(
+            boolean isTable,
+            AiIntentClassification intent,
+            SelectedFormatSelection selectedFormat) {
+        if (!isTable || intent == null || selectedFormat != null) {
+            return false;
+        }
+        if (!"format".equalsIgnoreCase(intent.getCategory())) {
+            return false;
+        }
+        if (isBlank(intent.getTargetField())) {
+            return false;
+        }
+        if (!isBlank(intent.getComputedFormat())) {
+            return false;
+        }
+        List<String> options = intent.getOptions();
+        return options != null && !options.isEmpty();
+    }
+
+    private String buildFormatChoiceMessage(
+            AiIntentClassification intent,
+            List<ColumnDescriptor> columnDescriptors) {
+        String targetLabel = intent != null ? intent.getTargetField() : null;
+        ColumnDescriptor target = findColumnByField(targetLabel, columnDescriptors);
+        if (target != null) {
+            targetLabel = displayColumnLabel(target, countHeaders(columnDescriptors));
+        }
+        if (isBlank(targetLabel)) {
+            targetLabel = "coluna";
+        }
+        return "Encontrei alguns formatos possíveis para " + targetLabel + ". Escolha uma opção para aplicar.";
     }
 
     private SelectedFormatSelection extractSelectedFormatFromHints(JsonNode contextHints) {
@@ -15212,6 +15341,44 @@ public class AiOrchestratorService {
                     .label(label != null && !label.isBlank() ? label : value)
                     .example(option.example)
                     .contextHints(meta.size() > 0 ? meta : null)
+                    .build());
+        }
+        return out;
+    }
+
+    private List<AiOption> buildFormatOptionPayloads(String targetField, List<ContextOption> options) {
+        if (options == null || options.isEmpty()) {
+            return List.of();
+        }
+        List<AiOption> out = new ArrayList<>();
+        for (ContextOption option : options) {
+            if (option == null) continue;
+            String value = option.value != null ? option.value : option.label;
+            String label = option.label != null ? option.label : option.value;
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            ObjectNode hints = objectMapper.createObjectNode();
+            ObjectNode selected = hints.putObject("optionSelected");
+            if (!isBlank(targetField)) {
+                selected.put("targetField", targetField);
+            }
+            ObjectNode selection = selected.putObject("selection");
+            selection.put("value", value);
+            selection.put("mode", "format");
+            ObjectNode presentation = hints.putObject("presentation");
+            presentation.put("kind", "guided-option");
+            presentation.put("description", option.example != null && !option.example.isBlank()
+                    ? "Exemplo: " + option.example + "."
+                    : "Aplica este formato na coluna.");
+            presentation.put("ctaLabel", "Aplicar formato");
+            presentation.put("icon", "format_list_numbered");
+            presentation.put("tone", "primary");
+            out.add(AiOption.builder()
+                    .value(value)
+                    .label(label != null && !label.isBlank() ? label : value)
+                    .example(option.example)
+                    .contextHints(hints)
                     .build());
         }
         return out;

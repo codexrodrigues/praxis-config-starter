@@ -2238,6 +2238,7 @@ class DomainRuleServiceTest {
                 .build();
         java.util.Map<String, AtomicInteger> keyLookups = new java.util.HashMap<>();
         java.util.Map<String, DomainRuleMaterialization> savedMaterializations = new java.util.HashMap<>();
+        AtomicInteger definitionMaterializationLookups = new AtomicInteger();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
         when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
@@ -2251,7 +2252,15 @@ class DomainRuleServiceTest {
                 "tenant-a",
                 "dev",
                 definitionId))
-                .thenReturn(List.of());
+                .thenAnswer(invocation -> {
+                    if (definitionMaterializationLookups.getAndIncrement() == 0) {
+                        return List.of();
+                    }
+                    return savedMaterializations.values().stream()
+                            .sorted(java.util.Comparator
+                                    .comparing(DomainRuleMaterialization::getTargetLayer, java.util.Comparator.reverseOrder()))
+                            .toList();
+                });
         when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(any(), any(), any()))
                 .thenAnswer(invocation -> {
                     String materializationKey = invocation.getArgument(2);
@@ -2294,6 +2303,8 @@ class DomainRuleServiceTest {
         assertThat(firstResponse.publicationStatus()).isEqualTo("published");
         assertThat(firstResponse.materializations()).hasSize(2)
                 .allSatisfy(item -> assertThat(item.sourceHash()).startsWith("derived:sha256:"));
+        assertThat(firstResponse.materializations().get(0).targetLayer()).isEqualTo("option_source");
+        assertThat(firstResponse.materializations().get(1).targetLayer()).isEqualTo("backend_validation");
         assertThat(secondResponse.publicationStatus()).isEqualTo("published");
         assertThat(secondResponse.explainability()
                 .path("publicationDiagnostics")
@@ -2317,6 +2328,8 @@ class DomainRuleServiceTest {
                             .isEqualTo(sourceHashFor(firstResponse, "backend_validation"));
                 });
         assertThat(secondResponse.materializations()).hasSize(2);
+        assertThat(secondResponse.materializations().get(0).targetLayer()).isEqualTo("option_source");
+        assertThat(secondResponse.materializations().get(1).targetLayer()).isEqualTo("backend_validation");
         assertThat(secondResponse.materializations())
                 .anySatisfy(item -> {
                     assertThat(item.id()).isEqualTo(materializationFor(firstResponse, "option_source").id());
