@@ -17,6 +17,7 @@ import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,7 +54,7 @@ public class ContextRetrievalService {
     @Value("${praxis.ai.rag.release.fallback.default-enabled:false}")
     private boolean ragReleaseFallbackToDefaultEnabled;
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     /**
      * Busca metadados de API usando similaridade vetorial.
      * Retorna os schemas completos (request/response) e parâmetros para permitir
@@ -63,7 +64,7 @@ public class ContextRetrievalService {
         return searchApiMetadata(query, method, tags, limit, null, null, null, null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<ApiSearchResult> searchApiMetadata(
             String query,
             String method,
@@ -73,7 +74,7 @@ public class ContextRetrievalService {
         return searchApiMetadata(query, method, tags, limit, embeddingConfig, null, null, null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<ApiSearchResult> searchApiMetadata(
             String query,
             String method,
@@ -93,7 +94,7 @@ public class ContextRetrievalService {
                 null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<ApiSearchResult> searchApiMetadata(
             String query,
             String method,
@@ -164,12 +165,12 @@ public class ContextRetrievalService {
         return projections.stream().map(this::mapToApiSearchResult).collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(String query, int limit) {
         return searchComponentDefinitions(query, limit, null, null, null, null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(
             String query,
             int limit,
@@ -177,7 +178,7 @@ public class ContextRetrievalService {
         return searchComponentDefinitions(query, limit, embeddingConfig, null, null, null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(
             String query,
             int limit,
@@ -193,7 +194,7 @@ public class ContextRetrievalService {
                 null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<ComponentSearchResult> searchComponentDefinitions(
             String query,
             int limit,

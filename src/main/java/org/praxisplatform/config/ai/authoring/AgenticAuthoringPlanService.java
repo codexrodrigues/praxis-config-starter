@@ -84,7 +84,7 @@ public class AgenticAuthoringPlanService {
             return completeRenameOrRelabelPlan(plan, request);
         }
         if (!isRemoveFieldIntent(request.intentResolution())) {
-            return plan;
+            return completeCanonicalCreateFormFields(plan, request);
         }
         JsonNode fields = plan.path("fields");
         if (fields.isArray() && !fields.isEmpty()) {
@@ -117,6 +117,51 @@ public class AgenticAuthoringPlanService {
             }
         }
         return completed;
+    }
+
+    private JsonNode completeCanonicalCreateFormFields(JsonNode plan, AgenticAuthoringPlanRequest request) {
+        if (!requiresTicketTitleField(request) || hasField(plan.path("fields"), "titulo")) {
+            return plan;
+        }
+        ObjectNode completed = ((ObjectNode) plan).deepCopy();
+        ArrayNode fields = completed.withArray("fields");
+        ObjectNode title = fields.insertObject(0);
+        title.put("name", "titulo");
+        title.put("label", "Titulo");
+        title.put("controlType", "text");
+        title.put("required", true);
+        ArrayNode sourceRefs = completed.withArray("sourceRefs");
+        if (!containsText(sourceRefs, "canonical-field-default:ticket-title")) {
+            sourceRefs.add("canonical-field-default:ticket-title");
+        }
+        return completed;
+    }
+
+    private boolean requiresTicketTitleField(AgenticAuthoringPlanRequest request) {
+        if (request == null) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        if (intent != null
+                && (!"create".equals(intent.operationKind())
+                || !"form".equals(intent.artifactKind()))) {
+            return false;
+        }
+        String normalizedPrompt = normalizeForMatch(request.userPrompt());
+        return containsAny(normalizedPrompt, "chamado", "chamados", "solicitacao", "solicitacoes", "incidente", "incidentes", "ticket", "tickets")
+                && containsAny(normalizedPrompt, "abrir", "abertura", "criar", "crie", "registrar", "registro", "formulario");
+    }
+
+    private boolean hasField(JsonNode fields, String fieldName) {
+        if (!fields.isArray()) {
+            return false;
+        }
+        for (JsonNode field : fields) {
+            if (fieldName.equals(text(field, "name"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JsonNode completeRenameOrRelabelPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {
@@ -638,6 +683,30 @@ public class AgenticAuthoringPlanService {
         }
         return value.toLowerCase()
                 .replaceAll("[^a-z0-9]+", "");
+    }
+
+    private boolean containsAny(String normalizedText, String... tokens) {
+        if (normalizedText == null || normalizedText.isBlank()) {
+            return false;
+        }
+        for (String token : tokens) {
+            if (normalizedText.contains(normalizeForMatch(token))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsText(JsonNode values, String expected) {
+        if (!values.isArray()) {
+            return false;
+        }
+        for (JsonNode value : values) {
+            if (expected.equals(value.asText(""))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String text(JsonNode node, String field) {

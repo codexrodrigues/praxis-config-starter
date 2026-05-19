@@ -30,6 +30,7 @@ import org.praxisplatform.config.repository.DomainContractRepository;
 import org.praxisplatform.config.repository.DomainFederationReleaseRepository;
 import org.praxisplatform.config.repository.DomainResolutionRepository;
 import org.praxisplatform.config.repository.DomainSourceRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,7 +55,7 @@ public class DomainFederationQueryService {
     private final DomainResolutionRepository resolutionRepository;
     private final ObjectMapper objectMapper;
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public DomainFederationContextQueryResponse context(
             String serviceKey,
             String resourceKey,
@@ -80,7 +81,7 @@ public class DomainFederationQueryService {
                 null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public DomainFederationContextQueryResponse context(
             String serviceKey,
             String resourceKey,

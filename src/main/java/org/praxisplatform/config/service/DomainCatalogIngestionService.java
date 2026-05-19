@@ -33,6 +33,7 @@ import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -177,7 +178,7 @@ public class DomainCatalogIngestionService {
         this.ragPublicationExecutor = asyncRagPublicationEnabled ? createRagPublicationExecutor() : null;
     }
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainCatalogIngestionResponse ingest(JsonNode payload, String tenantId, String environment) {
         if (payload == null || !payload.isObject()) {
             throw new ConfigurationIngestionException("Domain catalog payload must be a JSON object");
@@ -255,7 +256,7 @@ public class DomainCatalogIngestionService {
                 && Objects.equals(normalize(release.getEnvironment()), normalize(environment));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> search(
             String releaseKey,
             String itemType,
@@ -279,7 +280,7 @@ public class DomainCatalogIngestionService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogReleaseResponse> releases(String serviceKey, String tenantId, String environment, int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 100);
         return releaseRepository.findLatest(
@@ -292,7 +293,7 @@ public class DomainCatalogIngestionService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> searchLatest(
             String serviceKey,
             String tenantId,
@@ -305,7 +306,7 @@ public class DomainCatalogIngestionService {
         return searchLatest(serviceKey, null, tenantId, environment, itemType, contextKey, nodeType, query, limit);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> searchLatest(
             String serviceKey,
             String resourceKey,
@@ -328,7 +329,7 @@ public class DomainCatalogIngestionService {
         return responses.stream().limit(resolvedLimit).toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public DomainCatalogContextResponse contextLatest(
             String serviceKey,
             String tenantId,
@@ -341,7 +342,7 @@ public class DomainCatalogIngestionService {
         return contextLatest(serviceKey, null, tenantId, environment, itemType, contextKey, nodeType, query, limit);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public DomainCatalogContextResponse contextLatest(
             String serviceKey,
             String resourceKey,
@@ -374,7 +375,7 @@ public class DomainCatalogIngestionService {
                 governedContextItems(items.stream().limit(resolvedLimit).toList()));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> relationshipsLatest(
             String serviceKey,
             String tenantId,
@@ -387,7 +388,7 @@ public class DomainCatalogIngestionService {
         return relationshipsLatest(serviceKey, null, tenantId, environment, sourceNodeKey, targetNodeKey, edgeType, query, limit);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> relationshipsLatest(
             String serviceKey,
             String resourceKey,

@@ -25,6 +25,7 @@ import org.praxisplatform.config.repository.DomainKnowledgeBindingRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeRelationshipRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -53,7 +54,7 @@ public class DomainKnowledgeProjectionService {
     private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final ObjectMapper objectMapper;
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public void project(DomainCatalogRelease release, List<DomainCatalogItem> items) {
         if (release == null || items == null || items.isEmpty()) {
             return;

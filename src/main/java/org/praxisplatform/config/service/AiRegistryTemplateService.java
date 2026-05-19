@@ -19,6 +19,7 @@ import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.projection.AiRegistryTemplateSearchProjection;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,13 +45,13 @@ public class AiRegistryTemplateService {
   private final ObjectMapper objectMapper;
   private final EmbeddingService embeddingService;
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public Optional<AiRegistry> getTemplate(String componentId) {
     return repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
         REGISTRY_TYPE, componentId, COMPONENT_TYPE, Scope.SYSTEM, SYSTEM_SCOPE_KEY);
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public AiRegistry upsertTemplate(
       String componentId, JsonNode configJson, String aiDescription, JsonNode templateMeta) {
     validateConfigJson(configJson);
@@ -73,13 +74,13 @@ public class AiRegistryTemplateService {
     return saveConfig(cfg);
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<AiRegistryTemplateSearchResult> searchTemplates(
       String query, String componentId, int limit) {
     return searchTemplates(query, componentId, limit, null);
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<AiRegistryTemplateSearchResult> searchTemplates(
       String query, String componentId, int limit, EmbeddingCallConfig embeddingConfig) {
     String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
@@ -101,13 +102,13 @@ public class AiRegistryTemplateService {
     return results;
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<AiRegistryTemplateSearchResult> searchTemplatesByPrefix(
       String query, String registryKeyPrefix, int limit) {
     return searchTemplatesByPrefix(query, registryKeyPrefix, limit, null);
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<AiRegistryTemplateSearchResult> searchTemplatesByPrefix(
       String query, String registryKeyPrefix, int limit, EmbeddingCallConfig embeddingConfig) {
     if (registryKeyPrefix == null || registryKeyPrefix.isBlank()) {
@@ -133,7 +134,7 @@ public class AiRegistryTemplateService {
     return results;
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public void deleteTemplate(AiRegistry config) {
     repository.delete(config);
   }

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -84,6 +85,37 @@ class AgenticAuthoringPlanServiceTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void generateMinimalFormPlanCompletesCanonicalTicketTitleWhenProviderOmitsIt() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        ObjectNode plan = minimalPlan();
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(plan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Crie um formulario didatico para abrir chamados para notebooks com a tela quebrada",
+                                null,
+                                null,
+                                null),
+                        null,
+                        null,
+                        null);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.minimalFormPlan().path("fields"))
+                .extracting(field -> field.path("name").asText())
+                .contains("titulo", "descricao");
+        assertThat(result.minimalFormPlan().path("fields").get(0).path("name").asText()).isEqualTo("titulo");
+        assertThat(result.minimalFormPlan().path("fields").get(0).path("required").asBoolean()).isTrue();
+        assertThat(result.minimalFormPlan().path("sourceRefs"))
+                .extracting(JsonNode::asText)
+                .contains("canonical-field-default:ticket-title");
     }
 
     @Test

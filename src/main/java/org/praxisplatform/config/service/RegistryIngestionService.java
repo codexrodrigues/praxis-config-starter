@@ -21,6 +21,7 @@ import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,7 +47,7 @@ public class RegistryIngestionService {
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public void ingestRegistry(RegistryIngestionRequest request, String tenantId, String environment) {
         if (request.getComponents() == null || request.getComponents().isEmpty()) {
             log.warn("No 'components' map found in registry request.");

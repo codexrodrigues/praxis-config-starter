@@ -22,6 +22,7 @@ import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,7 +46,7 @@ public class ApiMetadataIngestionService {
     private final RagVectorStoreService ragVectorStoreService;
     private static final Logger ingestLog = LoggerFactory.getLogger("api-metadata-ingest");
 
-    @Transactional
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public void ingestCatalog(ApiCatalogRequest request, String tenantId, String environment) {
         if (request.getEndpoints() == null || request.getEndpoints().isEmpty()) {
             log.warn("No endpoints found in catalog request");
