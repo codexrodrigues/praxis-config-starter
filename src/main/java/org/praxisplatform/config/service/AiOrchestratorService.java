@@ -491,6 +491,22 @@ public class AiOrchestratorService {
                         memoryContext);
             }
         }
+        if (shouldOfferRendererChoiceFromLlmIntent(
+                isTable,
+                intent,
+                request != null ? request.getContextHints() : null)) {
+            List<AiOption> payloads = buildRendererOptionPayloads(
+                    intent.getTargetField(),
+                    intent.getOptions());
+            if (!payloads.isEmpty()) {
+                warnings.add("renderer-choice-offered-from-llm-intent-options");
+                return finalizeResponse(clarification(
+                        buildRendererChoiceMessage(intent, columnDescriptors),
+                        buildAiOptionLabels(payloads),
+                        payloads),
+                        memoryContext);
+            }
+        }
         AiActionPlan actionPlan = null;
         List<AiActionItem> expectedActions = List.of();
         boolean createOnlyPlan = false;
@@ -9204,6 +9220,45 @@ public class AiOrchestratorService {
         return "Encontrei alguns formatos possíveis para " + targetLabel + ". Escolha uma opção para aplicar.";
     }
 
+    private boolean shouldOfferRendererChoiceFromLlmIntent(
+            boolean isTable,
+            AiIntentClassification intent,
+            JsonNode contextHints) {
+        if (!isTable || intent == null) {
+            return false;
+        }
+        if (!"renderer".equalsIgnoreCase(intent.getCategory())) {
+            return false;
+        }
+        if (isBlank(intent.getTargetField()) || hasOptionSelection(contextHints)) {
+            return false;
+        }
+        List<String> options = intent.getOptions();
+        return options != null && options.size() > 1;
+    }
+
+    private String buildRendererChoiceMessage(
+            AiIntentClassification intent,
+            List<ColumnDescriptor> columnDescriptors) {
+        String targetLabel = intent != null ? intent.getTargetField() : null;
+        ColumnDescriptor target = findColumnByField(targetLabel, columnDescriptors);
+        if (target != null) {
+            targetLabel = displayColumnLabel(target, countHeaders(columnDescriptors));
+        }
+        if (isBlank(targetLabel)) {
+            targetLabel = "coluna";
+        }
+        return "Encontrei algumas formas de apresentar " + targetLabel + ". Escolha uma opção para aplicar.";
+    }
+
+    private boolean hasOptionSelection(JsonNode contextHints) {
+        if (contextHints == null || contextHints.isNull() || !contextHints.isObject()) {
+            return false;
+        }
+        JsonNode selected = contextHints.get("optionSelected");
+        return selected != null && selected.isObject();
+    }
+
     private SelectedFormatSelection extractSelectedFormatFromHints(JsonNode contextHints) {
         if (contextHints == null || contextHints.isNull()) {
             return null;
@@ -15428,6 +15483,75 @@ public class AiOrchestratorService {
                     .build());
         }
         return out;
+    }
+
+    private List<AiOption> buildRendererOptionPayloads(String targetField, List<String> options) {
+        if (options == null || options.isEmpty()) {
+            return List.of();
+        }
+        List<AiOption> out = new ArrayList<>();
+        for (String option : options) {
+            if (isBlank(option)) {
+                continue;
+            }
+            ObjectNode hints = objectMapper.createObjectNode();
+            ObjectNode selected = hints.putObject("optionSelected");
+            if (!isBlank(targetField)) {
+                selected.put("targetField", targetField);
+            }
+            ObjectNode selection = selected.putObject("selection");
+            selection.put("value", option);
+            selection.put("mode", "renderer");
+            ObjectNode presentation = hints.putObject("presentation");
+            presentation.put("kind", "guided-option");
+            presentation.put("description", rendererOptionDescription(option));
+            presentation.put("ctaLabel", "Aplicar opção");
+            presentation.put("icon", rendererOptionIcon(option));
+            presentation.put("tone", "primary");
+            out.add(AiOption.builder()
+                    .value(option)
+                    .label(option)
+                    .contextHints(hints)
+                    .build());
+        }
+        return out;
+    }
+
+    private String rendererOptionDescription(String option) {
+        String normalized = normalizeText(option);
+        if (normalized.contains("badge") || normalized.contains("chip") || normalized.contains("pill")) {
+            return "Transforma valores técnicos em indicadores visuais fáceis de escanear.";
+        }
+        if (normalized.contains("icone") || normalized.contains("icon")) {
+            return "Usa ícones com rótulo acessível para leitura rápida.";
+        }
+        if (normalized.contains("toggle")) {
+            return "Mostra o estado como controle visual sem alterar o dado.";
+        }
+        if (normalized.contains("tooltip")) {
+            return "Mantém a célula compacta e adiciona contexto no detalhe.";
+        }
+        return "Aplica esta apresentação visual na coluna.";
+    }
+
+    private String rendererOptionIcon(String option) {
+        String normalized = normalizeText(option);
+        if (normalized.contains("badge") || normalized.contains("chip") || normalized.contains("pill")) {
+            return "sell";
+        }
+        if (normalized.contains("icone") || normalized.contains("icon")) {
+            return "task_alt";
+        }
+        if (normalized.contains("toggle")) {
+            return "toggle_on";
+        }
+        if (normalized.contains("tooltip")) {
+            return "info";
+        }
+        if (normalized.contains("filtro") || normalized.contains("filter")) {
+            return "filter_list";
+        }
+        return "view_agenda";
     }
 
     private List<AiCapability> selectCapabilitiesByScope(

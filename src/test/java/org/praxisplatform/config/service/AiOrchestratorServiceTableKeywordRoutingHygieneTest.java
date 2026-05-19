@@ -183,6 +183,42 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
         assertThat(ReflectionTestUtils.getField(selection, "mode")).isEqualTo("format");
     }
 
+    @Test
+    void tableRendererOptionsFromLlmIntentBecomeGuidedActionPayloads() {
+        AiOrchestratorService service = newService();
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("renderer")
+                .targetField("ativo")
+                .options(List.of(
+                        "Mostrar badge colorido (verde = ativo, cinza/vermelho = inativo)",
+                        "Mostrar ícone (check / cruz) com label acessível"))
+                .build();
+
+        Boolean shouldOfferChoice = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldOfferRendererChoiceFromLlmIntent",
+                true,
+                intent,
+                null);
+        assertThat(shouldOfferChoice).isTrue();
+
+        @SuppressWarnings("unchecked")
+        List<AiOption> payloads = (List<AiOption>) ReflectionTestUtils.invokeMethod(
+                service,
+                "buildRendererOptionPayloads",
+                "ativo",
+                intent.getOptions());
+
+        assertThat(payloads).hasSize(2);
+        assertThat(payloads.get(0).getLabel()).contains("badge colorido");
+        assertThat(payloads.get(0).getContextHints().path("optionSelected").path("targetField").asText())
+                .isEqualTo("ativo");
+        assertThat(payloads.get(0).getContextHints().path("optionSelected").path("selection").path("mode").asText())
+                .isEqualTo("renderer");
+        assertThat(payloads.get(0).getContextHints().path("presentation").path("ctaLabel").asText())
+                .isEqualTo("Aplicar opção");
+    }
+
     private AiOrchestratorService newService() {
         return new AiOrchestratorService(
                 null,
