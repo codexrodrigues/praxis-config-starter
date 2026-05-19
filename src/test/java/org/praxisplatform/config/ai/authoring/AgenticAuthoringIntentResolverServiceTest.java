@@ -8332,6 +8332,58 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void businessRulePromptPrefersDirectDomainMatchOverHigherSemanticScore() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringCandidate genericHigherScoreCandidate = richCandidate(
+                "/api/human-resources/habilidades",
+                0.91d,
+                "Habilidades",
+                "Competencias e habilidades de funcionarios.");
+        AgenticAuthoringCandidate procurementSupplierCandidate = richCandidate(
+                "/api/procurement/suppliers",
+                0.72d,
+                "Fornecedores",
+                "Fornecedores de compras, elegibilidade, bloqueio e selecao.");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(genericHigherScoreCandidate, procurementSupplierCandidate));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+    }
+
+    @Test
     void metadataBackedResourceQuickReplyIdsRemainUniqueWhenResourcePathRepeats() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
@@ -8504,6 +8556,34 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "Semantic evidence recovered from governed catalog.",
                                 score,
                                 matchedTerms,
+                                "tenant",
+                                "local",
+	                                "release"))));
+    }
+
+    private AgenticAuthoringCandidate richCandidate(
+            String resourcePath,
+            double score,
+            String title,
+            String summary) {
+        String submitUrl = resourcePath + "/filter/cursor";
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                "post",
+                "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response",
+                submitUrl,
+                "POST",
+                score,
+                title + " - " + summary,
+                List.of("api-metadata", "semantic-retrieval", "schema-available"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "retrieved_candidate",
+                                resourcePath,
+                                summary,
+                                score,
+                                List.of(),
                                 "tenant",
                                 "local",
                                 "release"))));

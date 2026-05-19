@@ -614,12 +614,15 @@ public class AgenticAuthoringIntentResolverService {
                 && isExplicitGovernedBusinessRulePrompt(prompt)
                 && candidates != null
                 && !candidates.isEmpty()) {
-            selectedCandidate = selectCandidate(
-                    candidates,
-                    target,
-                    operationKind,
-                    discoveryArtifactKindForPrompt(prompt, artifactKind),
-                    prompt);
+            selectedCandidate = promptAlignedGovernedRuleCandidate(prompt, candidates);
+            if (selectedCandidate == null) {
+                selectedCandidate = selectCandidate(
+                        candidates,
+                        target,
+                        operationKind,
+                        discoveryArtifactKindForPrompt(prompt, artifactKind),
+                        prompt);
+            }
             if (selectedCandidate == null) {
                 selectedCandidate = candidates.get(0);
             }
@@ -3095,6 +3098,69 @@ public class AgenticAuthoringIntentResolverService {
             }
         }
         return score;
+    }
+
+    private AgenticAuthoringCandidate promptAlignedGovernedRuleCandidate(
+            String prompt,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .map(candidate -> new CandidatePromptAlignment(candidate, directPromptCandidateAlignmentScore(prompt, candidate)))
+                .filter(alignment -> alignment.score() > 0)
+                .max(Comparator
+                        .comparingInt(CandidatePromptAlignment::score)
+                        .thenComparingDouble(alignment -> alignment.candidate().score()))
+                .map(CandidatePromptAlignment::candidate)
+                .orElse(null);
+    }
+
+    private int directPromptCandidateAlignmentScore(String prompt, AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return 0;
+        }
+        String candidateText = directCandidateSemanticText(candidate);
+        if (candidateText.isBlank()) {
+            return 0;
+        }
+        int score = 0;
+        for (String token : promptSpecificTokens(prompt)) {
+            if (tokenMatchesCandidateText(token, candidateText)) {
+                score += 1;
+            }
+        }
+        return score;
+    }
+
+    private boolean tokenMatchesCandidateText(String token, String candidateText) {
+        if (token == null || token.isBlank() || candidateText == null || candidateText.isBlank()) {
+            return false;
+        }
+        String normalizedToken = normalize(token);
+        String paddedText = " " + candidateText.replaceAll("[^a-z0-9]+", " ") + " ";
+        if (paddedText.contains(" " + normalizedToken + " ")) {
+            return true;
+        }
+        if (normalizedToken.endsWith("s") && normalizedToken.length() > 4
+                && paddedText.contains(" " + normalizedToken.substring(0, normalizedToken.length() - 1) + " ")) {
+            return true;
+        }
+        return normalizedToken.length() > 4 && paddedText.contains(" " + normalizedToken + "s ");
+    }
+
+    private String directCandidateSemanticText(AgenticAuthoringCandidate candidate) {
+        Stream<String> evidenceText = candidate.evidenceBundle() == null
+                || candidate.evidenceBundle().evidence() == null
+                ? Stream.empty()
+                : candidate.evidenceBundle().evidence().stream()
+                .flatMap(evidence -> Stream.of(evidence.ref(), evidence.summary()));
+        return normalize(Stream.concat(
+                        Stream.of(candidate.resourcePath(), candidate.submitUrl(), candidate.reason()),
+                        evidenceText)
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.joining(" ")));
     }
 
     private int strongestPromptCandidateAlignmentScore(String prompt, List<AgenticAuthoringCandidate> candidates) {
