@@ -502,8 +502,73 @@ class AiOrchestratorServiceContextHintsTest {
 
         assertThat(response).isNotNull();
         assertThat(response.getType()).isEqualTo("error");
-        assertThat(response.getMessage()).contains("operationId nao declarado");
+        assertThat(response.getMessage()).contains("Nao consegui transformar essa resposta");
         assertThat(response.getWarnings()).contains("component-edit-plan-rejected-by-authoring-manifest");
+        assertThat(response.getWarnings())
+                .anyMatch(warning -> warning.contains("operationId nao declarado"));
+    }
+
+    @Test
+    void componentEditPlanResponseNormalizesLegacySetFormatAliasFromTableContextPack() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [
+                    { "kind": "column", "resolver": "column-by-field" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "column.format.set",
+                      "target": {
+                        "kind": "column",
+                        "resolver": "column-by-field",
+                        "required": true
+                      },
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["format"]
+                      },
+                      "affectedPaths": ["columns[].format"],
+                      "submissionImpact": { "kind": "none" }
+                    }
+                  ]
+                }
+                """);
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "operations": [
+                      {
+                        "operationId": "SET_FORMAT",
+                        "target": { "kind": "column", "field": "dtAdmissao" },
+                        "input": { "format": "dd 'de' MMMM 'de' yyyy" }
+                      }
+                    ]
+                  },
+                  "explanation": "Vou formatar a data de admissao por extenso."
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-manifest-contract-used"),
+                manifest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        assertThat(response.getComponentEditPlan().path("operations").get(0).path("operationId").asText())
+                .isEqualTo("column.format.set");
+        assertThat(response.getWarnings())
+                .contains(
+                        "component-edit-plan-operation-id-normalized:SET_FORMAT:column.format.set",
+                        "component-edit-plan-validated-by-authoring-manifest");
     }
 
     @Test

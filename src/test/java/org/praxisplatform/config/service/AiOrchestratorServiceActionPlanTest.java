@@ -442,7 +442,18 @@ class AiOrchestratorServiceActionPlanTest {
               "columns": [
                 { "field": "nomeCompleto", "header": "Nome" },
                 { "field": "salario", "header": "Salário" },
-                { "field": "cpf", "header": "CPF" }
+                { "field": "cpf", "header": "CPF" },
+                {
+                  "field": "id",
+                  "header": "ID",
+                  "conditionalStyles": [
+                    {
+                      "id": "style-id-gt-40000",
+                      "condition": { ">": [ { "var": "id" }, 40000 ] },
+                      "style": { "backgroundColor": "rgba(25, 118, 210, 0.12)" }
+                    }
+                  ]
+                }
               ]
             }
             """);
@@ -687,6 +698,525 @@ class AiOrchestratorServiceActionPlanTest {
             service, "buildComponentEditPlanFromActionPlan", fallback, tableManifest());
     assertThat(componentEditPlan.at("/operations/0/operationId").asText()).isEqualTo("column.format.set");
     assertThat(componentEditPlan.at("/operations/0/input/format").asText()).isEqualTo("000.000.000-00");
+  }
+
+  @Test
+  void shouldInferManifestBackedBooleanValueMappingPlanFromHumanPrompt() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "ativo", "header": "Ativo" },
+                { "field": "cpf", "header": "CPF" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Mostre Ativo como Sim e Não.")
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.valueMapping.set");
+    assertThat(action.getTarget()).isEqualTo("ativo");
+    assertThat(action.getParams().at("/valueMapping/true").asText()).isEqualTo("Sim");
+    assertThat(action.getParams().at("/valueMapping/false").asText()).isEqualTo("Não");
+
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", fallback, tableManifest());
+    assertThat(componentEditPlan.at("/operations/0/operationId").asText())
+        .isEqualTo("column.valueMapping.set");
+    assertThat(componentEditPlan.at("/operations/0/input/valueMapping/true").asText()).isEqualTo("Sim");
+  }
+
+  @Test
+  void shouldContinueBooleanStateRendererFromValueMappingContext() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "ativo",
+                  "header": "Ativo",
+                  "valueMapping": { "true": "Sim", "false": "Não" }
+                },
+                { "field": "dataAdmissao", "header": "Admissão" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Agora use badge suave.")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Mostre Ativo como Sim e Não.")
+                    .build()))
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    assertThat(fallback.getActions()).hasSize(2);
+    AiActionPlan.Action trueAction = fallback.getActions().get(0);
+    AiActionPlan.Action falseAction = fallback.getActions().get(1);
+    assertThat(trueAction.getType()).isEqualTo("column.conditionalRenderer.add");
+    assertThat(trueAction.getTarget()).isEqualTo("ativo");
+    assertThat(trueAction.getParams().path("condition").path("==").get(1).asBoolean()).isTrue();
+    assertThat(trueAction.getParams().at("/renderer/type").asText()).isEqualTo("badge");
+    assertThat(trueAction.getParams().at("/renderer/badge/text").asText()).isEqualTo("Sim");
+    assertThat(falseAction.getParams().path("condition").path("==").get(1).asBoolean()).isFalse();
+    assertThat(falseAction.getParams().at("/renderer/badge/text").asText()).isEqualTo("Não");
+  }
+
+  @Test
+  void shouldKeepBooleanStateRendererContextWhenSwitchingToOutlinedChip() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "ativo",
+                  "header": "Ativo",
+                  "valueMapping": { "true": "Sim", "false": "Não" },
+                  "conditionalRenderers": [
+                    {
+                      "condition": { "==": [ { "var": "ativo" }, true ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "text": "Sim", "color": "primary", "variant": "soft" }
+                      }
+                    },
+                    {
+                      "condition": { "==": [ { "var": "ativo" }, false ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "text": "Não", "color": "warn", "variant": "soft" }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "field": "nomeCompleto",
+                  "header": "Funcionário",
+                  "renderer": {
+                    "type": "compose",
+                    "compose": {
+                      "items": [
+                        { "type": "avatar", "avatar": { "initialsField": "nomeCompleto" } },
+                        { "type": "chip", "chip": { "textField": "nomeCompleto", "variant": "filled" } }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Troque para chip com contorno.")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Mostre Ativo como Sim e Não.")
+                    .build(),
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Agora use badge suave.")
+                    .build()))
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    assertThat(fallback.getActions()).hasSize(2);
+    AiActionPlan.Action trueAction = fallback.getActions().get(0);
+    assertThat(trueAction.getType()).isEqualTo("column.conditionalRenderer.add");
+    assertThat(trueAction.getTarget()).isEqualTo("ativo");
+    assertThat(trueAction.getParams().at("/renderer/type").asText()).isEqualTo("chip");
+    assertThat(trueAction.getParams().at("/renderer/chip/text").asText()).isEqualTo("Sim");
+    assertThat(trueAction.getParams().at("/renderer/chip/variant").asText()).isEqualTo("outlined");
+  }
+
+  @Test
+  void shouldInferManifestBackedButtonRendererPlanFromHumanPrompt() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF" },
+                { "field": "nomeCompleto", "header": "Funcionário" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Mostre CPF como botão com contorno.")
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.renderer.set");
+    assertThat(action.getTarget()).isEqualTo("cpf");
+    assertThat(action.getParams().path("type").asText()).isEqualTo("button");
+    assertThat(action.getParams().at("/button/labelField").asText()).isEqualTo("cpf");
+    assertThat(action.getParams().at("/button/variant").asText()).isEqualTo("outlined");
+
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", fallback, tableManifest());
+    assertThat(componentEditPlan.at("/operations/0/operationId").asText())
+        .isEqualTo("column.renderer.set");
+    assertThat(componentEditPlan.at("/operations/0/input/type").asText()).isEqualTo("button");
+  }
+
+  @Test
+  void shouldContinueRichRendererTargetFromPreviousRendererState() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "cpf",
+                  "header": "CPF",
+                  "renderer": {
+                    "type": "button",
+                    "button": { "labelField": "cpf", "variant": "outlined", "color": "primary", "size": "small" }
+                  }
+                },
+                { "field": "salario", "header": "Salário" },
+                {
+                  "field": "dataAdmissao",
+                  "header": "Admissão",
+                  "renderer": {
+                    "type": "button",
+                    "button": { "labelField": "dataAdmissao", "variant": "outlined", "color": "primary", "size": "small" }
+                  }
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Agora use botão de texto.")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Mostre CPF como botão com contorno.")
+                    .build()))
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.renderer.set");
+    assertThat(action.getTarget()).isEqualTo("cpf");
+    assertThat(action.getParams().path("type").asText()).isEqualTo("button");
+    assertThat(action.getParams().at("/button/labelField").asText()).isEqualTo("cpf");
+    assertThat(action.getParams().at("/button/variant").asText()).isEqualTo("text");
+  }
+
+  @Test
+  void shouldInferManifestBackedIconRendererPlanFromHumanPrompt() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "ativo", "header": "Ativo" },
+                { "field": "cpf", "header": "CPF" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Mostre Ativo como ícone de check.")
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.renderer.set");
+    assertThat(action.getTarget()).isEqualTo("ativo");
+    assertThat(action.getParams().path("type").asText()).isEqualTo("icon");
+    assertThat(action.getParams().at("/icon/name").asText()).isEqualTo("check_circle");
+  }
+
+  @Test
+  void shouldContinueConditionalStyleBorderColorFromExistingTableRuleContext() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "salario",
+                  "header": "Salário",
+                  "conditionalStyles": [
+                    {
+                      "condition": { ">": [ { "var": "salario" }, 30000 ] },
+                      "style": { "backgroundColor": "rgba(46, 125, 50, 0.18)" }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Para os menores coloque borda laranja.")
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.conditionalStyle.add");
+    assertThat(action.getTarget()).isEqualTo("salario");
+    assertThat(action.getParams().path("condition").path("<").get(1).asLong()).isEqualTo(30000L);
+    assertThat(action.getParams().at("/style/borderLeft").asText()).contains("245, 124, 0");
+  }
+
+  @Test
+  void shouldContinueConditionalStyleWithComposedVisualsAndTooltip() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "salario",
+                  "header": "Salário",
+                  "conditionalStyles": [
+                    {
+                      "id": "style-salario-gt-40000",
+                      "condition": { ">": [ { "var": "salario" }, 40000 ] },
+                      "style": { "backgroundColor": "rgba(46, 125, 50, 0.18)", "fontWeight": "600" }
+                    }
+                  ]
+                },
+                { "field": "cpf", "header": "CPF" },
+                {
+                  "field": "id",
+                  "header": "ID",
+                  "conditionalStyles": [
+                    {
+                      "id": "style-id-gt-40000",
+                      "condition": { ">": [ { "var": "id" }, 40000 ] },
+                      "style": { "backgroundColor": "rgba(25, 118, 210, 0.12)" }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Também deixe texto verde, opacidade suave e tooltip salário alto.")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Destaque salário acima de 40000 com fundo verde e negrito.")
+                    .build()))
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.conditionalStyle.add");
+    assertThat(action.getTarget()).isEqualTo("salario");
+    assertThat(action.getParams().path("condition").path(">").get(1).asLong()).isEqualTo(40000L);
+    assertThat(action.getParams().at("/style/color").asText()).contains("27, 94, 32");
+    assertThat(action.getParams().at("/style/opacity").asText()).isEqualTo("0.82");
+    assertThat(action.getParams().at("/tooltip/text").asText()).contains("Salário acima");
+  }
+
+  @Test
+  void shouldNotResolveIdFromWordsContainingIdInConditionalStyleContinuation() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "salario",
+                  "header": "Salário",
+                  "conditionalStyles": [
+                    {
+                      "id": "style-salario-gt-40000",
+                      "condition": { ">": [ { "var": "salario" }, 40000 ] },
+                      "style": { "backgroundColor": "rgba(46, 125, 50, 0.18)" }
+                    }
+                  ]
+                },
+                { "field": "id", "header": "ID" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("também deixe texto verde e opacidade suave")
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.conditionalStyle.add");
+    assertThat(action.getTarget()).isEqualTo("salario");
+    assertThat(action.getParams().path("condition").path(">").get(0).path("var").asText())
+        .isEqualTo("salario");
+    assertThat(action.getParams().path("condition").path(">").get(1).asLong()).isEqualTo(40000L);
+    assertThat(action.getParams().at("/style/opacity").asText()).isEqualTo("0.82");
   }
 
   @Test
@@ -1069,6 +1599,122 @@ class AiOrchestratorServiceActionPlanTest {
   }
 
   @Test
+  void shouldPreserveAdvancedFilteringFieldsWhenOnlyChangingMode() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "behavior": {
+                "filtering": {
+                  "enabled": true,
+                  "advancedFilters": {
+                    "enabled": true,
+                    "settings": {
+                      "mode": "card",
+                      "alwaysVisibleFields": ["cpf", "salario"],
+                      "selectedFieldIds": ["cpf", "salario"]
+                    }
+                  }
+                }
+              }
+            }
+            """);
+    JsonNode filteringHints =
+        objectMapper.readTree(
+            """
+            {
+              "mode": "advanced",
+              "advancedMode": "filter"
+            }
+            """);
+
+    JsonNode patch =
+        ReflectionTestUtils.invokeMethod(service, "buildFilteringPatchFromHints", filteringHints, currentState);
+
+    assertThat(patch).isNotNull();
+    assertThat(patch.at("/behavior/filtering/advancedFilters/settings/mode").asText()).isEqualTo("filter");
+    assertThat(patch.at("/behavior/filtering/advancedFilters/settings/alwaysVisibleFields/0").asText())
+        .isEqualTo("cpf");
+    assertThat(patch.at("/behavior/filtering/advancedFilters/settings/alwaysVisibleFields/1").asText())
+        .isEqualTo("salario");
+    assertThat(patch.at("/behavior/filtering/advancedFilters/settings/selectedFieldIds/0").asText())
+        .isEqualTo("cpf");
+    assertThat(patch.at("/behavior/filtering/advancedFilters/settings/selectedFieldIds/1").asText())
+        .isEqualTo("salario");
+  }
+
+  @Test
+  void shouldDetectAdvancedFilterVisibleFieldReplacementPrompt() {
+    Boolean replace =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "looksLikeFilterFieldReplacementPrompt",
+            "deixe só salário nos filtros visíveis");
+
+    assertThat(replace).isTrue();
+  }
+
+  @Test
+  void shouldBuildGovernedGlobalTablePropertyPlan() throws Exception {
+    JsonNode patch =
+        objectMapper.readTree(
+            """
+            {
+              "behavior": {
+                "pagination": { "enabled": true, "pageSize": 25 },
+                "selection": { "enabled": true, "type": "multiple" }
+              },
+              "toolbar": { "visible": true },
+              "export": { "enabled": true, "formats": ["excel", "csv"] }
+            }
+            """);
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildDeterministicTableComponentEditPlan",
+            patch,
+            tableManifest());
+
+    assertThat(plan).isNotNull();
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("behavior.pagination.configure");
+    assertThat(plan.at("/operations/0/input/pageSize").asInt()).isEqualTo(25);
+    assertThat(plan.at("/operations/1/operationId").asText()).isEqualTo("behavior.selection.configure");
+    assertThat(plan.at("/operations/1/input/type").asText()).isEqualTo("multiple");
+    assertThat(plan.at("/operations/2/operationId").asText()).isEqualTo("toolbar.configure");
+    assertThat(plan.at("/operations/2/input/visible").asBoolean()).isTrue();
+    assertThat(plan.at("/operations/3/operationId").asText()).isEqualTo("export.configure");
+    assertThat(plan.at("/operations/3/input/formats/0").asText()).isEqualTo("excel");
+    assertThat(plan.at("/operations/3/input/formats/1").asText()).isEqualTo("csv");
+  }
+
+  @Test
+  void shouldBuildGlobalTablePropertyPatchesFromHumanPrompts() throws Exception {
+    JsonNode pagination =
+        ReflectionTestUtils.invokeMethod(service, "buildPaginationPatch", "habilite paginação com 25 por página");
+    assertThat(pagination).isNotNull();
+    assertThat(pagination.at("/behavior/pagination/enabled").asBoolean()).isTrue();
+    assertThat(pagination.at("/behavior/pagination/pageSize").asInt()).isEqualTo(25);
+
+    JsonNode toolbar =
+        ReflectionTestUtils.invokeMethod(service, "buildToolbarPatch", "mostre a toolbar no topo");
+    assertThat(toolbar).isNotNull();
+    assertThat(toolbar.at("/toolbar/visible").asBoolean()).isTrue();
+    assertThat(toolbar.at("/toolbar/position").asText()).isEqualTo("top");
+
+    JsonNode export =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildExportPatch",
+            "habilite exportação para Excel e CSV",
+            objectMapper.createObjectNode());
+    assertThat(export).isNotNull();
+    assertThat(export.at("/export/enabled").asBoolean()).isTrue();
+    assertThat(export.at("/export/formats/0").asText()).isEqualTo("excel");
+    assertThat(export.at("/export/formats/1").asText()).isEqualTo("csv");
+  }
+
+  @Test
   void shouldContinueColumnWidthFromLastVisualColumnTarget() throws Exception {
     JsonNode currentState =
         objectMapper.readTree(
@@ -1340,6 +1986,81 @@ class AiOrchestratorServiceActionPlanTest {
   }
 
   @Test
+  void shouldPreferComputedColumnForPropertyContinuationAfterComputedAuthoring() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "salario", "header": "Salário", "sortable": true, "filterable": true },
+                {
+                  "field": "bonusSalario",
+                  "header": "Bônus",
+                  "computed": {
+                    "expression": { "*": [{ "var": "salario" }, 0.15] },
+                    "outputType": "currency",
+                    "format": "BRL|symbol|2",
+                    "dependencies": ["salario"]
+                  }
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("desabilite a ordenação dela")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("crie uma coluna bônus com 15% do salário")
+                    .build()))
+            .build();
+
+    JsonNode sortablePatch =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildDeterministicColumnSortablePatch",
+            "desabilite a ordenação dela",
+            columns,
+            currentState,
+            request);
+
+    assertThat(sortablePatch).isNotNull();
+    assertThat(sortablePatch.at("/columns/0/field").asText()).isEqualTo("bonusSalario");
+    assertThat(sortablePatch.at("/columns/0/sortable").asBoolean()).isFalse();
+
+    JsonNode filterablePatch =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildDeterministicColumnFilterablePatch",
+            "agora habilite filtro nela",
+            columns,
+            currentState,
+            request);
+
+    assertThat(filterablePatch).isNotNull();
+    assertThat(filterablePatch.at("/columns/0/field").asText()).isEqualTo("bonusSalario");
+    assertThat(filterablePatch.at("/columns/0/filterable").asBoolean()).isTrue();
+
+    JsonNode stickyPatch =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildDeterministicColumnStickyPatch",
+            "fixe ela no fim",
+            columns,
+            currentState,
+            request);
+
+    assertThat(stickyPatch).isNotNull();
+    assertThat(stickyPatch.at("/columns/0/field").asText()).isEqualTo("bonusSalario");
+    assertThat(stickyPatch.at("/columns/0/sticky").asText()).isEqualTo("end");
+  }
+
+  @Test
   void shouldInferManifestBackedTableComputedColumnPlanFromHumanPrompt() throws Exception {
     JsonNode currentState =
         objectMapper.readTree(
@@ -1429,7 +2150,8 @@ class AiOrchestratorServiceActionPlanTest {
             """
             {
               "columns": [
-                { "field": "salario", "header": "Salário" }
+                { "field": "salario", "header": "Salário" },
+                { "field": "id", "header": "ID" }
               ],
               "rowConditionalRenderers": [
                 {
@@ -1439,6 +2161,60 @@ class AiOrchestratorServiceActionPlanTest {
               ]
             }
             """);
+
+    request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Agora deixe mais forte.")
+            .build();
+
+    fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            continuedState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("row.conditionalRenderer.add");
+    assertThat(action.getParams().path("condition").path(">").get(0).path("var").asText())
+        .isEqualTo("salario");
+    assertThat(action.getParams().path("condition").path(">").get(1).asLong()).isEqualTo(30000L);
+    assertThat(action.getParams().at("/animation/preset").asText()).isEqualTo("pulse-soft");
+    assertThat(action.getParams().at("/animation/intensity").asText()).isEqualTo("strong");
+
+    request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Repita duas vezes.")
+            .build();
+
+    fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            continuedState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("row.conditionalRenderer.add");
+    assertThat(action.getParams().path("condition").path(">").get(0).path("var").asText())
+        .isEqualTo("salario");
+    assertThat(action.getParams().path("condition").path(">").get(1).asLong()).isEqualTo(30000L);
+    assertThat(action.getParams().at("/animation/repeat").asInt()).isEqualTo(2);
+
     request =
         AiOrchestratorRequest.builder()
             .componentId("praxis-table")
@@ -1463,6 +2239,54 @@ class AiOrchestratorServiceActionPlanTest {
     assertThat(action.getParams().path("condition").path("<").get(1).asLong()).isEqualTo(30000L);
     assertThat(action.getParams().path("id").asText()).contains("lt");
     assertThat(action.getParams().at("/animation/preset").asText()).isEqualTo("fade-soft");
+  }
+
+  @Test
+  void shouldNotResolveIdFromWordsContainingIdInRowAnimationContinuation() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "salario", "header": "Salário" },
+                { "field": "id", "header": "ID" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("agora deixe mais forte")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("anime as linhas com salário acima de 40000 usando pulso")
+                    .build()))
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("row.conditionalRenderer.add");
+    assertThat(action.getParams().path("condition").path(">").get(0).path("var").asText())
+        .isEqualTo("salario");
+    assertThat(action.getParams().path("condition").path(">").get(1).asLong()).isEqualTo(40000L);
+    assertThat(action.getParams().at("/animation/intensity").asText()).isEqualTo("strong");
   }
 
   @Test
@@ -1751,12 +2575,254 @@ class AiOrchestratorServiceActionPlanTest {
     assertThat(action.getParams().path("format").asText()).isEqualTo("BRL|symbol|2");
   }
 
+  @Test
+  void shouldContinueComputedColumnHeaderAndFormatFromCurrentState() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "salario", "header": "Salário" },
+                {
+                  "field": "bonusSalario",
+                  "header": "Bônus",
+                  "computed": {
+                    "expression": { "*": [ { "var": "salario" }, 0.15 ] },
+                    "outputType": "number",
+                    "format": "1.0-2",
+                    "dependencies": [ "salario" ]
+                  }
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+
+    AiOrchestratorRequest renameRequest =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Renomeie para Bônus estimado.")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Crie uma coluna bônus com 15% do salário.")
+                    .build()))
+            .build();
+
+    AiActionPlan renamePlan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            renameRequest,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(renamePlan).isNotNull();
+    AiActionPlan.Action renameAction = renamePlan.getActions().get(0);
+    assertThat(renameAction.getType()).isEqualTo("column.computed.add");
+    assertThat(renameAction.getTarget()).isEqualTo("bonusSalario");
+    assertThat(renameAction.getParams().path("header").asText()).isEqualTo("Bônus estimado");
+    assertThat(renameAction.getParams().at("/expression/*/0/var").asText()).isEqualTo("salario");
+    assertThat(renameAction.getParams().at("/expression/*/1").asDouble()).isEqualTo(0.15D);
+
+    AiOrchestratorRequest currencyRequest =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Agora formate como moeda brasileira.")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Crie uma coluna bônus com 15% do salário.")
+                    .build()))
+            .build();
+
+    AiActionPlan currencyPlan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            currencyRequest,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(currencyPlan).isNotNull();
+    AiActionPlan.Action currencyAction = currencyPlan.getActions().get(0);
+    assertThat(currencyAction.getType()).isEqualTo("column.computed.add");
+    assertThat(currencyAction.getTarget()).isEqualTo("bonusSalario");
+    assertThat(currencyAction.getParams().path("outputType").asText()).isEqualTo("currency");
+    assertThat(currencyAction.getParams().path("format").asText()).isEqualTo("BRL|symbol|2");
+    assertThat(currencyAction.getParams().at("/expression/*/0/var").asText()).isEqualTo("salario");
+    assertThat(currencyAction.getParams().at("/expression/*/1").asDouble()).isEqualTo(0.15D);
+  }
+
+  @Test
+  void shouldUseComputedColumnAsVisualContinuationTarget() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "salario", "header": "Salário" },
+                {
+                  "field": "bonusSalario",
+                  "header": "Bônus estimado",
+                  "computed": {
+                    "expression": { "*": [ { "var": "salario" }, 0.15 ] },
+                    "outputType": "currency",
+                    "format": "BRL|symbol|2",
+                    "dependencies": [ "salario" ]
+                  }
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Agora destaque os maiores que 6000 com fundo verde.")
+            .messages(List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Crie uma coluna bônus com 15% do salário.")
+                    .build()))
+            .build();
+
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            request,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action action = fallback.getActions().get(0);
+    assertThat(action.getType()).isEqualTo("column.conditionalStyle.add");
+    assertThat(action.getTarget()).isEqualTo("bonusSalario");
+    assertThat(action.getParams().at("/condition/>/0/var").asText()).isEqualTo("computed.bonusSalario");
+    assertThat(action.getParams().at("/condition/>/1").asDouble()).isEqualTo(6000D);
+  }
+
+  @Test
+  void shouldUseComputedColumnConditionalContextForBadgeAndRowAnimation() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "salario", "header": "Salário" },
+                {
+                  "field": "bonusSalario",
+                  "header": "Bônus estimado",
+                  "computed": {
+                    "expression": { "*": [ { "var": "salario" }, 0.15 ] },
+                    "outputType": "currency",
+                    "format": "BRL|symbol|2",
+                    "dependencies": [ "salario" ]
+                  },
+                  "conditionalStyles": [
+                    {
+                      "condition": { ">": [ { "var": "computed.bonusSalario" }, 6000 ] },
+                      "style": { "backgroundColor": "rgba(46, 125, 50, 0.18)" }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<?> actionCatalog =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", tableActionCatalog());
+    List<org.praxisplatform.config.dto.AiChatMessage> messages = List.of(
+        org.praxisplatform.config.dto.AiChatMessage.builder()
+            .role("user")
+            .content("Crie uma coluna bônus com 15% do salário.")
+            .build(),
+        org.praxisplatform.config.dto.AiChatMessage.builder()
+            .role("user")
+            .content("Agora destaque os maiores que 6000 com fundo verde.")
+            .build());
+
+    AiOrchestratorRequest badgeRequest =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Para esses maiores mostre badge Alto.")
+            .messages(messages)
+            .build();
+
+    AiActionPlan badgePlan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            badgeRequest,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(badgePlan).isNotNull();
+    AiActionPlan.Action badgeAction = badgePlan.getActions().get(0);
+    assertThat(badgeAction.getType()).isEqualTo("column.conditionalRenderer.add");
+    assertThat(badgeAction.getTarget()).isEqualTo("bonusSalario");
+    assertThat(badgeAction.getParams().at("/condition/>/0/var").asText()).isEqualTo("computed.bonusSalario");
+    assertThat(badgeAction.getParams().at("/condition/>/1").asDouble()).isEqualTo(6000D);
+    assertThat(badgeAction.getParams().at("/renderer/type").asText()).isEqualTo("badge");
+
+    AiOrchestratorRequest animationRequest =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Anime as linhas para esses maiores usando pulso.")
+            .messages(messages)
+            .build();
+
+    AiActionPlan animationPlan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "deriveFallbackTableManifestActionPlan",
+            animationRequest,
+            AiIntentClassification.builder().build(),
+            currentState,
+            columns,
+            actionCatalog,
+            tableManifest());
+
+    assertThat(animationPlan).isNotNull();
+    AiActionPlan.Action animationAction = animationPlan.getActions().get(0);
+    assertThat(animationAction.getType()).isEqualTo("row.conditionalRenderer.add");
+    assertThat(animationAction.getParams().at("/condition/>/0/var").asText()).isEqualTo("computed.bonusSalario");
+    assertThat(animationAction.getParams().at("/condition/>/1").asDouble()).isEqualTo(6000D);
+    assertThat(animationAction.getParams().at("/animation/preset").asText()).isEqualTo("pulse-soft");
+  }
+
   private JsonNode tableActionCatalog() throws Exception {
     return objectMapper.readTree(
         """
         {
           "actionCatalog": [
             { "id": "column.format.set" },
+            { "id": "column.valueMapping.set" },
             { "id": "column.renderer.set" },
             { "id": "column.conditionalStyle.add" },
             { "id": "column.conditionalRenderer.add" },
@@ -1785,6 +2851,17 @@ class AiOrchestratorServiceActionPlanTest {
               }
             },
             {
+              "operationId": "column.valueMapping.set",
+              "target": { "kind": "column", "resolver": "column-by-field", "required": true },
+              "inputSchema": {
+                "type": "object",
+                "required": ["valueMapping"],
+                "properties": {
+                  "valueMapping": { "type": "object" }
+                }
+              }
+            },
+            {
               "operationId": "column.conditionalStyle.add",
               "target": { "kind": "rule", "resolver": "style-rule-in-column-or-row", "required": true },
               "inputSchema": {
@@ -1794,6 +2871,7 @@ class AiOrchestratorServiceActionPlanTest {
                   "id": { "type": "string" },
                   "condition": { "type": "object" },
                   "style": { "type": "object" },
+                  "tooltip": { "type": "object" },
                   "description": { "type": "string" }
                 }
               }
@@ -1807,7 +2885,12 @@ class AiOrchestratorServiceActionPlanTest {
                 "properties": {
                   "type": { "type": "string" },
                   "compose": { "type": "object" },
-                  "avatar": { "type": "object" }
+                  "avatar": { "type": "object" },
+                  "button": { "type": "object" },
+                  "icon": { "type": "object" },
+                  "link": { "type": "object" },
+                  "badge": { "type": "object" },
+                  "chip": { "type": "object" }
                 }
               }
             },
@@ -1853,6 +2936,26 @@ class AiOrchestratorServiceActionPlanTest {
                   "description": { "type": "string" }
                 }
               }
+            },
+            {
+              "operationId": "appearance.density.set",
+              "inputSchema": { "type": "object", "properties": { "density": { "type": "string" } } }
+            },
+            {
+              "operationId": "behavior.pagination.configure",
+              "inputSchema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "pageSize": { "type": "number" } } }
+            },
+            {
+              "operationId": "behavior.selection.configure",
+              "inputSchema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "type": { "type": "string" } } }
+            },
+            {
+              "operationId": "toolbar.configure",
+              "inputSchema": { "type": "object", "properties": { "visible": { "type": "boolean" }, "position": { "type": "string" } } }
+            },
+            {
+              "operationId": "export.configure",
+              "inputSchema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "formats": { "type": "array" } } }
             }
           ]
         }

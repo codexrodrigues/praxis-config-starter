@@ -167,6 +167,110 @@ class AiOrchestratorServiceCpfMaskTest {
   }
 
   @Test
+  void augmentFormatOptionsFallsBackToPublishedTablePresetsWhenCapabilitiesAreMissing()
+      throws Exception {
+    @SuppressWarnings("unchecked")
+    List<Object> options =
+        (List<Object>)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "augmentFormatOptionsForPrompt",
+                List.of(),
+                "Quais formatos de data voce recomenda para a coluna Admissao?",
+                "dataAdmissao");
+
+    assertThat(options)
+        .extracting(option -> ReflectionTestUtils.getField(option, "value"))
+        .contains("dd/MM/yyyy", "fullDate", "MMM/yyyy", "BRL|symbol|2");
+  }
+
+  @Test
+  void answerTableFormatCapabilityQuestionAcceptsHumanOptionsRequest() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "dataAdmissao", "header": "Data de Admissão", "type": "date", "format": "dd/MM/yyyy" }
+              ]
+            }
+            """);
+    @SuppressWarnings("unchecked")
+    List<Object> options =
+        (List<Object>)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "augmentFormatOptionsForPrompt",
+                List.of(),
+                "Quais formatos de data voce recomenda para a coluna Data de Admissao? Mostre as opcoes para eu escolher.",
+                "dataAdmissao");
+
+    String answer =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "answerTableFormatCapabilityQuestion",
+                "Quais formatos de data voce recomenda para a coluna Data de Admissao? Mostre as opcoes para eu escolher.",
+                currentState,
+                options);
+
+    assertThat(answer)
+        .contains("**Formatos de data disponíveis**")
+        .contains("`dd/MM/yyyy`")
+        .contains("`fullDate`")
+        .contains("a coluna `Data de Admissão`");
+  }
+
+  @Test
+  void buildComponentEditPlanFromPatchConvertsTableColumnFormat() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode patch =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "dataAdmissao", "format": "MMM/yyyy" }
+              ]
+            }
+            """);
+    JsonNode authoringManifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-table",
+              "operations": [
+                {
+                  "operationId": "column.format.set",
+                  "target": { "kind": "column" },
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": { "format": { "type": "string" } }
+                  }
+                }
+              ]
+            }
+            """);
+    List<String> warnings = new ArrayList<>();
+
+    JsonNode plan =
+        (JsonNode)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "buildComponentEditPlanFromPatch",
+                "praxis-table",
+                patch,
+                authoringManifest,
+                warnings);
+
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("column.format.set");
+    assertThat(plan.at("/operations/0/target/field").asText()).isEqualTo("dataAdmissao");
+    assertThat(plan.at("/operations/0/input/format").asText()).isEqualTo("MMM/yyyy");
+    assertThat(warnings)
+        .contains("praxis-table patch livre convertido para componentEditPlan manifest-backed.");
+  }
+
+  @Test
   void buildTableDateFormatActionOptionsReturnsClickableRecommendations() throws Exception {
     ObjectMapper mapper = new ObjectMapper();
     JsonNode currentState =
@@ -216,6 +320,12 @@ class AiOrchestratorServiceCpfMaskTest {
                 service,
                 "isConsultativeTableFormatQuestion",
                 "Como eu posso formatar uma data dentro da tabela dinamica? Qual voce recomenda?");
+    Boolean optionsGuidance =
+        (Boolean)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "isConsultativeTableFormatQuestion",
+                "Quais formatos de data voce recomenda para a coluna Data de Admissao? Mostre as opcoes para eu escolher.");
     Boolean command =
         (Boolean)
             ReflectionTestUtils.invokeMethod(
@@ -224,6 +334,7 @@ class AiOrchestratorServiceCpfMaskTest {
                 "formate a coluna admissao como data por extenso");
 
     assertThat(guidance).isTrue();
+    assertThat(optionsGuidance).isTrue();
     assertThat(command).isFalse();
   }
 
