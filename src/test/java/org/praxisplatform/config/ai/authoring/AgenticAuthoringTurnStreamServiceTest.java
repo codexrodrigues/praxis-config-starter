@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -194,7 +195,7 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
-    void processingFailureEmitsStableCodeAndSafeAssistantMessage() {
+    void processingFailureEmitsStableCodeAndSafeAssistantMessage() throws Exception {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         AgenticAuthoringTurnStreamRequest request = request();
@@ -205,16 +206,26 @@ class AgenticAuthoringTurnStreamServiceTest {
         when(turnEventService.isTerminalType(anyString()))
                 .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
         when(turnEventService.findLastEvent(any(UUID.class))).thenReturn(Optional.empty());
+        List<Object> appendedPayloads = new CopyOnWriteArrayList<>();
+        CountDownLatch processingFailureAppended = new CountDownLatch(1);
         when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
-                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
-                        .eventId(UUID.randomUUID())
-                        .streamId(invocation.getArgument(1, UUID.class))
-                        .threadId(invocation.getArgument(2, UUID.class))
-                        .turnId(invocation.getArgument(3, UUID.class))
-                        .type(invocation.getArgument(4, String.class))
-                        .timestamp(Instant.now())
-                        .payload(objectMapper.valueToTree(invocation.getArgument(5)))
-                        .build());
+                .thenAnswer(invocation -> {
+                    Object payload = invocation.getArgument(5);
+                    appendedPayloads.add(payload);
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    if ("agentic-authoring-processing-failed".equals(node.path("code").asText())) {
+                        processingFailureAppended.countDown();
+                    }
+                    return AiTurnEventEnvelope.builder()
+                            .eventId(UUID.randomUUID())
+                            .streamId(invocation.getArgument(1, UUID.class))
+                            .threadId(invocation.getArgument(2, UUID.class))
+                            .turnId(invocation.getArgument(3, UUID.class))
+                            .type(invocation.getArgument(4, String.class))
+                            .timestamp(Instant.now())
+                            .payload(node)
+                            .build();
+                });
         when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenThrow(new IllegalStateException("provider quota exhausted"));
@@ -222,12 +233,12 @@ class AgenticAuthoringTurnStreamServiceTest {
         AgenticAuthoringTurnStreamService service = service();
         service.start(request, "http://localhost", principalContext);
 
-        ArgumentCaptor<Object> payloads = ArgumentCaptor.forClass(Object.class);
-        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(4000).atLeast(4))
-                .appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), payloads.capture());
+        org.assertj.core.api.Assertions.assertThat(processingFailureAppended.await(4, TimeUnit.SECONDS))
+                .as("processing failure event should be appended before asserting captured payloads")
+                .isTrue();
         service.shutdown();
 
-        org.assertj.core.api.Assertions.assertThat(payloads.getAllValues())
+        org.assertj.core.api.Assertions.assertThat(appendedPayloads)
                 .anySatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
                     org.assertj.core.api.Assertions.assertThat(node.path("code").asText())

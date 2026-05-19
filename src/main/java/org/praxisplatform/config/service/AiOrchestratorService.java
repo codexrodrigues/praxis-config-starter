@@ -9024,9 +9024,14 @@ public class AiOrchestratorService {
     }
 
     private List<AiOption> buildMaskOptionPayloads(String field, List<ContextOption> options) {
+        return buildMaskOptionPayloads(field, field, options);
+    }
+
+    private List<AiOption> buildMaskOptionPayloads(String field, String label, List<ContextOption> options) {
         if (options == null || options.isEmpty()) {
             return List.of();
         }
+        String targetLabel = !isBlank(label) ? label : field;
         List<AiOption> out = new ArrayList<>();
         for (ContextOption option : options) {
             if (option == null || option.value == null || option.value.isBlank()) continue;
@@ -9036,14 +9041,38 @@ public class AiOrchestratorService {
             ObjectNode selectionValue = selection.putObject("selection");
             selectionValue.put("value", option.value);
             selectionValue.put("mode", "mask");
+            ObjectNode presentation = hints.putObject("presentation");
+            presentation.put("kind", "guided-option");
+            presentation.put("description", option.example != null && !option.example.isBlank()
+                    ? "Exibe como " + option.example + "."
+                    : "Aplica a máscara selecionada na coluna.");
+            presentation.put("ctaLabel", "Aplicar máscara");
+            presentation.put("icon", maskOptionIcon(field));
+            presentation.put("tone", "primary");
             out.add(AiOption.builder()
                     .value(option.value)
-                    .label(option.label != null && !option.label.isBlank() ? option.label : option.value)
+                    .label(option.label != null && !option.label.isBlank()
+                            ? option.label
+                            : "Usar " + option.value + " em " + targetLabel)
                     .example(option.example)
                     .contextHints(hints)
                     .build());
         }
         return out;
+    }
+
+    private String maskOptionIcon(String field) {
+        String normalized = field != null ? normalizeText(field) : "";
+        if (normalized.contains("cpf") || normalized.contains("cnpj")) {
+            return "badge";
+        }
+        if (normalized.contains("cep")) {
+            return "location_on";
+        }
+        if (normalized.contains("telefone") || normalized.contains("phone") || normalized.contains("celular")) {
+            return "call";
+        }
+        return "pattern";
     }
 
     private ClarificationPayload buildFormatClarificationPayload(
@@ -12897,8 +12926,35 @@ public class AiOrchestratorService {
                 || normalizedPrompt.contains("date")
                 || normalizedPrompt.contains("admissao")
                 || normalizedPrompt.contains("mes");
-        if (!asksAboutFormatting || !asksAboutDates) {
+        boolean asksAboutSensitiveMask = containsSensitiveFieldToken(userPrompt);
+        if (!asksAboutFormatting || (!asksAboutDates && !asksAboutSensitiveMask)) {
             return null;
+        }
+
+        if (asksAboutSensitiveMask && !asksAboutDates) {
+            ColumnDescriptor targetColumn = findPromptedFormatColumn(currentState, normalizedPrompt);
+            String targetField = targetColumn != null ? targetColumn.field : promptedSensitiveFieldFallback(normalizedPrompt);
+            List<ContextOption> maskOptions = buildMaskOptionsForField(targetField);
+            if (maskOptions.isEmpty()) {
+                return null;
+            }
+            String targetLabel = targetColumn != null && !isBlank(targetColumn.header)
+                    ? targetColumn.header
+                    : targetField;
+            StringBuilder answer = new StringBuilder();
+            answer.append("**Formatos de máscara disponíveis**\n\n");
+            for (ContextOption option : maskOptions) {
+                answer.append("- `").append(option.value).append("`: ")
+                        .append(option.label != null && !option.label.isBlank() ? option.label : "máscara disponível");
+                if (option.example != null && !option.example.isBlank()) {
+                    answer.append(". Exemplo: ").append(option.example);
+                }
+                answer.append(".\n");
+            }
+            answer.append("\n**Minha recomendação**\n\n");
+            answer.append("Para a coluna `").append(targetLabel).append("`, eu recomendo o formato padrão com pontuação quando o dado for exibido para pessoas.");
+            answer.append(" Use a versão apenas com dígitos quando a tabela for usada para conferência técnica, exportação ou integração.");
+            return answer.toString();
         }
 
         List<ContextOption> dateOptions = formatOptions.stream()
@@ -13044,6 +13100,14 @@ public class AiOrchestratorService {
             return List.of();
         }
         String normalizedPrompt = normalizeText(userPrompt);
+        if (containsSensitiveFieldToken(userPrompt)) {
+            ColumnDescriptor targetColumn = findPromptedFormatColumn(currentState, normalizedPrompt);
+            String targetField = targetColumn != null ? targetColumn.field : promptedSensitiveFieldFallback(normalizedPrompt);
+            String targetLabel = targetColumn != null && !isBlank(targetColumn.header)
+                    ? targetColumn.header
+                    : targetField;
+            return buildMaskOptionPayloads(targetField, targetLabel, buildMaskOptionsForField(targetField));
+        }
         String targetLabel = findPromptedDateColumnPlainLabel(currentState, normalizedPrompt);
         if (isBlank(targetLabel)) {
             targetLabel = "data";
@@ -13074,6 +13138,37 @@ public class AiOrchestratorService {
                 "Bom para visão de competência, agrupamento mensal ou análise temporal.",
                 "calendar_month");
         return options;
+    }
+
+    private ColumnDescriptor findPromptedFormatColumn(JsonNode currentState, String normalizedPrompt) {
+        JsonNode columns = currentState != null ? currentState.get("columns") : null;
+        if (columns == null || !columns.isArray()) {
+            return null;
+        }
+        for (JsonNode column : columns) {
+            if (column == null || !column.isObject()) continue;
+            String field = textOrNull(column.get("field"));
+            String header = textOrNull(column.get("header"));
+            if (isBlank(field) && isBlank(header)) continue;
+            String normalizedField = normalizeText(field);
+            String normalizedHeader = normalizeText(header);
+            if ((!isBlank(normalizedField) && normalizedPrompt.contains(normalizedField))
+                    || (!isBlank(normalizedHeader) && normalizedPrompt.contains(normalizedHeader))) {
+                return new ColumnDescriptor(field, header);
+            }
+        }
+        return null;
+    }
+
+    private String promptedSensitiveFieldFallback(String normalizedPrompt) {
+        if (normalizedPrompt != null) {
+            if (normalizedPrompt.contains("cnpj")) return "cnpj";
+            if (normalizedPrompt.contains("cep")) return "cep";
+            if (normalizedPrompt.contains("telefone") || normalizedPrompt.contains("phone") || normalizedPrompt.contains("celular")) {
+                return "telefone";
+            }
+        }
+        return "cpf";
     }
 
     private void addDateFormatActionOption(

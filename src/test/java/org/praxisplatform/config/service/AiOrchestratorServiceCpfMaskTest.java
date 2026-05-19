@@ -242,6 +242,40 @@ class AiOrchestratorServiceCpfMaskTest {
   }
 
   @Test
+  void answerTableFormatCapabilityQuestionListsCpfMaskOptionsWhenUserAsksToChoose() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF", "type": "string" },
+                { "field": "nome", "header": "Nome", "type": "string" }
+              ]
+            }
+            """);
+    List<?> options =
+        List.of(
+            contextOption("dd/MM/yyyy", "Date dd/MM/yyyy", "13/06/2022"),
+            contextOption("BRL|symbol|2", "Currency BRL symbol", "R$ 1.234,56"));
+
+    String answer =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "answerTableFormatCapabilityQuestion",
+                "Quais formatos voce recomenda para a coluna CPF? Mostre as opcoes para eu escolher.",
+                currentState,
+                options);
+
+    assertThat(answer)
+        .contains("Formatos de máscara disponíveis")
+        .contains("000.000.000-00")
+        .contains("00000000000")
+        .contains("coluna `CPF`");
+  }
+
+  @Test
   void buildComponentEditPlanFromPatchConvertsTableColumnFormat() throws Exception {
     ObjectMapper mapper = new ObjectMapper();
     JsonNode patch =
@@ -341,6 +375,40 @@ class AiOrchestratorServiceCpfMaskTest {
             "formate a coluna Admissão como mes e ano");
     assertThat(actionOptions.get(1).getContextHints().at("/presentation/ctaLabel").asText())
         .isEqualTo("Aplicar formato");
+  }
+
+  @Test
+  void buildTableDateFormatActionOptionsReturnsGuidedMaskActionsForCpf() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF", "type": "string" }
+              ]
+            }
+            """);
+
+    @SuppressWarnings("unchecked")
+    List<AiOption> actionOptions =
+        (List<AiOption>)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableDateFormatActionOptions",
+                "Quais formatos voce recomenda para a coluna CPF? Mostre as opcoes para eu escolher.",
+                currentState,
+                List.of(contextOption("BRL|symbol|2", "Currency BRL symbol", "R$ 1.234,56")));
+
+    assertThat(actionOptions)
+        .extracting(AiOption::getLabel)
+        .contains("CPF (padrão)", "CPF (apenas dígitos)");
+    assertThat(actionOptions.get(0).getContextHints().at("/presentation/kind").asText())
+        .isEqualTo("guided-option");
+    assertThat(actionOptions.get(0).getContextHints().at("/presentation/ctaLabel").asText())
+        .isEqualTo("Aplicar máscara");
+    assertThat(actionOptions.get(0).getContextHints().at("/optionSelected/targetField").asText())
+        .isEqualTo("cpf");
   }
 
   @Test
