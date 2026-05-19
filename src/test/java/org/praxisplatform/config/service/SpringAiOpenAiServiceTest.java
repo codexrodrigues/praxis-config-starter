@@ -153,7 +153,7 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
-    void gpt5JsonCallUsesMinimalReasoningForCompactExplicitBudget() throws Exception {
+    void gpt5JsonCallUsesLowReasoningForCompactExplicitBudget() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
         HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
         server.start();
@@ -174,7 +174,7 @@ class SpringAiOpenAiServiceTest {
         assertNotNull(node);
         assertEquals(123, node.get("value").asInt());
         assertEquals(1800, capturedRequest.get().path("max_completion_tokens").asInt());
-        assertEquals("minimal", capturedRequest.get().path("reasoning_effort").asText());
+        assertEquals("low", capturedRequest.get().path("reasoning_effort").asText());
         } finally {
             server.stop(0);
         }

@@ -221,7 +221,7 @@ public class SpringAiOpenAiService implements AiProvider {
             root.put("model", resolvedModel);
             putTemperature(root, resolvedModel, resolvedTemp);
             putTokenLimit(root, resolvedModel, resolvedMaxTokens);
-            putReasoningEffort(root, resolvedModel, resolvedMaxTokens);
+            putCompactReasoningEffort(root, resolvedModel, resolvedMaxTokens);
             if (jsonMode) {
                 ObjectNode fmt = root.putObject("response_format");
                 fmt.put("type", "json_object");
@@ -305,7 +305,7 @@ public class SpringAiOpenAiService implements AiProvider {
             root.put("model", resolvedModel);
             putTemperature(root, resolvedModel, resolvedTemp);
             putTokenLimit(root, resolvedModel, resolvedMaxTokens);
-            putReasoningEffort(root, resolvedModel, resolvedMaxTokens);
+            putCompactReasoningEffort(root, resolvedModel, resolvedMaxTokens);
             root.put("stream", true);
             ArrayNode messages = root.putArray("messages");
             ObjectNode msg = messages.addObject();
@@ -420,11 +420,11 @@ public class SpringAiOpenAiService implements AiProvider {
         payload.put("temperature", resolvedTemp);
     }
 
-    private void putReasoningEffort(ObjectNode payload, String modelName, int maxTokens) {
-        if (!supportsMinimalReasoningEffort(modelName) || maxTokens > 2048) {
+    private void putCompactReasoningEffort(ObjectNode payload, String modelName, int maxTokens) {
+        if (!supportsCompactReasoningEffort(modelName) || maxTokens > 2048) {
             return;
         }
-        payload.put("reasoning_effort", "minimal");
+        payload.put("reasoning_effort", "low");
     }
 
     private boolean requiresMaxCompletionTokens(String modelName) {
@@ -442,7 +442,7 @@ public class SpringAiOpenAiService implements AiProvider {
         return requiresMaxCompletionTokens(modelName);
     }
 
-    private boolean supportsMinimalReasoningEffort(String modelName) {
+    private boolean supportsCompactReasoningEffort(String modelName) {
         if (modelName == null) {
             return false;
         }
