@@ -424,19 +424,6 @@ public class AiOrchestratorService {
             return finalizeResponse(contextHintPatch, memoryContext);
         }
 
-        AiOrchestratorResponse preClassificationFiltering = tryResolveFilteringPrompt(
-                request,
-                currentState,
-                columnDescriptors,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext,
-                authoringManifest);
-        if (preClassificationFiltering != null) {
-            return finalizeResponse(preClassificationFiltering, memoryContext);
-        }
-
         AiIntentClassification intent = classifyIntent(
                 modelPrompt,
                 availableFields,
@@ -464,46 +451,9 @@ public class AiOrchestratorService {
                 componentCategories,
                 isTable,
                 warnings);
-        intent = enforceFormatIntentWhenFieldExists(
-                intent,
-                request,
-                columnDescriptors,
-                request != null ? request.getDataProfile() : null,
-                warnings);
         adjustPageBuilderCreateIntent(intent, request, context);
-        AiOrchestratorResponse creationResponse = handleComputedCreationIntent(
-                intent,
-                request,
-                currentState,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext);
-        if (creationResponse != null) {
-            return finalizeResponse(creationResponse, memoryContext);
-        }
-        AiOrchestratorResponse computedFastPath = tryResolveComputedFastPath(
-                intent,
-                request,
-                currentState,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext);
-        if (computedFastPath != null) {
-            return finalizeResponse(computedFastPath, memoryContext);
-        }
-        AiOrchestratorResponse filteringResolution = tryResolveFilteringPrompt(
-                request,
-                currentState,
-                columnDescriptors,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext,
-                authoringManifest);
-        if (filteringResolution != null) {
-            return finalizeResponse(filteringResolution, memoryContext);
+        if (isTable) {
+            warnings.add("table-computed-keyword-fast-path-disabled");
         }
         AiActionPlan actionPlan = null;
         List<AiActionItem> expectedActions = List.of();
@@ -528,7 +478,8 @@ public class AiOrchestratorService {
                     resolvedSchema,
                     embeddingConfig,
                     tenantId,
-                    environment);
+                    environment,
+                    authoringManifest);
         }
         if (shouldIgnoreColumnClarification(isTable, columnNames, missingContext)) {
             missingContext = removeMissingContext(missingContext, "column");
@@ -699,7 +650,8 @@ public class AiOrchestratorService {
                         resolvedSchema,
                         embeddingConfig,
                         tenantId,
-                        environment);
+                        environment,
+                        authoringManifest);
             }
             if (isActionPlanEmpty(actionPlan)) {
                 warnings.add("table-action-plan-empty-without-keyword-fallback");
@@ -945,25 +897,29 @@ public class AiOrchestratorService {
                 intentPlan.setQuestions(List.of());
                 warnings.add("Perguntas do intent_plan ignoradas para acao ja resolvida; aplicando decisao inferida.");
             } else {
-                AiOrchestratorResponse deterministicFallback = tryResolveComputedFallback(
-                        request,
-                        currentState,
-                        warnings,
-                        configCapabilities,
-                        componentCapabilities,
-                        componentContext);
-                if (deterministicFallback != null) {
-                    return finalizeResponse(deterministicFallback, memoryContext);
-                }
-                deterministicFallback = tryResolveRendererRuleFallback(
-                        request,
-                        currentState,
-                        warnings,
-                        configCapabilities,
-                        componentCapabilities,
-                        componentContext);
-                if (deterministicFallback != null) {
-                    return finalizeResponse(deterministicFallback, memoryContext);
+                if (!isTable) {
+                    AiOrchestratorResponse deterministicFallback = tryResolveComputedFallback(
+                            request,
+                            currentState,
+                            warnings,
+                            configCapabilities,
+                            componentCapabilities,
+                            componentContext);
+                    if (deterministicFallback != null) {
+                        return finalizeResponse(deterministicFallback, memoryContext);
+                    }
+                    deterministicFallback = tryResolveRendererRuleFallback(
+                            request,
+                            currentState,
+                            warnings,
+                            configCapabilities,
+                            componentCapabilities,
+                            componentContext);
+                    if (deterministicFallback != null) {
+                        return finalizeResponse(deterministicFallback, memoryContext);
+                    }
+                } else {
+                    warnings.add("table-intent-plan-question-keyword-fallback-disabled");
                 }
                 return finalizeResponse(clarification(buildQuestionsMessage(planQuestions), null), memoryContext);
             }
@@ -1643,7 +1599,8 @@ public class AiOrchestratorService {
             JsonNode resolvedSchema,
             EmbeddingService.EmbeddingCallConfig embeddingConfig,
             String tenantId,
-            String environment) {
+            String environment,
+            JsonNode authoringManifest) {
         ArrayNode columnsNode = objectMapper.createArrayNode();
         if (columns != null) {
             for (ColumnDescriptor col : columns) {
@@ -1656,7 +1613,7 @@ public class AiOrchestratorService {
                 columnsNode.add(node);
             }
         }
-        ArrayNode actionsNode = buildActionCatalogNode(actionCatalog);
+        ArrayNode actionsNode = buildTableOperationCatalogNode(authoringManifest, actionCatalog);
         String formatChoices = objectMapper.valueToTree(buildOptionLabels(formatOptions)).toString();
         String prompt = AiPromptTemplates.buildPrompt(
                 AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN,
@@ -1667,7 +1624,7 @@ public class AiOrchestratorService {
                         "RAG_HINTS", safe(ragHints),
                         "FORMAT_OPTIONS", formatChoices,
                         "CONTEXT_HINTS", formatContextHints(request != null ? request.getContextHints() : null)));
-        AiJsonSchema planSchema = buildTableActionPlanSchema(actionCatalog);
+        AiJsonSchema planSchema = buildTableActionPlanSchema(actionCatalog, authoringManifest);
         JsonNode json = generateActionPlanJson("table_action_plan", prompt, planSchema, request, callConfig);
         ContextRequest contextRequest = parseContextRequest(json);
         if (contextRequest != null && contextRequest.hasCodes()) {
@@ -2280,7 +2237,7 @@ public class AiOrchestratorService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private AiJsonSchema buildTableActionPlanSchema(List<ComponentAction> actionCatalog) {
+    private AiJsonSchema buildTableActionPlanSchema(List<ComponentAction> actionCatalog, JsonNode authoringManifest) {
         ObjectNode schema = objectMapper.createObjectNode();
         schema.put("type", "object");
         schema.put("additionalProperties", false);
@@ -2299,7 +2256,7 @@ public class AiOrchestratorService {
 
         ObjectNode type = actionProps.putObject("type");
         type.put("type", "string");
-        type.putArray("enum").addAll(buildActionEnumFromCatalog(actionCatalog));
+        type.putArray("enum").addAll(buildTableOperationEnum(authoringManifest, actionCatalog));
         actionRequired.add("type");
 
         ObjectNode target = actionProps.putObject("target");
@@ -2312,8 +2269,9 @@ public class AiOrchestratorService {
         actionRequired.add("value");
 
         ObjectNode params = actionProps.putObject("params");
-        params.put("type", "string");
+        params.put("type", "object");
         params.put("nullable", true);
+        params.put("additionalProperties", true);
         actionRequired.add("params");
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
@@ -2493,6 +2451,126 @@ public class AiOrchestratorService {
             enumNode.add(action.id.trim());
         }
         return enumNode;
+    }
+
+    private ArrayNode buildTableOperationEnum(JsonNode authoringManifest, List<ComponentAction> actionCatalog) {
+        ArrayNode manifestOperationIds = buildManifestOperationEnum(authoringManifest);
+        if (!manifestOperationIds.isEmpty()) {
+            return manifestOperationIds;
+        }
+        return buildActionEnumFromCatalog(actionCatalog);
+    }
+
+    private ArrayNode buildManifestOperationEnum(JsonNode authoringManifest) {
+        ArrayNode enumNode = objectMapper.createArrayNode();
+        JsonNode operations = authoringManifest != null && authoringManifest.isObject()
+                ? authoringManifest.get("operations")
+                : null;
+        if (operations == null || !operations.isArray()) {
+            return enumNode;
+        }
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonNode operation : operations) {
+            String operationId = textOrNull(operation != null ? operation.get("operationId") : null);
+            if (operationId != null && !operationId.isBlank() && seen.add(operationId)) {
+                enumNode.add(operationId);
+            }
+        }
+        return enumNode;
+    }
+
+    private ArrayNode buildTableOperationCatalogNode(JsonNode authoringManifest, List<ComponentAction> actionCatalog) {
+        ArrayNode manifestOperations = buildManifestOperationCatalogNode(authoringManifest);
+        if (!manifestOperations.isEmpty()) {
+            return manifestOperations;
+        }
+        return buildActionCatalogNode(actionCatalog);
+    }
+
+    private ArrayNode buildManifestOperationCatalogNode(JsonNode authoringManifest) {
+        ArrayNode out = objectMapper.createArrayNode();
+        JsonNode operations = authoringManifest != null && authoringManifest.isObject()
+                ? authoringManifest.get("operations")
+                : null;
+        if (operations == null || !operations.isArray()) {
+            return out;
+        }
+        for (JsonNode operation : operations) {
+            String operationId = textOrNull(operation != null ? operation.get("operationId") : null);
+            if (operationId == null || operationId.isBlank()) {
+                continue;
+            }
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", operationId);
+            node.put("operationId", operationId);
+            putIfText(node, "title", operation.get("title"));
+            putIfText(node, "scope", operation.get("scope"));
+            putIfText(node, "targetKind", firstPresent(operation.get("targetKind"), operation.at("/target/kind")));
+            JsonNode target = operation.get("target");
+            if (target != null && target.isObject()) {
+                ObjectNode targetNode = node.putObject("target");
+                putIfText(targetNode, "kind", target.get("kind"));
+                putIfText(targetNode, "resolver", target.get("resolver"));
+                targetNode.put("required", target.path("required").asBoolean(false));
+            }
+            JsonNode inputSchema = operation.get("inputSchema");
+            if (inputSchema != null && inputSchema.isObject()) {
+                node.set("inputSchema", inputSchema);
+            }
+            JsonNode affectedPaths = operation.get("affectedPaths");
+            if (affectedPaths != null && affectedPaths.isArray()) {
+                node.set("affectedPaths", affectedPaths);
+            }
+            JsonNode validators = operation.get("validators");
+            if (validators != null && validators.isArray()) {
+                node.set("validators", validators);
+            }
+            ArrayNode examples = buildManifestOperationExampleCatalogNode(authoringManifest, operationId);
+            if (!examples.isEmpty()) {
+                node.set("examples", examples);
+            }
+            out.add(node);
+        }
+        return out;
+    }
+
+    private ArrayNode buildManifestOperationExampleCatalogNode(JsonNode authoringManifest, String operationId) {
+        ArrayNode out = objectMapper.createArrayNode();
+        if (operationId == null || operationId.isBlank()) {
+            return out;
+        }
+        JsonNode examples = authoringManifest != null && authoringManifest.isObject()
+                ? authoringManifest.get("examples")
+                : null;
+        if (examples == null || !examples.isArray()) {
+            return out;
+        }
+        for (JsonNode example : examples) {
+            String exampleOperationId = textOrNull(example != null ? example.get("operationId") : null);
+            if (!operationId.equals(exampleOperationId)) {
+                continue;
+            }
+            ObjectNode node = objectMapper.createObjectNode();
+            putIfText(node, "id", example.get("id"));
+            putIfText(node, "request", example.get("request"));
+            putIfText(node, "target", example.get("target"));
+            JsonNode params = example.get("params");
+            if (params != null && params.isObject()) {
+                node.set("params", params);
+            }
+            if (example.has("isPositive")) {
+                node.put("isPositive", example.path("isPositive").asBoolean(true));
+            }
+            out.add(node);
+        }
+        return out;
+    }
+
+    private void putIfText(ObjectNode node, String fieldName, JsonNode value) {
+        String text = textOrNull(value);
+        if (node != null && fieldName != null && text != null && !text.isBlank()) {
+            node.put(fieldName, text);
+        }
     }
 
     private ArrayNode buildActionCatalogNode(List<ComponentAction> actionCatalog) {

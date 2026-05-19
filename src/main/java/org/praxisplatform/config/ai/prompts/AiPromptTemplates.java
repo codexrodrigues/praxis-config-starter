@@ -360,9 +360,9 @@ REGRAS PARA "clarification":
 """;
 
     public static final String PROMPT_TABLE_ACTION_PLAN = """
-Você e um especialista em configuracao de tabelas. Gere um plano de acoes atomicas com base no pedido do usuario.
+Você e um especialista em authoring governado de tabelas Praxis. Gere um plano de operacoes atomicas com base no pedido do usuario.
 
-CATALOGO DE ACOES (JSON):
+CATALOGO DE OPERACOES DISPONIVEIS (JSON):
 {{ACTION_CATALOG}}
 
 RAG HINTS (trechos relevantes):
@@ -377,21 +377,22 @@ FORMATOS DISPONIVEIS (use apenas o valor entre parenteses): {{FORMAT_OPTIONS}}
 PEDIDO DO USUARIO: "{{USER_INPUT}}"
 
 REGRAS:
-1. Use apenas os IDs do catalogo de acoes.
-2. target deve ser o field da coluna. Se o usuario citar o header, converta para o field correspondente.
-3. Para acoes que exigem um valor direto (ex.: SET_FORMAT, RENAME_COLUMN), informe value. Use null se nao souber.
-4. Para acoes com detalhes adicionais (ex.: COLUMN.RENDERER.BUTTON.STYLE.SET), use params. Se params for complexo (ex.: renderer completo), envie params como string JSON (ex.: "{\\"renderer\\":{\\"type\\":\\"badge\\",...},\\"condition\\":\\"valor > 0\\"}").
-5. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
-6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
-7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
-8. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
+1. Use apenas os operationId/IDs do catalogo. Prefira operationId do authoringManifest quando disponivel.
+2. target deve ser o field da coluna quando a operacao exigir alvo. Se o usuario citar o header, converta para o field correspondente.
+3. Para operacoes que exigem um valor direto, informe value. Use null se nao souber.
+4. Para payload estruturado exigido por inputSchema, use params como objeto JSON, nao como string.
+5. Use os examples da operacao como guia semantico de intencao e formato de params, mas adapte ao pedido e as colunas reais.
+6. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
+7. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
+8. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
+9. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
    10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
-9. Retorne APENAS um objeto JSON valido (sem markdown).
+10. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):
 {
   "actions": [
-    { "type": "string", "target": "string", "value": "string", "params": { "key": "value" } }
+    { "type": "operationId", "target": "string", "value": "string", "params": { "inputSchemaKey": "value" } }
   ],
   "ambiguities": [
     { "alias": "string", "candidates": ["string"], "reason": "string" }
