@@ -455,6 +455,28 @@ public class AiOrchestratorService {
         if (isTable) {
             warnings.add("table-computed-keyword-fast-path-disabled");
         }
+        if (selectedFormat == null) {
+            selectedFormat = extractSelectedFormatFromLlmIntentOptions(intent, formatOptions);
+            if (selectedFormat != null) {
+                JsonNode forcedPatch = buildFormatPatchFromSelection(
+                        selectedFormat,
+                        intent,
+                        columnDescriptors,
+                        columnResolverKeys);
+                if (forcedPatch != null) {
+                    warnings.add("Formato selecionado por ação guiada aplicado via intenção LLM.");
+                    return finalizeResponse(applySuggestedPatch(
+                            forcedPatch,
+                            currentState,
+                            request.getComponentId(),
+                            warnings,
+                            configCapabilities,
+                            componentCapabilities,
+                            componentContext,
+                            true), memoryContext);
+                }
+            }
+        }
         if (shouldOfferFormatChoiceFromLlmIntent(isTable, intent, selectedFormat)) {
             ClarificationPayload payload = buildFormatClarificationPayload(
                     intent,
@@ -9142,6 +9164,30 @@ public class AiOrchestratorService {
         }
         List<String> options = intent.getOptions();
         return options != null && !options.isEmpty();
+    }
+
+    private SelectedFormatSelection extractSelectedFormatFromLlmIntentOptions(
+            AiIntentClassification intent,
+            List<ContextOption> formatOptions) {
+        if (intent == null || !"format".equalsIgnoreCase(intent.getCategory())) {
+            return null;
+        }
+        if (isBlank(intent.getTargetField()) || !isBlank(intent.getComputedFormat())) {
+            return null;
+        }
+        List<String> options = intent.getOptions();
+        if (options == null || options.size() != 1) {
+            return null;
+        }
+        String option = options.get(0);
+        if (isBlank(option)) {
+            return null;
+        }
+        String selectedValue = detectOptionSelection(option, formatOptions);
+        if (isBlank(selectedValue)) {
+            return null;
+        }
+        return new SelectedFormatSelection(intent.getTargetField(), selectedValue, "format");
     }
 
     private String buildFormatChoiceMessage(

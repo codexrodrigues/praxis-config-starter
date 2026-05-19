@@ -7,7 +7,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
-    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada."
+    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao."
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,8 +90,8 @@ if ($result.fields -notcontains "titulo") {
 if ($result.widgetId -ne "praxis-dynamic-form") {
     throw "Page preview did not compile a praxis-dynamic-form widget."
 }
-if ($result.submitUrl -ne "/api/helpdesk/chamados") {
-    throw "Page preview submitUrl is not the helpdesk create endpoint."
+if ($result.submitUrl -ne "/api/operations/incidentes") {
+    throw "Page preview submitUrl is not the canonical operations incident create endpoint."
 }
 
 $result | ConvertTo-Json -Depth 6

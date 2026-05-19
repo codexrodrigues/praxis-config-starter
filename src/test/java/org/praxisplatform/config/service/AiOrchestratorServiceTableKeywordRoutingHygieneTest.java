@@ -159,6 +159,30 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 .isEqualTo("Aplicar formato");
     }
 
+    @Test
+    void singleChosenFormatOptionFromLlmIntentIsTreatedAsSelectedAction() {
+        AiOrchestratorService service = newService();
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("format")
+                .targetField("salario")
+                .options(List.of("BRL|symbol|2"))
+                .build();
+        List<?> contextOptions = List.of(
+                newContextOption("BRL|symbol|2", "Currency BRL symbol", "R$ 12.700,00"),
+                newContextOption("USD|symbol|2", "Currency USD symbol", "US$ 12,700.00"));
+
+        Object selection = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractSelectedFormatFromLlmIntentOptions",
+                intent,
+                contextOptions);
+
+        assertThat(selection).isNotNull();
+        assertThat(ReflectionTestUtils.getField(selection, "targetField")).isEqualTo("salario");
+        assertThat(ReflectionTestUtils.getField(selection, "value")).isEqualTo("BRL|symbol|2");
+        assertThat(ReflectionTestUtils.getField(selection, "mode")).isEqualTo("format");
+    }
+
     private AiOrchestratorService newService() {
         return new AiOrchestratorService(
                 null,

@@ -7269,6 +7269,61 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void metadataBackedIncidentFormPromptSelectsQuickstartCreateEndpoint() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/operations/incidentes",
+                        "POST",
+                        "operations,incidentes,incidente,ocorrencias,cadastro,formulario",
+                        "Cadastrar incidente de missao",
+                        "Cadastra uma nova ocorrencia operacional com missao, severidade, impacto e localizacao.",
+                        "createIncidente",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/operations/incidentes/filter/cursor",
+                        "POST",
+                        "operations,incidentes,incidente,ocorrencias,consulta,tabela",
+                        "Filtrar incidentes de missao com paginacao por cursor",
+                        "Consulta incidentes para tabelas e investigacao operacional.",
+                        "filterIncidentesCursor",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/incidentes");
+        assertThat(result.selectedCandidate().submitUrl()).isEqualTo("/api/operations/incidentes");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
     void metadataBackedPromptFallsBackToBroadArtifactDiscoveryBeforeAskingForManualResource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
