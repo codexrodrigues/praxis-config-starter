@@ -7,8 +7,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
+import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOption;
 import org.junit.jupiter.api.Tag;
@@ -219,6 +221,44 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 .isEqualTo("Aplicar opção");
     }
 
+    @Test
+    void selectedRendererGuidedActionBecomesManifestActionPlan() throws Exception {
+        AiOrchestratorService service = newService();
+        JsonNode hints = objectMapper.readTree("""
+                {
+                  "optionSelected": {
+                    "targetField": "ativo",
+                    "selection": {
+                      "value": "Badge colorido (verde para ativo, vermelho/cinza para inativo)",
+                      "mode": "renderer"
+                    }
+                  }
+                }
+                """);
+
+        Object selection = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractSelectedRendererFromHints",
+                hints);
+        assertThat(selection).isNotNull();
+
+        AiActionPlan plan = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRendererActionPlan",
+                selection,
+                AiIntentClassification.builder().category("renderer").targetField("ativo").build(),
+                objectMapper.readTree("{\"columns\":[{\"field\":\"ativo\",\"header\":\"Ativo\",\"type\":\"boolean\"}]}"),
+                List.of(newColumnDescriptor("ativo", "Ativo")),
+                List.of("field"));
+
+        assertThat(plan).isNotNull();
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getType()).isEqualTo("column.conditionalRenderer.add");
+        assertThat(plan.getActions().get(0).getTarget()).isEqualTo("ativo");
+        assertThat(plan.getActions().get(0).getParams().path("renderer").path("type").asText())
+                .isEqualTo("badge");
+    }
+
     private AiOrchestratorService newService() {
         return new AiOrchestratorService(
                 null,
@@ -233,6 +273,13 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 null,
                 mock(AiThreadService.class),
                 mock(AiMessageService.class));
+    }
+
+    private Object newColumnDescriptor(String field, String header) throws Exception {
+        Class<?> type = Class.forName("org.praxisplatform.config.service.AiOrchestratorService$ColumnDescriptor");
+        Constructor<?> constructor = type.getDeclaredConstructor(String.class, String.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(field, header);
     }
 
     private Object newContextOption(String value, String label, String example) {

@@ -386,6 +386,7 @@ public class AiOrchestratorService {
                 ? resolveOptionsForPath(componentContext, configCapabilities, "columns[].format")
                 : List.of();
         SelectedFormatSelection selectedFormat = extractSelectedFormatFromHints(request.getContextHints());
+        SelectedRendererSelection selectedRenderer = extractSelectedRendererFromHints(request.getContextHints());
         List<ContextOption> formatOptions = isTable
                 ? augmentFormatOptionsForPrompt(
                         baseFormatOptions,
@@ -475,6 +476,31 @@ public class AiOrchestratorService {
                             componentContext,
                             true), memoryContext);
                 }
+            }
+        }
+        if (selectedRenderer != null) {
+            AiActionPlan selectedRendererPlan = buildSelectedRendererActionPlan(
+                    selectedRenderer,
+                    intent,
+                    currentState,
+                    columnDescriptors,
+                    columnResolverKeys);
+            JsonNode selectedRendererManifestPlan = buildComponentEditPlanFromActionPlan(
+                    selectedRendererPlan,
+                    authoringManifest);
+            if (selectedRendererManifestPlan != null && selectedRendererManifestPlan.isObject()) {
+                ObjectNode planResult = objectMapper.createObjectNode();
+                planResult.set("componentEditPlan", selectedRendererManifestPlan);
+                planResult.put(
+                        "explanation",
+                        buildActionPlanComponentEditExplanation(
+                                selectedRendererPlan,
+                                columnDescriptors,
+                                "Vou aplicar a apresentação visual escolhida na tabela."));
+                warnings.add("renderer-option-selected-manifest-backed");
+                return finalizeResponse(
+                        componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                        memoryContext);
             }
         }
         if (shouldOfferFormatChoiceFromLlmIntent(isTable, intent, selectedFormat)) {
@@ -9278,6 +9304,71 @@ public class AiOrchestratorService {
         }
         String mode = textOrNull(selection.get("mode"));
         return new SelectedFormatSelection(targetField, value, mode);
+    }
+
+    private SelectedRendererSelection extractSelectedRendererFromHints(JsonNode contextHints) {
+        if (contextHints == null || contextHints.isNull()) {
+            return null;
+        }
+        JsonNode selected = contextHints.get("optionSelected");
+        if (selected == null || selected.isNull() || !selected.isObject()) {
+            return null;
+        }
+        JsonNode selection = selected.get("selection");
+        if (selection == null || selection.isNull() || !selection.isObject()) {
+            return null;
+        }
+        String mode = textOrNull(selection.get("mode"));
+        if (!"renderer".equalsIgnoreCase(mode)) {
+            return null;
+        }
+        String targetField = textOrNull(selected.get("targetField"));
+        String value = textOrNull(selection.get("value"));
+        if (isBlank(value)) {
+            return null;
+        }
+        return new SelectedRendererSelection(targetField, value);
+    }
+
+    private AiActionPlan buildSelectedRendererActionPlan(
+            SelectedRendererSelection selection,
+            AiIntentClassification intent,
+            JsonNode currentState,
+            List<ColumnDescriptor> columns,
+            List<String> columnResolverKeys) {
+        if (selection == null || isBlank(selection.value)) {
+            return null;
+        }
+        String targetField = !isBlank(selection.targetField)
+                ? selection.targetField
+                : (intent != null ? intent.getTargetField() : null);
+        if (isBlank(targetField)) {
+            return null;
+        }
+        String resolvedField = resolveActionField(targetField, columns, columnResolverKeys);
+        String field = !isBlank(resolvedField) ? resolvedField : targetField;
+        ColumnDescriptor targetColumn = findColumnByField(field, columns);
+        if (targetColumn == null) {
+            targetColumn = new ColumnDescriptor(field, field);
+        }
+        String normalizedSelection = normalizeText(selection.value);
+        if (looksLikeBooleanStateRendererPrompt(normalizedSelection)
+                && isBooleanStateCompatibleColumn(targetColumn, currentState)) {
+            AiActionPlan booleanPlan = buildBooleanStateRendererActionPlan(
+                    normalizedSelection,
+                    targetColumn,
+                    currentState);
+            if (booleanPlan != null) {
+                return booleanPlan;
+            }
+        }
+        if (looksLikeRichColumnRendererPrompt(normalizedSelection)) {
+            return buildRichColumnRendererActionPlan(
+                    normalizedSelection,
+                    targetColumn,
+                    currentState);
+        }
+        return null;
     }
 
     private List<ContextOption> augmentFormatOptionsForPrompt(
@@ -22755,6 +22846,16 @@ public class AiOrchestratorService {
             this.targetField = targetField;
             this.value = value;
             this.mode = mode;
+        }
+    }
+
+    private static final class SelectedRendererSelection {
+        private final String targetField;
+        private final String value;
+
+        private SelectedRendererSelection(String targetField, String value) {
+            this.targetField = targetField;
+            this.value = value;
         }
     }
 
