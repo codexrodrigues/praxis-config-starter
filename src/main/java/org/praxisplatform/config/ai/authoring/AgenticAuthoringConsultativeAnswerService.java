@@ -42,13 +42,81 @@ public class AgenticAuthoringConsultativeAnswerService {
         if (request == null || !StringUtils.hasText(request.userPrompt())) {
             return Optional.empty();
         }
-        if (clearlyRequestsMaterialization(request.userPrompt())) {
+        boolean domainAvailabilityQuestion = isDomainAvailabilityQuestion(request.userPrompt());
+        if (!domainAvailabilityQuestion && clearlyRequestsMaterialization(request.userPrompt())) {
             return Optional.empty();
         }
         boolean explicitNoMaterialization = explicitlyForbidsMaterialization(request.userPrompt());
         AgenticAuthoringConsultativeApiCatalogProjection projection = null;
         try {
+            if (domainAvailabilityQuestion) {
+                projection = apiCatalogProjection(
+                        request.userPrompt(),
+                        tenantId,
+                        environment);
+                String unsupportedDomainMessage = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
+                        request.userPrompt(),
+                        projection == null ? List.of() : projection.resources());
+                if (StringUtils.hasText(unsupportedDomainMessage)) {
+                    return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                            "domain_api",
+                            changeKind("domain_api"),
+                            unsupportedDomainMessage,
+                            null,
+                            warnings("domain_api", null)));
+                }
+                if (shouldUseGroundedProjectionAnswer(projection)) {
+                    return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                            "domain_api",
+                            changeKind("domain_api"),
+                            sanitizeUserFacingAnswer(projection.assistantMessage()),
+                            projection,
+                            warnings("domain_api", projection)));
+                }
+                String generated = providerManagementService.generateText(
+                        directAnswerPrompt(
+                                request.userPrompt(),
+                                evidenceBundle(request, "domain_api", componentCapabilities, projection)),
+                        AiCallConfig.builder()
+                                .provider(request.provider())
+                                .model(request.model())
+                                .apiKey(request.apiKey())
+                                .temperature(0.2d)
+                                .maxTokens(2400)
+                                .build(),
+                        tenantId,
+                        userId,
+                        environment);
+                ParsedConsultativeAnswer parsed = parseConsultativeAnswer(generated);
+                String category = category(parsed.category());
+                String fallback = fallbackMessage("domain_api", projection, componentCapabilities);
+                String message = guardedDomainAnswer(
+                        request.userPrompt(),
+                        "domain_api",
+                        projection,
+                        safeAnswer(parsed.answer(), safeAnswer(generated, fallback)));
+                if (message.isBlank()) {
+                    return explicitNoMaterializationFallback(request.userPrompt(), componentCapabilities, projection);
+                }
+                return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                        "domain_api".equals(category) ? category : "domain_api",
+                        changeKind("domain_api"),
+                        message,
+                        projection,
+                        warnings("domain_api", projection)));
+            }
             if (explicitNoMaterialization) {
+                if (isComponentCatalogQuestion(request.userPrompt())) {
+                    String message = componentCatalogFallbackMessage(componentCapabilities);
+                    if (StringUtils.hasText(message)) {
+                        return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                                "component_catalog",
+                                changeKind("component_catalog"),
+                                message,
+                                null,
+                                warnings("component_catalog", null)));
+                    }
+                }
                 String generated = providerManagementService.generateText(
                         directAnswerPrompt(request.userPrompt(), evidenceBundle(request, "auto", componentCapabilities, null)),
                         AiCallConfig.builder()
@@ -88,7 +156,11 @@ public class AgenticAuthoringConsultativeAnswerService {
                     }
                 }
                 String fallback = fallbackMessage(category, projection, componentCapabilities);
-                String message = safeAnswer(parsed.answer(), safeAnswer(generated, fallback));
+                String message = guardedDomainAnswer(
+                        request.userPrompt(),
+                        category,
+                        projection,
+                        safeAnswer(parsed.answer(), safeAnswer(generated, fallback)));
                 if (message.isBlank()) {
                     return explicitNoMaterializationFallback(request.userPrompt(), componentCapabilities, projection);
                 }
@@ -144,7 +216,11 @@ public class AgenticAuthoringConsultativeAnswerService {
                 }
             }
             String fallback = fallbackMessage(category, projection, componentCapabilities);
-            String message = safeAnswer(parsed.answer(), fallback);
+            String message = guardedDomainAnswer(
+                    request.userPrompt(),
+                    category,
+                    projection,
+                    safeAnswer(parsed.answer(), fallback));
             if (message.isBlank()) {
                 return Optional.empty();
             }
@@ -155,9 +231,20 @@ public class AgenticAuthoringConsultativeAnswerService {
                     projection,
                         warnings(category, projection)));
         } catch (RuntimeException ex) {
-            if (explicitNoMaterialization) {
+            if (domainAvailabilityQuestion || explicitNoMaterialization) {
                 log.warn("[AgenticAuthoring] Consultative fast answer failed; returning grounded no-materialization fallback. reason={}",
                         ex.getClass().getSimpleName());
+                String unsupportedDomainMessage = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
+                        request.userPrompt(),
+                        projection == null ? List.of() : projection.resources());
+                if (StringUtils.hasText(unsupportedDomainMessage)) {
+                    return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                            "domain_api",
+                            changeKind("domain_api"),
+                            unsupportedDomainMessage,
+                            projection,
+                            warnings("domain_api", projection)));
+                }
                 return explicitNoMaterializationFallback(request.userPrompt(), componentCapabilities, projection);
             }
             log.warn("[AgenticAuthoring] Consultative fast answer failed; falling back to regular route. reason={}",
@@ -224,6 +311,9 @@ public class AgenticAuthoringConsultativeAnswerService {
                 - For domain/API questions, only present resources, fields, actions and screens supported by the grounded evidence as confirmed.
                   Do not invent typical domain APIs, fields, datasets, screens or business facts. If evidence is compact or incomplete,
                   say what is confirmed and what still needs confirmation instead of filling gaps from general knowledge.
+                - For domain/API questions, first compare the business concepts asked by the user with the confirmed resources in evidence.
+                  If the requested domain is not confirmed in this host, explicitly say that you did not find confirmed governed data for that domain
+                  before mentioning any alternative confirmed resources.
                 - If fields, operations or metrics are not present in evidence, do not propose concrete metrics or business facts.
                   Recommend screen types at a product level and state that columns, filters and metrics depend on confirmed fields.
                 - End with a complete, concrete next step. Do not leave a dangling sentence or end with a question.
@@ -279,6 +369,9 @@ public class AgenticAuthoringConsultativeAnswerService {
                 - For domain/API questions, only present resources, fields, actions and screens supported by the grounded evidence as confirmed.
                   Do not invent typical domain APIs, fields, datasets, screens or business facts. If evidence is compact or incomplete,
                   say what is confirmed and what still needs confirmation instead of filling gaps from general knowledge.
+                - For domain/API questions, first compare the business concepts asked by the user with the confirmed resources in evidence.
+                  If the requested domain is not confirmed in this host, explicitly say that you did not find confirmed governed data for that domain
+                  before mentioning any alternative confirmed resources.
                 - If fields, operations or metrics are not present in evidence, do not propose concrete metrics or business facts.
                   Recommend screen types at a product level and state that columns, filters and metrics depend on confirmed fields.
                 - End with a complete, concrete next step. Do not leave a dangling sentence or end with a question.
@@ -415,6 +508,28 @@ public class AgenticAuthoringConsultativeAnswerService {
         return "";
     }
 
+    private String guardedDomainAnswer(
+            String userPrompt,
+            String category,
+            AgenticAuthoringConsultativeApiCatalogProjection projection,
+            String answer) {
+        if (!"domain_api".equals(category) || projection == null || !projection.hasResources()) {
+            return answer;
+        }
+        String unsupportedDomainMessage = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
+                userPrompt,
+                projection.resources());
+        return StringUtils.hasText(unsupportedDomainMessage) ? unsupportedDomainMessage : answer;
+    }
+
+    private boolean shouldUseGroundedProjectionAnswer(AgenticAuthoringConsultativeApiCatalogProjection projection) {
+        if (projection == null || !projection.hasResources() || !StringUtils.hasText(projection.assistantMessage())) {
+            return false;
+        }
+        return projection.warnings() != null
+                && projection.warnings().contains("domain-api-consultative-compact-projection-used");
+    }
+
     private String componentCatalogFallbackMessage(AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         if (componentCapabilities == null || componentCapabilities.catalogs() == null
                 || componentCapabilities.catalogs().isEmpty()) {
@@ -425,7 +540,7 @@ public class AgenticAuthoringConsultativeAnswerService {
         int count = 0;
         Set<String> emittedLabels = new LinkedHashSet<>();
         for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : componentCapabilities.catalogs()) {
-            if (catalog == null || !StringUtils.hasText(catalog.componentId()) || count >= 8) {
+            if (catalog == null || !StringUtils.hasText(catalog.componentId()) || count >= 24) {
                 continue;
             }
             String label = componentDisplayName(catalog.componentId());
@@ -728,6 +843,8 @@ public class AgenticAuthoringConsultativeAnswerService {
                 || text.contains(" sem pre visualizacao ")
                 || text.contains(" nao crie nada ")
                 || text.contains(" nao crie qualquer coisa ")
+                || text.contains(" nao cria nada ")
+                || text.contains(" nao cria qualquer coisa ")
                 || text.contains(" nao criar nada ")
                 || text.contains(" nao criar qualquer coisa ")
                 || text.contains(" nao monte nada ")
@@ -781,6 +898,83 @@ public class AgenticAuthoringConsultativeAnswerService {
                 "configure ",
                 "enable ")
                 || isArtifactSpecification(text);
+    }
+
+    private boolean isDomainAvailabilityQuestion(String prompt) {
+        String text = " " + normalizeForIntentConstraint(prompt) + " ";
+        boolean asksQuestion = text.contains(" ? ")
+                || startsLikeConsultativeQuestion(text.trim())
+                || text.contains(" da pra ")
+                || text.contains(" da para ")
+                || text.contains(" da p ")
+                || text.contains(" tem ")
+                || text.contains(" existe ")
+                || text.contains(" existem ")
+                || text.contains(" posso ");
+        if (!asksQuestion) {
+            return false;
+        }
+        boolean asksAvailability = text.contains(" tem esses dados ")
+                || text.contains(" tem estes dados ")
+                || text.contains(" tem esses dado ")
+                || text.contains(" tem dados ")
+                || text.contains(" esses dados ")
+                || text.contains(" estes dados ")
+                || text.contains(" nesse host ")
+                || text.contains(" neste host ")
+                || text.contains(" esse host ")
+                || text.contains(" este host ")
+                || text.contains(" da pra fazer ")
+                || text.contains(" da para fazer ")
+                || text.contains(" consigo fazer ")
+                || text.contains(" posso fazer ")
+                || text.contains(" posso criar ")
+                || text.contains(" que dados tem ")
+                || text.contains(" quais dados tem ")
+                || text.contains(" que dados existem ")
+                || text.contains(" quais dados existem ")
+                || text.contains(" que apis existem ")
+                || text.contains(" quais apis existem ")
+                || text.contains(" que apis e dados existem ")
+                || text.contains(" quais apis e dados existem ")
+                || text.contains(" que dados e apis existem ")
+                || text.contains(" quais dados e apis existem ")
+                || text.contains(" que recursos existem ")
+                || text.contains(" quais recursos existem ")
+                || text.contains(" existe api ")
+                || text.contains(" existem api ")
+                || text.contains(" existe dados ")
+                || text.contains(" existem dados ");
+        if (!asksAvailability) {
+            return false;
+        }
+        return text.contains(" dados ")
+                || text.contains(" dado ")
+                || text.contains(" api ")
+                || text.contains(" apis ")
+                || text.contains(" dominio ")
+                || text.contains(" domínio ")
+                || text.contains(" recurso ")
+                || text.contains(" recursos ")
+                || mentionsAuthorableArtifact(text);
+    }
+
+    private boolean isComponentCatalogQuestion(String prompt) {
+        String text = " " + normalizeForIntentConstraint(prompt) + " ";
+        boolean asksAboutComponents = text.contains(" componente ")
+                || text.contains(" componentes ")
+                || text.contains(" widget ")
+                || text.contains(" widgets ")
+                || text.contains(" catalogo ")
+                || text.contains(" catálogo ");
+        boolean asksWhatCanCreate = text.contains(" quais ")
+                || text.contains(" que ")
+                || text.contains(" o que ")
+                || text.contains(" posso criar ")
+                || text.contains(" podem ser criados ")
+                || text.contains(" da pra criar ")
+                || text.contains(" da para criar ");
+        return asksAboutComponents && asksWhatCanCreate;
     }
 
     private boolean isArtifactSpecification(String text) {

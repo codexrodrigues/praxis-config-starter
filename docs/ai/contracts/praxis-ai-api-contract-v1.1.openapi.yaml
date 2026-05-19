@@ -1328,7 +1328,7 @@ components:
       required: false
       schema:
         type: string
-        default: 41b7f29594c63f60fe7900020f85c8761612090a4551f4e9d2530a0f78fd0a85
+        default: 33c545b58f49404695bf845d2094a5b2858538a54200745f1ecb3ca2d0628f01
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1358,7 +1358,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 41b7f29594c63f60fe7900020f85c8761612090a4551f4e9d2530a0f78fd0a85
+        example: 33c545b58f49404695bf845d2094a5b2858538a54200745f1ecb3ca2d0628f01
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -1929,6 +1929,11 @@ components:
         assistantMessage:
           type: string
           nullable: true
+        assistantContent:
+          type: object
+          nullable: true
+          description: Conteudo conversacional estruturado em blocos semanticos seguros para renderizacao rica pelo shell do assistente. O assistantMessage permanece como fallback textual.
+          additionalProperties: true
         quickReplies:
           type: array
           items:
@@ -2106,6 +2111,11 @@ components:
           type: string
           nullable: true
           description: Mensagem consultiva que o cliente deve renderizar junto com os candidatos retornados.
+        assistantContent:
+          type: object
+          nullable: true
+          description: Conteudo conversacional estruturado em blocos semanticos seguros para renderizacao rica pelo shell do assistente. O assistantMessage permanece como fallback textual.
+          additionalProperties: true
         candidates:
           type: array
           items:
@@ -2247,6 +2257,11 @@ components:
           type: string
           nullable: true
           description: Mensagem consultiva ou explicativa que o cliente deve renderizar diretamente quando presente, incluindo respostas de API Catalog Q&A sobre endpoints, schemas, actions, filtros, APIs relacionadas e escolha de API.
+        assistantContent:
+          type: object
+          nullable: true
+          description: Conteudo conversacional estruturado em blocos semanticos seguros para renderizacao rica pelo shell do assistente. O assistantMessage permanece como fallback textual.
+          additionalProperties: true
         apiCatalogAnswer:
           $ref: '#/components/schemas/AgenticAuthoringApiCatalogAnswer'
           nullable: true

@@ -49,15 +49,21 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 && (isPrimaryComponent(visualizationDecision, "praxis-tabs")
                 || hasLayoutKind(visualizationDecision, "tabs", "tabbed", "tabbed-resource-workspace")
                 || hasVisualIntent(visualizationDecision, "tab", "tabbed", "tabs"));
+        boolean expansionDenied = excludesComponent(visualizationDecision, "praxis-expansion");
+        boolean expansionRequested = !expansionDenied
+                && (isPrimaryComponent(visualizationDecision, "praxis-expansion")
+                || hasLayoutKind(visualizationDecision, "accordion", "expansion", "expansion-panels", "collapsible-panels")
+                || hasVisualIntent(visualizationDecision, "accordion", "expansion", "expansivel", "paineis"));
         if (!List.of("table", "dashboard", "page", "chart").contains(artifactKind)
-                && !(tabsRequested && "component".equals(artifactKind))) {
+                && !(tabsRequested && "component".equals(artifactKind))
+                && !(expansionRequested && "component".equals(artifactKind))) {
             return Optional.empty();
         }
         if (("dashboard".equals(artifactKind) || "chart".equals(artifactKind)) && visualizationDecision == null) {
             return Optional.empty();
         }
         boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
-        ObjectNode plan = tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
+        ObjectNode plan = expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
             case "page" -> pagePlan(candidate);
             default -> tablePlan(candidate);
@@ -167,11 +173,27 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
     private boolean isSurfaceOpenModalDrilldown(AgenticAuthoringPlanRequest request) {
         JsonNode contextHints = request == null ? null : request.contextHints();
-        return contextHints != null
+        boolean contextualAction = contextHints != null
                 && "contextual-preview-action".equals(safe(contextHints.path("kind").asText()))
                 && "surface.open".equals(safe(contextHints.path("surfaceActionId").asText()))
                 && "modal".equals(safe(contextHints.path("surfacePresentation").asText()))
                 && "praxis-table".equals(safe(contextHints.path("surfaceWidgetId").asText()));
+        if (contextualAction) {
+            return true;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
+        String changeKind = intent == null ? "" : safe(intent.changeKind());
+        String artifactKind = intent == null ? "" : safe(intent.artifactKind());
+        String targetComponentId = intent == null || intent.target() == null
+                ? ""
+                : safe(intent.target().componentId());
+        return intent != null
+                && "modify".equals(safe(intent.operationKind()))
+                && "enable_chart_drilldown".equals(changeKind)
+                && ("chart".equals(artifactKind) || "dashboard".equals(artifactKind))
+                && (targetComponentId.isBlank()
+                || "praxis-chart".equals(targetComponentId)
+                || "praxis-dynamic-page-builder".equals(targetComponentId));
     }
 
     private ObjectNode singleChartPlan(
@@ -222,6 +244,19 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         canvas.put("columns", 12);
         canvas.put("rowUnit", "72px");
         putCanvasItem(canvas.putObject("items"), tabsKey, 1, 1, 12, 8);
+        return plan;
+    }
+
+    private ObjectNode expansionPlan(AgenticAuthoringCandidate candidate) {
+        ObjectNode plan = basePlan("resource-expansion-page");
+        ArrayNode widgets = plan.putArray("widgets");
+        String expansionKey = widgetKey(candidate, "expansion");
+        addExpansion(widgets, candidate, expansionKey);
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "72px");
+        putCanvasItem(canvas.putObject("items"), expansionKey, 1, 1, 12, 8);
         return plan;
     }
 
@@ -289,6 +324,49 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
     }
 
+    private void addExpansion(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-expansion");
+        widget.put("role", "workspace");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("expansionId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("enableCustomization", true);
+        inputs.put("strictValidation", true);
+        ObjectNode config = inputs.putObject("config");
+        ObjectNode accordion = config.putObject("accordion");
+        accordion.put("multi", true);
+        accordion.put("displayMode", "default");
+        accordion.put("togglePosition", "after");
+        ArrayNode panels = config.putArray("panels");
+
+        ObjectNode overview = panels.addObject();
+        overview.put("id", "overview");
+        overview.put("title", "Dados gerais");
+        overview.put("description", "Resumo da fonte governada selecionada.");
+        overview.put("icon", "info");
+        overview.put("expanded", true);
+        addNestedOverview(overview.putArray("widgets"), candidate, widgetKey(candidate, "expansion-overview"));
+
+        ObjectNode details = panels.addObject();
+        details.put("id", "details");
+        details.put("title", "Detalhes");
+        details.put("description", "Registros conectados ao recurso governado.");
+        details.put("icon", "table_view");
+        addNestedTable(details.putArray("widgets"), candidate, widgetKey(candidate, "expansion-details"));
+
+        ObjectNode actions = panels.addObject();
+        actions.put("id", "actions");
+        actions.put("title", "Acoes");
+        actions.put("description", "Formulario governado para revisar ou executar operacoes disponiveis.");
+        actions.put("icon", "dynamic_form");
+        addNestedDetail(actions.putArray("widgets"), candidate, widgetKey(candidate, "expansion-actions"));
+    }
+
     private boolean tabsShouldIncludeChart(AgenticAuthoringVisualizationDecision visualizationDecision) {
         if (excludesComponent(visualizationDecision, "praxis-chart")) {
             return false;
@@ -311,6 +389,25 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("tableId", key);
         inputs.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
         inputs.putObject("config").putArray("columns");
+    }
+
+    private void addNestedOverview(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("id", "praxis-rich-content");
+        widget.put("childWidgetKey", key);
+        ObjectNode document = richContentDocument(widget.putObject("inputs"));
+        ObjectNode card = document.putArray("nodes").addObject();
+        card.put("type", "card");
+        card.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        card.put("subtitle", "Fonte governada");
+        card.put("variant", "filled");
+        card.put("tone", "info");
+        card.put("size", "sm");
+        card.put("density", "compact");
+        ArrayNode content = card.putArray("content");
+        ObjectNode body = content.addObject();
+        body.put("type", "text");
+        body.put("text", "Use os paineis para consultar registros, revisar detalhes e acessar acoes confirmadas pelo catalogo do host.");
     }
 
     private void addNestedDetail(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {

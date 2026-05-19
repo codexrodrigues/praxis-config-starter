@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -199,6 +200,13 @@ public class AgenticAuthoringTurnEngine {
                     "phase", "intent.resolve",
                     "summary", "Preparing semantic intent resolution."));
             request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
+            AgenticAuthoringResourceCandidatesResult earlyResourceDiscovery =
+                    maybePreDiscoverResourcesForMaterialization(request, principalContext, eventSink);
+            if (earlyResourceDiscovery != null
+                    && earlyResourceDiscovery.candidates() != null
+                    && !earlyResourceDiscovery.candidates().isEmpty()) {
+                request = withResourceDiscoveryContext(request, earlyResourceDiscovery);
+            }
             emitStatus(
                     eventSink,
                     "intent.resolve.llm",
@@ -340,6 +348,7 @@ public class AgenticAuthoringTurnEngine {
                         route);
             }
             String assistantMessage = previewAssistantMessage(
+                    request.userPrompt(),
                     preview,
                     intentResolution,
                     resourceDiscovery,
@@ -355,6 +364,10 @@ public class AgenticAuthoringTurnEngine {
             resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
             resultPayload.put("assistantMessage", safeText(assistantMessage));
+            resultPayload.put("assistantContent", assistantContent(
+                    terminalIntentResolution,
+                    businessCatalogDiscovery,
+                    resourceDiscovery));
             resultPayload.put(
                     "quickReplies",
                     terminalQuickReplies(request, intentResolution, businessCatalogDiscovery, preview));
@@ -460,6 +473,8 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("intentResolution", intentResolution);
         resultPayload.put("preview", objectMapper.createObjectNode());
         resultPayload.put("assistantMessage", safeText(answer.assistantMessage()));
+        resultPayload.put("assistantContent",
+                AgenticAuthoringAssistantContentFactory.fromConsultativeProjection(answer.apiCatalogProjection()));
         resultPayload.put("quickReplies", List.of());
         resultPayload.put("canApply", false);
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
@@ -623,6 +638,85 @@ public class AgenticAuthoringTurnEngine {
                 request.contextHints(),
                 componentCapabilities,
                 request.activeSemanticDecision());
+    }
+
+    private AgenticAuthoringResourceCandidatesResult maybePreDiscoverResourcesForMaterialization(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink) {
+        if (!shouldPreDiscoverResourcesForMaterialization(request) || eventSink.terminalReached()) {
+            return null;
+        }
+        emitStatus(
+                eventSink,
+                "resource.discovery",
+                "Estou buscando fontes governadas relacionadas ao pedido antes de chamar a LLM.");
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                "pre_intent_resource_discovery",
+                new AgenticAuthoringResourceCandidatesRequest(
+                        safeText(request.userPrompt()),
+                        request.userPrompt(),
+                        "page",
+                        6));
+        eventSink.append("thought.step", safeToolProjection(
+                "tool.start",
+                "Preloading governed resource candidates for semantic intent resolution.",
+                Map.of(
+                        "tool", toolCall.name(),
+                        "routeClass", "pre_intent_resource_discovery",
+                        "maxCallsPerTurn", MAX_TOOL_CALLS_PER_TURN)));
+        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext, "retrieveEvidence");
+        eventSink.append("thought.step", safeToolProjection(
+                result.valid() ? "tool.result" : "tool.error",
+                result.valid()
+                        ? "Pre-intent backend API resource search completed."
+                        : "Pre-intent backend API resource search failed.",
+                safeToolDiagnostics(result)));
+        return resourceDiscoveryPayload(result);
+    }
+
+    private boolean shouldPreDiscoverResourcesForMaterialization(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null
+                || request.pendingClarification() != null
+                || request.activeSemanticDecision() != null
+                || hasResourceDiscoveryContext(request)
+                || request.userPrompt() == null
+                || request.userPrompt().isBlank()) {
+            return false;
+        }
+        String prompt = safeText(request.userPrompt()).toLowerCase(Locale.ROOT);
+        boolean createOrChange = prompt.contains("crie")
+                || prompt.contains("criar")
+                || prompt.contains("monte")
+                || prompt.contains("montar")
+                || prompt.contains("adicione")
+                || prompt.contains("adicionar")
+                || prompt.contains("inclua")
+                || prompt.contains("incluir");
+        boolean materializedSurface = prompt.contains("pagina")
+                || prompt.contains("página")
+                || prompt.contains("dashboard")
+                || prompt.contains("painel")
+                || prompt.contains("grafico")
+                || prompt.contains("gráfico")
+                || prompt.contains("tabela")
+                || prompt.contains("formulario")
+                || prompt.contains("formulário")
+                || prompt.contains("accordion")
+                || prompt.contains("acordeon")
+                || prompt.contains("abas")
+                || prompt.contains("tabs")
+                || prompt.contains("widget");
+        return createOrChange && materializedSurface;
+    }
+
+    private boolean hasResourceDiscoveryContext(AgenticAuthoringTurnStreamRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().path("resourceDiscovery").isObject()
+                && request.contextHints().path("resourceDiscovery").path("candidates").isArray()
+                && !request.contextHints().path("resourceDiscovery").path("candidates").isEmpty();
     }
 
     private AgenticAuthoringToolResult maybeRunResourceDiscoveryTool(
@@ -2152,12 +2246,14 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private String previewAssistantMessage(
+            String userPrompt,
             AgenticAuthoringPreviewResult preview,
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringResourceCandidatesResult resourceDiscovery,
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
             String schemaBaseUrl) {
         String catalogMessage = consultativeCatalogAssistantMessage(
+                userPrompt,
                 intentResolution,
                 resourceDiscovery,
                 businessCatalogDiscovery,
@@ -2170,6 +2266,7 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private String consultativeCatalogAssistantMessage(
+            String userPrompt,
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringResourceCandidatesResult resourceDiscovery,
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
@@ -2183,7 +2280,10 @@ public class AgenticAuthoringTurnEngine {
                 return "";
             }
         }
-        String projectionMessage = consultativeProjectionAssistantMessage(businessCatalogDiscovery, resourceDiscovery);
+        String projectionMessage = consultativeProjectionAssistantMessage(
+                firstNonBlank(userPrompt, intentResolution == null ? "" : intentResolution.effectivePrompt()),
+                businessCatalogDiscovery,
+                resourceDiscovery);
         if (!projectionMessage.isBlank()) {
             return projectionMessage;
         }
@@ -2228,6 +2328,7 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private String consultativeProjectionAssistantMessage(
+            String userPrompt,
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
             AgenticAuthoringResourceCandidatesResult resourceDiscovery) {
         AgenticAuthoringConsultativeApiCatalogProjection projection =
@@ -2238,7 +2339,27 @@ public class AgenticAuthoringTurnEngine {
         if (projection == null || !projection.hasResources()) {
             return "";
         }
+        String unsupportedDomainMessage = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
+                userPrompt,
+                projection.resources());
+        if (StringUtils.hasText(unsupportedDomainMessage)) {
+            return unsupportedDomainMessage;
+        }
         return safeText(projection.assistantMessage());
+    }
+
+    private JsonNode assistantContent(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery) {
+        if (intentResolution != null && intentResolution.assistantContent() != null) {
+            return intentResolution.assistantContent();
+        }
+        JsonNode content = businessCatalogDiscovery == null ? null : businessCatalogDiscovery.assistantContent();
+        if (content != null) {
+            return content;
+        }
+        return resourceDiscovery == null ? null : resourceDiscovery.assistantContent();
     }
 
     private List<AgenticAuthoringCandidate> catalogCandidates(

@@ -300,24 +300,13 @@ class AgenticAuthoringTurnEngineTest {
     @Test
     void consultativeAnswerHonorsExplicitNoMaterializationInstruction() {
         AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
-        when(providerManagementService.generateText(
-                argThat(prompt -> prompt.contains("explicitly asked not to create")),
-                any(),
-                eq("tenant"),
-                eq("user"),
-                eq("local")))
-                .thenReturn("""
-                        CONSULTATIVE_CATEGORY: component_catalog
-                        ANSWER:
-                        Voce pode usar tabelas para consulta, graficos para indicadores, filtros para recortes e abas para separar visoes relacionadas.
-                        """);
         AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
                 providerManagementService,
                 objectMapper,
                 null);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Quais componentes posso criar aqui? Explique quando usar cada um, sem criar nada."),
+                request("quais componentes posso criar aqui e pra que serve cada um? nao cria nada ainda"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -326,13 +315,8 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(answer).isPresent();
         org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("component_catalog");
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
-                .contains("tabelas", "graficos", "abas");
-        verify(providerManagementService).generateText(
-                argThat(prompt -> prompt.contains("explicitly asked not to create")),
-                any(),
-                eq("tenant"),
-                eq("user"),
-                eq("local"));
+                .contains("Tabela", "Gráfico", "Formulário", "Filtro");
+        Mockito.verifyNoInteractions(providerManagementService);
     }
 
     @Test
@@ -505,29 +489,13 @@ class AgenticAuthoringTurnEngineTest {
         AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
         AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
                 Mockito.mock(AgenticAuthoringConsultativeApiCatalogProjectionService.class);
-        when(providerManagementService.generateText(
-                any(),
-                any(),
-                eq("tenant"),
-                eq("user"),
-                eq("local")))
-                .thenReturn("""
-                        CONSULTATIVE_CATEGORY: domain_api
-                        ANSWER:
-                        Vou consultar o catalogo de dominio confirmado.
-                        """)
-                .thenReturn("""
-                        CONSULTATIVE_CATEGORY: domain_api
-                        ANSWER:
-                        A fonte confirmada e Vw Analytics Folha Pagamento. O catalogo compacto nao confirma campos detalhados.
-                        """);
         when(projectionService.projectCompact(
                 eq("Quais APIs e dados existem sobre folha de pagamento?"),
                 eq("tenant"),
                 eq("local")))
                 .thenReturn(new AgenticAuthoringConsultativeApiCatalogProjection(
                         "folha de pagamento",
-                        "Encontrei uma fonte de dados confirmada: Vw Analytics Folha Pagamento.",
+                        "Encontrei uma fonte de dados confirmada: Vw Analytics Folha Pagamento. Vw Analytics Folha Pagamento: boa para analises, indicadores e graficos.",
                         List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
                                 "vw-analytics-folha-pagamento",
                                 "/api/analytics/vw-analytics-folha-pagamento",
@@ -554,19 +522,189 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(answer).isPresent();
         org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("domain_api");
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
-                .contains("fonte confirmada");
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(providerManagementService, Mockito.times(2)).generateText(
-                promptCaptor.capture(),
-                any(),
+                .contains("fonte de dados confirmada")
+                .contains("Vw Analytics Folha Pagamento");
+        verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void consultativeDomainAvailabilityQuestionDoesNotBecomeMaterializationCommand() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                Mockito.mock(AgenticAuthoringConsultativeApiCatalogProjectionService.class);
+        when(projectionService.projectCompact(
+                eq("Quero um painel de vendas e boleto atrasado. Esse host tem esses dados?"),
                 eq("tenant"),
-                eq("user"),
-                eq("local"));
-        org.assertj.core.api.Assertions.assertThat(promptCaptor.getAllValues().get(1))
-                .contains("domainApiCatalog")
+                eq("local")))
+                .thenReturn(new AgenticAuthoringConsultativeApiCatalogProjection(
+                        "vendas boleto",
+                        "Encontrei uma fonte de dados confirmada: Funcionarios.",
+                        List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
+                                "human-resources.funcionarios",
+                                "/api/human-resources/funcionarios",
+                                "Funcionarios",
+                                "operational",
+                                "Pessoas e colaboradores da empresa.",
+                                List.of(),
+                                List.of(),
+                                List.of(),
+                                List.of("domain_catalog_context"))),
+                        List.of("domain-api-consultative-compact-projection-used")));
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                projectionService);
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                request("Quero um painel de vendas e boleto atrasado. Esse host tem esses dados?"),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("domain_api");
+        org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                .startsWith("Nao encontrei dados governados confirmados neste host")
+                .contains("vendas")
+                .contains("boleto")
+                .contains("Funcionarios")
+                .doesNotStartWith("Encontrei");
+        verify(projectionService).projectCompact(any(), any(), any());
+        verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void compactDomainAvailabilityQuestionUsesGroundedProjectionWithoutLlmElaboration() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                Mockito.mock(AgenticAuthoringConsultativeApiCatalogProjectionService.class);
+        String userPrompt = "Que dados tem sobre pessoa funcionario cargo departamnto e folah? nao sei o nome certo das apis";
+        when(projectionService.projectCompact(
+                eq(userPrompt),
+                eq("tenant"),
+                eq("local")))
+                .thenReturn(new AgenticAuthoringConsultativeApiCatalogProjection(
+                        userPrompt,
+                        "Encontrei 2 fontes de dados confirmadas para esse recorte: Funcionarios e Vw Analytics Folha Pagamento. Funcionarios: boa para consultar e operar registros. Vw Analytics Folha Pagamento: boa para analises, indicadores e graficos. Quando voce pedir para criar, eu materializo usando apenas o que estiver confirmado no catalogo.",
+                        List.of(
+                                new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
+                                        "human-resources.funcionarios",
+                                        "/api/human-resources/funcionarios",
+                                        "Funcionarios",
+                                        "operational",
+                                        "",
+                                        List.of(),
+                                        List.of(),
+                                        List.of(),
+                                        List.of("domain_catalog_context")),
+                                new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
+                                        "human-resources.vw-analytics-folha-pagamento",
+                                        "/api/human-resources/vw-analytics-folha-pagamento",
+                                        "Vw Analytics Folha Pagamento",
+                                        "analytical",
+                                        "",
+                                        List.of(),
+                                        List.of(),
+                                        List.of(),
+                                        List.of("domain_catalog_context"))),
+                        List.of("domain-api-consultative-compact-projection-used")));
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                projectionService);
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                request(userPrompt),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("domain_api");
+        org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                .contains("Funcionarios")
                 .contains("Vw Analytics Folha Pagamento")
-                .contains("Do not invent typical domain APIs")
-                .contains("what still needs confirmation");
+                .doesNotContain("contexto logístico/risco")
+                .doesNotContain("contexto logistico/risco");
+        verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void enrichedCompactDomainAvailabilityQuestionStillUsesProjectionWithoutLlmElaboration() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                Mockito.mock(AgenticAuthoringConsultativeApiCatalogProjectionService.class);
+        String userPrompt = "Quais dados existem sobre cargos?";
+        when(projectionService.projectCompact(
+                eq(userPrompt),
+                eq("tenant"),
+                eq("local")))
+                .thenReturn(new AgenticAuthoringConsultativeApiCatalogProjection(
+                        userPrompt,
+                        "Encontrei uma fonte de dados confirmada para esse recorte: Cargos. Cargos: boa para consultar e operar registros. Campos confirmados: Nome, Descricao e Nivel. Operações disponíveis: Listar cargos e Criar cargo. Quando voce pedir para criar, eu materializo usando apenas o que estiver confirmado no catalogo.",
+                        List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
+                                "human-resources.cargos",
+                                "/api/human-resources/cargos",
+                                "Cargos",
+                                "operational",
+                                "",
+                                List.of(
+                                        new AgenticAuthoringConsultativeApiCatalogProjection.Field(
+                                                "nome", "Nome", "string"),
+                                        new AgenticAuthoringConsultativeApiCatalogProjection.Field(
+                                                "descricao", "Descricao", "string"),
+                                        new AgenticAuthoringConsultativeApiCatalogProjection.Field(
+                                                "nivel", "Nivel", "string")),
+                                List.of(),
+                                List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Endpoint(
+                                        "list", "GET", "/api/human-resources/cargos", "Listar cargos")),
+                                List.of("domain_catalog_context"))),
+                        List.of("domain-api-consultative-compact-projection-used")));
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                projectionService);
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                request(userPrompt),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                .contains("Campos confirmados: Nome, Descricao e Nivel")
+                .contains("Operações disponíveis: Listar cargos e Criar cargo");
+        verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void explicitComponentCatalogQuestionUsesFastGroundedAnswerWithoutLlmCall() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                Mockito.mock(AgenticAuthoringConsultativeApiCatalogProjectionService.class));
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                request("Quais componentes posso criar aqui e pra que serve cada um? Nao cria nada ainda."),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("component_catalog");
+        org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                .contains("Tabela")
+                .contains("Gráfico")
+                .contains("Formulário")
+                .doesNotContain("schema")
+                .doesNotContain("resourceKey");
+        verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
     }
 
     @Test

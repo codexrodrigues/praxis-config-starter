@@ -325,6 +325,7 @@ class AiApiContractOpenApiTest {
         assertThat(intentResolutionProperties).containsKeys(
                 "effectivePrompt",
                 "assistantMessage",
+                "assistantContent",
                 "quickReplies",
                 "pendingClarification",
                 "clarificationQuestions");
@@ -342,6 +343,7 @@ class AiApiContractOpenApiTest {
                 (Map<String, Object>) resourceCandidates.get("properties");
         assertThat(resourceCandidatesProperties).containsKeys(
                 "assistantMessage",
+                "assistantContent",
                 "quickReplies",
                 "candidates",
                 "warnings");

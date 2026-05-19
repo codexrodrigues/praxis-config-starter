@@ -11,9 +11,12 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
+import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
+import org.praxisplatform.config.dto.AiOption;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
+import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
@@ -39,6 +42,14 @@ class AiOrchestratorServiceCpfMaskTest {
             mock(AiMessageService.class));
   }
 
+  private Object contextOption(String value, String label, String example) throws Exception {
+    Constructor<?> ctor =
+        Class.forName("org.praxisplatform.config.service.AiOrchestratorService$ContextOption")
+            .getDeclaredConstructor(String.class, String.class, String.class);
+    ctor.setAccessible(true);
+    return ctor.newInstance(value, label, example);
+  }
+
   @Test
   void inferFormatFromPromptReturnsCpfMask() {
     String prompt = "Formate a coluna CPF (000.000.000-00 (padrão CPF))";
@@ -48,6 +59,239 @@ class AiOrchestratorServiceCpfMaskTest {
                 service, "inferFormatFromPrompt", prompt, List.of());
 
     assertThat(mask).isEqualTo("000.000.000-00");
+  }
+
+  @Test
+  void inferFormatFromPromptUsesCpfStandardMaskForNaturalRequest() {
+    String mask =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service, "inferFormatFromPrompt", "Formate a coluna CPF.", List.of());
+
+    assertThat(mask).isEqualTo("000.000.000-00");
+  }
+
+  @Test
+  void applyInferredMissingFormatValuesUsesCpfStandardMaskForHumanRequest() {
+    List<String> warnings = new ArrayList<>();
+    @SuppressWarnings("unchecked")
+    List<AiActionItem> actions =
+        (List<AiActionItem>)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "applyInferredMissingFormatValues",
+                List.of(AiActionItem.builder().type("SET_FORMAT").field("cpf").build()),
+                "formate a coluna cpf",
+                List.of(),
+                warnings);
+
+    assertThat(actions).hasSize(1);
+    assertThat(actions.get(0).getValue()).isEqualTo("000.000.000-00");
+    assertThat(warnings).anyMatch(warning -> warning.contains("Formato inferido"));
+  }
+
+  @Test
+  void inferFormatFromPromptUsesFullDateForNaturalCompleteDateRequest() throws Exception {
+    List<?> options =
+        List.of(
+            contextOption("shortDate", "Date short", "13/06/2022"),
+            contextOption("fullDate", "Date full", "13 de junho de 2022"));
+
+    String value =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "inferFormatFromPrompt",
+                "formate a coluna admissao como data completa",
+                options);
+
+    assertThat(value).isEqualTo("fullDate");
+  }
+
+  @Test
+  void inferFormatFromPromptUsesMonthYearForNaturalMonthRequest() throws Exception {
+    List<?> options =
+        List.of(
+            contextOption("shortDate", "Date short", "13/06/2022"),
+            contextOption("MMM/yyyy", "Month/Year", "jun./2022"));
+
+    String value =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "inferFormatFromPrompt",
+                "formate a coluna admissao como mes e ano",
+                options);
+
+    assertThat(value).isEqualTo("MMM/yyyy");
+  }
+
+  @Test
+  void answerTableFormatCapabilityQuestionListsDateFormatsFromCapabilities() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "dataAdmissao", "header": "Admissão", "type": "date", "format": "dd/MM/yyyy" },
+                { "field": "nome", "header": "Nome", "type": "string" }
+              ]
+            }
+            """);
+    List<?> options =
+        List.of(
+            contextOption("shortDate", "Date short", "13/06/2022"),
+            contextOption("fullDate", "Date full", "segunda-feira, 13 de junho de 2022"),
+            contextOption("MMM/yyyy", "Month/Year", "jun./2022"),
+            contextOption("dd/MM/yyyy", "Date dd/MM/yyyy", "13/06/2022"),
+            contextOption("BRL|symbol|2", "Currency BRL symbol", "R$ 1.234,56"));
+
+    String answer =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "answerTableFormatCapabilityQuestion",
+                "Como eu posso formatar uma data dentro da tabela dinamica? Quais formatos existem e qual voce recomenda para a coluna Admissao?",
+                currentState,
+                options);
+
+    assertThat(answer)
+        .contains("**Formatos de data disponíveis**")
+        .contains("`fullDate`")
+        .contains("`MMM/yyyy`")
+        .contains("`dd/MM/yyyy`")
+        .contains("a coluna `Admissão`")
+        .contains("Formato atual da coluna: `dd/MM/yyyy`");
+    assertThat(answer).doesNotContain("BRL|symbol|2");
+  }
+
+  @Test
+  void buildTableDateFormatActionOptionsReturnsClickableRecommendations() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "dataAdmissao", "header": "Admissão", "type": "date", "format": "dd/MM/yyyy" }
+              ]
+            }
+            """);
+    List<?> options =
+        List.of(
+            contextOption("fullDate", "Date full", "segunda-feira, 13 de junho de 2022"),
+            contextOption("MMM/yyyy", "Month/Year", "jun./2022"),
+            contextOption("dd/MM/yyyy", "Date dd/MM/yyyy", "13/06/2022"));
+
+    @SuppressWarnings("unchecked")
+    List<AiOption> actionOptions =
+        (List<AiOption>)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableDateFormatActionOptions",
+                "Como eu posso formatar uma data dentro da tabela dinamica? Qual voce recomenda para a coluna Admissao?",
+                currentState,
+                options);
+
+    assertThat(actionOptions).hasSize(3);
+    assertThat(actionOptions)
+        .extracting(AiOption::getLabel)
+        .containsExactly("Usar dd/MM/yyyy", "Usar data por extenso", "Usar mês/ano");
+    assertThat(actionOptions)
+        .extracting(AiOption::getValue)
+        .contains(
+            "formate a coluna Admissão como dd/MM/yyyy",
+            "formate a coluna Admissão como data por extenso",
+            "formate a coluna Admissão como mes e ano");
+    assertThat(actionOptions.get(1).getContextHints().at("/presentation/ctaLabel").asText())
+        .isEqualTo("Aplicar formato");
+  }
+
+  @Test
+  void isConsultativeTableFormatQuestionDetectsGuidanceRequestWithoutTreatingCommandsAsQuestions() {
+    Boolean guidance =
+        (Boolean)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "isConsultativeTableFormatQuestion",
+                "Como eu posso formatar uma data dentro da tabela dinamica? Qual voce recomenda?");
+    Boolean command =
+        (Boolean)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "isConsultativeTableFormatQuestion",
+                "formate a coluna admissao como data por extenso");
+
+    assertThat(guidance).isTrue();
+    assertThat(command).isFalse();
+  }
+
+  @Test
+  void inferFormatFromPromptUsesPortugueseBooleanYesNoCustomOption() throws Exception {
+    List<?> options =
+        List.of(
+            contextOption("true-false", "Boolean true/false", "true"),
+            contextOption("yes-no", "Boolean yes/no", "Yes"),
+            contextOption("custom|Sim|Nao", "Boolean custom (Sim/Nao)", "Sim"));
+
+    String value =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "inferFormatFromPrompt",
+                "formate a coluna ativo como sim ou nao",
+                options);
+
+    assertThat(value).isEqualTo("custom|Sim|Nao");
+  }
+
+  @Test
+  void inferFormatFromPromptUsesUppercaseForPortuguesePluralRequest() throws Exception {
+    List<?> options =
+        List.of(
+            contextOption("uppercase", "String uppercase", "FUNCIONARIO"),
+            contextOption("lowercase", "String lowercase", "funcionario"));
+
+    String value =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "inferFormatFromPrompt",
+                "deixe a coluna funcionario em maiusculas",
+                options);
+
+    assertThat(value).isEqualTo("uppercase");
+  }
+
+  @Test
+  void inferFormatFromPromptUsesUsdForPortugueseDollarRequest() throws Exception {
+    List<?> options =
+        List.of(
+            contextOption("BRL|symbol|2", "Currency BRL symbol", "R$ 1.234,56"),
+            contextOption("USD|symbol|2", "Currency USD symbol", "$1,234.56"));
+
+    String value =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "inferFormatFromPrompt",
+                "formate a coluna salario como dolar",
+                options);
+
+    assertThat(value).isEqualTo("USD|symbol|2");
+  }
+
+  @Test
+  void hasResolvedFormatActionDetectsSetFormatWithValue() {
+    Boolean resolved =
+        (Boolean)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "hasResolvedFormatAction",
+                List.of(AiActionItem.builder().type("SET_FORMAT").field("ativo").value("custom|Sim|Nao").build()));
+
+    assertThat(resolved).isTrue();
   }
 
   @Test
@@ -133,6 +377,114 @@ class AiOrchestratorServiceCpfMaskTest {
     String serialized = mapper.writeValueAsString(normalized);
     assertThat(serialized).contains("\"format\":\"000.000.000-00\"");
     assertThat(serialized).doesNotContain("\"type\":\"date\"");
+  }
+
+  @Test
+  void normalizesLegacyTableCapabilityChangeKindToCanonicalManifestOperation() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode manifest =
+        mapper.readTree(
+            """
+            {
+              "componentId": "praxis-table",
+              "operations": [
+                {
+                  "operationId": "column.format.set",
+                  "target": {
+                    "kind": "column",
+                    "resolver": "column-by-field",
+                    "required": true
+                  },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["format"],
+                    "properties": {
+                      "format": { "type": "string" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    JsonNode plan =
+        mapper.readTree(
+            """
+            {
+              "schemaVersion": "praxis-component-edit-plan.v1",
+              "componentId": "praxis-table",
+              "operations": [
+                {
+                  "operationId": "set_column_format",
+                  "target": { "kind": "column", "field": "cpf" },
+                  "input": { "format": "000.000.000-00" }
+                }
+              ]
+            }
+            """);
+    List<String> warnings = new ArrayList<>();
+
+    JsonNode normalized =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "normalizeComponentEditPlanForAuthoringManifest",
+            plan,
+            manifest,
+            warnings);
+
+    assertThat(normalized.at("/operations/0/operationId").asText()).isEqualTo("column.format.set");
+    assertThat(normalized.at("/operations/0/input/format").asText()).isEqualTo("000.000.000-00");
+    assertThat(warnings)
+        .contains("component-edit-plan-operation-id-normalized:set_column_format:column.format.set");
+  }
+
+  @Test
+  void computedCreationIntentIgnoresCpfMaskFormattingPrompt() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .category("format")
+            .targetField("cpf")
+            .needsClarification(true)
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Formate o campo CPF usando a mascara brasileira 000.000.000-00.")
+            .schemaFields(
+                mapper.readTree(
+                    """
+                    [
+                      { "name": "cpf", "type": "string" },
+                      { "name": "dataAdmissao", "type": "string", "format": "date" }
+                    ]
+                    """))
+            .build();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF", "type": "string" },
+                { "field": "dataAdmissao", "header": "Admissão", "type": "date" }
+              ]
+            }
+            """);
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "handleComputedCreationIntent",
+            intent,
+            request,
+            currentState,
+            new ArrayList<String>(),
+            List.of(),
+            List.of(),
+            mapper.createObjectNode());
+
+    assertThat(response).isNull();
   }
 
   @Test

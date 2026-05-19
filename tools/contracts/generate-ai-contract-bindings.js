@@ -497,6 +497,7 @@ export interface AgenticAuthoringIntentResolutionResultContract {
   gate?: AiJsonObject | null;
   effectivePrompt?: string | null;
   assistantMessage?: string | null;
+  assistantContent?: AiJsonObject | null;
   quickReplies?: AgenticAuthoringQuickReplyContract[];
   pendingClarification?: AgenticAuthoringPendingClarificationContract | null;
   clarificationQuestions?: string[];
@@ -550,6 +551,7 @@ export interface AgenticAuthoringResourceCandidatesResultContract {
   retrievalQuery?: string | null;
   artifactKind?: string | null;
   assistantMessage?: string | null;
+  assistantContent?: AiJsonObject | null;
   candidates?: AgenticAuthoringCandidateContract[];
   quickReplies?: AgenticAuthoringQuickReplyContract[];
   warnings?: string[];
@@ -634,6 +636,7 @@ export interface AgenticAuthoringTurnResultPayloadContract {
   intentResolution?: AgenticAuthoringIntentResolutionResultContract | null;
   preview?: AgenticAuthoringPreviewResultContract | null;
   assistantMessage?: string | null;
+  assistantContent?: AiJsonObject | null;
   quickReplies?: AgenticAuthoringQuickReplyContract[];
   canApply?: boolean | null;
   decisionDiagnostics?: AgenticAuthoringDecisionDiagnosticsContract | null;

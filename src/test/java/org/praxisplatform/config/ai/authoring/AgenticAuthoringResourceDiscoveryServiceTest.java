@@ -337,6 +337,240 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     }
 
     @Test
+    void apiCatalogProjectionSaysRequestedDomainIsNotConfirmedBeforeSuggestingAlternatives() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of());
+        DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.isNull(),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.eq("node"),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.anyString(),
+                Mockito.eq(8))).thenReturn(domainContext(
+                "human-resources.funcionarios",
+                "Funcionarios",
+                "Pessoas e colaboradores da empresa",
+                List.of("Nome", "Cargo", "Departamento")));
+
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> domainCatalog,
+                        repository,
+                        "praxis-service");
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection = projectionService.projectCompact(
+                "Quero um painel de vendas e boleto atrasado. Esse host tem esses dados?",
+                "tenant",
+                "local");
+
+        assertThat(projection).isNotNull();
+        assertThat(projection.assistantMessage())
+                .startsWith("Nao encontrei dados governados confirmados neste host")
+                .contains("vendas")
+                .contains("boleto")
+                .contains("Funcionarios")
+                .doesNotStartWith("Encontrei")
+                .doesNotContain("fonte de dados confirmada para esse recorte");
+    }
+
+    @Test
+    void unsupportedDomainMessageDoesNotSuggestGenericResourceLabels() {
+        String message = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
+                "Quero um painel de vendas e boleto atrasado. Esse host tem esses dados?",
+                List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
+                        "risk-intelligence.vw-indicadores-incidentes",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        "Descricao",
+                        "analytics",
+                        "Resumo documental generico.",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of("domain_catalog_context"))));
+
+        assertThat(message)
+                .startsWith("Nao encontrei dados governados confirmados neste host")
+                .contains("vendas")
+                .contains("boleto")
+                .doesNotContain("Descricao")
+                .contains("precisa estar publicado no catalogo/RAG");
+    }
+
+    @Test
+    void compactConsultativeProjectionRanksRequestedConceptsAndDropsUnrelatedResources() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of());
+        DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.isNull(),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("dev"),
+                Mockito.eq("node"),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("folha"),
+                Mockito.eq(8))).thenReturn(discoveryContext(List.of(
+                "risk-intelligence.vw-indicadores-incidentes",
+                "human-resources.folhas-pagamento",
+                "procurement.suppliers")));
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.isNull(),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("dev"),
+                Mockito.eq("node"),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("pagamento"),
+                Mockito.eq(8))).thenReturn(discoveryContext(List.of(
+                "human-resources.vw-analytics-folha-pagamento",
+                "procurement.purchase-orders")));
+
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> domainCatalog,
+                        repository,
+                        "praxis-service");
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection = projectionService.projectCompact(
+                "Quais APIs existem sobre folha de pagamento? Explica sem criar tela.",
+                "tenant-a",
+                "dev");
+
+        assertThat(projection).isNotNull();
+        assertThat(projection.resources())
+                .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Resource::resourceKey)
+                .containsExactly(
+                        "human-resources.folhas-pagamento",
+                        "human-resources.vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void compactConsultativeProjectionDoesNotExposeLowQualityCatalogDescriptions() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of());
+        DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.isNull(),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("dev"),
+                Mockito.eq("node"),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("pessoa"),
+                Mockito.eq(8))).thenReturn(discoveryContext(
+                "human-resources.funcionarios",
+                "Funcionarios",
+                "Fonte classificada como base operacional/analitica; contexto logistico/risco; nao lista campos especificos."));
+
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> domainCatalog,
+                        repository,
+                        "praxis-service");
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection = projectionService.projectCompact(
+                "Que dados tem sobre pessoa funcionario?",
+                "tenant-a",
+                "dev");
+
+        assertThat(projection).isNotNull();
+        assertThat(projection.resources()).hasSize(1);
+        assertThat(projection.resources().get(0).description()).isBlank();
+        assertThat(projection.assistantMessage())
+                .contains("Funcionarios")
+                .contains("boa para consultar")
+                .doesNotContain("contexto logistico/risco")
+                .doesNotContain("nao lista campos especificos")
+                .doesNotContain("base operacional/analitica");
+    }
+
+    @Test
+    void compactConsultativeProjectionEnrichesConfirmedResourcesWithFieldsAndOperations() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/folhas-pagamento/filter/cursor",
+                        "POST",
+                        "folha,pagamento",
+                        "Filtrar folhas de pagamento",
+                        "Filtrar folhas de pagamento",
+                        "filterFolhasPagamentoCursor",
+                        null,
+                        "{}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/folhas-pagamento/stats/group-by",
+                        "POST",
+                        "folha,pagamento",
+                        "Agrupar folha para graficos",
+                        "Agrupar folha para graficos",
+                        "groupFolhasPagamento",
+                        null,
+                        "{}",
+                        "[]",
+                        "{}",
+                        null)));
+        DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.isNull(),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("dev"),
+                Mockito.eq("node"),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("folha"),
+                Mockito.eq(8))).thenReturn(discoveryContext(List.of("human-resources.folhas-pagamento")));
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.eq("human-resources.folhas-pagamento"),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.eq(80))).thenReturn(domainContext(
+                "human-resources.folhas-pagamento",
+                "Folhas Pagamento",
+                "Cadastro e acompanhamento operacional da folha de pagamento",
+                List.of("Competencia", "Valor total", "Status")));
+
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> domainCatalog,
+                        repository,
+                        "praxis-service");
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection = projectionService.projectCompact(
+                "Quais dados existem sobre folha de pagamento?",
+                "tenant-a",
+                "dev");
+
+        assertThat(projection).isNotNull();
+        AgenticAuthoringConsultativeApiCatalogProjection.Resource resource = projection.resources().get(0);
+        assertThat(resource.fields())
+                .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Field::label)
+                .contains("Competencia", "Valor total", "Status");
+        assertThat(resource.endpoints())
+                .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Endpoint::kind)
+                .contains("cursorFilter", "groupByStats");
+        assertThat(projection.assistantMessage())
+                .contains("Campos confirmados: Competencia, Valor total e Status")
+                .contains("Operações disponíveis: Filtrar folhas de pagamento e Agrupar folha para graficos")
+                .doesNotContain("schema");
+    }
+
+    @Test
     void apiCatalogProjectionFiltersWeakResourcesForFocusedCompoundDomainQuestion() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         when(repository.findAll()).thenReturn(List.of());
@@ -1526,5 +1760,34 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 null,
                 List.of(),
                 items);
+    }
+
+    private DomainCatalogContextResponse discoveryContext(
+            String resourceKey,
+            String label,
+            String description) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("resourceKey", resourceKey);
+        node.put("nodeKey", resourceKey + ".concept");
+        node.put("label", label);
+        node.put("description", description);
+        return new DomainCatalogContextResponse(
+                "praxis.domain-catalog-context/v0.1",
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                List.of(new DomainCatalogItemResponse(
+                        UUID.randomUUID(),
+                        resourceKey + "@latest",
+                        "node",
+                        resourceKey + ".concept",
+                        resourceKey,
+                        "concept",
+                        null,
+                        null,
+                        node)));
     }
 }

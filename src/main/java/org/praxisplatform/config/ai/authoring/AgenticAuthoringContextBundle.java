@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -11,8 +14,9 @@ import org.springframework.util.StringUtils;
 
 final class AgenticAuthoringContextBundle {
 
-    private static final int MAX_COMPACT_CAPABILITIES_PER_COMPONENT = 8;
-    private static final int MAX_COMPACT_TRIGGER_TERMS = 8;
+    private static final int MAX_DETAILED_COMPONENT_CATALOGS = 6;
+    private static final int MAX_COMPACT_CAPABILITIES_PER_COMPONENT = 5;
+    private static final int MAX_COMPACT_TRIGGER_TERMS = 5;
     private static final int MAX_COMPACT_FIELD_ALIASES = 6;
     private static final int MAX_COMPACT_ALIASES_PER_FIELD = 6;
     private static final int MAX_COMPACT_EXAMPLES = 1;
@@ -36,7 +40,7 @@ final class AgenticAuthoringContextBundle {
         bundle.set("userIntent", userIntent(objectMapper, request, effectivePrompt));
         bundle.set("retrievalContext", retrievalContext(objectMapper, candidateOptions));
         bundle.set("governedDomainContext", governedDomainContext(objectMapper, request, governedDomainContext));
-        bundle.set("componentContext", componentContext(objectMapper, componentCapabilities));
+        bundle.set("componentContext", componentContext(objectMapper, request, effectivePrompt, target, componentCapabilities));
         bundle.set("conversationContext", conversationContext(objectMapper, request));
         bundle.set("toolCatalog", toolCatalog(objectMapper));
         bundle.set("rules", rules(objectMapper));
@@ -128,9 +132,17 @@ final class AgenticAuthoringContextBundle {
 
     private static ObjectNode componentContext(
             ObjectMapper objectMapper,
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         ObjectNode component = objectMapper.createObjectNode();
-        component.set("componentCapabilities", compactComponentCapabilities(objectMapper, componentCapabilities));
+        component.set("componentCapabilities", compactComponentCapabilities(
+                objectMapper,
+                request,
+                effectivePrompt,
+                target,
+                componentCapabilities));
         component.set("authorableComponents", authorableComponents(objectMapper, componentCapabilities));
         component.set("platformGuide", platformGuide(objectMapper, componentCapabilities));
         component.put("formAuthoringPolicy", "Users can describe forms naturally, including fields and process goals. Praxis should ground final form materialization in governed domain resources, schemas, actions, and component capabilities; when grounding is incomplete, keep the form as a reviewable local/editorial draft instead of inventing business rules.");
@@ -141,12 +153,23 @@ final class AgenticAuthoringContextBundle {
 
     private static ObjectNode compactComponentCapabilities(
             ObjectMapper objectMapper,
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         ObjectNode compact = objectMapper.createObjectNode();
         compact.put("version", componentCapabilities == null ? "" : valueOrEmpty(componentCapabilities.version()));
+        int totalCatalogs = componentCapabilities == null || componentCapabilities.catalogs() == null
+                ? 0
+                : componentCapabilities.catalogs().size();
+        compact.put("totalCatalogs", totalCatalogs);
+        compact.put("detailPolicy", "Detailed capabilities are scoped to the current prompt and target to keep LLM latency low. Use authorableComponents and platformGuide for global discovery, then request or infer details for the selected component.");
         ArrayNode catalogs = compact.putArray("catalogs");
         if (componentCapabilities != null && componentCapabilities.catalogs() != null) {
-            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : componentCapabilities.catalogs()) {
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> selectedCatalogs =
+                    promptRelevantCatalogs(request, effectivePrompt, target, componentCapabilities.catalogs());
+            compact.put("includedCatalogs", selectedCatalogs.size());
+            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : selectedCatalogs) {
                 if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
                     continue;
                 }
@@ -176,6 +199,84 @@ final class AgenticAuthoringContextBundle {
             }
         }
         return compact;
+    }
+
+    private static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> promptRelevantCatalogs(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs) {
+        if (catalogs == null || catalogs.isEmpty()) {
+            return List.of();
+        }
+        List<ScoredCatalog> scored = new ArrayList<>();
+        String prompt = normalizedSearchText(valueOrEmpty(effectivePrompt) + " " + valueOrEmpty(request == null ? null : request.userPrompt()));
+        String targetComponentId = normalizedSearchText(request == null ? null : request.targetComponentId());
+        String selectedComponentId = normalizedSearchText(target == null ? null : target.componentId());
+        for (int index = 0; index < catalogs.size(); index++) {
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog = catalogs.get(index);
+            if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
+                continue;
+            }
+            int score = relevanceScore(catalog, prompt, targetComponentId, selectedComponentId);
+            scored.add(new ScoredCatalog(catalog, score, index));
+        }
+        return scored.stream()
+                .sorted(Comparator
+                        .comparingInt(ScoredCatalog::score).reversed()
+                        .thenComparingInt(ScoredCatalog::index))
+                .limit(MAX_DETAILED_COMPONENT_CATALOGS)
+                .map(ScoredCatalog::catalog)
+                .toList();
+    }
+
+    private static int relevanceScore(
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog,
+            String prompt,
+            String targetComponentId,
+            String selectedComponentId) {
+        String componentId = normalizedSearchText(catalog.componentId());
+        int score = 0;
+        if (!componentId.isBlank() && (componentId.equals(targetComponentId) || componentId.equals(selectedComponentId))) {
+            score += 100;
+        }
+        for (String token : searchTokens(componentId)) {
+            if (containsToken(prompt, token)) {
+                score += 24;
+            }
+        }
+        String purpose = normalizedSearchText(componentPurpose(catalog) + " " + componentBestFor(catalog));
+        for (String token : searchTokens(purpose)) {
+            if (containsToken(prompt, token)) {
+                score += 8;
+            }
+        }
+        if (catalog.capabilities() != null) {
+            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : catalog.capabilities()) {
+                if (capability == null) {
+                    continue;
+                }
+                if (containsToken(prompt, normalizedSearchText(capability.changeKind()))) {
+                    score += 10;
+                }
+                if (capability.triggerTerms() == null) {
+                    continue;
+                }
+                for (String term : capability.triggerTerms()) {
+                    String normalizedTerm = normalizedSearchText(term);
+                    if (!normalizedTerm.isBlank() && prompt.contains(normalizedTerm)) {
+                        score += 14;
+                    }
+                }
+            }
+        }
+        return score;
+    }
+
+    private record ScoredCatalog(
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog,
+            int score,
+            int index) {
     }
 
     private static ArrayNode authorableComponents(
@@ -259,6 +360,9 @@ final class AgenticAuthoringContextBundle {
         if (componentId.contains("tabs")) {
             return "Organizar uma experiencia em abas com secoes relacionadas.";
         }
+        if (componentId.contains("expansion") || componentId.contains("accordion")) {
+            return "Organizar uma experiencia em paineis expansiveis, accordion ou acordeon com conteudo e widgets governados.";
+        }
         if (componentId.contains("stepper") || componentId.contains("wizard")) {
             return "Conduzir processos em etapas com revisao progressiva.";
         }
@@ -284,6 +388,9 @@ final class AgenticAuthoringContextBundle {
         }
         if (componentId.contains("tabs")) {
             return "Paginas com multiplas visoes do mesmo assunto, como resumo, detalhes, historico e acoes.";
+        }
+        if (componentId.contains("expansion") || componentId.contains("accordion")) {
+            return "Paginas compactas com secoes recolhiveis, accordion ou acordeon, como dados gerais, detalhes, historico e acoes.";
         }
         if (componentId.contains("stepper") || componentId.contains("wizard")) {
             return "Fluxos com varias etapas, validacao gradual e revisao antes de concluir.";
@@ -368,6 +475,35 @@ final class AgenticAuthoringContextBundle {
 
     private static String valueOrEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static String normalizedSearchText(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase();
+        return normalized.replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    private static Set<String> searchTokens(String value) {
+        Set<String> tokens = new LinkedHashSet<>();
+        if (!StringUtils.hasText(value)) {
+            return tokens;
+        }
+        for (String token : value.split("\\s+")) {
+            if (token.length() >= 3) {
+                tokens.add(token);
+            }
+        }
+        return tokens;
+    }
+
+    private static boolean containsToken(String text, String token) {
+        return StringUtils.hasText(text)
+                && StringUtils.hasText(token)
+                && (" " + text + " ").contains(" " + token + " ");
     }
 
     private static void addLimited(ArrayNode node, Set<String> seen, String value, int limit) {

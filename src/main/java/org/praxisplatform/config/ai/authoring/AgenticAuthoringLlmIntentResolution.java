@@ -15,8 +15,40 @@ public record AgenticAuthoringLlmIntentResolution(
         List<String> clarificationQuestions,
         List<String> warnings,
         AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan,
-        AgenticAuthoringVisualizationDecision visualizationDecision
+        AgenticAuthoringVisualizationDecision visualizationDecision,
+        boolean requiresGovernedAuthoring
 ) {
+    public AgenticAuthoringLlmIntentResolution(
+            boolean resolved,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            String selectedResourcePath,
+            String resourceSearchQuery,
+            String followUpKind,
+            String assistantMessage,
+            List<AgenticAuthoringQuickReply> quickReplies,
+            List<String> clarificationQuestions,
+            List<String> warnings,
+            AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        this(
+                resolved,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedResourcePath,
+                resourceSearchQuery,
+                followUpKind,
+                assistantMessage,
+                quickReplies,
+                clarificationQuestions,
+                warnings,
+                consultativeRetrievalPlan,
+                visualizationDecision,
+                false);
+    }
+
     public AgenticAuthoringLlmIntentResolution(
             boolean resolved,
             String operationKind,
@@ -42,7 +74,8 @@ public record AgenticAuthoringLlmIntentResolution(
                 clarificationQuestions,
                 warnings,
                 null,
-                null);
+                null,
+                false);
     }
 
     public AgenticAuthoringLlmIntentResolution(
@@ -71,6 +104,7 @@ public record AgenticAuthoringLlmIntentResolution(
                 clarificationQuestions,
                 warnings,
                 null,
-                visualizationDecision);
+                visualizationDecision,
+                false);
     }
 }

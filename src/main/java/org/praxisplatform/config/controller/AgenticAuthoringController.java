@@ -398,7 +398,9 @@ public class AgenticAuthoringController {
                 List.of(),
                 MissingNode.getInstance(),
                 MissingNode.getInstance(),
-                null);
+                null)
+                .withAssistantContent(org.praxisplatform.config.ai.authoring.AgenticAuthoringAssistantContentFactory
+                        .fromConsultativeProjection(answer.apiCatalogProjection()));
         return Optional.of(new AgenticAuthoringPreviewResult(
                 true,
                 List.of(),

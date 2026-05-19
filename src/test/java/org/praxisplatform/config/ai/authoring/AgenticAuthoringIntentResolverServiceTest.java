@@ -143,6 +143,41 @@ class AgenticAuthoringIntentResolverServiceTest {
                 contextHints);
     }
 
+    private AgenticAuthoringIntentResolverService serviceWithGovernedAuthoringLlmIntent() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "form",
+                        "create_artifact",
+                        null,
+                        null,
+                        "new_instruction",
+                        "Essa intenção deve ser autorada como decisão governada compartilhada.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        null,
+                        true)));
+        return new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+    }
+
     @Test
     void genericStarterDoesNotInventQuickstartResourcesWithoutHostCatalog() {
         AgenticAuthoringIntentResolverService genericService =
@@ -8027,9 +8062,10 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void businessRulePromptRoutesToSharedRuleAuthoringWithoutExplicitDomainCatalogHint() {
+    void llmGovernedIntentRoutesToSharedRuleAuthoringWithoutExplicitDomainCatalogHint() {
+        AgenticAuthoringIntentResolverService llmFirstService = serviceWithGovernedAuthoringLlmIntent();
         ObjectNode contextHints = resourcePathContextHints("/api/procurement/suppliers");
-        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
                 "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
                 contextHints));
 
@@ -8047,8 +8083,9 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void explicitResourcePathInPromptOverridesDomainHeuristicsForSharedRuleAuthoring() {
-        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+    void explicitResourcePathInPromptRoutesToSharedRuleAuthoringWhenLlmMarksGovernedIntent() {
+        AgenticAuthoringIntentResolverService llmFirstService = serviceWithGovernedAuthoringLlmIntent();
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie uma regra de validacao governada para chamados em /api/helpdesk/chamados: prioridade e titulo obrigatorios antes de salvar, mesmo citando funcionarios no texto.",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
@@ -8071,7 +8108,8 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void canonicalRoutingMatrixRoutesBusinessRulesToSharedRuleAuthoring() {
+    void canonicalRoutingMatrixRoutesLlmGovernedIntentsToSharedRuleAuthoring() {
+        AgenticAuthoringIntentResolverService llmFirstService = serviceWithGovernedAuthoringLlmIntent();
         List<RoutingCase> cases = List.of(
                 new RoutingCase(
                         "Crie uma politica de elegibilidade para fornecedores inativos",
@@ -8088,7 +8126,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         for (RoutingCase routingCase : cases) {
             ObjectNode contextHints = resourcePathContextHints(routingCase.resourcePath());
-            AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+            AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
                     routingCase.prompt(),
                     contextHints));
 
@@ -8117,7 +8155,8 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void deterministicGuardrailRoutesGovernancePromptsWithResolvedResourceToSharedRules() {
+    void llmGovernanceDecisionRoutesGovernancePromptsWithResolvedResourceToSharedRules() {
+        AgenticAuthoringIntentResolverService llmFirstService = serviceWithGovernedAuthoringLlmIntent();
         List<RoutingCase> cases = List.of(
                 new RoutingCase(
                         "Dados sensiveis exigem revisao antes de aprovar",
@@ -8133,7 +8172,7 @@ class AgenticAuthoringIntentResolverServiceTest {
             ObjectNode contextHints = objectMapper.createObjectNode();
             contextHints.put("resourcePath", routingCase.resourcePath());
 
-            AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+            AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
                     routingCase.prompt(),
                     "praxis-ui-angular",
                     "praxis-dynamic-page-builder",
@@ -8209,7 +8248,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void businessRulePromptKeepsKnownResourceCandidateWhenLlmIntentIsUnavailable() {
+    void businessRulePromptDoesNotRouteToSharedRuleWhenLlmIntentIsUnavailable() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -8235,9 +8274,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "deterministic-smoke-disabled",
                 contextHints));
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.gate().status()).isEqualTo("route_required");
-        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isNotEqualTo("route_required");
+        assertThat(result.failureCodes()).doesNotContain("shared-rule-authoring-required");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
         assertThat(result.selectedCandidate().evidence()).contains("quick-reply-context");

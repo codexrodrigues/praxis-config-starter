@@ -22,6 +22,7 @@ import org.springframework.util.StringUtils;
 public class AgenticAuthoringConsultativeApiCatalogProjectionService {
 
     private static final int MAX_PROJECTED_RESOURCES = 6;
+    private static final int MAX_COMPACT_CANDIDATE_RESOURCES = 18;
     private static final int SUFFICIENT_PROJECTED_RESOURCES = 4;
     private static final int MAX_DISCOVERY_QUERIES = 5;
     private static final int MAX_DISCOVERY_ITEMS = 8;
@@ -33,7 +34,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             "dado", "dados", "existe", "existem", "relacionado", "relacionados", "tela", "telas", "posso",
             "fazer", "criar", "aqui", "explique", "explicar", "consultar", "consulta", "consultas",
             "recomenda", "recomendar", "recomendacao", "recomendacoes", "recomendações", "criada", "criadas",
-            "esta", "estao", "estão");
+            "esta", "estao", "estão", "sem", "ainda");
 
     private final Supplier<DomainCatalogIngestionService> domainCatalogIngestionServiceSupplier;
     private final ApiMetadataRepository apiMetadataRepository;
@@ -101,7 +102,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                 .toList();
         return new AgenticAuthoringConsultativeApiCatalogProjection(
                 safe(query),
-                assistantMessage(resources),
+                assistantMessage(query, resources),
                 List.copyOf(resources),
                 List.copyOf(warnings));
     }
@@ -116,9 +117,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         if (domainCatalogIngestionService == null) {
             return null;
         }
-        List<String> queries = significantTokens(query).stream()
-                .limit(MAX_DISCOVERY_QUERIES)
-                .toList();
+        Set<String> queryTokens = significantTokens(query);
+        List<String> queries = catalogDiscoveryQueries(query);
         if (queries.isEmpty()) {
             return null;
         }
@@ -134,13 +134,80 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             return null;
         }
         List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> projected = resources.values().stream()
+                .filter(resource -> compactResourceScore(queryTokens, resource) > 0)
+                .sorted(Comparator
+                        .comparingInt((AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) ->
+                                compactResourceScore(queryTokens, resource))
+                        .reversed()
+                        .thenComparing(resource -> "analytical".equals(resource.role()) ? 1 : 0)
+                        .thenComparing(resource -> resource.label().toLowerCase(Locale.ROOT)))
                 .limit(MAX_PROJECTED_RESOURCES)
+                .toList();
+        if (projected.isEmpty()) {
+            List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> unsupportedContext =
+                    resources.values().stream()
+                            .limit(MAX_PROJECTED_RESOURCES)
+                            .toList();
+            String unsupportedMessage =
+                    AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(query, unsupportedContext);
+            if (StringUtils.hasText(unsupportedMessage)) {
+                return new AgenticAuthoringConsultativeApiCatalogProjection(
+                        safe(query),
+                        unsupportedMessage,
+                        unsupportedContext,
+                        List.of(
+                                "domain-api-consultative-compact-projection-used",
+                                "domain-api-consultative-compact-projection-no-concept-coverage"));
+            }
+            return null;
+        }
+        List<ApiMetadata> apiMetadata = apiMetadataRepository == null ? List.of() : apiMetadataRepository.findAll();
+        List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> enriched = projected.stream()
+                .map(resource -> enrichCompactResource(domainCatalogIngestionService, resource, apiMetadata, tenantId, environment))
                 .toList();
         return new AgenticAuthoringConsultativeApiCatalogProjection(
                 safe(query),
-                assistantMessage(projected),
-                projected,
+                assistantMessage(query, enriched),
+                enriched,
                 List.of("domain-api-consultative-compact-projection-used"));
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection.Resource enrichCompactResource(
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            AgenticAuthoringConsultativeApiCatalogProjection.Resource compactResource,
+            List<ApiMetadata> apiMetadata,
+            String tenantId,
+            String environment) {
+        if (compactResource == null) {
+            return null;
+        }
+        DomainCatalogContextResponse context = latestContext(
+                domainCatalogIngestionService,
+                compactResource.resourceKey(),
+                tenantId,
+                environment);
+        if (context != null && context.items() != null && !context.items().isEmpty()) {
+            return resource(compactResource.resourceKey(), null, context.items(), apiMetadata);
+        }
+        List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints =
+                endpoints(compactResource.resourcePath(), apiMetadata);
+        if (endpoints.isEmpty()) {
+            return compactResource;
+        }
+        List<String> evidence = new ArrayList<>(compactResource.evidence() == null
+                ? List.of()
+                : compactResource.evidence());
+        evidence.add("api_metadata");
+        return new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
+                compactResource.resourceKey(),
+                compactResource.resourcePath(),
+                compactResource.label(),
+                role(compactResource.resourceKey(), endpoints),
+                compactResource.description(),
+                compactResource.fields(),
+                compactResource.actions(),
+                endpoints,
+                evidence.stream().filter(StringUtils::hasText).distinct().toList());
     }
 
     private void collectCompactResources(
@@ -150,7 +217,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             String tenantId,
             String environment,
             Map<String, AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources) {
-        if (resources.size() >= MAX_PROJECTED_RESOURCES) {
+        if (resources.size() >= MAX_COMPACT_CANDIDATE_RESOURCES) {
             return;
         }
         for (String catalogQuery : queries) {
@@ -174,7 +241,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                         continue;
                     }
                     resources.put(resource.resourceKey(), resource);
-                    if (resources.size() >= MAX_PROJECTED_RESOURCES) {
+                    if (resources.size() >= MAX_COMPACT_CANDIDATE_RESOURCES) {
                         return;
                     }
                 }
@@ -190,13 +257,17 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             return null;
         }
         JsonNode payload = item == null ? null : item.payload();
-        String label = firstNonBlank(
-                firstText(payload, "resourceLabel", "label", "title", "name"),
-                humanLabel(resourceKey));
-        String description = firstNonBlank(
-                firstText(payload, "description", "summary", "helpText"),
-                firstText(payload, "businessDescription", "purpose"));
         String nodeType = safe(item == null ? "" : item.nodeType());
+        boolean conceptNode = "concept".equals(nodeType);
+        String label = firstNonBlank(
+                firstText(payload, "resourceLabel"),
+                conceptNode ? firstText(payload, "label", "title", "name") : "",
+                humanLabel(resourceKey));
+        String description = conceptNode
+                ? meaningfulDescription(firstNonBlank(
+                        firstText(payload, "description", "summary", "helpText"),
+                        firstText(payload, "businessDescription", "purpose")))
+                : meaningfulDescription(firstText(payload, "resourceDescription", "resourceSummary"));
         List<String> evidence = List.of(firstNonBlank(
                 description,
                 nodeType.isBlank() ? "" : "Catalogo de dominio: " + nodeType,
@@ -211,6 +282,37 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                 List.of(),
                 List.of(),
                 evidence);
+    }
+
+    private int compactResourceScore(
+            Set<String> queryTokens,
+            AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
+        if (queryTokens == null || queryTokens.isEmpty()) {
+            return 1;
+        }
+        String haystack = normalizedText(compactResourceText(resource));
+        int score = 0;
+        for (String token : queryTokens) {
+            if (containsToken(haystack, token)) {
+                score++;
+            }
+        }
+        return score;
+    }
+
+    private String compactResourceText(AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
+        if (resource == null) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder();
+        text.append(' ').append(resource.resourceKey());
+        text.append(' ').append(resource.resourcePath());
+        text.append(' ').append(resource.label());
+        text.append(' ').append(resource.description());
+        if (resource.evidence() != null) {
+            resource.evidence().forEach(value -> text.append(' ').append(value));
+        }
+        return text.toString();
     }
 
     private List<String> domainCatalogResourceKeys(
@@ -458,21 +560,21 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             String nodeType = safe(item.nodeType());
             if ("concept".equals(nodeType) && conceptLabel.isBlank()) {
                 conceptLabel = firstText(item.payload(), "label", "name", "title");
-                description = firstText(item.payload(), "description", "summary", "helpText");
+                description = meaningfulDescription(firstText(item.payload(), "description", "summary", "helpText"));
                 continue;
             }
             if ("field".equals(nodeType) && fields.size() < 12) {
                 fields.add(new AgenticAuthoringConsultativeApiCatalogProjection.Field(
                         leafName(firstText(item.payload(), "nodeKey", "key", "name", "fieldName", "id")),
                         firstNonBlank(firstText(item.payload(), "label", "name", "title"), leafName(item.itemKey())),
-                        firstText(item.payload(), "description", "summary", "helpText")));
+                        meaningfulDescription(firstText(item.payload(), "description", "summary", "helpText"))));
                 continue;
             }
             if ("action".equals(nodeType) && actions.size() < 8) {
                 actions.add(new AgenticAuthoringConsultativeApiCatalogProjection.Action(
                         leafName(firstText(item.payload(), "nodeKey", "key", "name", "action", "id")),
                         firstNonBlank(firstText(item.payload(), "label", "name", "title"), leafName(item.itemKey())),
-                        firstText(item.payload(), "description", "summary", "helpText")));
+                        meaningfulDescription(firstText(item.payload(), "description", "summary", "helpText"))));
             }
         }
         List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints = endpoints(resourcePath, apiMetadata);
@@ -631,8 +733,15 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         return tokens;
     }
 
-    private String assistantMessage(List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources) {
+    private String assistantMessage(
+            String query,
+            List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources) {
         List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> visible = resources.stream().limit(5).toList();
+        String unsupportedDomainMessage =
+                AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(query, visible);
+        if (StringUtils.hasText(unsupportedDomainMessage)) {
+            return unsupportedDomainMessage;
+        }
         StringBuilder message = new StringBuilder("Encontrei ");
         if (visible.size() == 1) {
             message.append("uma fonte de dados confirmada para esse recorte: ");
@@ -648,7 +757,13 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         if (!summaries.isEmpty()) {
             message.append(String.join(" ", summaries)).append(" ");
         }
-        message.append("Para uma tela administrativa, eu começaria por uma lista filtrável com campos confirmados");
+        boolean hasConfirmedFields = visible.stream().anyMatch(resource ->
+                resource.fields() != null && !resource.fields().isEmpty());
+        if (hasConfirmedFields) {
+            message.append("Para uma tela administrativa, eu começaria por uma lista filtrável com esses campos confirmados");
+        } else {
+            message.append("Para uma tela administrativa, eu começaria confirmando quais campos dessa fonte devem aparecer");
+        }
         boolean hasAnalytics = visible.stream().anyMatch(resource -> "analytical".equals(resource.role()));
         if (hasAnalytics) {
             message.append(" e, quando o objetivo for acompanhamento, usaria a visão analítica para indicadores e gráficos");
@@ -675,17 +790,46 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         if (!fields.isEmpty()) {
             summary.append(". Campos confirmados: ").append(humanJoin(fields));
         }
-        List<String> endpointLabels = resource.endpoints().stream()
-                .map(AgenticAuthoringConsultativeApiCatalogProjection.Endpoint::label)
+        List<String> endpointLabels = new ArrayList<>(resource.endpoints().stream()
+                .map(this::userFacingEndpointLabel)
                 .filter(StringUtils::hasText)
                 .distinct()
                 .limit(3)
-                .toList();
+                .toList());
+        if (endpointLabels.size() > 1) {
+            endpointLabels.remove("ver ações disponíveis para os registros");
+        }
         if (!endpointLabels.isEmpty()) {
             summary.append(". Operações disponíveis: ").append(humanJoin(endpointLabels));
         }
         summary.append(".");
         return summary.toString();
+    }
+
+    private String userFacingEndpointLabel(AgenticAuthoringConsultativeApiCatalogProjection.Endpoint endpoint) {
+        if (endpoint == null) {
+            return "";
+        }
+        String label = safe(endpoint.label());
+        String normalized = normalizedText(label);
+        if (normalized.contains("workflow actions") || normalized.contains("acoes de workflow")) {
+            return "ver ações disponíveis para os registros";
+        }
+        if (normalized.contains("capabilities") || normalized.contains("capabilidades")) {
+            return "";
+        }
+        if (normalized.contains("opcoes derivadas") || normalized.contains("fontes de opcao")) {
+            return "carregar opções para filtros e seletores";
+        }
+        return switch (safe(endpoint.kind())) {
+            case "groupByStats" -> firstNonBlank(label, "agrupar dados para gráficos");
+            case "timeSeriesStats" -> firstNonBlank(label, "montar série histórica");
+            case "cursorFilter", "filter" -> firstNonBlank(label, "filtrar registros");
+            case "listAll", "list" -> firstNonBlank(label, "listar registros");
+            case "create" -> firstNonBlank(label, "criar registro");
+            case "detail" -> firstNonBlank(label, "consultar detalhe");
+            default -> label;
+        };
     }
 
     private String humanJoin(List<String> values) {
@@ -771,6 +915,23 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         return "";
     }
 
+    private String meaningfulDescription(String value) {
+        String description = safe(value);
+        if (description.isBlank()) {
+            return "";
+        }
+        String normalized = normalizedText(description);
+        if (normalized.contains("contexto logistico/risco")
+                || (normalized.contains("contexto logistico") && normalized.contains("risco"))
+                || normalized.contains("nao lista campos especificos")
+                || normalized.contains("resumo documental generico")
+                || normalized.contains("descricao do dado de negocio")
+                || normalized.contains("base operacional/analitica")) {
+            return "";
+        }
+        return description;
+    }
+
     private String leafName(String value) {
         String text = safe(value);
         int dot = text.lastIndexOf('.');
@@ -784,6 +945,100 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         String normalized = Normalizer.normalize(safe(text), Normalizer.Form.NFD)
                 .replaceAll("\\p{M}+", "");
         return normalized.toLowerCase(Locale.ROOT);
+    }
+
+    private boolean containsToken(String haystack, String token) {
+        String normalizedToken = normalizedText(token).trim();
+        if (normalizedToken.isBlank()) {
+            return false;
+        }
+        String padded = " " + haystack.replaceAll("[^a-z0-9]+", " ").trim() + " ";
+        if (padded.contains(" " + normalizedToken + " ")
+                || padded.contains(" " + singular(normalizedToken) + " ")
+                || padded.contains(" " + plural(normalizedToken) + " ")) {
+            return true;
+        }
+        for (String candidate : padded.trim().split("\\s+")) {
+            if (nearToken(candidate, normalizedToken)
+                    || nearToken(candidate, singular(normalizedToken))
+                    || nearToken(candidate, plural(normalizedToken))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean nearToken(String candidate, String token) {
+        if (candidate.length() < 5 || token.length() < 5) {
+            return false;
+        }
+        if (Math.abs(candidate.length() - token.length()) > 1) {
+            return false;
+        }
+        if (candidate.length() == token.length() && adjacentTransposition(candidate, token)) {
+            return true;
+        }
+        return editDistanceAtMostOne(candidate, token);
+    }
+
+    private boolean adjacentTransposition(String left, String right) {
+        int firstDiff = -1;
+        int diffCount = 0;
+        for (int i = 0; i < left.length(); i++) {
+            if (left.charAt(i) != right.charAt(i)) {
+                if (firstDiff < 0) {
+                    firstDiff = i;
+                }
+                diffCount++;
+            }
+        }
+        return diffCount == 2
+                && firstDiff + 1 < left.length()
+                && left.charAt(firstDiff) == right.charAt(firstDiff + 1)
+                && left.charAt(firstDiff + 1) == right.charAt(firstDiff);
+    }
+
+    private boolean editDistanceAtMostOne(String left, String right) {
+        int i = 0;
+        int j = 0;
+        int edits = 0;
+        while (i < left.length() && j < right.length()) {
+            if (left.charAt(i) == right.charAt(j)) {
+                i++;
+                j++;
+                continue;
+            }
+            edits++;
+            if (edits > 1) {
+                return false;
+            }
+            if (left.length() == right.length()) {
+                i++;
+                j++;
+            } else if (left.length() > right.length()) {
+                i++;
+            } else {
+                j++;
+            }
+        }
+        return edits + (left.length() - i) + (right.length() - j) <= 1;
+    }
+
+    private String singular(String token) {
+        if (token.length() > 4 && token.endsWith("oes")) {
+            return token.substring(0, token.length() - 3) + "ao";
+        }
+        if (token.length() > 4 && token.endsWith("ais")) {
+            return token.substring(0, token.length() - 2) + "l";
+        }
+        if (token.length() > 3 && token.endsWith("s")) {
+            return token.substring(0, token.length() - 1);
+        }
+        return token;
+    }
+
+    private String plural(String token) {
+        return token.endsWith("s") ? token : token + "s";
     }
 
     private String safe(String value) {

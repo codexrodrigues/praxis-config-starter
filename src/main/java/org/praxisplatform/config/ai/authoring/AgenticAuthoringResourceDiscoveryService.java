@@ -121,6 +121,7 @@ public class AgenticAuthoringResourceDiscoveryService {
                 retrievalQuery,
                 artifactKind,
                 assistantMessage(candidates, artifactKind, consultativeProjection),
+                AgenticAuthoringAssistantContentFactory.fromConsultativeProjection(consultativeProjection),
                 List.copyOf(candidates),
                 quickReplies,
                 List.copyOf(warnings),

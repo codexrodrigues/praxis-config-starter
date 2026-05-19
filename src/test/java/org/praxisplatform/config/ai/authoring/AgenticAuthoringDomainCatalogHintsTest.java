@@ -50,10 +50,10 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("node");
         assertThat(contextHints.path("domainCatalog").path("itemTypes").path(1).asText())
                 .isEqualTo("governance");
-        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").asText())
-                .isEqualTo("shared_rule_authoring");
-        assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").asText())
-                .isEqualTo("privacy");
+        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").isMissingNode())
+                .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").isMissingNode())
+                .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("federated").asBoolean())
@@ -110,7 +110,7 @@ class AgenticAuthoringDomainCatalogHintsTest {
     }
 
     @Test
-    void enrichAddsSelectionEligibilityRuleTypeForSupplierBlockingPrompts() {
+    void enrichDoesNotInferAuthoringFlowFromSupplierBlockingPromptKeywords() {
         ObjectNode contextHints = objectMapper.createObjectNode();
         AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
                 "/api/procurement/suppliers",
@@ -129,10 +129,10 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 "Crie uma regra para impedir selecao de fornecedores blocked ou inactive em pedidos de compra",
                 null);
 
-        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").asText())
-                .isEqualTo("shared_rule_authoring");
-        assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").asText())
-                .isEqualTo("selection_eligibility");
+        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").isMissingNode())
+                .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").isMissingNode())
+                .isTrue();
         assertThat(contextHints.path("domainCatalog").path("resourceKey").asText())
                 .isEqualTo("procurement.suppliers");
     }

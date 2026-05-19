@@ -1,5 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 
 public record AgenticAuthoringResourceCandidatesResult(
@@ -8,6 +9,7 @@ public record AgenticAuthoringResourceCandidatesResult(
         String retrievalQuery,
         String artifactKind,
         String assistantMessage,
+        JsonNode assistantContent,
         List<AgenticAuthoringCandidate> candidates,
         List<AgenticAuthoringQuickReply> quickReplies,
         List<String> warnings,
@@ -28,6 +30,7 @@ public record AgenticAuthoringResourceCandidatesResult(
                 retrievalQuery,
                 artifactKind,
                 assistantMessage,
+                null,
                 candidates,
                 quickReplies,
                 warnings,

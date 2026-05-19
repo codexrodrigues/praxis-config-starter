@@ -33,10 +33,11 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     @Test
     void resolveCanUseFastLlmIntentPassWhenCompactEvidenceIsSufficient() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
         when(providerManagementService.generateJson(
                 promptCaptor.capture(),
-                any(AiJsonSchema.class),
+                schemaCaptor.capture(),
                 configCaptor.capture(),
                 eq("tenant"),
                 eq("user"),
@@ -49,6 +50,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": "/api/risk-intelligence/vw-indicadores-incidentes",
                   "resourceSearchQuery": null,
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Criei uma pre-visualizacao com um grafico simples por Severidade.",
                   "visualizationDecision": {
                     "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
@@ -144,6 +146,11 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .doesNotContain("/api/human-resources/funcionarios")
                 .doesNotContain("contextBundle:");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+        assertThat(schemaCaptor.getValue().jsonSchema())
+                .contains("\"requiresGovernedAuthoring\"")
+                .contains("\"required\"")
+                .contains("requiresGovernedAuthoring");
+        assertThat(result.requiresGovernedAuthoring()).isFalse();
         assertThat(result.artifactKind()).isEqualTo("chart");
         assertThat(result.selectedResourcePath())
                 .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
@@ -152,6 +159,100 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.visualizationDecision().includeDetailTable()).isFalse();
         assertThat(result.visualizationDecision().includeFilters()).isFalse();
         assertThat(result.visualizationDecision().includeKpis()).isFalse();
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void resolveCanUseFastLlmIntentPassWhenConversationContainsOnlyCurrentPrompt() throws Exception {
+        String prompt = "Crie uma pagina com accordion: dados gerais, detalhes e acoes de funcionarios.";
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "page",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "assistantMessage": "Criei uma pagina com paineis expansíveis para funcionários.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "funcionarios-accordion-page",
+                    "layoutKind": "accordion_layout",
+                    "primaryComponent": "praxis-expansion",
+                    "axes": [],
+                    "includeSummary": false,
+                    "includeDetailTable": false,
+                    "excludedComponentIds": ["praxis-chart"],
+                    "includeFilters": false,
+                    "includeKpis": false,
+                    "provenance": "llm-fast-intent"
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        prompt,
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(new AgenticAuthoringConversationMessage("m1", "user", prompt, "2026-05-17T10:00:00Z")),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                prompt,
+                objectMapper.createObjectNode(),
+                null,
+                List.of(new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "GET",
+                        "/schemas/filtered/human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.98d,
+                        "Fonte indicada explicitamente pelo usuario.",
+                        List.of("explicit-source-match"))),
+                componentCapabilitiesWithExpansion(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-fast-intent-context.v1")
+                .contains("For a requested page organized as accordion/acordeon/expansion panels")
+                .doesNotContain("contextBundle:");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-expansion");
         assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
         Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
                 any(),
@@ -934,6 +1035,30 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                                         "crie um grafico por status",
                                         "Agrupar pedidos por status",
                                         List.of("Use categoryField para o eixo X", "Use valueField para a metrica"))))))));
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult componentCapabilitiesWithExpansion() {
+        return new AgenticAuthoringComponentCapabilitiesResult(
+                "0",
+                List.of(
+                        new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
+                                "praxis-expansion",
+                                "0",
+                                List.of(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
+                                        "panel.add",
+                                        "layout_expansion",
+                                        List.of("accordion", "acordeon", "painel expansivel"),
+                                        List.of(),
+                                        List.of()))),
+                        new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
+                                "praxis-table",
+                                "0",
+                                List.of(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
+                                        "table.create",
+                                        "create_table",
+                                        List.of("tabela", "detalhes"),
+                                        List.of(),
+                                        List.of())))));
     }
 
     private AgenticAuthoringCandidate weakCandidate(String resourcePath) {

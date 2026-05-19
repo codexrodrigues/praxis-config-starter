@@ -149,7 +149,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             String userId,
             String environment) {
         List<AgenticAuthoringCandidate> fastCandidates = fastIntentCandidateOptions(candidateOptions);
-        if (!shouldTryFastIntentResolution(request, target, fastCandidates)) {
+        if (!shouldTryFastIntentResolution(request, effectivePrompt, target, fastCandidates)) {
             return Optional.empty();
         }
         try {
@@ -230,12 +230,13 @@ public class AgenticAuthoringLlmIntentResolverService {
 
     private boolean shouldTryFastIntentResolution(
             AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions) {
         if (request == null
                 || request.pendingClarification() != null
                 || request.activeSemanticDecision() != null
-                || (request.conversationMessages() != null && !request.conversationMessages().isEmpty())
+                || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt)
                 || candidateOptions == null
                 || candidateOptions.isEmpty()) {
             return false;
@@ -248,7 +249,44 @@ public class AgenticAuthoringLlmIntentResolverService {
                         || hasEvidence(candidate, "context-hint")
                         || hasEvidence(candidate, "quick-reply-context")
                         || hasEvidence(candidate, "current-page")
-                        || hasEvidence(candidate, "explicit-resource-path"));
+                        || hasEvidence(candidate, "explicit-resource-path")
+                        || hasEvidence(candidate, "tool-search-api-resources")
+                        || hasEvidence(candidate, "domain-catalog-context"));
+    }
+
+    private boolean hasConversationHistoryBeyondCurrentPrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt) {
+        if (request == null || request.conversationMessages() == null || request.conversationMessages().isEmpty()) {
+            return false;
+        }
+        List<AgenticAuthoringConversationMessage> messages = request.conversationMessages().stream()
+                .filter(message -> message != null && StringUtils.hasText(message.text()))
+                .toList();
+        if (messages.isEmpty()) {
+            return false;
+        }
+        if (messages.size() != 1) {
+            return true;
+        }
+        AgenticAuthoringConversationMessage message = messages.get(0);
+        return !"user".equalsIgnoreCase(valueOrDefault(message.role(), ""))
+                || (!sameCompactText(message.text(), effectivePrompt)
+                && !sameCompactText(message.text(), request.userPrompt()));
+    }
+
+    private boolean sameCompactText(String left, String right) {
+        String normalizedLeft = compactText(left);
+        String normalizedRight = compactText(right);
+        return !normalizedLeft.isBlank() && normalizedLeft.equals(normalizedRight);
+    }
+
+    private String compactText(String value) {
+        return value == null
+                ? ""
+                : value.toLowerCase(Locale.ROOT)
+                        .replaceAll("[^\\p{L}\\p{N}]+", " ")
+                        .trim();
     }
 
     private List<AgenticAuthoringCandidate> fastIntentCandidateOptions(List<AgenticAuthoringCandidate> candidateOptions) {
@@ -263,6 +301,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                         || hasEvidence(candidate, "quick-reply-context")
                         || hasEvidence(candidate, "current-page")
                         || hasEvidence(candidate, "explicit-resource-path")
+                        || hasEvidence(candidate, "tool-search-api-resources")
                         || hasEvidence(candidate, "domain-catalog-context"))
                 .toList();
         List<AgenticAuthoringCandidate> scoped = new ArrayList<>();
@@ -350,7 +389,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.clarificationQuestions(),
                 resolution.warnings(),
                 resolution.consultativeRetrievalPlan(),
-                resolution.visualizationDecision());
+                resolution.visualizationDecision(),
+                resolution.requiresGovernedAuthoring());
     }
 
     private AgenticAuthoringLlmIntentResolution withFastIntentWarning(
@@ -373,7 +413,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.clarificationQuestions(),
                 List.copyOf(warnings),
                 resolution.consultativeRetrievalPlan(),
-                resolution.visualizationDecision());
+                resolution.visualizationDecision(),
+                resolution.requiresGovernedAuthoring());
     }
 
     private String fastIntentPrompt(
@@ -461,8 +502,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
                 Select visualizationDecision.primaryComponent only from authorableComponents.
                 For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
+                For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
+                For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
                 For chart axes, use the grouping/time field in axes[].field and numeric measures in metricField/metricAggregation.
                 Field names may be proposed from the user's wording and candidate evidence; canonical schema validation runs after this step and may correct or reject them.
+                Set requiresGovernedAuthoring=true only for reusable governed business decisions, policies, compliance/access/eligibility/approval/privacy/enforcement rules that must go through shared-rule authoring. Keep it false for local visual formatting, masks, badges, labels, component configuration, layout, filters, and columns.
                 If the requested source/component cannot be resolved with this compact evidence, set resolved=false and leave visualizationDecision null.
                 Keep assistantMessage short and natural in the user's language.
                 Always include quickReplies, clarificationQuestions, warnings, visualizationDecision and consultativeRetrievalPlan fields.
@@ -627,6 +671,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 visualizationDecision(result.path("visualizationDecision"));
         AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan =
                 consultativeRetrievalPlan(result.path("consultativeRetrievalPlan"));
+        boolean requiresGovernedAuthoring = result.path("requiresGovernedAuthoring").asBoolean(false);
         if (!resolved
                 && operationKind.isBlank()
                 && artifactKind.isBlank()
@@ -652,7 +697,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 clarificationQuestions,
                 warnings,
                 consultativeRetrievalPlan,
-                visualizationDecision));
+                visualizationDecision,
+                requiresGovernedAuthoring));
     }
 
     private AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan(JsonNode node) {
@@ -806,6 +852,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 "none",
                 "unknown"));
         nullableString(properties, "assistantMessage");
+        properties.putObject("requiresGovernedAuthoring").put("type", "boolean");
         arrayOfStrings(properties, "clarificationQuestions");
         arrayOfStrings(properties, "warnings");
         properties.set("visualizationDecision", visualizationDecisionSchema());
@@ -835,6 +882,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("artifactKind")
                 .add("changeKind")
                 .add("followUpKind")
+                .add("requiresGovernedAuthoring")
                 .add("visualizationDecision")
                 .add("consultativeRetrievalPlan")
                 .add("quickReplies")

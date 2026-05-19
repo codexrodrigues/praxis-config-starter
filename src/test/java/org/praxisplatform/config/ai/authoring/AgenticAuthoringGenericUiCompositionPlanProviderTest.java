@@ -345,9 +345,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         String widgets = result.uiCompositionPlan().path("widgets").toString();
         assertThat(widgets)
-                .contains("\"metric\":{\"field\":\"salario_liquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
-                .contains("\"metric\":{\"operation\":\"SUM\",\"field\":\"salario_liquido\",\"alias\":\"salario_liquido\"}")
-                .contains("\"metrics\":[{\"aggregation\":\"sum\",\"field\":\"salario_liquido\",\"alias\":\"salario_liquido\"}]");
+                .contains("\"metric\":{\"field\":\"salarioLiquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
+                .contains("\"metric\":{\"operation\":\"SUM\",\"field\":\"salarioLiquido\",\"alias\":\"salarioLiquido\"}")
+                .contains("\"metrics\":[{\"aggregation\":\"sum\",\"field\":\"salarioLiquido\",\"alias\":\"salarioLiquido\"}]");
     }
 
     @Test
@@ -676,6 +676,46 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void createsGovernedExpansionPageWhenDecisionSelectsAccordionComponent() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "resource accordion workspace",
+                "accordion",
+                "praxis-expansion",
+                List.of(),
+                false,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma pagina com accordion: dados gerais, detalhes e acoes de funcionarios.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "create_artifact", "/api/human-resources/funcionarios", decision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-expansion-page");
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
+        JsonNode expansion = plan.path("widgets").path(0);
+        assertThat(expansion.path("componentId").asText()).isEqualTo("praxis-expansion");
+        assertThat(expansion.path("inputs").path("strictValidation").asBoolean()).isTrue();
+        JsonNode panels = expansion.path("inputs").path("config").path("panels");
+        assertThat(panels).hasSize(3);
+        assertThat(panels).extracting(panel -> panel.path("title").asText())
+                .containsExactly("Dados gerais", "Detalhes", "Acoes");
+        assertThat(panels.toString())
+                .contains("praxis-rich-content")
+                .contains("praxis-table")
+                .contains("praxis-dynamic-form")
+                .contains("/api/human-resources/funcionarios")
+                .doesNotContain("payroll")
+                .doesNotContain("quickstart");
+        assertThat(plan.path("canvas").path("items").path("funcionarios-expansion").path("colSpan").asInt())
+                .isEqualTo(12);
+    }
+
+    @Test
     void modifiesExistingChartTypeFromComponentCapabilityAction() {
         ObjectNode page = objectMapper.createObjectNode();
         ObjectNode widget = page.putArray("widgets").addObject();
@@ -857,6 +897,45 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(link.path("from").path("ref").path("port").asText()).isEqualTo("pointClick");
         assertThat(link.path("to").path("ref").path("actionId").asText()).isEqualTo("surface.open");
         assertThat(link.path("to").path("ref").path("payload").path("presentation").asText()).isEqualTo("modal");
+    }
+
+    @Test
+    void llmResolvedChartDrilldownModificationDoesNotRequireContextualActionHints() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = widget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        ObjectNode inputs = definition.putObject("inputs");
+        ObjectNode config = inputs.putObject("config");
+        config.put("type", "bar");
+        ObjectNode dataSource = config.putObject("dataSource");
+        dataSource.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
+        dataSource.put("schemaUrl", "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes");
+        ObjectNode axes = config.putObject("axes");
+        axes.putObject("x").put("field", "severidade").put("label", "Severidade");
+        config.putArray("series").addObject().put("type", "bar");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Abra os registros da categoria selecionada do gráfico em um modal de detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                chartModificationIntent("chart", "praxis-chart", "enable_chart_drilldown"))).orElseThrow();
+
+        JsonNode patchedChart = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition");
+        JsonNode link = result.compiledFormPatch().path("patch").path("page")
+                .path("composition").path("links").get(0);
+
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-surface-open-modification");
+        assertThat(patchedChart.path("outputs").path("pointClick").path("type").asText())
+                .isEqualTo("surface.open");
+        assertThat(patchedChart.path("outputs").path("pointClick").path("params").path("bindings").get(0).path("to").asText())
+                .isEqualTo("widget.inputs.queryContext.filters.severidade");
+        assertThat(link.path("from").path("ref").path("port").asText()).isEqualTo("pointClick");
+        assertThat(link.path("to").path("ref").path("actionId").asText()).isEqualTo("surface.open");
     }
 
     @Test

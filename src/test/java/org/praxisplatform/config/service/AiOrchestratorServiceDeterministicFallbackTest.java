@@ -287,6 +287,7 @@ class AiOrchestratorServiceDeterministicFallbackTest {
                   "columns": [
                     { "field": "status", "header": "Status" },
                     { "field": "createdAt", "header": "Data de criacao" },
+                    { "field": "cpf", "header": "CPF" },
                     { "field": "classe", "header": "Classe" }
                   ],
                   "behavior": {}
@@ -325,6 +326,7 @@ class AiOrchestratorServiceDeterministicFallbackTest {
                 AiCapability.builder().path("appearance").valueKind("object").build(),
                 AiCapability.builder().path("behavior").valueKind("object").build(),
                 AiCapability.builder().path("columns[]").valueKind("object").build(),
+                AiCapability.builder().path("columns[].format").valueKind("string").build(),
                 AiCapability.builder().path("columns[].conditionalRenderers[]").valueKind("object").build());
     }
 
