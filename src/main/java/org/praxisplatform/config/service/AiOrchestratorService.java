@@ -258,44 +258,7 @@ public class AiOrchestratorService {
             List<AiCapability> componentCapabilities = extractComponentCapabilities(context.getComponentDefinition());
             JsonNode componentContext = extractComponentContextPack(context.getComponentDefinition());
             if (COMPONENT_ID_TABLE.equals(request.getComponentId())) {
-                List<ContextOption> earlyBaseFormatOptions =
-                        resolveOptionsForPath(componentContext, configCapabilities, "columns[].format");
-                SelectedFormatSelection earlySelectedFormat = extractSelectedFormatFromHints(request.getContextHints());
-                List<ContextOption> earlyFormatOptions = augmentFormatOptionsForPrompt(
-                        earlyBaseFormatOptions,
-                        request.getUserPrompt(),
-                        earlySelectedFormat != null ? earlySelectedFormat.targetField : null);
-                if (isConsultativeTableFormatQuestion(request.getUserPrompt())) {
-                    String tableFormatAnswer = answerTableFormatCapabilityQuestion(
-                            request.getUserPrompt(),
-                            currentState,
-                            earlyFormatOptions);
-                    if (tableFormatAnswer != null) {
-                        warnings.add("table-format-capability-consultative-answer-used");
-                        AiOrchestratorResponse response = info(tableFormatAnswer);
-                        List<AiOption> actionOptions = buildTableDateFormatActionOptions(
-                                request.getUserPrompt(),
-                                currentState,
-                                earlyFormatOptions);
-                        if (!actionOptions.isEmpty()) {
-                            response.setOptionPayloads(actionOptions);
-                        }
-                        return finalizeResponse(response, memoryContext);
-                    }
-                }
-                AiOrchestratorResponse earlyTableFallback = tryResolveTableDeterministicDirectFallback(
-                        request,
-                        currentState,
-                        warnings,
-                        configCapabilities,
-                        componentCapabilities,
-                        componentContext,
-                        authoringManifest);
-                if (earlyTableFallback != null) {
-                    warnings.add("componentEditPlan resolvido no caminho rapido de tabela.");
-                    earlyTableFallback.setWarnings(warnings);
-                    return finalizeResponse(earlyTableFallback, memoryContext);
-                }
+                warnings.add("table-keyword-routing-disabled-before-llm");
             }
 
             AiCallConfig frontendConfig = resolveFrontendCallConfig(tenantId, userId, environment);
@@ -438,25 +401,6 @@ public class AiOrchestratorService {
         List<String> configCategories = extractCategoryNames(configCapabilities);
         List<String> componentCategories = extractCategoryNames(componentCapabilities);
 
-        if (isTable && isConsultativeTableFormatQuestion(request.getUserPrompt())) {
-            String tableFormatAnswer = answerTableFormatCapabilityQuestion(
-                    request.getUserPrompt(),
-                    currentState,
-                    formatOptions);
-            if (tableFormatAnswer != null) {
-                warnings.add("table-format-capability-consultative-answer-used");
-                AiOrchestratorResponse response = info(tableFormatAnswer);
-                List<AiOption> actionOptions = buildTableDateFormatActionOptions(
-                        request.getUserPrompt(),
-                        currentState,
-                        formatOptions);
-                if (!actionOptions.isEmpty()) {
-                    response.setOptionPayloads(actionOptions);
-                }
-                return finalizeResponse(response, memoryContext);
-            }
-        }
-
         if (request.getSuggestedPatch() != null && !request.getSuggestedPatch().isNull()) {
             return finalizeResponse(applySuggestedPatch(
                     request.getSuggestedPatch(),
@@ -491,18 +435,6 @@ public class AiOrchestratorService {
                 authoringManifest);
         if (preClassificationFiltering != null) {
             return finalizeResponse(preClassificationFiltering, memoryContext);
-        }
-
-        AiOrchestratorResponse preClassificationTableFallback = tryResolveTableDeterministicDirectFallback(
-                request,
-                currentState,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext,
-                authoringManifest);
-        if (preClassificationTableFallback != null) {
-            return finalizeResponse(preClassificationTableFallback, memoryContext);
         }
 
         AiIntentClassification intent = classifyIntent(
@@ -619,17 +551,6 @@ public class AiOrchestratorService {
                 intent.setOptions(null);
             }
             warnings.add("Categoria indefinida ignorada devido a actionCatalog disponível.");
-        }
-        AiOrchestratorResponse deterministicPreClarification = tryResolveTableDeterministicDirectFallback(
-                request,
-                currentState,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext,
-                authoringManifest);
-        if (deterministicPreClarification != null) {
-            return finalizeResponse(deterministicPreClarification, memoryContext);
         }
         if (Boolean.TRUE.equals(intent.getNeedsClarification())
                 || (missingContext != null && !missingContext.isEmpty())) {
@@ -766,19 +687,6 @@ public class AiOrchestratorService {
 
         if (isTable && !componentActions.isEmpty()) {
             if (actionPlan == null) {
-                AiActionPlan deterministicTablePlan = deriveFallbackTableManifestActionPlan(
-                        request,
-                        intent,
-                        currentState,
-                        columnDescriptors,
-                        componentActions,
-                        authoringManifest);
-                if (deterministicTablePlan != null) {
-                    actionPlan = deterministicTablePlan;
-                    warnings.add("componentEditPlan de tabela inferido antes do table_action_plan para operacao manifest-backed.");
-                }
-            }
-            if (actionPlan == null) {
                 actionPlan = extractTableActionPlan(
                         modelPrompt,
                         columnDescriptors,
@@ -794,17 +702,7 @@ public class AiOrchestratorService {
                         environment);
             }
             if (isActionPlanEmpty(actionPlan)) {
-                AiActionPlan fallbackTablePlan = deriveFallbackTableManifestActionPlan(
-                        request,
-                        intent,
-                        currentState,
-                        columnDescriptors,
-                        componentActions,
-                        authoringManifest);
-                if (fallbackTablePlan != null) {
-                    actionPlan = fallbackTablePlan;
-                    warnings.add("componentEditPlan de tabela inferido deterministicamente a partir do authoringManifest.");
-                }
+                warnings.add("table-action-plan-empty-without-keyword-fallback");
             }
             actionPlan = applyActionPlanDefaults(actionPlan, componentActions);
             actionPlan = applySingleActionTargetFallback(
@@ -825,31 +723,7 @@ public class AiOrchestratorService {
                     columnResolverKeys,
                     globalActions);
             if (expectedActions.isEmpty()) {
-                List<AiActionItem> fallbackActions = deriveFallbackTableActions(
-                        request.getUserPrompt(),
-                        columnDescriptors,
-                        componentActions,
-                        allowedActionTypes,
-                        columnResolverKeys,
-                        formatOptions);
-                if (!fallbackActions.isEmpty()) {
-                    warnings.add("keyword-fallback-table-actions-used");
-                    expectedActions = fallbackActions;
-                }
-            }
-            if (expectedActions.isEmpty()
-                    && buildComponentEditPlanFromActionPlan(actionPlan, authoringManifest) == null) {
-                AiActionPlan fallbackTablePlan = deriveFallbackTableManifestActionPlan(
-                        request,
-                        intent,
-                        currentState,
-                        columnDescriptors,
-                        componentActions,
-                        authoringManifest);
-                if (fallbackTablePlan != null) {
-                    actionPlan = fallbackTablePlan;
-                    warnings.add("componentEditPlan de tabela substituiu action plan nao materializavel pelo authoringManifest.");
-                }
+                warnings.add("table-expected-actions-empty-without-keyword-fallback");
             }
             expectedActions = applyPlanValueFallback(
                     expectedActions,
@@ -1046,17 +920,6 @@ public class AiOrchestratorService {
                     intent.getCategory(),
                     filteredCaps != null ? filteredCaps.size() : 0,
                     summarizeCapabilityPaths(filteredCaps, 12));
-        }
-        AiOrchestratorResponse deterministicFastPath = tryResolveTableDeterministicDirectFallback(
-                request,
-                currentState,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext,
-                authoringManifest);
-        if (deterministicFastPath != null) {
-            return finalizeResponse(deterministicFastPath, memoryContext);
         }
         IntentPlan intentPlan = generateIntentPlan(
                 request,
@@ -1268,16 +1131,8 @@ public class AiOrchestratorService {
             return finalizeResponse(errorWithWarnings(semanticCheck.message, warnings), memoryContext);
         }
         patchNode = semanticCheck.patch;
-        AiOrchestratorResponse relevanceFallback = tryResolveDeterministicPatchRelevanceFallback(
-                request,
-                patchNode,
-                currentState,
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext);
-        if (relevanceFallback != null) {
-            return finalizeResponse(relevanceFallback, memoryContext);
+        if (isTable) {
+            warnings.add("table-deterministic-patch-relevance-fallback-disabled");
         }
 
         if (actionPlan != null
