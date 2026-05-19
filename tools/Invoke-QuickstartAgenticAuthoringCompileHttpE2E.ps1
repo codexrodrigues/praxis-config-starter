@@ -7,7 +7,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
-    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada."
+    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao."
 )
 
 $ErrorActionPreference = "Stop"
@@ -101,8 +101,8 @@ if (-not $result.compileValid) {
 if ($result.widgetId -ne "praxis-dynamic-form") {
     throw "Compiled patch did not target praxis-dynamic-form."
 }
-if ($result.submitUrl -ne "/api/helpdesk/chamados") {
-    throw "Compiled patch submitUrl is not the helpdesk create endpoint."
+if ($result.submitUrl -ne "/api/operations/incidentes") {
+    throw "Compiled patch submitUrl is not the canonical operations incident create endpoint."
 }
 
 $result | ConvertTo-Json -Depth 6

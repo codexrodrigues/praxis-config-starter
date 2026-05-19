@@ -43,7 +43,7 @@ urlencode() {
 }
 
 headers=(-H "Origin: $ORIGIN" -H "Content-Type: application/json" -H "X-Tenant-ID: $TENANT_ID" -H "X-User-ID: $USER_ID" -H "X-Env: $ENVIRONMENT")
-prompt="Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada."
+prompt="Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao."
 
 echo "[1/7] health"
 test "$(curl -fsS --max-time 10 "$BASE_URL/actuator/health" | tee "$ARTIFACTS_DIR/health.json" | jq -r '.status')" = "UP"
@@ -62,7 +62,7 @@ compile_body="$(jq -n --argjson minimalFormPlan "$(jq '.minimalFormPlan' <<<"$pl
 compiled="$(curl -fsS --max-time 60 -X POST "$BASE_URL/api/praxis/config/ai/authoring/compiled-form-patch" "${headers[@]}" --data-binary @<(printf '%s' "$compile_body") | tee "$ARTIFACTS_DIR/compile.response.json")"
 test "$(jq -r '.valid' <<<"$compiled")" = "true"
 test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.id' <<<"$compiled")" = "praxis-dynamic-form"
-test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.inputs.submitUrl' <<<"$compiled")" = "/api/helpdesk/chamados"
+test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.inputs.submitUrl' <<<"$compiled")" = "/api/operations/incidentes"
 
 echo "[4/7] page-preview"
 intent="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/intent-resolution" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/intent.response.json")"
@@ -75,7 +75,7 @@ test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.id' <<<"$prev
 
 echo "[5/7] page-apply/get/delete"
 component_type="praxis-dynamic-page"
-component_id="agentic-authoring:local-e2e:helpdesk-ticket-form"
+component_id="agentic-authoring:local-e2e:operations-incident-form"
 ui_uri="$BASE_URL/api/praxis/config/ui?componentType=$(urlencode "$component_type")&componentId=$(urlencode "$component_id")&scope=user"
 apply_body="$(jq -n --argjson compiledFormPatch "$(jq '.compiledFormPatch' <<<"$preview")" --argjson semanticDecision "$(jq '.semanticDecision' <<<"$intent")" --arg componentType "$component_type" --arg componentId "$component_id" \
   '{compiledFormPatch:$compiledFormPatch, semanticDecision:$semanticDecision, componentType:$componentType, componentId:$componentId, scope:"user", tags:{purpose:"agentic-authoring-local-e2e"}}')"

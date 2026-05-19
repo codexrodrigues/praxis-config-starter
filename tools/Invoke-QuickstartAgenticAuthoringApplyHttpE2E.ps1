@@ -8,8 +8,8 @@ param(
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
     [string] $ComponentType = "praxis-dynamic-page",
-    [string] $ComponentId = "agentic-authoring:e2e:helpdesk-ticket-form",
-    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada."
+    [string] $ComponentId = "agentic-authoring:e2e:operations-incident-form",
+    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao."
 )
 
 $ErrorActionPreference = "Stop"
@@ -161,8 +161,8 @@ try {
     if ($result.widgetId -ne "praxis-dynamic-form") {
         throw "Persisted UI config did not contain praxis-dynamic-form."
     }
-    if ($result.submitUrl -ne "/api/helpdesk/chamados") {
-        throw "Persisted submitUrl is not the helpdesk create endpoint."
+    if ($result.submitUrl -ne "/api/operations/incidentes") {
+        throw "Persisted submitUrl is not the canonical operations incident create endpoint."
     }
     if (-not $result.cleanupDeleted) {
         throw "E2E record cleanup did not run."
