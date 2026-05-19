@@ -609,13 +609,15 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
-        if (selectedCandidate == null
-                && !explicitLocalUiComposition
+        if (!explicitLocalUiComposition
                 && isExplicitGovernedBusinessRulePrompt(prompt)
                 && candidates != null
                 && !candidates.isEmpty()) {
-            selectedCandidate = promptAlignedGovernedRuleCandidate(prompt, candidates);
-            if (selectedCandidate == null) {
+            AgenticAuthoringCandidate promptAlignedGovernedRuleCandidate =
+                    promptAlignedGovernedRuleCandidate(prompt, candidates);
+            if (promptAlignedGovernedRuleCandidate != null) {
+                selectedCandidate = promptAlignedGovernedRuleCandidate;
+            } else if (selectedCandidate == null) {
                 selectedCandidate = selectCandidate(
                         candidates,
                         target,

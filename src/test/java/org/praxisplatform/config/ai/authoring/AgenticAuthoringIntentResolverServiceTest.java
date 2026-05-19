@@ -8350,12 +8350,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .thenReturn(Optional.empty());
         AgenticAuthoringCandidate genericHigherScoreCandidate = richCandidate(
                 "/api/human-resources/habilidades",
-                0.91d,
+                0.98d,
                 "Habilidades",
                 "Competencias e habilidades de funcionarios.");
         AgenticAuthoringCandidate procurementSupplierCandidate = richCandidate(
                 "/api/procurement/suppliers",
-                0.72d,
+                0.70d,
                 "Fornecedores",
                 "Fornecedores de compras, elegibilidade, bloqueio e selecao.");
         Mockito.when(candidateCatalog.discover(
