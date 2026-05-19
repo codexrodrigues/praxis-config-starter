@@ -55,7 +55,8 @@ printf '%s' "$body" | jq 'del(.apiKey) + {apiKey:"***"}' > "$ARTIFACTS_DIR/reque
 intent="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/intent-resolution" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/intent.response.json")"
 test "$(jq -r '.valid' <<<"$intent")" = "true"
 jq -e '.semanticDecision.schemaVersion == "praxis-agentic-authoring-semantic-decision.v1"' <<<"$intent" >/dev/null
-plan="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/minimal-form-plan" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/plan.response.json")"
+plan_body="$(jq --argjson intentResolution "$intent" '. + {intentResolution:$intentResolution}' <<<"$body")"
+plan="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/minimal-form-plan" "${headers[@]}" --data-binary @<(printf '%s' "$plan_body") | tee "$ARTIFACTS_DIR/plan.response.json")"
 test "$(jq -r '.valid' <<<"$plan")" = "true"
 jq -e '.minimalFormPlan.fields | map(.name) | index("titulo") != null' <<<"$plan" >/dev/null
 jq -e '.minimalFormPlan.fields | map(.name) | index("prioridadeId") == null and index("statusAtualId") == null' <<<"$plan" >/dev/null

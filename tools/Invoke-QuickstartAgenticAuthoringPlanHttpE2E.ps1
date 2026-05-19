@@ -56,11 +56,20 @@ $body = @{
 } | ConvertTo-Json -Compress
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
+$intent = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$base/api/praxis/config/ai/authoring/intent-resolution" `
+    -Headers $headers `
+    -Body $body `
+    -TimeoutSec 90
+$planRequest = $body | ConvertFrom-Json
+$planRequest | Add-Member -NotePropertyName intentResolution -NotePropertyValue $intent
+$bodyWithIntent = $planRequest | ConvertTo-Json -Depth 40 -Compress
 $plan = Invoke-RestMethod `
     -Method Post `
     -Uri "$base/api/praxis/config/ai/authoring/minimal-form-plan" `
     -Headers $headers `
-    -Body $body `
+    -Body $bodyWithIntent `
     -TimeoutSec 90
 
 $fields = @($plan.minimalFormPlan.fields)
@@ -68,14 +77,19 @@ $result = [pscustomobject]@{
     health = $health.status
     provider = $Provider
     model = $model
+    intentValid = [bool] $intent.valid
     valid = [bool] $plan.valid
+    selectedResourcePath = $intent.selectedCandidate.resourcePath
     fields = @($fields | ForEach-Object { $_.name })
-    failureCodes = @($plan.failureCodes)
+    failureCodes = @($intent.failureCodes + $plan.failureCodes)
     warningCount = @($plan.warnings).Count
 }
 
 if ($result.health -ne "UP") {
     throw "Quickstart health is not UP."
+}
+if (-not $result.intentValid) {
+    throw "Intent resolution is not valid: $($intent.failureCodes -join ', ')"
 }
 if (-not $result.valid) {
     throw "Agentic authoring MinimalFormPlan is not valid: $($result.failureCodes -join ', ')"

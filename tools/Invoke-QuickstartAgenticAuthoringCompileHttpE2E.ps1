@@ -62,11 +62,14 @@ $intent = Invoke-RestMethod `
     -Headers $headers `
     -Body $planBody `
     -TimeoutSec 90
+$planRequest = $planBody | ConvertFrom-Json
+$planRequest | Add-Member -NotePropertyName intentResolution -NotePropertyValue $intent
+$planBodyWithIntent = $planRequest | ConvertTo-Json -Depth 40 -Compress
 $plan = Invoke-RestMethod `
     -Method Post `
     -Uri "$base/api/praxis/config/ai/authoring/minimal-form-plan" `
     -Headers $headers `
-    -Body $planBody `
+    -Body $planBodyWithIntent `
     -TimeoutSec 90
 
 $compileBody = @{
