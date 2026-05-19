@@ -2357,10 +2357,18 @@ public class AgenticAuthoringIntentResolverService {
                 || candidates.isEmpty()) {
             return fallback;
         }
-        if (fallback != null && isWriteCandidate(fallback)) {
+        if (isBroadArtifactDiscoveryOnly(candidates)) {
             return fallback;
         }
-        if (isBroadArtifactDiscoveryOnly(candidates)) {
+        Optional<AgenticAuthoringCandidate> createEndpointCandidate = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(this::isCreateEndpointCandidate)
+                .findFirst();
+        if (createEndpointCandidate.isPresent()
+                && (fallback == null || !isCreateEndpointCandidate(fallback))) {
+            return createEndpointCandidate.get();
+        }
+        if (fallback != null && isWriteCandidate(fallback)) {
             return fallback;
         }
         if (fallback == null
@@ -2373,6 +2381,23 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(this::isWriteCandidate)
                 .findFirst()
                 .orElse(fallback);
+    }
+
+    private boolean isCreateEndpointCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        String operation = valueOrDefault(candidate.operation(), "");
+        String submitMethod = valueOrDefault(candidate.submitMethod(), operation);
+        String resourcePath = normalizePath(candidate.resourcePath());
+        String submitUrl = normalizePath(valueOrDefault(candidate.submitUrl(), resourcePath));
+        String schemaUrl = valueOrDefault(candidate.schemaUrl(), "");
+        return "post".equalsIgnoreCase(operation)
+                && "post".equalsIgnoreCase(submitMethod)
+                && !resourcePath.isBlank()
+                && resourcePath.equals(submitUrl)
+                && !schemaUrl.contains("/filter")
+                && !schemaUrl.contains("/stats/");
     }
 
     private String semanticRawPrompt(AgenticAuthoringIntentResolutionRequest request, String rawPrompt) {

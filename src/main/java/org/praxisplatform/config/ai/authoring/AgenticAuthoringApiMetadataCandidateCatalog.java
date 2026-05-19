@@ -134,12 +134,38 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             candidatesByResource.merge(
                     candidate.resourcePath(),
                     candidate,
-                    (existing, replacement) -> replacement.score() > existing.score() ? replacement : existing);
+                    this::preferredCandidateForSameResource);
         }
         return candidatesByResource.values().stream()
                 .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
                 .limit(8)
                 .toList();
+    }
+
+    private AgenticAuthoringCandidate preferredCandidateForSameResource(
+            AgenticAuthoringCandidate existing,
+            AgenticAuthoringCandidate replacement) {
+        boolean existingCreate = isCreateEndpointCandidate(existing);
+        boolean replacementCreate = isCreateEndpointCandidate(replacement);
+        if (replacementCreate != existingCreate) {
+            return replacementCreate ? replacement : existing;
+        }
+        return replacement.score() > existing.score() ? replacement : existing;
+    }
+
+    private boolean isCreateEndpointCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        String operation = valueOrEmpty(candidate.operation());
+        String submitMethod = valueOrEmpty(candidate.submitMethod());
+        String resourcePath = normalizePath(candidate.resourcePath());
+        String submitUrl = normalizePath(candidate.submitUrl());
+        return "post".equalsIgnoreCase(operation)
+                && "post".equalsIgnoreCase(submitMethod)
+                && !resourcePath.isBlank()
+                && resourcePath.equals(submitUrl)
+                && !isKnownCollectionOperation(submitUrl);
     }
 
     private List<AgenticAuthoringCandidate> concat(
@@ -662,6 +688,15 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         if ("page".equals(artifactKind)) {
             if (path.endsWith("/filter") || path.endsWith("/filter/cursor")) {
+                adjustment += 0.18d;
+            }
+        }
+        if ("form".equals(artifactKind)) {
+            if (path.endsWith("/filter") || path.endsWith("/filter/cursor")
+                    || path.endsWith("/stats/group-by") || path.endsWith("/stats/timeseries")
+                    || path.endsWith("/stats/distribution")) {
+                adjustment -= 0.18d;
+            } else if (!path.endsWith("/all") && !path.endsWith("/by-ids") && !path.contains("/{")) {
                 adjustment += 0.18d;
             }
         }
