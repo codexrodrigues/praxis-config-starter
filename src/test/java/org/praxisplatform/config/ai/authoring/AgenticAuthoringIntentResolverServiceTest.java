@@ -7387,7 +7387,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("regra compartilhada")
                 .contains("simulacao")
                 .contains("publicacao")
-                .doesNotContain("/api/praxis/config/domain-rules", "/api/human-resources/funcionarios");
+                .contains("/api/praxis/config/domain-rules/intake")
+                .contains("/api/praxis/config/domain-rules/simulations")
+                .doesNotContain("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
     }
@@ -8076,7 +8078,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("regra compartilhada")
                 .contains("simulacao")
                 .contains("publicacao")
-                .doesNotContain("/api/praxis/config/domain-rules", "/api/procurement/suppliers");
+                .contains("/api/praxis/config/domain-rules/intake")
+                .contains("/api/praxis/config/domain-rules/simulations")
+                .doesNotContain("/api/procurement/suppliers");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
         assertThat(result.selectedCandidate().evidence()).contains("quick-reply-context");
@@ -8104,7 +8108,9 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().evidence()).contains("explicit-resource-path");
         assertThat(result.assistantMessage())
                 .contains("regra compartilhada")
-                .doesNotContain("/api/praxis/config/domain-rules", "/api/helpdesk/chamados");
+                .contains("/api/praxis/config/domain-rules/intake")
+                .contains("/api/praxis/config/domain-rules/simulations")
+                .doesNotContain("/api/helpdesk/chamados");
     }
 
     @Test
@@ -8144,7 +8150,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                     .contains("regra compartilhada")
                     .contains("simulacao")
                     .contains("publicacao")
-                    .doesNotContain("/api/praxis/config/domain-rules");
+                    .contains("/api/praxis/config/domain-rules/intake")
+                    .contains("/api/praxis/config/domain-rules/simulations");
             assertThat(result.selectedCandidate())
                     .as(routingCase.prompt())
                     .isNotNull();
@@ -8248,7 +8255,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void businessRulePromptDoesNotRouteToSharedRuleWhenLlmIntentIsUnavailable() {
+    void businessRulePromptRoutesToSharedRuleWhenLlmIntentIsUnavailable() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -8274,13 +8281,17 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "deterministic-smoke-disabled",
                 contextHints));
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.gate().status()).isNotEqualTo("route_required");
-        assertThat(result.failureCodes()).doesNotContain("shared-rule-authoring-required");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
         assertThat(result.selectedCandidate().evidence()).contains("quick-reply-context");
         assertThat(result.warnings()).contains("llm-intent-resolution-fallback-deterministic");
+        assertThat(result.assistantMessage())
+                .contains("/api/praxis/config/domain-rules/intake")
+                .contains("/api/praxis/config/domain-rules/simulations")
+                .doesNotContain("/api/procurement/suppliers");
     }
 
     @Test

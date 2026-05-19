@@ -3595,11 +3595,37 @@ public class AgenticAuthoringIntentResolverService {
         if ("shared_rule_authoring".equals(requestedFlow) && !isExplicitLocalUiCompositionPrompt(prompt)) {
             return selectedCandidate != null;
         }
-        return selectedCandidate != null && llmRequiresGovernedAuthoring;
+        return selectedCandidate != null
+                && (llmRequiresGovernedAuthoring || isExplicitGovernedBusinessRulePrompt(prompt));
     }
 
     private boolean requiresGovernedAuthoring(AgenticAuthoringLlmIntentResolution llmIntent) {
         return llmIntent != null && llmIntent.requiresGovernedAuthoring();
+    }
+
+    private boolean isExplicitGovernedBusinessRulePrompt(String prompt) {
+        String normalized = normalize(prompt);
+        if (normalized.isBlank() || isExplicitLocalUiCompositionPrompt(prompt)) {
+            return false;
+        }
+        boolean ruleAuthoring = containsAny(normalized,
+                "regra", "regras",
+                "politica", "policy",
+                "validacao", "validar", "valide",
+                "aprovacao", "aprovar",
+                "governada", "governado", "governanca", "governance",
+                "compliance", "lgpd", "gdpr",
+                "elegibilidade", "eligibility");
+        boolean businessConstraint = containsAny(normalized,
+                "nao pode", "nao deve", "impedir", "impeca",
+                "bloqueado", "bloqueada", "blocked",
+                "inativo", "inactive",
+                "obrigatorio", "obrigatoria", "obrigatorios", "obrigatorias",
+                "exigir", "exija", "require",
+                "antes de salvar", "antes de seguir",
+                "selecionado", "selecionada", "selecionavel", "selecionavel",
+                "mascarar", "mascare", "dados sensiveis", "privacidade");
+        return ruleAuthoring && businessConstraint;
     }
 
     private boolean isExplicitLocalUiCompositionPrompt(String prompt) {
@@ -4398,9 +4424,9 @@ public class AgenticAuthoringIntentResolverService {
     private String sharedRuleAuthoringAssistantMessage(AgenticAuthoringCandidate selectedCandidate) {
         String resourcePath = selectedCandidate == null ? "" : valueOrDefault(selectedCandidate.resourcePath(), "").trim();
         if (!resourcePath.isBlank()) {
-            return "Esse pedido parece ser uma regra compartilhada do dominio, nao apenas uma mudanca visual da tela. Vou tratar o recurso selecionado como base da decisao e seguir por simulacao, revisao e publicacao antes de aplicar qualquer materializacao.";
+            return "Esse pedido parece ser uma regra compartilhada do dominio, nao apenas uma mudanca visual da tela. Use /api/praxis/config/domain-rules/intake para registrar a intencao, /api/praxis/config/domain-rules/simulations para simulacao de impacto e cobertura, e siga por revisao e publicacao antes de aplicar qualquer materializacao.";
         }
-        return "Esse pedido parece ser uma regra compartilhada do dominio, nao apenas uma mudanca visual da tela. Primeiro preciso confirmar o recurso de negocio para simular, revisar e publicar com governanca.";
+        return "Esse pedido parece ser uma regra compartilhada do dominio, nao apenas uma mudanca visual da tela. Primeiro confirme o recurso de negocio e entao use /api/praxis/config/domain-rules/intake e /api/praxis/config/domain-rules/simulations para seguir por simulacao, revisao e publicacao com governanca.";
     }
 
     private JsonNode apiCatalogAnswer(
