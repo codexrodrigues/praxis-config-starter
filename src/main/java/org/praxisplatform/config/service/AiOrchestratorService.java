@@ -520,10 +520,19 @@ public class AiOrchestratorService {
         if (shouldOfferRendererChoiceFromLlmIntent(
                 isTable,
                 intent,
-                request != null ? request.getContextHints() : null)) {
+                request != null ? request.getContextHints() : null)
+                || shouldOfferRendererChoiceFromConsultativePrompt(
+                isTable,
+                intent,
+                request != null ? request.getContextHints() : null,
+                request != null ? request.getUserPrompt() : null)) {
+            List<String> rendererOptions = intent.getOptions();
+            if (rendererOptions == null || rendererOptions.isEmpty()) {
+                rendererOptions = defaultRendererOptionsForField(intent.getTargetField());
+            }
             List<AiOption> payloads = buildRendererOptionPayloads(
                     intent.getTargetField(),
-                    intent.getOptions());
+                    rendererOptions);
             if (!payloads.isEmpty()) {
                 warnings.add("renderer-choice-offered-from-llm-intent-options");
                 return finalizeResponse(clarification(
@@ -9261,6 +9270,48 @@ public class AiOrchestratorService {
         }
         List<String> options = intent.getOptions();
         return options != null && options.size() > 1;
+    }
+
+    private boolean shouldOfferRendererChoiceFromConsultativePrompt(
+            boolean isTable,
+            AiIntentClassification intent,
+            JsonNode contextHints,
+            String userPrompt) {
+        if (!isTable || intent == null || hasOptionSelection(contextHints)) {
+            return false;
+        }
+        if (!"renderer".equalsIgnoreCase(intent.getCategory()) || isBlank(intent.getTargetField())) {
+            return false;
+        }
+        String normalized = normalizeText(userPrompt);
+        if (isBlank(normalized)) {
+            return false;
+        }
+        boolean asksForAlternatives = normalized.contains("opcao")
+                || normalized.contains("opcoes")
+                || normalized.contains("opção")
+                || normalized.contains("opções")
+                || normalized.contains("alternativa")
+                || normalized.contains("alternativas")
+                || normalized.contains("recomenda")
+                || normalized.contains("sugere")
+                || normalized.contains("sugestao")
+                || normalized.contains("sugestão");
+        boolean asksToChoose = normalized.contains("escolher")
+                || normalized.contains("escolha")
+                || normalized.contains("clicar")
+                || normalized.contains("botao")
+                || normalized.contains("botão");
+        return asksForAlternatives || asksToChoose;
+    }
+
+    private List<String> defaultRendererOptionsForField(String targetField) {
+        String label = isBlank(targetField) ? "valor" : targetField;
+        return List.of(
+                "Badge colorido com texto legível para " + label,
+                "Ícone com rótulo acessível para " + label,
+                "Texto legível com contraste suave para " + label,
+                "Chip compacto com tooltip explicativo para " + label);
     }
 
     private String buildRendererChoiceMessage(

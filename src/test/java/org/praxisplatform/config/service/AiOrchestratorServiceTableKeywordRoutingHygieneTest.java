@@ -259,6 +259,35 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 .isEqualTo("badge");
     }
 
+    @Test
+    void consultativeRendererPromptRequestsGuidedChoicesEvenWithoutLlmOptions() {
+        AiOrchestratorService service = newService();
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("renderer")
+                .targetField("ativo")
+                .options(List.of())
+                .build();
+
+        Boolean shouldOfferChoice = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldOfferRendererChoiceFromConsultativePrompt",
+                true,
+                intent,
+                objectMapper.createObjectNode(),
+                "como posso deixar a coluna ativo mais amigavel quais opcoes voce recomenda para eu escolher");
+
+        assertThat(shouldOfferChoice).isTrue();
+
+        @SuppressWarnings("unchecked")
+        List<String> defaults = (List<String>) ReflectionTestUtils.invokeMethod(
+                service,
+                "defaultRendererOptionsForField",
+                "ativo");
+
+        assertThat(defaults).hasSizeGreaterThan(1);
+        assertThat(defaults.get(0)).contains("Badge");
+    }
+
     private AiOrchestratorService newService() {
         return new AiOrchestratorService(
                 null,
