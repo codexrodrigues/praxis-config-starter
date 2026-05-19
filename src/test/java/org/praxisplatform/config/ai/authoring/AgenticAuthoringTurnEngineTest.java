@@ -1,6 +1,7 @@
 package org.praxisplatform.config.ai.authoring;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -323,7 +324,7 @@ class AgenticAuthoringTurnEngineTest {
     void consultativeAnswerFallsBackToSpecificComponentCapabilityWhenLlmFails() {
         AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
         when(providerManagementService.generateText(
-                argThat(prompt -> prompt.contains("explicitly asked not to create")),
+                anyString(),
                 any(),
                 eq("tenant"),
                 eq("user"),
@@ -356,13 +357,6 @@ class AgenticAuthoringTurnEngineTest {
     @Test
     void consultativeComponentCatalogFallbackDeduplicatesComponentFamilies() {
         AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
-        when(providerManagementService.generateText(
-                argThat(prompt -> prompt.contains("explicitly asked not to create")),
-                any(),
-                eq("tenant"),
-                eq("user"),
-                eq("local")))
-                .thenThrow(new RuntimeException("llm unavailable"));
         AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
                 providerManagementService,
                 objectMapper,

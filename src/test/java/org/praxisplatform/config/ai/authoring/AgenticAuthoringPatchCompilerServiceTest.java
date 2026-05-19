@@ -25,16 +25,18 @@ class AgenticAuthoringPatchCompilerServiceTest {
         writeCatalog();
 
         AgenticAuthoringCompileResult result = service()
-                .compile(new AgenticAuthoringCompileRequest(minimalPlan()));
+                .compile(new AgenticAuthoringCompileRequest(funcionariosPlan(), funcionariosIntent()));
 
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.compiledFormPatch().path("profileId").asText()).isEqualTo("create-minimal-form");
-        assertThat(result.compiledFormPatch().path("catalogReleaseId").asText()).isEqualTo("catalog-release-test");
+        assertThat(result.compiledFormPatch().path("catalogReleaseId").asText())
+                .isEqualTo("praxis-ui-angular.create-minimal-form.intent-resolution.v0.1.0");
         assertThat(result.compiledFormPatch().path("patch").path("page").path("widgets").get(0)
                 .path("definition").path("id").asText()).isEqualTo("praxis-dynamic-form");
         assertThat(result.compiledFormPatch().path("patch").path("page").path("widgets").get(0)
-                .path("definition").path("inputs").path("schemaUrl").asText()).isEqualTo("/schemas/request");
+                .path("definition").path("inputs").path("schemaUrl").asText())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
         assertThat(result.compiledFormPatch().path("compatibility").path("aiHttpContract").asText()).isEqualTo("v1.1");
         assertThat(result.compiledFormPatch().path("compatibility").path("requiresV12").asBoolean()).isFalse();
     }
@@ -42,11 +44,11 @@ class AgenticAuthoringPatchCompilerServiceTest {
     @Test
     void compileRejectsInvalidMinimalPlanWithoutBuildingPatch() throws Exception {
         writeCatalog();
-        ObjectNode plan = minimalPlan();
+        ObjectNode plan = funcionariosPlan();
         ((ArrayNode) plan.path("fields")).removeAll();
 
         AgenticAuthoringCompileResult result = service()
-                .compile(new AgenticAuthoringCompileRequest(plan));
+                .compile(new AgenticAuthoringCompileRequest(plan, funcionariosIntent()));
 
         assertThat(result.valid()).isFalse();
         assertThat(result.failureCodes()).contains("fields must not be empty");

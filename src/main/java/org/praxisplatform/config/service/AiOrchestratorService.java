@@ -17413,7 +17413,14 @@ public class AiOrchestratorService {
                 || normalized.contains("mostrar")
                 || normalized.contains("exiba")
                 || normalized.contains("exibir")
-                || normalized.contains("apresente");
+                || normalized.contains("apresente")
+                || normalized.contains("deixe")
+                || normalized.contains("mude")
+                || normalized.contains("troque")
+                || normalized.contains("altere")
+                || normalized.contains("coloque")
+                || normalized.contains("volte")
+                || normalized.contains("retorne");
         if (!command) {
             return false;
         }
@@ -20784,7 +20791,9 @@ public class AiOrchestratorService {
             case "setcolumnvisibility" -> "column.visibility.set";
             case "setcolumnorder" -> "column.order.set";
             case "configureexport" -> "export.configure";
-            default -> null;
+            default -> normalizedAlias.startsWith("setformat")
+                    ? "column.format.set"
+                    : null;
         };
         return candidate != null && operationsById.containsKey(candidate) ? candidate : null;
     }

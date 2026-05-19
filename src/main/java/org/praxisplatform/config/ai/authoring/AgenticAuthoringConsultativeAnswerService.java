@@ -234,6 +234,21 @@ public class AgenticAuthoringConsultativeAnswerService {
             if (domainAvailabilityQuestion || explicitNoMaterialization) {
                 log.warn("[AgenticAuthoring] Consultative fast answer failed; returning grounded no-materialization fallback. reason={}",
                         ex.getClass().getSimpleName());
+                if (explicitNoMaterialization) {
+                    Optional<String> capabilityMessage = componentCapabilityFallbackMessage(
+                            request.userPrompt(),
+                            componentCapabilities);
+                    if (capabilityMessage.isPresent()) {
+                        List<String> fallbackWarnings = new ArrayList<>(warnings("component_capability", projection));
+                        fallbackWarnings.add("llm-consultative-answer-fallback-used");
+                        return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                                "component_capability",
+                                changeKind("component_capability"),
+                                capabilityMessage.get(),
+                                projection,
+                                fallbackWarnings.stream().distinct().toList()));
+                    }
+                }
                 String unsupportedDomainMessage = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
                         request.userPrompt(),
                         projection == null ? List.of() : projection.resources());

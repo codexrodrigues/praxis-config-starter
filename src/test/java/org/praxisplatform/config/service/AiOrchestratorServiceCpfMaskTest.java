@@ -271,6 +271,18 @@ class AiOrchestratorServiceCpfMaskTest {
   }
 
   @Test
+  void looksLikeTableFormatCommandAcceptsContextualHumanContinuation() {
+    Boolean result =
+        (Boolean)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "looksLikeTableFormatCommand",
+                "Agora deixe essa mesma data so mes e ano.");
+
+    assertThat(result).isTrue();
+  }
+
+  @Test
   void buildTableDateFormatActionOptionsReturnsClickableRecommendations() throws Exception {
     ObjectMapper mapper = new ObjectMapper();
     JsonNode currentState =

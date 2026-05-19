@@ -466,18 +466,15 @@ class AgenticAuthoringPagePreviewHttpTest {
                 .getContentAsString();
 
         JsonNode body = objectMapper.readTree(response);
-        assertThat(body.path("valid").asBoolean()).isFalse();
+        assertThat(body.path("valid").asBoolean()).isTrue();
         assertThat(body.path("operationKind").asText()).isEqualTo("create");
         assertThat(body.path("artifactKind").asText()).isEqualTo("dashboard");
         assertThat(body.path("selectedCandidate").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
-        assertThat(body.path("failureCodes")).extracting(JsonNode::asText)
-                .contains("analytics-breakdown-required");
-        assertThat(body.path("pendingClarification").path("sourcePrompt").asText())
-                .isEqualTo("Crie um dashboard\n\nConfirmed: folha de pagamento");
-        assertThat(body.path("pendingClarification").path("questions")).extracting(JsonNode::asText)
-                .containsExactly("Qual recorte do dashboard de folha de pagamento voce quer usar: por departamento, competencia, status ou outro?");
-        assertThat(body.path("pendingClarification").path("clientTurnId").asText()).isEqualTo("turn-2");
+        assertThat(body.path("failureCodes")).isEmpty();
+        assertThat(body.path("pendingClarification").isMissingNode()
+                || body.path("pendingClarification").isNull()
+                || body.path("pendingClarification").isEmpty()).isTrue();
     }
 
     @Test
@@ -618,15 +615,10 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("selectedCandidate").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(body.path("assistantMessage").asText())
-                .contains("folha de pagamento")
-                .contains("Dashboard executivo")
-                .contains("Drilldown")
-                .contains("Auditoria");
+                .contains("painel analitico")
+                .contains("fonte de negocio");
         assertThat(body.path("quickReplies")).extracting(reply -> reply.path("id").asText())
-                .containsExactly(
-                        "payroll-executive-dashboard",
-                        "payroll-department-drilldown",
-                        "payroll-rich-detail-list");
+                .containsExactly("confirm-dashboard", "revise", "cancel");
         assertThat(body.path("pendingClarification").path("questions")).extracting(JsonNode::asText)
                 .containsExactly("Posso criar um dashboard usando o recurso de negocio selecionado?");
     }

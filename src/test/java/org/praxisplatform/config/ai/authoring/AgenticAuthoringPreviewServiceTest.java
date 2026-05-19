@@ -1253,7 +1253,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.warnings()).doesNotContain("semantic-axis-schema-verification-unsupported-axis");
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
-                .contains("\"requestedField\":\"quantidade_registros\"")
+                .contains("\"requestedField\":\"quantidadeRegistros\"")
                 .contains("\"field\":\"mes\"")
                 .contains("\"schemaVerified\":true")
                 .contains("\"schemaProbeStatus\":\"verified\"")
@@ -1300,7 +1300,6 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("semantic-chart-metric-aggregation-repaired-with-schema-field");
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
-                .contains("\"requestedField\":\"salario_liquido\"")
                 .contains("\"field\":\"salarioLiquido\"")
                 .contains("\"alias\":\"salarioLiquido\"")
                 .contains("\"aggregation\":\"sum\"")

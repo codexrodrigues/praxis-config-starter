@@ -31,7 +31,7 @@ Add the dependency to your Host Application's `pom.xml` (e.g., `praxis-api-quick
 <dependency>
     <groupId>io.github.codexrodrigues</groupId>
     <artifactId>praxis-config-starter</artifactId>
-    <version>0.1.0-rc.24</version>
+    <version>0.1.0-rc.38</version>
 </dependency>
 ```
 
