@@ -127,6 +127,25 @@ class AiOrchestratorServiceCpfMaskTest {
   }
 
   @Test
+  void inferFormatFromPromptUsesBrazilianShortDateForHumanContinuation() throws Exception {
+    List<?> options =
+        List.of(
+            contextOption("MMM/yyyy", "Month/Year", "jun./2022"),
+            contextOption("dd/MM/yyyy", "Date dd/MM/yyyy", "13/06/2022"),
+            contextOption("fullDate", "Date full", "segunda-feira, 13 de junho de 2022"));
+
+    String value =
+        (String)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "inferFormatFromPrompt",
+                "Agora volte essa mesma data para o formato brasileiro curto.",
+                options);
+
+    assertThat(value).isEqualTo("dd/MM/yyyy");
+  }
+
+  @Test
   void answerTableFormatCapabilityQuestionListsDateFormatsFromCapabilities() throws Exception {
     ObjectMapper mapper = new ObjectMapper();
     JsonNode currentState =

@@ -8600,6 +8600,17 @@ public class AiOrchestratorService {
                 || normalizedField.contains("vencimento")
                 || normalizedHeader.contains("vencimento");
         if (dateLike
+                && (normalizedPrompt.contains("brasileiro")
+                || normalizedPrompt.contains("padraobrasileiro")
+                || normalizedPrompt.contains("curto")
+                || normalizedPrompt.contains("compacto")
+                || normalizedPrompt.contains("ddmmyyyy"))) {
+            String option = findOptionByValue(formatOptions, "dd/MM/yyyy");
+            if (option != null) {
+                return option;
+            }
+        }
+        if (dateLike
                 && (normalizedPrompt.contains("extenso")
                 || normalizedPrompt.contains("completa")
                 || normalizedPrompt.contains("fulldate"))) {
@@ -8609,7 +8620,11 @@ public class AiOrchestratorService {
             }
         }
         if (dateLike
-                && (normalizedPrompt.contains("mes")
+                && (normalizedPrompt.contains("meseano")
+                || normalizedPrompt.contains("mesano")
+                || normalizedPrompt.contains("pormes")
+                || normalizedPrompt.contains("somes")
+                || normalizedPrompt.contains("soomes")
                 || normalizedPrompt.contains("competencia")
                 || normalizedPrompt.contains("mensal"))) {
             String option = findOptionByValue(formatOptions, "MMM/yyyy");
@@ -8784,6 +8799,17 @@ public class AiOrchestratorService {
     }
 
     private String findDateOption(List<ContextOption> options, String normalizedPrompt) {
+        if (normalizedPrompt != null
+                && (normalizedPrompt.contains("brasileiro")
+                || normalizedPrompt.contains("padraobrasileiro")
+                || normalizedPrompt.contains("curto")
+                || normalizedPrompt.contains("compacto")
+                || normalizedPrompt.contains("ddmmyyyy"))) {
+            String option = findOptionByValue(options, "dd/MM/yyyy");
+            if (option != null) {
+                return option;
+            }
+        }
         if (normalizedPrompt != null
                 && (normalizedPrompt.contains("datacompleta")
                 || normalizedPrompt.contains("completa")
