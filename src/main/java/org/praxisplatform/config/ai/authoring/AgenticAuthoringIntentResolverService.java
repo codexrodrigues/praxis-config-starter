@@ -3390,10 +3390,7 @@ public class AgenticAuthoringIntentResolverService {
         if (normalizedPrompt.isBlank() || candidate == null) {
             return false;
         }
-        String candidateText = normalize(String.join(" ",
-                valueOrDefault(candidate.resourcePath(), ""),
-                valueOrDefault(candidate.submitUrl(), ""),
-                valueOrDefault(candidate.reason(), "")));
+        String candidateText = directCandidateSemanticText(candidate);
         for (String token : candidateText.replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
             if (isGenericAnalyticalCandidateToken(token)) {
                 continue;

@@ -25,6 +25,20 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             "qual", "quais", "outra", "outras", "opcao", "opcoes", "voce", "antes", "indica", "indicar",
             "indique", "alternativa", "alternativas", "compare", "comparar", "recomende", "recomendar");
 
+    private static final Map<String, List<String>> DOMAIN_TOKEN_ALIASES = Map.ofEntries(
+            Map.entry("compra", List.of("procurement", "purchase", "purchases")),
+            Map.entry("compras", List.of("procurement", "purchase", "purchases")),
+            Map.entry("fornecedor", List.of("supplier", "suppliers", "vendor", "vendors")),
+            Map.entry("fornecedores", List.of("supplier", "suppliers", "vendor", "vendors")),
+            Map.entry("pedido", List.of("order", "orders", "purchase")),
+            Map.entry("pedidos", List.of("order", "orders", "purchase")),
+            Map.entry("bloqueado", List.of("blocked", "inactive", "disabled", "inativo")),
+            Map.entry("bloqueados", List.of("blocked", "inactive", "disabled", "inativos")),
+            Map.entry("inativo", List.of("inactive", "disabled", "bloqueado")),
+            Map.entry("inativos", List.of("inactive", "disabled", "bloqueados")),
+            Map.entry("selecao", List.of("selection", "select", "selected", "lookup")),
+            Map.entry("selecionado", List.of("selection", "select", "selected", "lookup")));
+
     private final ApiMetadataRepository repository;
     private final ContextRetrievalService retrievalService;
 
@@ -658,6 +672,18 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private boolean matchesToken(String text, String token) {
+        if (matchesRawToken(text, token)) {
+            return true;
+        }
+        for (String alias : DOMAIN_TOKEN_ALIASES.getOrDefault(token, List.of())) {
+            if (matchesRawToken(text, alias)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean matchesRawToken(String text, String token) {
         if (text.contains(token)) {
             return true;
         }
