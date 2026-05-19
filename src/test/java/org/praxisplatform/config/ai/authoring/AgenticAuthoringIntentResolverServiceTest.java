@@ -8295,6 +8295,43 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void businessRulePromptDiscoversBusinessResourceEvenWhenFallbackLooksLikeComponentAuthoring() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+        assertThat(result.assistantMessage())
+                .contains("/api/praxis/config/domain-rules/intake")
+                .contains("/api/praxis/config/domain-rules/simulations")
+                .doesNotContain("/api/procurement/suppliers");
+    }
+
+    @Test
     void metadataBackedResourceQuickReplyIdsRemainUniqueWhenResourcePathRepeats() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(

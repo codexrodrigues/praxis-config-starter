@@ -609,6 +609,22 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
+        if (selectedCandidate == null
+                && !explicitLocalUiComposition
+                && isExplicitGovernedBusinessRulePrompt(prompt)
+                && candidates != null
+                && !candidates.isEmpty()) {
+            selectedCandidate = selectCandidate(
+                    candidates,
+                    target,
+                    operationKind,
+                    discoveryArtifactKindForPrompt(prompt, artifactKind),
+                    prompt);
+            if (selectedCandidate == null) {
+                selectedCandidate = candidates.get(0);
+            }
+            candidates = withPriorityCandidate(candidates, selectedCandidate);
+        }
         if (selectedCandidate != null
                 && !turn.answeredPendingClarification()
                 && startsWithConfirmation(rawPrompt)) {
@@ -2762,12 +2778,13 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringTarget target,
             String tenantId,
             String environment) {
-        if ("component".equals(valueOrUnknown(artifactKind))) {
+        String effectiveArtifactKind = discoveryArtifactKindForPrompt(prompt, artifactKind);
+        if ("component".equals(effectiveArtifactKind)) {
             return List.of();
         }
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
         if (target != null && target.resourcePath() != null && !target.resourcePath().isBlank()
-                && !shouldDetachCurrentTarget(prompt, artifactKind, target)) {
+                && !shouldDetachCurrentTarget(prompt, effectiveArtifactKind, target)) {
             String operation = target.submitMethod() == null || target.submitMethod().isBlank()
                     ? "post"
                     : target.submitMethod();
@@ -2780,9 +2797,9 @@ public class AgenticAuthoringIntentResolverService {
         }
         List<AgenticAuthoringCandidate> metadataCandidates = apiMetadataCandidateCatalog == null
                 ? List.of()
-                : apiMetadataCandidateCatalog.discover(prompt, artifactKind, tenantId, environment, null);
+                : apiMetadataCandidateCatalog.discover(prompt, effectiveArtifactKind, tenantId, environment, null);
         if (metadataCandidates.isEmpty() && apiMetadataCandidateCatalog != null) {
-            metadataCandidates = apiMetadataCandidateCatalog.discover("", artifactKind, tenantId, environment, null);
+            metadataCandidates = apiMetadataCandidateCatalog.discover("", effectiveArtifactKind, tenantId, environment, null);
         }
         if (!metadataCandidates.isEmpty()) {
             candidates.addAll(metadataCandidates);
@@ -2797,7 +2814,7 @@ public class AgenticAuthoringIntentResolverService {
             String tenantId,
             String environment) {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
-        String effectiveArtifactKind = valueOrUnknown(artifactKind);
+        String effectiveArtifactKind = discoveryArtifactKindForPrompt(prompt, artifactKind);
         if ("component".equals(effectiveArtifactKind)) {
             return List.of();
         }
@@ -2837,6 +2854,14 @@ public class AgenticAuthoringIntentResolverService {
                     null));
         }
         return groundCandidates(prompt, deduplicateCandidates(candidates), tenantId, environment);
+    }
+
+    private String discoveryArtifactKindForPrompt(String prompt, String artifactKind) {
+        String effectiveArtifactKind = valueOrUnknown(artifactKind);
+        if (isExplicitGovernedBusinessRulePrompt(prompt)) {
+            return "form";
+        }
+        return effectiveArtifactKind;
     }
 
     private boolean hasExplicitSourceCandidate(List<AgenticAuthoringCandidate> candidates) {
