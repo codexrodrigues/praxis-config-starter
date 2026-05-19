@@ -291,8 +291,10 @@ class AgenticAuthoringTurnStreamServiceTest {
         AgenticAuthoringTurnStreamService service = service();
         service.start(request, "http://localhost", principalContext);
 
+        org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
+                .completeTurn(eq(threadId), any(UUID.class));
         ArgumentCaptor<Object> payloads = ArgumentCaptor.forClass(Object.class);
-        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(4000).atLeast(7))
+        org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.atLeast(7))
                 .appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), payloads.capture());
         service.shutdown();
 
@@ -325,8 +327,6 @@ class AgenticAuthoringTurnStreamServiceTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalSource").asText())
                             .isEqualTo("context_hint");
                 });
-        org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
-                .completeTurn(eq(threadId), any(UUID.class));
     }
 
     @Test
