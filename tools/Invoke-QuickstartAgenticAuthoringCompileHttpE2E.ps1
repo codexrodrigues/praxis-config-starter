@@ -56,6 +56,12 @@ $planBody = @{
 } | ConvertTo-Json -Compress
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
+$intent = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$base/api/praxis/config/ai/authoring/intent-resolution" `
+    -Headers $headers `
+    -Body $planBody `
+    -TimeoutSec 90
 $plan = Invoke-RestMethod `
     -Method Post `
     -Uri "$base/api/praxis/config/ai/authoring/minimal-form-plan" `
@@ -65,6 +71,7 @@ $plan = Invoke-RestMethod `
 
 $compileBody = @{
     minimalFormPlan = $plan.minimalFormPlan
+    intentResolution = $intent
 } | ConvertTo-Json -Depth 20 -Compress
 
 $compiled = Invoke-RestMethod `
@@ -80,17 +87,22 @@ $result = [pscustomobject]@{
     health = $health.status
     provider = $Provider
     model = $model
+    intentValid = [bool] $intent.valid
     planValid = [bool] $plan.valid
     compileValid = [bool] $compiled.valid
+    selectedResourcePath = $intent.selectedCandidate.resourcePath
     fields = @($plan.minimalFormPlan.fields | ForEach-Object { $_.name })
     widgetCount = $widgets.Count
     widgetId = if ($null -ne $firstWidget) { $firstWidget.definition.id } else { $null }
     submitUrl = if ($null -ne $firstWidget) { $firstWidget.definition.inputs.submitUrl } else { $null }
-    failureCodes = @($plan.failureCodes + $compiled.failureCodes)
+    failureCodes = @($intent.failureCodes + $plan.failureCodes + $compiled.failureCodes)
 }
 
 if ($result.health -ne "UP") {
     throw "Quickstart health is not UP."
+}
+if (-not $result.intentValid) {
+    throw "Intent resolution is not valid: $($intent.failureCodes -join ', ')"
 }
 if (-not $result.planValid) {
     throw "MinimalFormPlan is not valid: $($plan.failureCodes -join ', ')"
@@ -102,7 +114,7 @@ if ($result.widgetId -ne "praxis-dynamic-form") {
     throw "Compiled patch did not target praxis-dynamic-form."
 }
 if ($result.submitUrl -ne "/api/operations/incidentes") {
-    throw "Compiled patch submitUrl is not the canonical operations incident create endpoint."
+    throw "Compiled patch submitUrl is not the canonical operations incident create endpoint. Actual submitUrl: $($result.submitUrl)"
 }
 
 $result | ConvertTo-Json -Depth 6

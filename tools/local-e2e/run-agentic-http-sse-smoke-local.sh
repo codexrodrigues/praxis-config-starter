@@ -52,22 +52,22 @@ echo "[2/7] minimal-form-plan"
 body="$(jq -n --arg userPrompt "$prompt" --arg provider "$PROVIDER" --arg model "$MODEL" \
   '{userPrompt:$userPrompt, provider:$provider, model:$model, apiKey:(if $provider == "openai" then env.PRAXIS_AI_OPENAI_API_KEY else env.PRAXIS_AI_GEMINI_API_KEY end)}')"
 printf '%s' "$body" | jq 'del(.apiKey) + {apiKey:"***"}' > "$ARTIFACTS_DIR/request.sanitized.json"
+intent="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/intent-resolution" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/intent.response.json")"
+test "$(jq -r '.valid' <<<"$intent")" = "true"
+jq -e '.semanticDecision.schemaVersion == "praxis-agentic-authoring-semantic-decision.v1"' <<<"$intent" >/dev/null
 plan="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/minimal-form-plan" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/plan.response.json")"
 test "$(jq -r '.valid' <<<"$plan")" = "true"
 jq -e '.minimalFormPlan.fields | map(.name) | index("titulo") != null' <<<"$plan" >/dev/null
 jq -e '.minimalFormPlan.fields | map(.name) | index("prioridadeId") == null and index("statusAtualId") == null' <<<"$plan" >/dev/null
 
 echo "[3/7] compiled-form-patch"
-compile_body="$(jq -n --argjson minimalFormPlan "$(jq '.minimalFormPlan' <<<"$plan")" '{minimalFormPlan:$minimalFormPlan}')"
+compile_body="$(jq -n --argjson minimalFormPlan "$(jq '.minimalFormPlan' <<<"$plan")" --argjson intentResolution "$intent" '{minimalFormPlan:$minimalFormPlan, intentResolution:$intentResolution}')"
 compiled="$(curl -fsS --max-time 60 -X POST "$BASE_URL/api/praxis/config/ai/authoring/compiled-form-patch" "${headers[@]}" --data-binary @<(printf '%s' "$compile_body") | tee "$ARTIFACTS_DIR/compile.response.json")"
 test "$(jq -r '.valid' <<<"$compiled")" = "true"
 test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.id' <<<"$compiled")" = "praxis-dynamic-form"
 test "$(jq -r '.compiledFormPatch.patch.page.widgets[0].definition.inputs.submitUrl' <<<"$compiled")" = "/api/operations/incidentes"
 
 echo "[4/7] page-preview"
-intent="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/intent-resolution" "${headers[@]}" --data-binary @<(printf '%s' "$body") | tee "$ARTIFACTS_DIR/intent.response.json")"
-test "$(jq -r '.valid' <<<"$intent")" = "true"
-jq -e '.semanticDecision.schemaVersion == "praxis-agentic-authoring-semantic-decision.v1"' <<<"$intent" >/dev/null
 preview_body="$(jq --argjson intentResolution "$intent" '. + {intentResolution:$intentResolution}' <<<"$body")"
 preview="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/page-preview" "${headers[@]}" --data-binary @<(printf '%s' "$preview_body") | tee "$ARTIFACTS_DIR/preview.response.json")"
 test "$(jq -r '.valid' <<<"$preview")" = "true"
