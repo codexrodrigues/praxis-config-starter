@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -34,12 +36,14 @@ class UserConfigServiceTest {
   @Mock private UiUserConfigRepository repository;
   @Mock private AiApiKeyProtectionService apiKeyProtectionService;
   @Mock private NamedParameterJdbcTemplate jdbcTemplate;
+  @Mock private ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
 
   private UserConfigService service;
 
   @BeforeEach
   void setUp() {
-    service = new UserConfigService(repository, new ObjectMapper(), apiKeyProtectionService, jdbcTemplate);
+    lenient().when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+    service = new UserConfigService(repository, new ObjectMapper(), apiKeyProtectionService, jdbcTemplateProvider);
   }
 
   @Test

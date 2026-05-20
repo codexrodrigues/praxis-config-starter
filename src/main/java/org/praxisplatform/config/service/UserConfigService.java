@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -33,17 +34,17 @@ public class UserConfigService {
   private final UiUserConfigRepository repository;
   private final ObjectMapper objectMapper;
   private final AiApiKeyProtectionService apiKeyProtectionService;
-  private final NamedParameterJdbcTemplate jdbcTemplate;
+  private final ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
 
   public UserConfigService(
       UiUserConfigRepository repository,
       ObjectMapper objectMapper,
       AiApiKeyProtectionService apiKeyProtectionService,
-      @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate jdbcTemplate) {
+      @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider) {
     this.repository = repository;
     this.objectMapper = objectMapper;
     this.apiKeyProtectionService = apiKeyProtectionService;
-    this.jdbcTemplate = jdbcTemplate;
+    this.jdbcTemplateProvider = jdbcTemplateProvider;
   }
 
   public enum Scope {
@@ -211,7 +212,15 @@ public class UserConfigService {
             .addValue("updateEtag", updateEtag.toString())
             .addValue("updatedBy", updatedBy);
 
-    return jdbcTemplate.queryForObject(sql, params, this::mapUiUserConfig);
+    return jdbcTemplate().queryForObject(sql, params, this::mapUiUserConfig);
+  }
+
+  private NamedParameterJdbcTemplate jdbcTemplate() {
+    NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+    if (jdbcTemplate == null) {
+      throw new IllegalStateException("configNamedParameterJdbcTemplate is required for ui_user_config writes.");
+    }
+    return jdbcTemplate;
   }
 
   private String conflictTarget(String effectiveUserId, String environment) {

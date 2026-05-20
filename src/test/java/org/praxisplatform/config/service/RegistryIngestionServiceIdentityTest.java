@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -17,14 +18,15 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagVectorStoreService;
-import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.springframework.ai.document.Document;
 
@@ -102,6 +104,7 @@ class RegistryIngestionServiceIdentityTest {
         assertThat(document.getMetadata().get(RagMetadataKeys.TENANT_ID)).isEqualTo("tenant-a");
         assertThat(document.getMetadata().get(RagMetadataKeys.ENVIRONMENT)).isEqualTo("prod");
         assertThat(document.getMetadata().get(RagMetadataKeys.VERSION)).isEqualTo("registry-v2");
+        assertThat(document.getMetadata().get(RagMetadataKeys.AI_VISIBILITY)).isEqualTo("allow");
     }
 
     @Test
@@ -209,5 +212,164 @@ class RegistryIngestionServiceIdentityTest {
                     assertThat(error.getCause()).hasMessageContaining("target.kind is not declared");
                     assertThat(error.getCause()).hasMessageContaining("unknown validator");
                 });
+    }
+
+    @Test
+    void shouldIngestMultiChunksAndInvokePurge() {
+        RegistryIngestionRequest.ChunkEntry chunk1 = RegistryIngestionRequest.ChunkEntry.builder()
+                .chunkIndex(0)
+                .chunkKind("intro")
+                .content("Introduction content")
+                .sourcePointer("/path/to/intro")
+                .contentHash("hash1")
+                .sourceKind("component_definition")
+                .sourceId("component-x")
+                .corpusVersion("1.0.0")
+                .aiVisibility("mask")
+                .embeddingProfile("gemini-768")
+                .build();
+
+        RegistryIngestionRequest.ChunkEntry chunk2 = RegistryIngestionRequest.ChunkEntry.builder()
+                .chunkIndex(1)
+                .chunkKind("methods")
+                .content("Methods content")
+                .sourcePointer("/path/to/methods")
+                .contentHash("hash2")
+                .sourceKind("component_definition")
+                .sourceId("component-x")
+                .corpusVersion("1.0.0")
+                .build();
+
+        RegistryIngestionRequest.ComponentEntry component = RegistryIngestionRequest.ComponentEntry.builder()
+                .description("Multi-chunk component")
+                .inputs(List.of())
+                .outputs(List.of())
+                .chunks(List.of(chunk1, chunk2))
+                .build();
+
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .version("registry-v2")
+                .components(Map.of("component-x", component))
+                .build();
+
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        anyString()))
+                .thenReturn(Optional.empty());
+        when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        when(ragVectorStoreService.corpusReleaseStatus("tenant-b", "staging", "registry-v2", 2))
+                .thenReturn(new RagVectorStoreService.RagCorpusReleaseStatus(
+                        true,
+                        true,
+                        "tenant-b",
+                        "staging",
+                        "registry-v2",
+                        2,
+                        2,
+                        1,
+                        Map.of("intro", 1L, "methods", 1L),
+                        Map.of("allow", 1L, "mask", 1L),
+                        List.of(),
+                        "2026-05-19T10:00:00Z",
+                        List.of()));
+
+        RegistryIngestionService.RegistryReindexResult result =
+                service.reindexRegistry(request, "tenant-b", "staging");
+
+        InOrder inOrder = inOrder(ragVectorStoreService);
+        inOrder.verify(ragVectorStoreService)
+                .deleteDocumentsByScope("tenant-b", "staging", "registry-v2", "component-x", "component_definition");
+
+        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
+        inOrder.verify(ragVectorStoreService).upsertDocuments(captor.capture());
+        List<Document> docs = captor.getValue();
+        assertThat(docs).hasSize(2);
+
+        Document doc1 = docs.get(0);
+        assertThat(doc1.getId()).isEqualTo("tenant-b/staging/component-x/registry-v2/component_definition/intro/hash1/0");
+        assertThat(doc1.getText()).isEqualTo("Introduction content");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.SOURCE_KIND)).isEqualTo("component_definition");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.SOURCE_ID)).isEqualTo("component-x");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.SOURCE_POINTER)).isEqualTo("/path/to/intro");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.CHUNK_KIND)).isEqualTo("intro");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.CORPUS_VERSION)).isEqualTo("1.0.0");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.AI_VISIBILITY)).isEqualTo("mask");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.EMBEDDING_PROFILE)).isEqualTo("gemini-768");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.TENANT_ID)).isEqualTo("tenant-b");
+        assertThat(doc1.getMetadata().get(RagMetadataKeys.ENVIRONMENT)).isEqualTo("staging");
+
+        Document doc2 = docs.get(1);
+        assertThat(doc2.getId()).isEqualTo("tenant-b/staging/component-x/registry-v2/component_definition/methods/hash2/1");
+        assertThat(doc2.getText()).isEqualTo("Methods content");
+        assertThat(doc2.getMetadata().get(RagMetadataKeys.SOURCE_KIND)).isEqualTo("component_definition");
+        assertThat(doc2.getMetadata().get(RagMetadataKeys.SOURCE_ID)).isEqualTo("component-x");
+        assertThat(doc2.getMetadata().get(RagMetadataKeys.SOURCE_POINTER)).isEqualTo("/path/to/methods");
+        assertThat(doc2.getMetadata().get(RagMetadataKeys.CHUNK_KIND)).isEqualTo("methods");
+        assertThat(doc2.getMetadata().get(RagMetadataKeys.CORPUS_VERSION)).isEqualTo("1.0.0");
+        assertThat(doc2.getMetadata().get(RagMetadataKeys.TENANT_ID)).isEqualTo("tenant-b");
+        assertThat(doc2.getMetadata().get(RagMetadataKeys.ENVIRONMENT)).isEqualTo("staging");
+
+        assertThat(result.releaseId()).isEqualTo("registry-v2");
+        assertThat(result.componentCount()).isEqualTo(1);
+        assertThat(result.expectedChunkCount()).isEqualTo(2);
+        assertThat(result.publishedChunkCount()).isEqualTo(2);
+        assertThat(result.components()).hasSize(1);
+        assertThat(result.components().get(0).chunkKinds()).containsExactly("intro", "methods");
+        assertThat(result.corpusStatus()).isNotNull();
+        assertThat(result.corpusStatus().reconciled()).isTrue();
+    }
+
+    @Test
+    void shouldPurgeByChunkSourceScopeWhenSourceIdDiffersFromComponentMapKey() {
+        RegistryIngestionRequest.ChunkEntry chunk = RegistryIngestionRequest.ChunkEntry.builder()
+                .chunkIndex(0)
+                .chunkKind("summary")
+                .content("Source scoped content")
+                .sourcePointer("praxis-ui-angular/components/source-component.ts")
+                .contentHash("hash3")
+                .sourceKind("component_definition")
+                .sourceId("canonical-source-id")
+                .corpusVersion("1.0.0")
+                .build();
+
+        RegistryIngestionRequest.ComponentEntry component = RegistryIngestionRequest.ComponentEntry.builder()
+                .description("Component with canonical source id")
+                .inputs(List.of())
+                .outputs(List.of())
+                .chunks(List.of(chunk))
+                .build();
+
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .version("registry-v3")
+                .components(Map.of("map-key-component", component))
+                .build();
+
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        anyString()))
+                .thenReturn(Optional.empty());
+        when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.ingestRegistry(request, "tenant-c", "prod");
+
+        verify(ragVectorStoreService)
+                .deleteDocumentsByScope("tenant-c", "prod", "registry-v3", "canonical-source-id", "component_definition");
+
+        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
+        verify(ragVectorStoreService).upsertDocuments(captor.capture());
+        Document document = captor.getValue().get(0);
+        assertThat(document.getId())
+                .isEqualTo("tenant-c/prod/canonical-source-id/registry-v3/component_definition/summary/hash3/0");
+        assertThat(document.getMetadata().get(RagMetadataKeys.COMPONENT_ID)).isEqualTo("canonical-source-id");
+        assertThat(document.getMetadata().get(RagMetadataKeys.RESOURCE_ID)).isEqualTo("canonical-source-id");
     }
 }

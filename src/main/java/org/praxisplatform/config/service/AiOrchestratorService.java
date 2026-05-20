@@ -24,6 +24,8 @@ import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -758,6 +760,9 @@ public class AiOrchestratorService {
                     formatOptions,
                     request != null ? request.getUserPrompt() : null,
                     warnings);
+            normalizeTableBooleanLabelActionsFromPrompt(
+                    request != null ? request.getUserPrompt() : null,
+                    actionPlan);
             Set<String> globalActions = identifyGlobalActions(componentActions);
             expectedActions = normalizePlanActions(
                     actionPlan,
@@ -1748,7 +1753,97 @@ public class AiOrchestratorService {
         if (parseContextRequest(json) != null) {
             return null;
         }
-        return objectMapper.convertValue(json, AiActionPlan.class);
+        AiActionPlan plan = objectMapper.convertValue(json, AiActionPlan.class);
+        normalizeTableBooleanLabelActionsFromPrompt(userPrompt, plan);
+        return plan;
+    }
+
+    private void normalizeTableBooleanLabelActionsFromPrompt(String userPrompt, AiActionPlan plan) {
+        if (plan == null || plan.getActions() == null || plan.getActions().isEmpty()) {
+            return;
+        }
+        String normalizedPrompt = normalizeText(userPrompt);
+        String[] labels = inferBooleanStateRendererLabels(userPrompt, normalizeText(userPrompt));
+        if (labels == null || isBlank(labels[0]) || isBlank(labels[1])) {
+            return;
+        }
+        String rendererTarget = findBooleanRendererActionTarget(plan);
+        if (!isBlank(rendererTarget) && looksLikeBooleanStateRendererPrompt(normalizedPrompt)) {
+            AiActionPlan rendererPlan = buildBooleanStateRendererActionPlan(
+                    userPrompt,
+                    new ColumnDescriptor(rendererTarget, rendererTarget),
+                    null);
+            if (rendererPlan != null && rendererPlan.getActions() != null && !rendererPlan.getActions().isEmpty()) {
+                plan.setActions(rendererPlan.getActions());
+                plan.setAmbiguities(List.of());
+                return;
+            }
+        }
+        for (AiActionPlan.Action action : plan.getActions()) {
+            if (action == null || isBlank(action.getType())) {
+                continue;
+            }
+            JsonNode params = action.getParams();
+            if (params == null || params.isNull() || !params.isObject()) {
+                continue;
+            }
+            ObjectNode objectParams = (ObjectNode) params;
+            if ("column.valueMapping.set".equals(action.getType())) {
+                ObjectNode valueMapping = objectParams.with("valueMapping");
+                valueMapping.put("true", labels[0]);
+                valueMapping.put("false", labels[1]);
+            } else if ("column.conditionalRenderer.add".equals(action.getType())) {
+                JsonNode expected = objectParams.path("condition").path("==").path(1);
+                ObjectNode visual = firstRendererVisualNode(objectParams.path("renderer"));
+                if (visual != null) {
+                    if (expected.isBoolean()) {
+                        visual.put("text", expected.asBoolean() ? labels[0] : labels[1]);
+                    } else if ("true".equalsIgnoreCase(expected.asText())) {
+                        visual.put("text", labels[0]);
+                    } else if ("false".equalsIgnoreCase(expected.asText())) {
+                        visual.put("text", labels[1]);
+                    }
+                }
+            }
+        }
+    }
+
+    private String findBooleanRendererActionTarget(AiActionPlan plan) {
+        if (plan == null || plan.getActions() == null) {
+            return null;
+        }
+        for (AiActionPlan.Action action : plan.getActions()) {
+            if (action == null || isBlank(action.getTarget())) {
+                continue;
+            }
+            String type = action.getType();
+            if ("column.renderer.set".equals(type)
+                    || "column.conditionalRenderer.add".equals(type)
+                    || "column.valueMapping.set".equals(type)) {
+                return action.getTarget();
+            }
+        }
+        return null;
+    }
+
+    private ObjectNode firstRendererVisualNode(JsonNode renderer) {
+        if (renderer == null || renderer.isNull() || !renderer.isObject()) {
+            return null;
+        }
+        String type = textOrNull(renderer.get("type"));
+        JsonNode typed = !isBlank(type) ? renderer.get(type) : null;
+        if (typed != null && typed.isObject()) {
+            return (ObjectNode) typed;
+        }
+        JsonNode badge = renderer.get("badge");
+        if (badge != null && badge.isObject()) {
+            return (ObjectNode) badge;
+        }
+        JsonNode chip = renderer.get("chip");
+        if (chip != null && chip.isObject()) {
+            return (ObjectNode) chip;
+        }
+        return null;
     }
 
     private AiActionPlan extractComponentActionPlan(
@@ -3899,23 +3994,31 @@ public class AiOrchestratorService {
     }
 
     private AiActionPlan buildBooleanStateRendererActionPlan(
-            String normalizedPrompt,
+            String prompt,
             ColumnDescriptor targetColumn,
             JsonNode currentState) {
         if (targetColumn == null || isBlank(targetColumn.field)) {
             return null;
         }
+        String normalizedPrompt = normalizeText(prompt);
         boolean badge = normalizedPrompt != null && (normalizedPrompt.contains("badge") || normalizedPrompt.contains("selo"));
         String rendererType = badge ? "badge" : "chip";
-        String variant = inferRendererVariant(normalizedPrompt, null, "soft");
+        String variant = sanitizeTableRendererVariant(
+                rendererType,
+                inferRendererVariant(normalizedPrompt, null, "badge".equals(rendererType) ? "soft" : "filled"));
         JsonNode columnState = findColumnState(currentState, targetColumn.field);
         JsonNode valueMapping = columnState != null ? columnState.path("valueMapping") : null;
         String mappedTrue = textOrNull(valueMapping != null ? valueMapping.get("true") : null);
         String mappedFalse = textOrNull(valueMapping != null ? valueMapping.get("false") : null);
         boolean wantsYesNo = normalizedPrompt != null
                 && (normalizedPrompt.contains("sim") || normalizedPrompt.contains("nao") || normalizedPrompt.contains("não"));
-        String trueLabel = !isBlank(mappedTrue) ? mappedTrue : (wantsYesNo ? "Sim" : "Ativo");
-        String falseLabel = !isBlank(mappedFalse) ? mappedFalse : ("Sim".equals(trueLabel) ? "Não" : "Inativo");
+        String[] selectedLabels = inferBooleanStateRendererLabels(prompt, normalizedPrompt);
+        String trueLabel = selectedLabels != null && !isBlank(selectedLabels[0])
+                ? selectedLabels[0]
+                : (!isBlank(mappedTrue) ? mappedTrue : (wantsYesNo ? "Sim" : "Ativo"));
+        String falseLabel = selectedLabels != null && !isBlank(selectedLabels[1])
+                ? selectedLabels[1]
+                : (!isBlank(mappedFalse) ? mappedFalse : ("Sim".equals(trueLabel) ? "Não" : "Inativo"));
 
         List<AiActionPlan.Action> actions = new ArrayList<>();
         actions.add(AiActionPlan.Action.builder()
@@ -3932,6 +4035,36 @@ public class AiOrchestratorService {
                 .actions(actions)
                 .ambiguities(List.of())
                 .build();
+    }
+
+    private String[] inferBooleanStateRendererLabels(String prompt, String normalizedPrompt) {
+        if (isBlank(prompt) && isBlank(normalizedPrompt)) {
+            return null;
+        }
+        if (!isBlank(prompt)) {
+            Matcher matcher = Pattern
+                    .compile("[\"'“”‘’]([^\"'“”‘’/]{1,24})[\"'“”‘’]\\s*/\\s*[\"'“”‘’]([^\"'“”‘’/]{1,24})[\"'“”‘’]")
+                    .matcher(prompt);
+            if (matcher.find()) {
+                String trueLabel = trimToNull(matcher.group(1));
+                String falseLabel = trimToNull(matcher.group(2));
+                if (trueLabel != null && falseLabel != null) {
+                    return new String[]{trueLabel, falseLabel};
+                }
+            }
+        }
+        String normalized = normalizedPrompt != null ? normalizedPrompt : "";
+        if ((normalized.contains("sn") || normalized.contains("soun")) && normalized.contains("curto")) {
+            return new String[]{"S", "N"};
+        }
+        if (normalized.contains("curto")
+                && (normalized.contains("texto") || normalized.contains("indicador") || normalized.contains("badge"))) {
+            return new String[]{"S", "N"};
+        }
+        if (normalized.contains("simnao") || normalized.contains("simounao")) {
+            return new String[]{"Sim", "Não"};
+        }
+        return null;
     }
 
     private ColumnDescriptor resolveBooleanStateRendererTargetColumn(
@@ -4054,7 +4187,7 @@ public class AiOrchestratorService {
         ObjectNode visual = renderer.putObject(rendererType);
         visual.put("text", label);
         visual.put("color", color);
-        visual.put("variant", isBlank(variant) ? "soft" : variant);
+        visual.put("variant", sanitizeTableRendererVariant(rendererType, isBlank(variant) ? null : variant));
         params.put("description", "Aplica " + label + " quando " + field + " for " + expected + ".");
         return params;
     }
@@ -4449,7 +4582,9 @@ public class AiOrchestratorService {
         params.put("type", "badge");
         ObjectNode badge = params.putObject("badge");
         badge.put("textField", field);
-        badge.put("variant", inferRendererVariant(normalizedPrompt, null, "soft"));
+        badge.put("variant", sanitizeTableRendererVariant(
+                "badge",
+                inferRendererVariant(normalizedPrompt, null, "soft")));
         badge.put("color", inferRendererColor(normalizedPrompt, null, "primary"));
         return params;
     }
@@ -4459,9 +4594,31 @@ public class AiOrchestratorService {
         params.put("type", "chip");
         ObjectNode chip = params.putObject("chip");
         chip.put("textField", field);
-        chip.put("variant", inferRendererVariant(normalizedPrompt, null, "filled"));
+        chip.put("variant", sanitizeTableRendererVariant(
+                "chip",
+                inferRendererVariant(normalizedPrompt, null, "filled")));
         chip.put("color", inferRendererColor(normalizedPrompt, null, "primary"));
         return params;
+    }
+
+    private String sanitizeTableRendererVariant(String rendererType, String variant) {
+        String normalizedType = rendererType != null ? rendererType.trim().toLowerCase(Locale.ROOT) : "";
+        String normalizedVariant = variant != null ? variant.trim().toLowerCase(Locale.ROOT) : "";
+        if ("badge".equals(normalizedType)) {
+            if ("filled".equals(normalizedVariant)
+                    || "outlined".equals(normalizedVariant)
+                    || "soft".equals(normalizedVariant)) {
+                return normalizedVariant;
+            }
+            return "soft";
+        }
+        if ("chip".equals(normalizedType)) {
+            if ("filled".equals(normalizedVariant) || "outlined".equals(normalizedVariant)) {
+                return normalizedVariant;
+            }
+            return "filled";
+        }
+        return isBlank(normalizedVariant) ? "filled" : normalizedVariant;
     }
 
     private String inferRendererVariant(String normalizedPrompt, JsonNode previousRenderer, String fallback) {

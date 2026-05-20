@@ -1,6 +1,7 @@
 package org.praxisplatform.config.autoconfig;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.ApplicationContext;
@@ -13,6 +14,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 public class ConfigJdbcTemplateAutoConfiguration {
 
     @Bean(name = "configNamedParameterJdbcTemplate")
+    @ConditionalOnBean(JdbcTemplate.class)
     @ConditionalOnMissingBean(name = "configNamedParameterJdbcTemplate")
     public NamedParameterJdbcTemplate configNamedParameterJdbcTemplate(ApplicationContext context) {
         if (context.containsBean("configJdbcTemplate")) {

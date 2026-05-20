@@ -32,6 +32,7 @@ import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
@@ -1496,6 +1497,98 @@ class AgenticAuthoringTurnEngineTest {
                             .contains("layout_preference");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("payload")).isFalse();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("summary")).isFalse();
+                });
+    }
+
+    @Test
+    void injectsGranularAuthoringEvidenceIntoPreviewContextBeforePlanning() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        ContextRetrievalService contextRetrievalService = Mockito.mock(ContextRetrievalService.class);
+        when(contextRetrievalService.searchComponentCorpus(
+                eq("Ajuste toolbar button examples"),
+                eq("praxis-table"),
+                eq(null),
+                eq(6),
+                eq("tenant"),
+                eq("local"),
+                eq("release-1")))
+                .thenReturn(List.of(new ContextRetrievalService.ComponentCorpusEvidence(
+                        "doc-1",
+                        "praxis-table",
+                        "component_definition",
+                        "recipe",
+                        "praxis-ui-angular/examples/ai-recipes/table-toolbar.md",
+                        "release-1",
+                        "tenant",
+                        "local",
+                        "allow",
+                        "hash-1",
+                        "1.0.0",
+                        "Use toolbar buttons through governed component capabilities.",
+                        0.92d)));
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                contextRetrievalService,
+                null,
+                null,
+                objectMapper);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())));
+        com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("selectedComponentId", "praxis-table");
+        contextHints.put("releaseId", "release-1");
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                requestWithContextHints("Ajuste toolbar button examples", contextHints),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        JsonNode authoringEvidence = planRequest.getValue().contextHints().path("authoringEvidence");
+        org.assertj.core.api.Assertions.assertThat(authoringEvidence.path("schemaVersion").asText())
+                .isEqualTo("praxis-agentic-authoring-evidence.v1");
+        org.assertj.core.api.Assertions.assertThat(authoringEvidence.path("tool").asText())
+                .isEqualTo("getComponentAuthoringContext");
+        org.assertj.core.api.Assertions.assertThat(authoringEvidence.path("evidence").path(0).path("sourceRef").asText())
+                .isEqualTo("praxis-ui-angular/examples/ai-recipes/table-toolbar.md");
+        org.assertj.core.api.Assertions.assertThat(authoringEvidence.path("evidence").path(0).path("content").asText())
+                .contains("toolbar buttons");
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("authoringEvidenceCount").asInt())
+                .isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("authoringEvidenceSourceRefs").toString())
+                .contains("table-toolbar.md");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("authoringEvidence.result");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("sourceRefs").toString())
+                            .contains("table-toolbar.md");
                 });
     }
 

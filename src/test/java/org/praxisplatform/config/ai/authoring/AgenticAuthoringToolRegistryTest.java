@@ -1,8 +1,11 @@
 package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
@@ -10,6 +13,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.SchemaRetrievalService;
 
 @Tag("unit")
 class AgenticAuthoringToolRegistryTest {
@@ -22,8 +27,8 @@ class AgenticAuthoringToolRegistryTest {
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
 
         assertThat(registry.definitions())
-                .singleElement()
-                .satisfies(definition -> {
+                .hasSize(7)
+                .anySatisfy(definition -> {
                     assertThat(definition.name()).isEqualTo("searchApiResources");
                     assertThat(definition.allowedRoutes())
                             .containsExactlyInAnyOrder(
@@ -39,9 +44,185 @@ class AgenticAuthoringToolRegistryTest {
                     assertThat(definition.sideEffectClass()).isEqualTo("read_only");
                     assertThat(definition.governanceLevel()).isEqualTo("safe_grounding");
                     assertThat(definition.auditRedactionPolicy()).isEqualTo("safe_event_projection_only");
-                });
+                })
+                .extracting(AgenticAuthoringToolDefinition::name)
+                .containsExactlyInAnyOrder(
+                        "searchApiResources",
+                        "searchComponentCorpus",
+                        "getComponentAuthoringContext",
+                        "getManifestSlice",
+                        "searchConfigPathDocs",
+                        "searchExamples",
+                        "searchSchemaFields");
     }
 
+    @Test
+    void executesSearchComponentCorpusThroughContextRetrievalService() {
+        ContextRetrievalService contextRetrievalService = Mockito.mock(ContextRetrievalService.class);
+        when(contextRetrievalService.searchComponentCorpus(
+                eq("toolbar"),
+                eq("praxis-table"),
+                eq("capabilities"),
+                eq(3),
+                eq("tenant-a"),
+                eq("prod"),
+                eq("release-1")))
+                .thenReturn(List.of(new ContextRetrievalService.ComponentCorpusEvidence(
+                        "doc-1",
+                        "praxis-table",
+                        "component_definition",
+                        "capabilities",
+                        "praxis-ui-angular/projects/praxis-table/table.metadata.ts",
+                        "release-1",
+                        "tenant-a",
+                        "prod",
+                        "allow",
+                        "hash-1",
+                        "1.0.0",
+                        "Toolbar capability docs",
+                        0.91d)));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                contextRetrievalService,
+                null,
+                null,
+                objectMapper);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchComponentCorpus",
+                        "component_authoring",
+                        new CorpusToolRequest(
+                                "toolbar",
+                                "praxis-table",
+                                "capabilities",
+                                null,
+                                "tenant-a",
+                                "prod",
+                                "release-1",
+                                3)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics())
+                .containsEntry("evidenceCount", 1)
+                .containsEntry("componentId", "praxis-table")
+                .containsEntry("chunkKind", "capabilities")
+                .containsEntry("releaseId", "release-1");
+        assertThat((List<?>) result.payload()).hasSize(1);
+    }
+
+    @Test
+    void executesSearchExamplesAsRecipeOnlyCorpusSearch() {
+        ContextRetrievalService contextRetrievalService = Mockito.mock(ContextRetrievalService.class);
+        when(contextRetrievalService.searchComponentCorpus(
+                eq("component examples recipes"),
+                eq("praxis-table"),
+                eq("recipe"),
+                eq(5),
+                eq(null),
+                eq(null),
+                eq("release-1")))
+                .thenReturn(List.of());
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                contextRetrievalService,
+                null,
+                null,
+                objectMapper);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchExamples",
+                        "component_authoring",
+                        new CorpusToolRequest(
+                                null,
+                                "praxis-table",
+                                null,
+                                null,
+                                null,
+                                null,
+                                "release-1",
+                                5)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics()).containsEntry("chunkKind", "recipe");
+    }
+
+    @Test
+    void executesSearchSchemaFieldsWithoutApplyingPatch() throws Exception {
+        SchemaRetrievalService schemaRetrievalService = Mockito.mock(SchemaRetrievalService.class);
+        JsonNode schema = objectMapper.readTree("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}");
+        when(schemaRetrievalService.fetchSchema(
+                Mockito.any(org.praxisplatform.config.dto.AiSchemaContext.class),
+                anyString()))
+                .thenReturn(schema);
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                schemaRetrievalService,
+                objectMapper);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchSchemaFields",
+                        "component_authoring",
+                        new SchemaFieldsToolRequest(
+                                "/employees",
+                                "POST",
+                                "request",
+                                "name",
+                                "http://localhost:8080",
+                                5)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics()).containsEntry("schemaFound", true);
+        assertThat(((JsonNode) result.payload()).path("schema").path("properties").has("name")).isTrue();
+    }
+
+    @Test
+    void rejectsReadOnlyCorpusToolWhenServiceIsUnavailable() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchComponentCorpus",
+                        "component_authoring",
+                        new CorpusToolRequest("toolbar", "praxis-table", null, null, null, null, "release-1", 5)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("tool-service-unavailable");
+    }
+
+    @Test
+    void readOnlyCorpusToolsAreBlockedOutsideRetrievalPhases() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                Mockito.mock(ContextRetrievalService.class),
+                null,
+                null,
+                objectMapper);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchComponentCorpus",
+                        "component_authoring",
+                        new CorpusToolRequest("toolbar", "praxis-table", null, null, null, null, "release-1", 5)),
+                null,
+                "applyPatch");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("tool-phase-not-allowed");
+    }
     @Test
     void executesSearchApiResourcesThroughRegistry() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);

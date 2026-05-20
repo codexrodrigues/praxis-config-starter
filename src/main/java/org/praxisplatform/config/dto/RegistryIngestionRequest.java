@@ -45,13 +45,13 @@ public class RegistryIngestionRequest {
      * DescriÃ§Ã£o serializada de um componente individual dentro do lote de ingestÃ£o.
      */
     public static class ComponentEntry {
-        
+
         private String description;
-        
+
         private String category;
-        
+
         private List<IoEntry> inputs;
-        
+
         private List<IoEntry> outputs;
 
         private String configSchemaId;
@@ -61,7 +61,9 @@ public class RegistryIngestionRequest {
         private JsonNode componentContext;
 
         private List<CapabilityEntry> capabilities;
-        
+
+        private List<ChunkEntry> chunks;
+
         // Campos adicionais livres que podem vir do JSON
         @JsonIgnore
         @Builder.Default
@@ -110,6 +112,24 @@ public class RegistryIngestionRequest {
         private String type;
         private boolean required;
     }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    /**
+     * Chunk granular de corpus gerado para o componente para uso em RAG.
+     */
+    public static class ChunkEntry {
+        private int chunkIndex;
+        private String chunkKind;
+        private String content;
+        private String sourcePointer;
+        private String contentHash;
+        private String sourceKind;
+        private String sourceId;
+        private String corpusVersion;
+        private String aiVisibility;
+        private String embeddingProfile;
+    }
 }
-
-

@@ -27,6 +27,14 @@ public final class RagMetadataKeys {
     public static final String AUTHORING_OPERATION_COUNT = "authoringOperationCount";
     public static final String AUTHORING_TARGET_COUNT = "authoringTargetCount";
 
+    public static final String SOURCE_KIND = "sourceKind";
+    public static final String SOURCE_ID = "sourceId";
+    public static final String SOURCE_POINTER = "sourcePointer";
+    public static final String CHUNK_KIND = "chunkKind";
+    public static final String PUBLISHED_AT = "publishedAt";
+    public static final String EMBEDDING_PROFILE = "embeddingProfile";
+    public static final String CORPUS_VERSION = "corpusVersion";
+
     public static final String DOMAIN_KNOWLEDGE_CONCEPT_ID = "domainKnowledgeConceptId";
     public static final String DOMAIN_KNOWLEDGE_CONCEPT_KEY = "domainKnowledgeConceptKey";
     public static final String DOMAIN_KNOWLEDGE_EVIDENCE_ID = "domainKnowledgeEvidenceId";
