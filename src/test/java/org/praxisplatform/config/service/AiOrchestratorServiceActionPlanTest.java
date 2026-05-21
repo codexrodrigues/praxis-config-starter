@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
@@ -15,6 +16,7 @@ import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
+import org.praxisplatform.config.dto.AiOption;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
@@ -63,6 +65,319 @@ class AiOrchestratorServiceActionPlanTest {
     String prompt = ReflectionTestUtils.invokeMethod(service, "resolveUserPrompt", request);
 
     assertThat(prompt).isEqualTo("Agora mostre a admissão por extenso.");
+  }
+
+  @Test
+  void shouldUseOnlyCurrentTurnPromptForPlanningWhenThereIsNoMemory() {
+    String prompt =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "resolveCurrentTurnPlanningPrompt",
+            "Quero adicionar na toolbar um botão para exportar somente as linhas selecionadas.");
+
+    assertThat(prompt)
+        .isEqualTo("Quero adicionar na toolbar um botão para exportar somente as linhas selecionadas.");
+  }
+
+  @Test
+  void shouldUseConversationMemoryAsReferenceOnlyForPlanningContinuations() {
+    AiMemoryContext memory =
+        new AiMemoryContext(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            null,
+            List.of(
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Ative filtros avançados e deixe CPF e Ativo sempre visíveis.")
+                    .build(),
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("assistant")
+                    .content("Vou ativar os filtros avançados e deixar CPF, Ativo sempre visíveis.")
+                    .build(),
+                org.praxisplatform.config.dto.AiChatMessage.builder()
+                    .role("user")
+                    .content("Inclua também Salário nesses filtros.")
+                    .build()),
+            8,
+            false,
+            null);
+
+    String prompt =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "resolveCurrentTurnPlanningPrompt",
+            "Inclua também Salário nesses filtros.",
+            memory);
+
+    assertThat(prompt).contains("CURRENT_USER_REQUEST:");
+    assertThat(prompt).contains("Inclua também Salário nesses filtros.");
+    assertThat(prompt).contains("CONVERSATION_CONTEXT_FOR_REFERENCE_ONLY:");
+    assertThat(prompt).contains("Use o pedido atual como unica instrucao nova.");
+    assertThat(prompt).contains("Ative filtros avançados e deixe CPF e Ativo sempre visíveis.");
+    assertThat(prompt).doesNotContain("Vou ativar os filtros avançados");
+    assertThat(prompt).contains("previous-user: Ative filtros avançados");
+  }
+
+  @Test
+  void shouldHumanizeTechnicalFormatValuesInActionPlanExplanation() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "dataAdmissao", "header": "Data Admissao" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.format.set")
+                        .target("dataAdmissao")
+                        .params(objectMapper.readTree("{\"format\":\"longDate\"}"))
+                        .build()))
+            .build();
+
+    String explanation =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildActionPlanComponentEditExplanation",
+            plan,
+            columns,
+            "Fallback.");
+
+    assertThat(explanation).isEqualTo("Vou formatar a coluna Data Admissao como data por extenso.");
+    assertThat(explanation).doesNotContain("longDate");
+  }
+
+  @Test
+  void shouldPruneStaleColumnActionsWhenCurrentIntentTargetsToolbarExport() throws Exception {
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                new ArrayList<>(
+                    List.of(
+                        AiActionPlan.Action.builder()
+                            .type("column.format.set")
+                            .target("dataAdmissao")
+                            .params(objectMapper.readTree("{\"format\":\"dd/MM/yyyy\"}"))
+                            .build(),
+                        AiActionPlan.Action.builder()
+                            .type("column.format.set")
+                            .target("dataAdmissao")
+                            .params(objectMapper.readTree("{\"format\":\"MMM/yyyy\"}"))
+                            .build(),
+                        AiActionPlan.Action.builder()
+                            .type("export.configure")
+                            .params(objectMapper.readTree("{\"enabled\":true,\"scope\":\"selected\"}"))
+                            .build())))
+            .ambiguities(List.of())
+            .build();
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("toggle_feature")
+            .scope("config")
+            .category("toolbar")
+            .targetField(null)
+            .needsClarification(false)
+            .build();
+    JsonNode manifest =
+        objectMapper.readTree(
+            """
+            {
+              "componentId": "praxis-table",
+              "operations": [
+                {
+                  "operationId": "column.format.set",
+                  "scope": "column",
+                  "targetKind": "column",
+                  "affectedPaths": ["columns[].format"]
+                },
+                {
+                  "operationId": "export.configure",
+                  "scope": "global",
+                  "targetKind": "export",
+                  "affectedPaths": ["export"]
+                }
+              ]
+            }
+            """);
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan pruned =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "pruneTableActionPlanByClassifiedIntent",
+            plan,
+            intent,
+            List.of(),
+            manifest,
+            warnings);
+
+    assertThat(pruned.getActions()).hasSize(1);
+    assertThat(pruned.getActions().get(0).getType()).isEqualTo("export.configure");
+    assertThat(warnings).contains("table-action-plan-pruned-by-llm-intent:global-actions");
+  }
+
+  @Test
+  void shouldKeepLatestIdempotentColumnActionForSameTarget() throws Exception {
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                new ArrayList<>(
+                    List.of(
+                        AiActionPlan.Action.builder()
+                            .type("column.format.set")
+                            .target("dataAdmissao")
+                            .params(objectMapper.readTree("{\"format\":\"dd/MM/yyyy\"}"))
+                            .build(),
+                        AiActionPlan.Action.builder()
+                            .type("column.format.set")
+                            .target("dataAdmissao")
+                            .params(objectMapper.readTree("{\"format\":\"MMM/yyyy\"}"))
+                            .build())))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan result =
+        ReflectionTestUtils.invokeMethod(service, "dedupeIdempotentTableActionsByTarget", plan, warnings);
+
+    assertThat(result.getActions()).hasSize(1);
+    assertThat(result.getActions().get(0).getTarget()).isEqualTo("dataAdmissao");
+    assertThat(result.getActions().get(0).getParams().path("format").asText()).isEqualTo("MMM/yyyy");
+    assertThat(warnings).contains("table-action-plan-idempotent-actions-deduped");
+  }
+
+  @Test
+  void shouldBlockSemanticAccessibilityRegressionActionPlans() throws Exception {
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("accessibility.configure")
+                        .params(objectMapper.readTree("{\"enabled\":false,\"reduceMotion\":false}"))
+                        .build()))
+            .build();
+
+    String message =
+        ReflectionTestUtils.invokeMethod(service, "tableActionPlanSafetyViolationMessage", plan);
+
+    assertThat(message)
+        .contains("reduza proteções de acessibilidade")
+        .contains("alto contraste")
+        .contains("reduzir movimento");
+  }
+
+  @Test
+  void shouldAllowSemanticAccessibilityProtectionActionPlans() throws Exception {
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("accessibility.configure")
+                        .params(objectMapper.readTree("{\"enabled\":true,\"highContrast\":true,\"reduceMotion\":true}"))
+                        .build()))
+            .build();
+
+    String message =
+        ReflectionTestUtils.invokeMethod(service, "tableActionPlanSafetyViolationMessage", plan);
+
+    assertThat(message).isNull();
+  }
+
+  @Test
+  void shouldBlockAccessibilityConfigureWithoutSpecificProtectionInput() throws Exception {
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("accessibility.configure")
+                        .params(objectMapper.readTree("{}"))
+                        .build()))
+            .build();
+
+    String message =
+        ReflectionTestUtils.invokeMethod(service, "tableActionPlanSafetyViolationMessage", plan);
+
+    assertThat(message).contains("reduza proteções de acessibilidade");
+  }
+
+  @Test
+  void shouldRecognizeToolbarIntentAsGlobalTableActionIntent() {
+    AiIntentClassification intent =
+        AiIntentClassification.builder().category("toolbar").scope("config").build();
+
+    Boolean result =
+        ReflectionTestUtils.invokeMethod(service, "isGlobalTableActionIntent", intent);
+
+    assertThat(result).isTrue();
+  }
+
+  @Test
+  void shouldAllowReviewableComponentEditPlanForConfirmationRequiredOperation() throws Exception {
+    JsonNode manifest =
+        objectMapper.readTree(
+            """
+            {
+              "editableTargets": [
+                { "kind": "export", "resolver": "export-config" }
+              ],
+              "operations": [
+                {
+                  "operationId": "export.configure",
+                  "scope": "global",
+                  "target": { "kind": "export", "resolver": "export-config", "required": false },
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": { "type": "boolean" },
+                      "general": {
+                        "type": "object",
+                        "properties": {
+                          "scope": { "enum": ["selected", "filtered", "all"] }
+                        }
+                      }
+                    }
+                  },
+                  "requiresConfirmation": true
+                }
+              ]
+            }
+            """);
+    JsonNode plan =
+        objectMapper.readTree(
+            """
+            {
+              "schemaVersion": "praxis-component-edit-plan.v1",
+              "componentId": "praxis-table",
+              "operations": [
+                {
+                  "operationId": "export.configure",
+                  "input": {
+                    "enabled": true,
+                    "general": { "scope": "selected" }
+                  }
+                }
+              ]
+            }
+            """);
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            plan,
+            manifest);
+
+    assertThat(failures).isEmpty();
   }
 
   @Test
@@ -1644,6 +1959,555 @@ class AiOrchestratorServiceActionPlanTest {
   }
 
   @Test
+  void shouldCompleteManifestBackedAdvancedFilterFieldsFromHumanPrompt() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF" },
+                { "field": "ativo", "header": "Ativo" },
+                { "field": "salario", "header": "Salário" }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("filter.advanced.configure")
+                        .params(objectMapper.readTree("{\"enabled\":true}"))
+                        .value(objectMapper.readTree("{\"enabled\":true,\"settings\":{\"showAdvanced\":true}}"))
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Ative filtros avançados e deixe CPF e Ativo sempre visíveis.")
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            request,
+            objectMapper.createArrayNode(),
+            currentState,
+            tableManifest(),
+            warnings);
+
+    JsonNode params = completed.getActions().get(0).getParams();
+    assertThat(params.path("enabled").asBoolean()).isTrue();
+    assertThat(params.at("/settings/showAdvanced").asBoolean()).isTrue();
+    assertThat(params.at("/settings/alwaysVisibleFields/0").asText()).isEqualTo("cpf");
+    assertThat(params.at("/settings/alwaysVisibleFields/1").asText()).isEqualTo("ativo");
+    assertThat(params.at("/settings/selectedFieldIds/0").asText()).isEqualTo("cpf");
+    assertThat(params.at("/settings/selectedFieldIds/1").asText()).isEqualTo("ativo");
+    assertThat(warnings).contains("filter.advanced.configure preservou campos citados no pedido humano.");
+
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromActionPlan",
+            completed,
+            tableManifest());
+
+    JsonNode input = componentEditPlan.at("/operations/0/input");
+    assertThat(input.has("value")).isFalse();
+    assertThat(input.at("/settings/alwaysVisibleFields/0").asText()).isEqualTo("cpf");
+    assertThat(input.at("/settings/alwaysVisibleFields/1").asText()).isEqualTo("ativo");
+  }
+
+  @Test
+  void shouldMergeAdvancedFilterFieldsWithCurrentStateWhenConfiguringIncrementally()
+      throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF" },
+                { "field": "ativo", "header": "Ativo" },
+                { "field": "salario", "header": "Salário" }
+              ],
+              "behavior": {
+                "filtering": {
+                  "advancedFilters": {
+                    "enabled": true,
+                    "settings": {
+                      "alwaysVisibleFields": ["cpf", "ativo"],
+                      "selectedFieldIds": ["cpf", "ativo"]
+                    }
+                  }
+                }
+              }
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("filter.advanced.configure")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "enabled": true,
+                                  "settings": {
+                                    "showAdvanced": true,
+                                    "alwaysVisibleFields": ["salario"],
+                                    "selectedFieldIds": ["salario"]
+                                  }
+                                }
+                                """))
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Inclua também Salário nesses filtros.")
+            .build();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            request,
+            objectMapper.createArrayNode(),
+            currentState,
+            tableManifest(),
+            new ArrayList<String>());
+
+    JsonNode settings = completed.getActions().get(0).getParams().path("settings");
+    assertThat(settings.path("alwaysVisibleFields").get(0).asText()).isEqualTo("cpf");
+    assertThat(settings.path("alwaysVisibleFields").get(1).asText()).isEqualTo("ativo");
+    assertThat(settings.path("alwaysVisibleFields").get(2).asText()).isEqualTo("salario");
+    assertThat(settings.path("selectedFieldIds").get(0).asText()).isEqualTo("cpf");
+    assertThat(settings.path("selectedFieldIds").get(1).asText()).isEqualTo("ativo");
+    assertThat(settings.path("selectedFieldIds").get(2).asText()).isEqualTo("salario");
+  }
+
+  @Test
+  void shouldGroundAdvancedFilterContinuationFieldsOnFilterCatalog() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF" },
+                { "field": "ativo", "header": "Ativo" },
+                { "field": "salario", "header": "Salário" }
+              ],
+              "behavior": {
+                "filtering": {
+                  "advancedFilters": {
+                    "enabled": true,
+                    "settings": {
+                      "alwaysVisibleFields": ["cpf", "ativo"],
+                      "selectedFieldIds": ["cpf", "ativo"]
+                    }
+                  }
+                }
+              }
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("filter.advanced.fields.add")
+                        .params(objectMapper.readTree("{\"fields\":[\"salario\"],\"selected\":true,\"alwaysVisible\":true}"))
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Inclua também Salário nesses filtros.")
+            .contextHints(filterFieldCatalogHints())
+            .build();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            request,
+            objectMapper.createArrayNode(),
+            currentState,
+            tableManifest(),
+            new ArrayList<String>());
+
+    JsonNode params = completed.getActions().get(0).getParams();
+    assertThat(params.at("/fields/0").asText()).isEqualTo("salarioBetween");
+
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromActionPlan",
+            completed,
+            tableManifest());
+
+    JsonNode input = componentEditPlan.at("/operations/0/input");
+    assertThat(input.at("/fields/0").asText()).isEqualTo("salarioBetween");
+  }
+
+  @Test
+  void shouldUseSelectedFilterFieldHintWhenCompletingAdvancedFilterContinuation() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "dataAdmissao", "header": "Admissão" }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("filter.advanced.fields.add")
+                        .params(objectMapper.createObjectNode())
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Inclua data de admissão nos filtros avançados.")
+            .contextHints(filterFieldSelectionHints("dataAdmissaoRange"))
+            .build();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            request,
+            objectMapper.createArrayNode(),
+            currentState,
+            tableManifest(),
+            new ArrayList<String>());
+
+    JsonNode params = completed.getActions().get(0).getParams();
+    assertThat(params.at("/fields/0").asText()).isEqualTo("dataAdmissaoRange");
+  }
+
+  @Test
+  void shouldProjectFilterFieldClarificationOptionsFromCatalog() throws Exception {
+    List<AiOption> options =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildFilterFieldOptionPayloads",
+            List.of("Admissão", "dataAdmissaoRange", "dataAdmissaoLastDays"),
+            filterFieldCatalogHints());
+
+    assertThat(options).hasSize(2);
+    assertThat(options).extracting(AiOption::getValue)
+        .containsExactly("dataAdmissaoRange", "dataAdmissaoLastDays");
+    assertThat(options).extracting(AiOption::getLabel)
+        .containsExactly("Período de Admissão", "Admissões recentes");
+    assertThat(options.get(0).getContextHints().at("/optionSelected/targetField").asText())
+        .isEqualTo("dataAdmissaoRange");
+    assertThat(options.get(0).getContextHints().at("/presentation/icon").asText())
+        .isEqualTo("date_range");
+    assertThat(options.get(0).getContextHints().at("/presentation/description").isMissingNode())
+        .isTrue();
+  }
+
+  @Test
+  void shouldResolveHumanTypoFilterFieldPromptsFromCatalog() throws Exception {
+    JsonNode hints =
+        objectMapper.readTree(
+            """
+            {
+              "authoringContract": {
+                "componentEditPlan": {
+                  "filterFieldCatalog": {
+                    "fields": [
+                      {
+                        "name": "dataNascimentoRange",
+                        "label": "Período de Nascimento",
+                        "aliases": ["nascimento", "data nascimento"]
+                      },
+                      {
+                        "name": "dataAdmissaoRange",
+                        "label": "Período de Admissão",
+                        "aliases": ["admissão", "data admissão", "data de admissão"]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+    List<String> vaguePeriod =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "resolveFilterFieldsFromCatalogPrompt",
+            "inclua periodo",
+            hints);
+    List<String> typoAdmission =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "resolveFilterFieldsFromCatalogPrompt",
+            "coloca admisao no filtro",
+            hints);
+    List<String> exactAdmission =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "resolveFilterFieldsFromCatalogPrompt",
+            "Período de Admissão",
+            hints);
+
+    assertThat(vaguePeriod).containsExactly("dataNascimentoRange", "dataAdmissaoRange");
+    assertThat(typoAdmission).containsExactly("dataAdmissaoRange");
+    assertThat(exactAdmission).containsExactly("dataAdmissaoRange");
+  }
+
+  @Test
+  void shouldBuildFilterFieldClarificationForVagueHumanPrompt() throws Exception {
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("inclua periodo")
+            .contextHints(filterFieldCatalogHints())
+            .build();
+
+    Object payload =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildFilterFieldClarificationPayloadFromPrompt",
+            request);
+
+    assertThat(payload).isNotNull();
+    @SuppressWarnings("unchecked")
+    List<AiOption> options = (List<AiOption>) ReflectionTestUtils.getField(payload, "payloads");
+    assertThat(options).extracting(AiOption::getLabel)
+        .contains("Período de Admissão");
+    assertThat(options).extracting(AiOption::getValue)
+        .contains("dataAdmissaoRange");
+  }
+
+  @Test
+  void shouldGateFilterFieldClarificationBySemanticFilteringIntent() {
+    AiIntentClassification filtering =
+        AiIntentClassification.builder()
+            .category("filtering")
+            .build();
+    AiIntentClassification conditional =
+        AiIntentClassification.builder()
+            .category("conditional")
+            .build();
+
+    Boolean allowFiltering =
+        ReflectionTestUtils.invokeMethod(service, "shouldOfferFilterFieldClarification", filtering);
+    Boolean allowConditional =
+        ReflectionTestUtils.invokeMethod(service, "shouldOfferFilterFieldClarification", conditional);
+
+    assertThat(allowFiltering).isTrue();
+    assertThat(allowConditional).isFalse();
+  }
+
+  @Test
+  void shouldHumanizeMissingContextClarificationKeys() {
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .category("conditional")
+            .needsClarification(true)
+            .missingContext(List.of("threshold", "applyTo", "color"))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("destaca salarios altos com fundo verde suave")
+            .build();
+
+    String message =
+        ReflectionTestUtils.invokeMethod(service, "buildClarificationMessage", intent, request);
+
+    assertThat(message)
+        .contains("qual limite define a condicao")
+        .contains("onde aplicar o ajuste")
+        .contains("qual cor ou estilo visual usar")
+        .doesNotContain("threshold")
+        .doesNotContain("applyTo")
+        .doesNotContain("color");
+  }
+
+  @Test
+  void shouldHumanizeSentenceLikeMissingContextFromLlm() {
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .category("conditional")
+            .needsClarification(true)
+            .missingContext(
+                List.of(
+                    "confirmar coluna alvo",
+                    "definir criterio para \"menores\"",
+                    "valor limite",
+                    "escopo aplicacao (todas linhas|seleção|top n)"))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("e os menores deixa laranja")
+            .build();
+
+    String message =
+        ReflectionTestUtils.invokeMethod(service, "buildClarificationMessage", intent, request);
+
+    assertThat(message)
+        .contains("qual coluna usar")
+        .contains("qual criterio define a condicao")
+        .contains("qual valor limite usar")
+        .contains("onde aplicar o ajuste")
+        .doesNotContain("confirmar coluna alvo")
+        .doesNotContain("mais detalhes sobre valor limite")
+        .doesNotContain("escopo aplicacao");
+  }
+
+  @Test
+  void shouldCompleteManifestBackedAdvancedFilterFieldContinuationOperations() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF" },
+                { "field": "ativo", "header": "Ativo" },
+                { "field": "salario", "header": "Salário" }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("filter.advanced.fields.remove")
+                        .params(objectMapper.createObjectNode())
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Agora remova Ativo desses filtros.")
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            request,
+            objectMapper.createArrayNode(),
+            currentState,
+            tableManifest(),
+            warnings);
+
+    JsonNode params = completed.getActions().get(0).getParams();
+    assertThat(params.at("/fields/0").asText()).isEqualTo("ativo");
+    assertThat(warnings).contains("filter.advanced.fields.remove completou campos citados no pedido humano.");
+
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromActionPlan",
+            completed,
+            tableManifest());
+
+    JsonNode input = componentEditPlan.at("/operations/0/input");
+    assertThat(input.has("value")).isFalse();
+    assertThat(input.at("/fields/0").asText()).isEqualTo("ativo");
+  }
+
+  private JsonNode filterFieldCatalogHints() throws Exception {
+    return objectMapper.readTree(
+        """
+        {
+          "authoringContract": {
+            "componentEditPlan": {
+              "filterFieldCatalog": {
+                "source": "resource-filter-schema",
+                "fields": [
+                  {
+                    "name": "cpf",
+                    "label": "CPF",
+                    "aliases": ["cpf"]
+                  },
+                  {
+                    "name": "ativo",
+                    "label": "Status",
+                    "aliases": ["ativo", "status"]
+                  },
+                  {
+                    "name": "salarioBetween",
+                    "label": "Faixa Salarial",
+                    "aliases": ["salario", "salário", "faixa salarial"]
+                  },
+                  {
+                    "name": "dataAdmissaoRange",
+                    "label": "Período de Admissão",
+                    "aliases": ["admissão", "data admissão", "data de admissão"]
+                  },
+                  {
+                    "name": "dataAdmissaoLastDays",
+                    "label": "Admissões recentes",
+                    "aliases": ["admissão", "data admissão", "recentes"]
+                  }
+                ]
+              }
+            }
+          }
+        }
+        """);
+  }
+
+  private JsonNode filterFieldSelectionHints(String targetField) throws Exception {
+    JsonNode hints = filterFieldCatalogHints();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) hints)
+        .putObject("optionSelected")
+        .put("targetField", targetField)
+        .putObject("selection")
+        .put("value", targetField);
+    return hints;
+  }
+
+  @Test
+  void shouldTreatManifestBackedGlobalTableActionAsClarificationDeferrable() throws Exception {
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(List.of(AiActionPlan.Action.builder().type("filter.advanced.configure").build()))
+            .build();
+
+    Boolean result =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "hasManifestBackedGlobalAction",
+            actionPlan,
+            tableManifest());
+
+    assertThat(result).isTrue();
+  }
+
+  @Test
   void shouldDetectAdvancedFilterVisibleFieldReplacementPrompt() {
     Boolean replace =
         ReflectionTestUtils.invokeMethod(
@@ -2948,6 +3812,43 @@ class AiOrchestratorServiceActionPlanTest {
             {
               "operationId": "behavior.selection.configure",
               "inputSchema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "type": { "type": "string" } } }
+            },
+            {
+              "operationId": "filter.advanced.configure",
+              "target": { "kind": "filter", "resolver": "advanced-filters", "required": false },
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "type": "boolean" },
+                  "settings": { "type": "object" }
+                }
+              }
+            },
+            {
+              "operationId": "filter.advanced.fields.add",
+              "target": { "kind": "filter", "resolver": "advanced-filters", "required": false },
+              "inputSchema": {
+                "type": "object",
+                "required": ["fields"],
+                "properties": {
+                  "fields": { "type": "array", "items": { "type": "string" } },
+                  "selected": { "type": "boolean" },
+                  "alwaysVisible": { "type": "boolean" }
+                }
+              }
+            },
+            {
+              "operationId": "filter.advanced.fields.remove",
+              "target": { "kind": "filter", "resolver": "advanced-filters", "required": false },
+              "inputSchema": {
+                "type": "object",
+                "required": ["fields"],
+                "properties": {
+                  "fields": { "type": "array", "items": { "type": "string" } },
+                  "selected": { "type": "boolean" },
+                  "alwaysVisible": { "type": "boolean" }
+                }
+              }
             },
             {
               "operationId": "toolbar.configure",

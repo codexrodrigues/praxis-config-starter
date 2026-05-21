@@ -25,6 +25,7 @@ No `praxis-config-starter`:
 
 ```bash
 mvn -B -Dtest=RagVectorStoreServiceTest,RegistryIngestionServiceIdentityTest,ContextRetrievalServiceTest,AgenticAuthoringToolRegistryTest,AgenticAuthoringTurnEngineTest test
+mvn -B -Dtest=AgenticAuthoringConversationTurnOrchestratorTest,AgenticAuthoringTurnEngineTest test
 git diff --check
 ```
 
@@ -65,6 +66,9 @@ Backend:
 
 - suites focais executadas: `RagVectorStoreServiceTest`, `RegistryIngestionServiceIdentityTest`, `ContextRetrievalServiceTest`, `AgenticAuthoringToolRegistryTest`, `AgenticAuthoringTurnEngineTest`;
 - resultado: 81 testes, 0 falhas, 0 erros, 0 skipped.
+- bateria humana deterministica inicial executada: `AgenticAuthoringConversationTurnOrchestratorTest`, `AgenticAuthoringTurnEngineTest`;
+- resultado da bateria humana: 65 testes, 0 falhas, 0 erros, 0 skipped;
+- cobertura adicionada: resposta curta com erro de digitacao, fragmento copiado da resposta anterior, texto numerado colado como nova instrucao e follow-up humano com erro de componente recuperando evidencia granular antes do `preview.plan`.
 
 Downstream quickstart:
 

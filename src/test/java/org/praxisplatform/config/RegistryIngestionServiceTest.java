@@ -97,6 +97,30 @@ class RegistryIngestionServiceTest {
     @MockBean
     private GoogleGenAiTextEmbeddingModel googleGenAiTextEmbeddingModel;
 
+    @MockBean
+    private org.praxisplatform.config.service.DomainCatalogIngestionService domainCatalogIngestionService;
+
+    @MockBean
+    private org.praxisplatform.config.service.DomainFederationQueryService domainFederationQueryService;
+
+    @MockBean
+    private org.praxisplatform.config.service.DomainFederationIngestDryRunService domainFederationIngestDryRunService;
+
+    @MockBean
+    private org.praxisplatform.config.service.DomainFederationIngestPersistenceService domainFederationIngestPersistenceService;
+
+    @MockBean
+    private org.praxisplatform.config.service.DomainFederationReleaseService domainFederationReleaseService;
+
+    @MockBean
+    private org.praxisplatform.config.service.DomainFederationContractValidator domainFederationContractValidator;
+
+    @MockBean
+    private org.praxisplatform.config.service.DomainCatalogPromptContextService domainCatalogPromptContextService;
+
+    @MockBean
+    private org.praxisplatform.config.service.DomainKnowledgeChangeSetService domainKnowledgeChangeSetService;
+
     private static final String COMPONENT_ID = "demo-component";
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";

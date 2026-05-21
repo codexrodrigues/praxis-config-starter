@@ -16,11 +16,13 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.domain.AiThread;
+import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiContextDTO;
 import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
@@ -31,17 +33,19 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AiOrchestratorServiceContextHintsTest {
 
     private AiOrchestratorService service;
+    private AiProvider aiProvider;
     private SchemaRetrievalService schemaRetrievalService;
     private AiRegistryTemplateService templateService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
+        aiProvider = mock(AiProvider.class);
         schemaRetrievalService = mock(SchemaRetrievalService.class);
         templateService = mock(AiRegistryTemplateService.class);
         service = new AiOrchestratorService(
                 mock(AiContextService.class),
-                mock(AiProvider.class),
+                aiProvider,
                 mock(AiInteractionLogger.class),
                 mock(ContextRetrievalService.class),
                 schemaRetrievalService,
@@ -228,6 +232,216 @@ class AiOrchestratorServiceContextHintsTest {
         assertThat(prompt).contains("\"preferredResponse\" : \"componentEditPlan\"");
         assertThat(prompt).contains("component-edit-plan.v1.schema.json");
         assertThat(prompt).contains("retorne componentEditPlan em vez de patch livre");
+    }
+
+    @Test
+    void classifyIntentReceivesAuthoringContractResponseModes() throws Exception {
+        JsonNode authoringContract = objectMapper.readTree("""
+                {
+                  "kind": "praxis.component-authoring-context",
+                  "responseModes": [
+                    {
+                      "kind": "consult",
+                      "operationKind": "consult",
+                      "changeKind": "answer",
+                      "preferredResponse": "info"
+                    },
+                    {
+                      "kind": "edit",
+                      "operationKind": "author",
+                      "changeKind": "componentEditPlan",
+                      "preferredResponse": "componentEditPlan"
+                    }
+                  ]
+                }
+                """);
+        when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "intent": "ask_about_config",
+                          "scope": "config",
+                          "category": "columns",
+                          "targetField": null,
+                          "newField": null,
+                          "baseFields": [],
+                          "computedFormat": null,
+                          "expression": null,
+                          "needsClarification": false,
+                          "missingContext": [],
+                          "options": []
+                        }
+                        """));
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "classifyIntent",
+                "como criar uma coluna que exibe a soma de duas outras colunas?",
+                List.of("valorA", "valorB"),
+                List.of(),
+                List.of(),
+                List.of("columns", "format"),
+                List.of(),
+                "N/A",
+                "N/A",
+                authoringContract,
+                AiOrchestratorRequest.builder().userPrompt("como criar uma coluna que exibe a soma de duas outras colunas?").build(),
+                null);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiProvider).generateJson(promptCaptor.capture(), any(AiJsonSchema.class), nullable(AiCallConfig.class));
+        assertThat(promptCaptor.getValue()).contains("CONTRATO DECLARATIVO DE AUTORIA");
+        assertThat(promptCaptor.getValue()).contains("\"preferredResponse\" : \"info\"");
+        assertThat(promptCaptor.getValue()).contains("pedidos de explicação, documentação, orientação");
+        assertThat(promptCaptor.getValue()).contains("Não transforme um pedido consultivo");
+    }
+
+    @Test
+    void selectAuthoringResponseModeUsesLlmAgainstDeclaredModes() throws Exception {
+        JsonNode authoringContract = objectMapper.readTree("""
+                {
+                  "kind": "praxis.component-authoring-context",
+                  "responseModes": [
+                    { "kind": "consult", "preferredResponse": "info" },
+                    { "kind": "edit", "preferredResponse": "componentEditPlan" }
+                  ]
+                }
+                """);
+        when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "kind": "consult",
+                          "preferredResponse": "info",
+                          "reason": "O turno pede orientação, não materialização."
+                        }
+                        """));
+
+        String selected = ReflectionTestUtils.invokeMethod(
+                service,
+                "selectAuthoringResponseMode",
+                "como criar uma coluna que exibe a soma de duas outras colunas?",
+                authoringContract,
+                AiOrchestratorRequest.builder().userPrompt("como criar uma coluna que exibe a soma de duas outras colunas?").build(),
+                null);
+
+        assertThat(selected).isEqualTo("consult");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiProvider).generateJson(promptCaptor.capture(), any(AiJsonSchema.class), nullable(AiCallConfig.class));
+        assertThat(promptCaptor.getValue()).contains("decisor semântico de modo de resposta");
+        assertThat(promptCaptor.getValue()).contains("\"kind\" : \"consult\"");
+        assertThat(promptCaptor.getValue()).contains("\"kind\" : \"edit\"");
+    }
+
+    @Test
+    void answerQuestionGovernedByConsultModeAsksForHumanGuidanceOnly() throws Exception {
+        JsonNode authoringContract = objectMapper.readTree("""
+                {
+                  "kind": "praxis.component-authoring-context",
+                  "responseModes": [
+                    { "kind": "consult", "preferredResponse": "info" },
+                    { "kind": "edit", "preferredResponse": "componentEditPlan" }
+                  ],
+                  "operations": [
+                    { "operationId": "column.computed.add", "title": "Adicionar coluna calculada" }
+                  ]
+                }
+                """);
+        when(aiProvider.generateText(anyString(), nullable(AiCallConfig.class)))
+                .thenReturn("Explique o recurso sem aplicar mudanças.");
+
+        String answer = ReflectionTestUtils.invokeMethod(
+                service,
+                "answerQuestion",
+                "como criar uma coluna que exibe a soma de duas outras colunas?",
+                objectMapper.readTree("""
+                        {
+                          "columns": [
+                            { "field": "salario", "header": "Salário" },
+                            { "field": "bonus", "header": "Bônus" }
+                          ]
+                        }
+                        """),
+                AiOrchestratorRequest.builder()
+                        .userPrompt("como criar uma coluna que exibe a soma de duas outras colunas?")
+                        .build(),
+                null,
+                authoringContract);
+
+        assertThat(answer).isEqualTo("Explique o recurso sem aplicar mudanças.");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiProvider).generateText(promptCaptor.capture(), nullable(AiCallConfig.class));
+        assertThat(promptCaptor.getValue()).contains("responda como orientação humana");
+        assertThat(promptCaptor.getValue()).contains("Não produza JSON Patch, componentEditPlan, plano aplicável");
+        assertThat(promptCaptor.getValue()).contains("PERGUNTA DO USUÁRIO: \"como criar uma coluna que exibe a soma de duas outras colunas?\"");
+    }
+
+    @Test
+    void unknownFieldValidationDoesNotRejectOptionalManifestTargetCreation() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "operations": [
+                    {
+                      "operationId": "column.computed.add",
+                      "target": { "kind": "computedColumn", "required": false },
+                      "effects": [{ "kind": "append-unique", "path": "columns[]", "key": "field" }]
+                    }
+                  ]
+                }
+                """);
+
+        List<String> unknownFields = ReflectionTestUtils.invokeMethod(
+                service,
+                "findUnknownActionFields",
+                List.of(AiActionItem.builder()
+                        .type("column.computed.add")
+                        .field("total")
+                        .build()),
+                List.of("salario", "bonus"),
+                List.of(),
+                authoringManifest);
+
+        assertThat(unknownFields).isEmpty();
+    }
+
+    @Test
+    void resolveAuthoringContractPreservesRuntimeResponseModesWhenManifestExists() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "authoringContract": {
+                    "responseModes": [
+                      { "kind": "consult", "preferredResponse": "info" },
+                      { "kind": "edit", "preferredResponse": "componentEditPlan" }
+                    ],
+                    "consultativeContext": {
+                      "resourcePath": "/api/human-resources/funcionarios"
+                    }
+                  }
+                }
+                """);
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    { "operationId": "column.computed.set", "title": "Coluna calculada" }
+                  ]
+                }
+                """);
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .build();
+
+        JsonNode contract = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveAuthoringContract",
+                contextHints,
+                context,
+                authoringManifest);
+
+        assertThat(contract.path("preferredResponse").asText()).isEqualTo("componentEditPlan");
+        assertThat(contract.path("responseModes")).hasSize(2);
+        assertThat(contract.at("/responseModes/0/kind").asText()).isEqualTo("consult");
+        assertThat(contract.at("/consultativeContext/resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
     }
 
     @Test

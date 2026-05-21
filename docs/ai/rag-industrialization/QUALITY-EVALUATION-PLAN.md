@@ -1,6 +1,6 @@
 # Plano de Avaliacao de Qualidade do Retrieval/Authoring
 
-Status: backlog operacional pos-Fase 09.
+Status: bateria inicial em implementacao pos-Fase 09.
 
 ## Objetivo
 
@@ -58,3 +58,17 @@ Criar um runner local em fase posterior, preferencialmente em `praxis-config-sta
 
 O benchmark deve conseguir reprovar regressao de retrieval sem exigir chamada real a OpenAI/Gemini.
 
+## Bateria humana inicial
+
+A bateria operacional detalhada esta em:
+
+- `docs/ai/agentic-authoring/implementation/16-human-simulation-rag-validation-battery.md`
+
+Primeiro corte implementavel sem provider externo:
+
+- conversa com erro de digitacao e nome impreciso de componente;
+- pergunta consultiva antes da materializacao;
+- resposta curta a clarificacao;
+- trecho copiado da resposta anterior usado como nova pergunta;
+- validacao de `contextHints.authoringEvidence` no `PlanRequest`;
+- validacao de `decisionDiagnostics.authoringEvidenceSourceRefs`.

@@ -73,7 +73,34 @@ public final class AiPromptTemplates {
       - Formatação: Sempre preencha 'columns[].format' e 'columns[].width' (ex: "120px", "20%") quando previsível.
       - Cores/Badges: Use renderers visuais (badge, chip) para status/categorias.
       - Alinhamento: 'align': 'right' para números/moeda, 'center' para status/boolean.
-    """;
+	""";
+
+	public static final String PROMPT_AUTHORING_RESPONSE_MODE_CLASSIFIER = """
+	Você é o decisor semântico de modo de resposta para autoria governada Praxis.
+	Escolha qual responseMode declarado no contrato deve governar o turno atual.
+
+	PEDIDO DO USUÁRIO:
+	{{USER_INPUT}}
+
+	CONTRATO DECLARATIVO DE AUTORIA:
+	{{AUTHORING_CONTRACT}}
+
+	REGRAS:
+	1. Escolha apenas um modo existente em responseModes.
+	2. Use o modo consultivo quando o usuário quer entender, perguntar, documentar, explicar, revisar possibilidades ou receber orientação sobre a tabela/componente.
+	3. Use o modo de edição quando o usuário quer materializar uma alteração concreta no componente ou preparar uma proposta aplicável.
+	4. Não use falta de parâmetros de edição como motivo para escolher edição se o turno é semanticamente consultivo.
+	5. Trate perguntas sobre possibilidades, capacidades, origem de dados, formato de operações ou instruções conceituais como consultivas quando não houver decisão explícita de aplicar a mudança agora.
+	6. Trate como edição apenas quando o usuário pedir uma materialização concreta no componente, com intenção de produzir uma alteração aplicável neste turno.
+	7. Retorne APENAS JSON válido, sem markdown.
+
+	SCHEMA:
+	{
+	  "kind": "consult|edit|string",
+	  "preferredResponse": "info|componentEditPlan|string",
+	  "reason": "string"
+	}
+	""";
 
 	public static final String PROMPT_INTENT_CLASSIFIER = """
 	Você é um especialista em UX e configuração de componentes de UI.
@@ -86,6 +113,7 @@ public final class AiPromptTemplates {
 	OUTPUTS DISPONÍVEIS: {{OUTPUTS_LIST}}
 	METADADOS (se houver): {{RUNTIME_METADATA}}
 	TIPOS INFERIDOS (dataProfile, se houver): {{FIELD_TYPES}}
+	CONTRATO DECLARATIVO DE AUTORIA (se fornecido): {{AUTHORING_CONTRACT}}
 
 	CATEGORIAS PARA CONFIG (derivadas das capabilities):
 	{{CONFIG_CATEGORIES}}
@@ -115,6 +143,8 @@ public final class AiPromptTemplates {
 	5. Para update/remove: preencha targetField com coluna existente (fuzzy match permitido).
 	6. Se o usuário for ambíguo (ex: "muda a cor" e houver ambiguidade), marque "needsClarification": true.
 	7. Se o usuário fizer uma PERGUNTA sobre o estado atual, use "intent": "ask_about_config".
+	7.1. Se o CONTRATO DECLARATIVO DE AUTORIA declarar responseModes com kind="consult" e preferredResponse="info", pedidos de explicação, documentação, orientação ou how-to sobre capacidades, endpoint, schema, campos, estilos, regras condicionais, animações ou formato de uma operação devem ser classificados como "ask_about_config", needsClarification=false.
+	7.2. Não transforme um pedido consultivo/how-to em edição apenas porque a operação explicada exigiria parâmetros se fosse aplicada. Parâmetros ausentes só justificam clarification quando a decisão semântica do próprio modelo for uma edição/materialização, preferencialmente em responseModes kind="edit" ou preferredResponse="componentEditPlan".
 	8. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
 	9. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
 	10. Se o pedido afetar ambos, use scope="mixed".
@@ -221,12 +251,20 @@ public final class AiPromptTemplates {
 CONFIGURAÇÃO ATUAL:
 {{TARGET_CONFIG}}
 
+CONTRATO DECLARATIVO DE AUTORIA (se houver):
+{{AUTHORING_CONTRACT}}
+
 PERGUNTA DO USUÁRIO: "{{USER_INPUT}}"
 
 INSTRUÇÕES:
 - Responda de forma direta e concisa em português.
 	- Liste os itens solicitados se houver.
-	- Não invente informações que não estejam no JSON.
+	- Use o contrato declarativo para explicar capacidades, formatos, estilos, endpoints e exemplos de operação quando ele estiver disponível.
+	- Quando o contrato indicar um modo consultivo, responda como orientação humana: explique o recurso, os campos relevantes, o endpoint ou a forma conceitual de configurar.
+	- Não produza JSON Patch, componentEditPlan, plano aplicável, payload de execução ou blocos JSON de alteração em respostas consultivas.
+	- Não invente informações que não estejam no JSON ou no contrato declarativo.
+	- Para perguntas sobre endpoint/resourcePath, cite apenas o endpoint ou resourcePath presente no JSON/contrato. Se o usuário pedir para inventar, criar ou supor um endpoint, diga que isso exige uma decisão/catálogo de backend registrado e não proponha caminhos hipotéticos.
+	- Não use exemplos de endpoint fictícios em respostas consultivas; quando faltar endpoint registrado, peça um candidato do catálogo de APIs.
 
 RESPOSTA:
 """;
@@ -385,9 +423,11 @@ REGRAS:
 6. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
 7. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
 8. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
-9. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
+9. Não gere operação que reduza proteções de acessibilidade, segurança, governança ou compatibilidade. Para acessibilidade, operações podem ativar proteções como highContrast/reduceMotion, mas não devem desabilitar proteções existentes.
+10. Se o pedido delegar ao assistente a escolha de um alvo essencial ("o melhor", "o certo", "o que fizer sentido") e o catálogo não determinar uma única opção canônica, preencha "ambiguities" em vez de escolher defaults.
+11. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
    10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
-10. Retorne APENAS um objeto JSON valido (sem markdown).
+12. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):
 {

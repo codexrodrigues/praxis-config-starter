@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
+import org.praxisplatform.config.ai.prompts.AiPromptTemplates;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOption;
@@ -39,8 +40,25 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 .doesNotContain("enforceFormatIntentWhenFieldExists(")
                 .doesNotContain("handleComputedCreationIntent(")
                 .doesNotContain("tryResolveComputedFastPath(")
-                .doesNotContain("keyword-fallback-table-actions-used");
+                .doesNotContain("matchActionsForClause(")
+                .doesNotContain("splitPromptClauses(")
+                .doesNotContain("local-text-fallback-table-actions-used");
         assertThat(generatePatchBody).contains("extractTableActionPlan(");
+    }
+
+    @Test
+    void qaPromptMustForbidHypotheticalEndpointInvention() {
+        assertThat(AiPromptTemplates.PROMPT_QA)
+                .contains("endpoint/resourcePath")
+                .contains("não proponha caminhos hipotéticos")
+                .contains("Não use exemplos de endpoint fictícios");
+    }
+
+    @Test
+    void tableActionPlanPromptMustRequireSemanticSafetyGuardrails() {
+        assertThat(AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN)
+                .contains("Não gere operação que reduza proteções de acessibilidade")
+                .contains("preencha \"ambiguities\" em vez de escolher defaults");
     }
 
     @Test
