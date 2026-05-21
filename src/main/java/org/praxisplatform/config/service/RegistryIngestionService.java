@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.StringJoiner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,9 +51,21 @@ public class RegistryIngestionService {
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public void ingestRegistry(RegistryIngestionRequest request, String tenantId, String environment) {
+        reindexRegistry(request, tenantId, environment);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public RegistryReindexResult reindexRegistry(RegistryIngestionRequest request, String tenantId, String environment) {
+        if (request == null) {
+            log.warn("No registry request found for ingestion.");
+            return RegistryReindexResult.empty(normalize(tenantId), normalize(environment), "v1");
+        }
         if (request.getComponents() == null || request.getComponents().isEmpty()) {
             log.warn("No 'components' map found in registry request.");
-            return;
+            return RegistryReindexResult.empty(
+                    normalize(tenantId),
+                    normalize(environment),
+                    RagDocumentIdentity.resolveReleaseId(null, request.getVersion(), request.getGeneratedAt()));
         }
 
         String resolvedTenant = normalize(tenantId);
@@ -59,19 +73,50 @@ public class RegistryIngestionService {
         String releaseId = RagDocumentIdentity.resolveReleaseId(null, request.getVersion(), request.getGeneratedAt());
         String requestVersion = normalize(request.getVersion());
         var definitions = request.getDefinitions();
+        List<ComponentPublicationStatus> componentStatuses = new ArrayList<>();
+        long expectedChunkCount = 0;
+        long publishedChunkCount = 0;
         request.getComponents().forEach((componentId, entry) -> {
             try {
                 validateAuthoringManifest(componentId, entry);
                 AiRegistry def = toComponentDefinition(componentId, entry, definitions);
                 upsertDefinition(def);
-                Document ragDocument = toRagDocument(def, entry, resolvedTenant, resolvedEnv, releaseId, requestVersion);
-                ragVectorStoreService.upsertDocuments(List.of(ragDocument));
+                List<Document> ragDocuments = toRagDocuments(def, entry, resolvedTenant, resolvedEnv, releaseId, requestVersion);
+                purgeExistingDocuments(resolvedTenant, resolvedEnv, releaseId, componentId, ragDocuments);
+                ragVectorStoreService.upsertDocuments(ragDocuments);
+                componentStatuses.add(new ComponentPublicationStatus(
+                        componentId,
+                        ragDocuments.size(),
+                        ragDocuments.stream()
+                                .map(document -> toStringValue(document.getMetadata().get(RagMetadataKeys.CHUNK_KIND)))
+                                .filter(value -> value != null && !value.isBlank())
+                                .distinct()
+                                .toList(),
+                        ragDocuments.stream()
+                                .map(Document::getId)
+                                .toList()));
                 log.info("Ingested component: {}", componentId);
             } catch (Exception e) {
                 log.error("Failed to process component: " + componentId, e);
                 throw new ConfigurationIngestionException("Error processing component: " + componentId, e);
             }
         });
+        for (ComponentPublicationStatus status : componentStatuses) {
+            expectedChunkCount += status.chunkCount();
+            publishedChunkCount += status.chunkCount();
+        }
+        RagVectorStoreService.RagCorpusReleaseStatus corpusStatus =
+                ragVectorStoreService.corpusReleaseStatus(resolvedTenant, resolvedEnv, releaseId, expectedChunkCount);
+        return new RegistryReindexResult(
+                resolvedTenant,
+                resolvedEnv,
+                releaseId,
+                requestVersion,
+                request.getComponents().size(),
+                expectedChunkCount,
+                publishedChunkCount,
+                List.copyOf(componentStatuses),
+                corpusStatus);
     }
 
     private AiRegistry toComponentDefinition(
@@ -86,7 +131,7 @@ public class RegistryIngestionService {
 
         String summary = buildSummary(componentId, description, entry);
         List<Float> embedding = embeddingService.embed(summary);
-        
+
         String payload = buildPayload(componentId, description, entry);
 
         return AiRegistry.builder()
@@ -98,6 +143,136 @@ public class RegistryIngestionService {
                 .payload(payload)
                 .embedding(embedding)
                 .build();
+    }
+
+    private List<Document> toRagDocuments(
+            AiRegistry definition,
+            RegistryIngestionRequest.ComponentEntry entry,
+            String tenantId,
+            String environment,
+            String releaseId,
+            String requestVersion) {
+        List<RegistryIngestionRequest.ChunkEntry> chunks = entry.getChunks();
+        if (chunks == null || chunks.isEmpty()) {
+            return List.of(toRagDocument(definition, entry, tenantId, environment, releaseId, requestVersion));
+        }
+
+        List<Document> documents = new ArrayList<>();
+        String description = entry.getDescription();
+        if (description == null || description.isBlank()) {
+            description = "Component " + definition.getRegistryKey();
+        }
+
+        for (RegistryIngestionRequest.ChunkEntry chunk : chunks) {
+            String sourceKind = firstNonBlank(chunk.getSourceKind(), REGISTRY_TYPE_COMPONENT_DEF);
+            String sourceId = firstNonBlank(chunk.getSourceId(), definition.getRegistryKey());
+            String chunkKind = firstNonBlank(chunk.getChunkKind(), "summary");
+            String content = firstNonBlank(
+                    chunk.getContent(),
+                    buildSummary(definition.getRegistryKey(), description, entry));
+            int chunkIndex = Math.max(0, chunk.getChunkIndex());
+            String contentHash = chunk.getContentHash();
+            if (contentHash == null || contentHash.isBlank()) {
+                contentHash = RagDocumentIdentity.sha256(content);
+            }
+
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            // Legacy / general compatibility keys
+            metadata.put(RagMetadataKeys.RESOURCE_TYPE, sourceKind);
+            metadata.put(RagMetadataKeys.RESOURCE_ID, sourceId);
+            metadata.put(RagMetadataKeys.COMPONENT_ID, sourceId);
+            metadata.put(RagMetadataKeys.DOC_TYPE, sourceKind);
+            metadata.put(RagMetadataKeys.RELEASE_ID, releaseId);
+            metadata.put(RagMetadataKeys.CONTENT_HASH, contentHash);
+            metadata.put(RagMetadataKeys.CHUNK_INDEX, chunkIndex);
+            metadata.put(RagMetadataKeys.DESCRIPTION, description);
+            metadata.put(RagMetadataKeys.JSON_SCHEMA, toJson(entry));
+
+            // New contractual keys
+            metadata.put(RagMetadataKeys.SOURCE_KIND, sourceKind);
+            metadata.put(RagMetadataKeys.SOURCE_ID, sourceId);
+            metadata.put(RagMetadataKeys.SOURCE_POINTER, chunk.getSourcePointer());
+            metadata.put(RagMetadataKeys.CHUNK_KIND, chunkKind);
+            metadata.put(RagMetadataKeys.CORPUS_VERSION, chunk.getCorpusVersion());
+            metadata.put(RagMetadataKeys.AI_VISIBILITY, firstNonBlank(chunk.getAiVisibility(), "allow"));
+            metadata.put(RagMetadataKeys.EMBEDDING_PROFILE, chunk.getEmbeddingProfile());
+            metadata.put(RagMetadataKeys.PUBLISHED_AT, java.time.Instant.now().toString());
+
+            com.fasterxml.jackson.databind.JsonNode authoringManifest = authoringManifest(entry);
+            if (authoringManifest != null && authoringManifest.isObject()) {
+                metadata.put(
+                        RagMetadataKeys.AUTHORING_MANIFEST_VERSION,
+                        text(authoringManifest, "manifestVersion"));
+                metadata.put(
+                        RagMetadataKeys.AUTHORING_OPERATION_COUNT,
+                        authoringManifest.path("operations").isArray() ? authoringManifest.path("operations").size() : 0);
+                metadata.put(
+                        RagMetadataKeys.AUTHORING_TARGET_COUNT,
+                        authoringManifest.path("editableTargets").isArray() ? authoringManifest.path("editableTargets").size() : 0);
+            }
+            if (tenantId != null) {
+                metadata.put(RagMetadataKeys.TENANT_ID, tenantId);
+            }
+            if (environment != null) {
+                metadata.put(RagMetadataKeys.ENVIRONMENT, environment);
+            }
+            metadata.put(RagMetadataKeys.VERSION, hasText(requestVersion) ? requestVersion : definition.getVersion());
+            metadata.entrySet().removeIf(mEntry -> Objects.isNull(mEntry.getValue()));
+
+            String docId = RagDocumentIdentity.buildDocumentId(
+                    tenantId,
+                    environment,
+                    sourceId,
+                    releaseId,
+                    sourceKind,
+                    chunkKind,
+                    contentHash,
+                    chunkIndex
+            );
+
+            documents.add(Document.builder()
+                    .id(docId)
+                    .text(content)
+                    .metadata(metadata)
+                    .build());
+        }
+        return documents;
+    }
+
+    private void purgeExistingDocuments(
+            String tenantId,
+            String environment,
+            String releaseId,
+            String componentId,
+            List<Document> ragDocuments) {
+        Set<SourceScope> scopes = new LinkedHashSet<>();
+        if (ragDocuments != null) {
+            for (Document document : ragDocuments) {
+                Map<String, Object> metadata = document.getMetadata() != null ? document.getMetadata() : Map.of();
+                String sourceId = firstNonBlank(
+                        toStringValue(metadata.get(RagMetadataKeys.SOURCE_ID)),
+                        toStringValue(metadata.get(RagMetadataKeys.COMPONENT_ID)),
+                        toStringValue(metadata.get(RagMetadataKeys.RESOURCE_ID)),
+                        componentId);
+                String sourceKind = firstNonBlank(
+                        toStringValue(metadata.get(RagMetadataKeys.SOURCE_KIND)),
+                        toStringValue(metadata.get(RagMetadataKeys.DOC_TYPE)),
+                        toStringValue(metadata.get(RagMetadataKeys.RESOURCE_TYPE)),
+                        REGISTRY_TYPE_COMPONENT_DEF);
+                scopes.add(new SourceScope(sourceId, sourceKind));
+            }
+        }
+        if (scopes.isEmpty()) {
+            scopes.add(new SourceScope(componentId, REGISTRY_TYPE_COMPONENT_DEF));
+        }
+        for (SourceScope scope : scopes) {
+            ragVectorStoreService.deleteDocumentsByScope(
+                    tenantId,
+                    environment,
+                    releaseId,
+                    scope.sourceId(),
+                    scope.sourceKind());
+        }
     }
 
     private Document toRagDocument(
@@ -124,6 +299,11 @@ public class RegistryIngestionService {
         metadata.put(RagMetadataKeys.CHUNK_INDEX, 0);
         metadata.put(RagMetadataKeys.DESCRIPTION, description);
         metadata.put(RagMetadataKeys.JSON_SCHEMA, toJson(entry));
+        metadata.put(RagMetadataKeys.SOURCE_KIND, RagResourceTypes.COMPONENT_DEFINITION);
+        metadata.put(RagMetadataKeys.SOURCE_ID, definition.getRegistryKey());
+        metadata.put(RagMetadataKeys.CHUNK_KIND, "summary");
+        metadata.put(RagMetadataKeys.AI_VISIBILITY, "allow");
+        metadata.put(RagMetadataKeys.PUBLISHED_AT, java.time.Instant.now().toString());
         com.fasterxml.jackson.databind.JsonNode authoringManifest = authoringManifest(entry);
         if (authoringManifest != null && authoringManifest.isObject()) {
             metadata.put(
@@ -164,6 +344,62 @@ public class RegistryIngestionService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            String normalized = normalize(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
+    private String toStringValue(Object value) {
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    private record SourceScope(String sourceId, String sourceKind) {
+    }
+
+    public record RegistryReindexResult(
+            String tenantId,
+            String environment,
+            String releaseId,
+            String registryVersion,
+            int componentCount,
+            long expectedChunkCount,
+            long publishedChunkCount,
+            List<ComponentPublicationStatus> components,
+            RagVectorStoreService.RagCorpusReleaseStatus corpusStatus
+    ) {
+        private static RegistryReindexResult empty(
+                String tenantId,
+                String environment,
+                String releaseId) {
+            return new RegistryReindexResult(
+                    tenantId,
+                    environment,
+                    releaseId,
+                    "",
+                    0,
+                    0,
+                    0,
+                    List.of(),
+                    null);
+        }
+    }
+
+    public record ComponentPublicationStatus(
+            String componentId,
+            int chunkCount,
+            List<String> chunkKinds,
+            List<String> documentIds
+    ) {
     }
 
     private String buildSummary(String id, String description, RegistryIngestionRequest.ComponentEntry entry) {

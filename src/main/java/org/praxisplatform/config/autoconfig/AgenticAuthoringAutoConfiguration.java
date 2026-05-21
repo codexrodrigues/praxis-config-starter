@@ -229,8 +229,17 @@ public class AgenticAuthoringAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public AgenticAuthoringToolRegistry agenticAuthoringToolRegistry(
-            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService) {
-        return new AgenticAuthoringToolRegistry(resourceDiscoveryService);
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ObjectProvider<ContextRetrievalService> contextRetrievalService,
+            ObjectProvider<AgenticAuthoringManifestService> manifestService,
+            ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringToolRegistry(
+                resourceDiscoveryService,
+                contextRetrievalService.getIfAvailable(),
+                manifestService.getIfAvailable(),
+                schemaRetrievalService.getIfAvailable(),
+                objectMapper);
     }
 
     @Bean

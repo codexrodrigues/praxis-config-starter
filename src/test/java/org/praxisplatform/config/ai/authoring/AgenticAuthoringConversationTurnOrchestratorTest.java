@@ -195,6 +195,62 @@ class AgenticAuthoringConversationTurnOrchestratorTest {
         assertThat(turn.answeredPendingClarification()).isFalse();
     }
 
+    @Test
+    void preservesOriginalGoalWhenHumanAnswersClarificationWithMessyShortText() {
+        AgenticAuthoringConversationTurn turn = orchestrator.resolve(
+                "folha memo por departameto",
+                List.of(),
+                pendingClarification(
+                        "Crie uma tela pra eu acompanhar as pessoas da empresa",
+                        "Qual dominio deve alimentar esta tela?"));
+
+        assertThat(turn.effectivePrompt())
+                .isEqualTo("Crie uma tela pra eu acompanhar as pessoas da empresa\n\nConfirmed: folha memo por departameto");
+        assertThat(turn.answeredPendingClarification()).isTrue();
+    }
+
+    @Test
+    void treatsCopiedAssistantFragmentAsNewQuestionWhenThereIsNoHardClarification() {
+        AgenticAuthoringConversationTurn turn = orchestrator.resolve(
+                "\"evidencias governadas\" quer dizer o que na tela?",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "m1",
+                                "user",
+                                "Antes de criar, como voce decide o componente?",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Eu uso evidencias governadas do componente para orientar o plano.",
+                                null)),
+                null);
+
+        assertThat(turn.effectivePrompt()).isEqualTo("\"evidencias governadas\" quer dizer o que na tela?");
+        assertThat(turn.answeredPendingClarification()).isFalse();
+    }
+
+    @Test
+    void treatsPastedNumberedFragmentWithActionAsNewInstruction() {
+        AgenticAuthoringConversationTurn turn = orchestrator.resolve(
+                "111 coloca isso como botao na tabela",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "m1",
+                                "user",
+                                "Me explica como melhorar a lista",
+                                null),
+                        new AgenticAuthoringConversationMessage(
+                                "m2",
+                                "assistant",
+                                "Voce pode adicionar acoes na toolbar quando fizer sentido.",
+                                null)),
+                null);
+
+        assertThat(turn.effectivePrompt()).isEqualTo("111 coloca isso como botao na tabela");
+        assertThat(turn.answeredPendingClarification()).isFalse();
+    }
+
     private AgenticAuthoringPendingClarification pendingClarification(String sourcePrompt, String question) {
         return new AgenticAuthoringPendingClarification(
                 sourcePrompt,

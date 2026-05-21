@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
+import org.praxisplatform.config.ai.prompts.AiPromptTemplates;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOption;
@@ -39,8 +40,25 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 .doesNotContain("enforceFormatIntentWhenFieldExists(")
                 .doesNotContain("handleComputedCreationIntent(")
                 .doesNotContain("tryResolveComputedFastPath(")
-                .doesNotContain("keyword-fallback-table-actions-used");
+                .doesNotContain("matchActionsForClause(")
+                .doesNotContain("splitPromptClauses(")
+                .doesNotContain("local-text-fallback-table-actions-used");
         assertThat(generatePatchBody).contains("extractTableActionPlan(");
+    }
+
+    @Test
+    void qaPromptMustForbidHypotheticalEndpointInvention() {
+        assertThat(AiPromptTemplates.PROMPT_QA)
+                .contains("endpoint/resourcePath")
+                .contains("não proponha caminhos hipotéticos")
+                .contains("Não use exemplos de endpoint fictícios");
+    }
+
+    @Test
+    void tableActionPlanPromptMustRequireSemanticSafetyGuardrails() {
+        assertThat(AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN)
+                .contains("Não gere operação que reduza proteções de acessibilidade")
+                .contains("preencha \"ambiguities\" em vez de escolher defaults");
     }
 
     @Test
@@ -258,6 +276,166 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
         assertThat(plan.getActions().get(0).getTarget()).isEqualTo("ativo");
         assertThat(plan.getActions().get(0).getParams().path("renderer").path("type").asText())
                 .isEqualTo("badge");
+    }
+
+    @Test
+    void selectedRendererGuidedBadgeWithTextUsesTableSupportedVariant() throws Exception {
+        AiOrchestratorService service = newService();
+        JsonNode hints = objectMapper.readTree("""
+                {
+                  "optionSelected": {
+                    "targetField": "ativo",
+                    "selection": {
+                      "value": "Badge com texto 'Sim' (verde) / 'Não' (vermelho)",
+                      "mode": "renderer"
+                    }
+                  }
+                }
+                """);
+
+        Object selection = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractSelectedRendererFromHints",
+                hints);
+
+        AiActionPlan plan = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRendererActionPlan",
+                selection,
+                AiIntentClassification.builder().category("renderer").targetField("ativo").build(),
+                objectMapper.readTree("{\"columns\":[{\"field\":\"ativo\",\"header\":\"Ativo\",\"type\":\"boolean\"}]}"),
+                List.of(newColumnDescriptor("ativo", "Ativo")),
+                List.of("field", "header"));
+
+        assertThat(plan).isNotNull();
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("Sim");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/badge/variant").asText())
+                .isEqualTo("soft");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("Não");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/variant").asText())
+                .isEqualTo("soft");
+    }
+
+    @Test
+    void selectedRendererGuidedShortBadgePreservesChosenLabelsOverPreviousMapping() throws Exception {
+        AiOrchestratorService service = newService();
+        JsonNode hints = objectMapper.readTree("""
+                {
+                  "optionSelected": {
+                    "targetField": "ativo",
+                    "selection": {
+                      "value": "Badge curto: 'S' / 'N' com cores suaves (verde / cinza)",
+                      "mode": "renderer"
+                    }
+                  }
+                }
+                """);
+
+        Object selection = ReflectionTestUtils.invokeMethod(
+                service,
+                "extractSelectedRendererFromHints",
+                hints);
+
+        AiActionPlan plan = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRendererActionPlan",
+                selection,
+                AiIntentClassification.builder().category("renderer").targetField("ativo").build(),
+                objectMapper.readTree("""
+                        {
+                          "columns": [
+                            {
+                              "field": "ativo",
+                              "header": "Ativo",
+                              "type": "boolean",
+                              "valueMapping": { "true": "Sim", "false": "Não" }
+                            }
+                          ]
+                        }
+                        """),
+                List.of(newColumnDescriptor("ativo", "Ativo")),
+                List.of("field", "header"));
+
+        assertThat(plan).isNotNull();
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("S");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/badge/variant").asText())
+                .isEqualTo("soft");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("N");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/variant").asText())
+                .isEqualTo("soft");
+    }
+
+    @Test
+    void naturalContinuationForShortBooleanIndicatorOverridesPreviousLongMapping() throws Exception {
+        AiOrchestratorService service = newService();
+
+        AiActionPlan plan = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildBooleanStateRendererActionPlan",
+                "agora deixe esse indicador mais discreto e com texto curto",
+                newColumnDescriptor("ativo", "Ativo"),
+                objectMapper.readTree("""
+                        {
+                          "columns": [
+                            {
+                              "field": "ativo",
+                              "header": "Ativo",
+                              "type": "boolean",
+                              "valueMapping": { "true": "Ativo", "false": "Inativo" }
+                            }
+                          ]
+                        }
+                        """));
+
+        assertThat(plan).isNotNull();
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("S");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("N");
+    }
+
+    @Test
+    void llmTablePlanForShortBooleanTextIsNormalizedBeforeMaterialization() throws Exception {
+        AiOrchestratorService service = newService();
+        AiActionPlan plan = AiActionPlan.builder()
+                .actions(List.of(
+                        AiActionPlan.Action.builder()
+                                .type("column.valueMapping.set")
+                                .target("ativo")
+                                .params(objectMapper.readTree("""
+                                        { "valueMapping": { "true": "true", "false": "false" } }
+                                        """))
+                                .build(),
+                        AiActionPlan.Action.builder()
+                                .type("column.renderer.set")
+                                .target("ativo")
+                                .params(objectMapper.readTree("""
+                                        { "type": "badge", "badge": { "textField": "ativo", "variant": "soft" } }
+                                        """))
+                                .build()))
+                .ambiguities(List.of())
+                .build();
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "normalizeTableBooleanLabelActionsFromPrompt",
+                "deixe a coluna ativo como badge com texto curto",
+                plan);
+
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getType()).isEqualTo("column.conditionalRenderer.add");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("S");
+        assertThat(plan.getActions().get(1).getType()).isEqualTo("column.conditionalRenderer.add");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("N");
     }
 
     @Test

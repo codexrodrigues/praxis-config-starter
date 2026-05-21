@@ -29,6 +29,12 @@ class ConfigJdbcTemplateAutoConfigurationTest {
     }
 
     @Test
+    void shouldBackOffWhenJdbcTemplateIsUnavailable() {
+        contextRunner.run(context ->
+                assertThat(context).doesNotHaveBean("configNamedParameterJdbcTemplate"));
+    }
+
+    @Test
     void shouldPreferConfigJdbcTemplateWhenPresent() {
         JdbcTemplate defaultJdbcTemplate = mock(JdbcTemplate.class);
         JdbcTemplate configJdbcTemplate = mock(JdbcTemplate.class);

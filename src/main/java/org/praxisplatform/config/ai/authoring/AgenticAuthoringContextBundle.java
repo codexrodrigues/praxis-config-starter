@@ -460,6 +460,27 @@ final class AgenticAuthoringContextBundle {
         inputs.add("limit");
         searchApiResources.put("result", "candidateResources[] with resourcePath, operation, schemaUrl, submitUrl, submitMethod, score, reason, and evidence.");
         searchApiResources.put("whenToUse", "Use when the user intent is clear enough to search resources but current candidateResources is empty, generic, or ambiguous.");
+        ObjectNode getComponentAuthoringContext = tools.putObject("getComponentAuthoringContext");
+        getComponentAuthoringContext.put("method", "INTERNAL_TOOL");
+        getComponentAuthoringContext.put("endpoint", "praxis-config-starter:vector_store/component-corpus");
+        getComponentAuthoringContext.put("purpose", "Retrieve granular read-only component corpus evidence before preview planning.");
+        ArrayNode componentInputs = getComponentAuthoringContext.putArray("inputs");
+        componentInputs.add("query");
+        componentInputs.add("componentId");
+        componentInputs.add("releaseId");
+        componentInputs.add("limit");
+        getComponentAuthoringContext.put("result", "authoringEvidence.evidence[] with sourceRef, releaseId, chunkKind, contentHash, corpusVersion, and bounded content.");
+        getComponentAuthoringContext.put("whenToUse", "Use for component capabilities, examples, manifests, recipes, or configuration docs; evidence is grounding only and does not replace validate-plan or compile-patch.");
+        ObjectNode getManifestSlice = tools.putObject("getManifestSlice");
+        getManifestSlice.put("method", "INTERNAL_TOOL");
+        getManifestSlice.put("endpoint", "praxis-config-starter:ai_registry/authoringManifest");
+        getManifestSlice.put("purpose", "Retrieve a bounded backend manifest slice for a component operation.");
+        getManifestSlice.put("result", "A read-only manifest slice such as operations, editableTargets, validators, or one operationId.");
+        ObjectNode searchSchemaFields = tools.putObject("searchSchemaFields");
+        searchSchemaFields.put("method", "INTERNAL_TOOL");
+        searchSchemaFields.put("endpoint", "praxis-config-starter:/schemas/filtered");
+        searchSchemaFields.put("purpose", "Retrieve governed schema evidence for fields and operations without applying patches.");
+        searchSchemaFields.put("result", "Read-only schema evidence with sourceRef.");
         return tools;
     }
 

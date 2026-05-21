@@ -257,6 +257,44 @@ public class ContextRetrievalService {
         return projections.stream().map(this::mapToComponentSearchResult).collect(Collectors.toList());
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public List<ComponentCorpusEvidence> searchComponentCorpus(
+            String query,
+            String componentId,
+            String chunkKind,
+            int limit,
+            String tenantId,
+            String environment,
+            String releaseId) {
+        String resolvedReleaseId = resolveReleaseId(releaseId);
+        List<ComponentCorpusEvidence> results = searchComponentCorpusWithVectorStore(
+                query,
+                componentId,
+                chunkKind,
+                limit,
+                tenantId,
+                environment,
+                resolvedReleaseId);
+        if (results.isEmpty() && shouldFallbackToDefaultRelease(resolvedReleaseId)) {
+            String defaultReleaseId = resolveDefaultReleaseId();
+            results = searchComponentCorpusWithVectorStore(
+                    query,
+                    componentId,
+                    chunkKind,
+                    limit,
+                    tenantId,
+                    environment,
+                    defaultReleaseId);
+            if (!results.isEmpty()) {
+                log.warn(
+                        "[ContextRetrievalService] Component corpus retrieval fallback applied from release '{}' to default '{}'.",
+                        safeQuery(resolvedReleaseId),
+                        safeQuery(defaultReleaseId));
+            }
+        }
+        return results;
+    }
+
     private String toVectorLiteral(List<Float> floatList) {
         if (floatList == null || floatList.isEmpty()) {
             return "[]";
@@ -391,6 +429,60 @@ public class ContextRetrievalService {
                 .collect(Collectors.toList());
     }
 
+    private List<ComponentCorpusEvidence> searchComponentCorpusWithVectorStore(
+            String query,
+            String componentId,
+            String chunkKind,
+            int limit,
+            String tenantId,
+            String environment,
+            String releaseId) {
+        if (!ragVectorStoreService.isAvailable()) {
+            return List.of();
+        }
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        FilterExpressionBuilder.Op filter = builder.eq(
+                RagMetadataKeys.RESOURCE_TYPE,
+                RagResourceTypes.COMPONENT_DEFINITION);
+        filter = builder.and(filter, RagFilters.buildScopedFilter(
+                builder,
+                tenantId,
+                environment,
+                releaseId,
+                ragReleaseFallbackToLegacyVersion));
+        String normalizedComponentId = normalizeToken(componentId);
+        if (normalizedComponentId != null) {
+            filter = builder.and(filter, builder.or(
+                    builder.eq(RagMetadataKeys.SOURCE_ID, normalizedComponentId),
+                    builder.or(
+                            builder.eq(RagMetadataKeys.COMPONENT_ID, normalizedComponentId),
+                            builder.eq(RagMetadataKeys.RESOURCE_ID, normalizedComponentId))));
+        }
+        String normalizedChunkKind = normalizeToken(chunkKind);
+        if (normalizedChunkKind != null) {
+            filter = builder.and(filter, builder.eq(RagMetadataKeys.CHUNK_KIND, normalizedChunkKind));
+        }
+        filter = builder.and(filter, builder.eq(RagMetadataKeys.AI_VISIBILITY, "allow"));
+
+        String retrievalQuery = trimToNull(query);
+        if (retrievalQuery == null) {
+            retrievalQuery = String.join(
+                    " ",
+                    normalizedComponentId != null ? normalizedComponentId : "component",
+                    normalizedChunkKind != null ? normalizedChunkKind : "corpus");
+        }
+        List<Document> documents = ragVectorStoreService.search(
+                retrievalQuery,
+                limit > 0 ? limit : DEFAULT_SEARCH_LIMIT,
+                filter.build());
+        if (documents.isEmpty()) {
+            return List.of();
+        }
+        return documents.stream()
+                .map(this::mapToComponentCorpusEvidence)
+                .collect(Collectors.toList());
+    }
+
     private ApiSearchResult mapToApiSearchResult(Document document) {
         Map<String, Object> metadata = document != null ? document.getMetadata() : Map.of();
         Long id = toLong(metadata.get(RagMetadataKeys.DB_ID));
@@ -419,6 +511,35 @@ public class ContextRetrievalService {
                 .jsonSchema(toString(metadata.get(RagMetadataKeys.JSON_SCHEMA)))
                 .similarityScore(document != null && document.getScore() != null ? document.getScore() : 0.0d)
                 .build();
+    }
+
+    private ComponentCorpusEvidence mapToComponentCorpusEvidence(Document document) {
+        Map<String, Object> metadata = document != null ? document.getMetadata() : Map.of();
+        String sourceId = firstNonBlank(
+                toString(metadata.get(RagMetadataKeys.SOURCE_ID)),
+                toString(metadata.get(RagMetadataKeys.COMPONENT_ID)),
+                toString(metadata.get(RagMetadataKeys.RESOURCE_ID)));
+        String sourceKind = firstNonBlank(
+                toString(metadata.get(RagMetadataKeys.SOURCE_KIND)),
+                toString(metadata.get(RagMetadataKeys.DOC_TYPE)),
+                toString(metadata.get(RagMetadataKeys.RESOURCE_TYPE)));
+        String releaseId = firstNonBlank(
+                toString(metadata.get(RagMetadataKeys.RELEASE_ID)),
+                toString(metadata.get(RagMetadataKeys.VERSION)));
+        return new ComponentCorpusEvidence(
+                document != null ? document.getId() : null,
+                sourceId,
+                sourceKind,
+                toString(metadata.get(RagMetadataKeys.CHUNK_KIND)),
+                toString(metadata.get(RagMetadataKeys.SOURCE_POINTER)),
+                releaseId,
+                toString(metadata.get(RagMetadataKeys.TENANT_ID)),
+                toString(metadata.get(RagMetadataKeys.ENVIRONMENT)),
+                toString(metadata.get(RagMetadataKeys.AI_VISIBILITY)),
+                toString(metadata.get(RagMetadataKeys.CONTENT_HASH)),
+                toString(metadata.get(RagMetadataKeys.CORPUS_VERSION)),
+                document != null ? document.getText() : null,
+                document != null && document.getScore() != null ? document.getScore() : 0.0d);
     }
 
     private String summarizeApiResults(List<ApiMetadataProjection> projections) {
@@ -485,6 +606,35 @@ public class ContextRetrievalService {
         return String.valueOf(value);
     }
 
+    private String normalizeToken(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            String normalized = normalizeToken(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
     private Long toLong(Object value) {
         if (value == null) {
             return null;
@@ -497,5 +647,21 @@ public class ContextRetrievalService {
         } catch (NumberFormatException ex) {
             return null;
         }
+    }
+
+    public record ComponentCorpusEvidence(
+            String documentId,
+            String sourceId,
+            String sourceKind,
+            String chunkKind,
+            String sourcePointer,
+            String releaseId,
+            String tenantId,
+            String environment,
+            String aiVisibility,
+            String contentHash,
+            String corpusVersion,
+            String content,
+            double similarityScore) {
     }
 }

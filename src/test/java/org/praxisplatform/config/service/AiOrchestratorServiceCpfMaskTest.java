@@ -370,11 +370,147 @@ class AiOrchestratorServiceCpfMaskTest {
     assertThat(actionOptions)
         .extracting(AiOption::getValue)
         .contains(
-            "formate a coluna Admissão como dd/MM/yyyy",
-            "formate a coluna Admissão como data por extenso",
-            "formate a coluna Admissão como mes e ano");
+            "formate a coluna dataAdmissao como dd/MM/yyyy",
+            "formate a coluna dataAdmissao como data por extenso",
+            "formate a coluna dataAdmissao como mes e ano");
     assertThat(actionOptions.get(1).getContextHints().at("/presentation/ctaLabel").asText())
         .isEqualTo("Aplicar formato");
+  }
+
+  @Test
+  void buildTableDateFormatActionOptionsFallsBackToCanonicalDateActionsWhenCatalogIsMissing()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "primeiraAcao", "header": "Primeira ação", "type": "date", "format": "yyyy-MM-dd HH:mm" },
+                { "field": "ultimaAcao", "header": "Última ação", "type": "date", "format": "yyyy-MM-dd HH:mm" },
+                { "field": "titulo", "header": "Título", "type": "string" }
+              ]
+            }
+            """);
+
+    @SuppressWarnings("unchecked")
+    List<AiOption> actionOptions =
+        (List<AiOption>)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableDateFormatActionOptions",
+                "Quais formatos você recomenda para as datas de ação? Mostre opções para eu escolher.",
+                currentState,
+                List.of());
+
+    assertThat(actionOptions).hasSize(3);
+    assertThat(actionOptions)
+        .extracting(AiOption::getValue)
+        .contains(
+            "formate as colunas primeiraAcao e ultimaAcao como dd/MM/yyyy",
+            "formate as colunas primeiraAcao e ultimaAcao como data por extenso",
+            "formate as colunas primeiraAcao e ultimaAcao como mes e ano");
+    assertThat(actionOptions.get(0).getContextHints().at("/presentation/description").asText())
+        .contains("Formato brasileiro");
+    assertThat(actionOptions.get(0).getContextHints().at("/targetField").asText())
+        .isEqualTo("Primeira ação e Última ação");
+    assertThat(actionOptions.get(0).getContextHints().at("/optionSelected/targetFields/0").asText())
+        .isEqualTo("primeiraAcao");
+    assertThat(actionOptions.get(0).getContextHints().at("/optionSelected/targetFields/1").asText())
+        .isEqualTo("ultimaAcao");
+  }
+
+  @Test
+  void attachConsultativeTableActionOptionsAddsDateButtonsToQaAnswer() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "primeiraAcao", "header": "Primeira ação", "type": "date", "format": "yyyy-MM-dd HH:mm" },
+                { "field": "ultimaAcao", "header": "Última ação", "type": "date", "format": "yyyy-MM-dd HH:mm" },
+                { "field": "titulo", "header": "Título", "type": "string" }
+              ]
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .userPrompt("Quais formatos você recomenda para as datas de ação? Mostre opções para eu escolher.")
+            .build();
+    AiOrchestratorResponse response =
+        AiOrchestratorResponse.builder()
+            .type("info")
+            .message("Posso sugerir formatos de data para Primeira ação e Última ação.")
+            .build();
+
+    AiOrchestratorResponse enriched =
+        (AiOrchestratorResponse)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "attachConsultativeTableActionOptions",
+                response,
+                request,
+                currentState,
+                List.of());
+
+    assertThat(enriched.getOptionPayloads()).hasSize(3);
+    assertThat(enriched.getOptionPayloads())
+        .extracting(AiOption::getLabel)
+        .containsExactly("Usar dd/MM/yyyy", "Usar data por extenso", "Usar mês/ano");
+    assertThat(enriched.getOptionPayloads().get(0).getContextHints().at("/presentation/ctaLabel").asText())
+        .isEqualTo("Aplicar formato");
+    assertThat(enriched.getOptionPayloads().get(0).getContextHints().at("/optionSelected/selection/value").asText())
+        .isEqualTo("dd/MM/yyyy");
+  }
+
+  @Test
+  void attachConsultativeTableActionOptionsAddsConditionalRuleButtonsToQaAnswer()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "id", "header": "ID" },
+                { "field": "descricao", "header": "Descrição" },
+                { "field": "tipo", "header": "Tipo" },
+                { "field": "valor", "header": "Valor", "type": "currency", "format": "BRL|symbol|2" }
+              ]
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .userPrompt(
+                "Quais formas você recomenda para destacar descontos e valores altos? Mostre opções para eu escolher.")
+            .build();
+    AiOrchestratorResponse response =
+        AiOrchestratorResponse.builder()
+            .type("info")
+            .message("Posso sugerir formas de destacar descontos e valores altos.")
+            .build();
+
+    AiOrchestratorResponse enriched =
+        (AiOrchestratorResponse)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "attachConsultativeTableActionOptions",
+                response,
+                request,
+                currentState,
+                List.of());
+
+    assertThat(enriched.getOptionPayloads()).hasSize(3);
+    assertThat(enriched.getOptionPayloads())
+        .extracting(AiOption::getLabel)
+        .containsExactly("Destacar descontos", "Destacar valores altos", "Badge para descontos");
+    assertThat(enriched.getOptionPayloads().get(0).getContextHints().at("/presentation/ctaLabel").asText())
+        .isEqualTo("Preparar ajuste");
+    assertThat(enriched.getOptionPayloads().get(0).getContextHints().at("/guidedAction/operationIntent").asText())
+        .isEqualTo("row.styleRule.add");
+    assertThat(enriched.getOptionPayloads().get(0).getContextHints().has("optionSelected"))
+        .isFalse();
   }
 
   @Test
@@ -412,24 +548,24 @@ class AiOrchestratorServiceCpfMaskTest {
   }
 
   @Test
-  void isConsultativeTableFormatQuestionDetectsGuidanceRequestWithoutTreatingCommandsAsQuestions() {
+  void isConsultativeTableGuidanceQuestionDetectsGuidanceRequestWithoutTreatingCommandsAsQuestions() {
     Boolean guidance =
         (Boolean)
             ReflectionTestUtils.invokeMethod(
                 service,
-                "isConsultativeTableFormatQuestion",
+                "isConsultativeTableGuidanceQuestion",
                 "Como eu posso formatar uma data dentro da tabela dinamica? Qual voce recomenda?");
     Boolean optionsGuidance =
         (Boolean)
             ReflectionTestUtils.invokeMethod(
                 service,
-                "isConsultativeTableFormatQuestion",
+                "isConsultativeTableGuidanceQuestion",
                 "Quais formatos de data voce recomenda para a coluna Data de Admissao? Mostre as opcoes para eu escolher.");
     Boolean command =
         (Boolean)
             ReflectionTestUtils.invokeMethod(
                 service,
-                "isConsultativeTableFormatQuestion",
+                "isConsultativeTableGuidanceQuestion",
                 "formate a coluna admissao como data por extenso");
 
     assertThat(guidance).isTrue();

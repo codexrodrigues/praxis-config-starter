@@ -53,6 +53,35 @@ public final class RagDocumentIdentity {
         return buildDocumentId(tenantId, null, componentId, releaseId, docType, contentHash, chunkIndex);
     }
 
+    public static String buildDocumentId(
+            String tenantId,
+            String environment,
+            String sourceId,
+            String releaseId,
+            String sourceKind,
+            String chunkKind,
+            String contentHash,
+            int chunkIndex) {
+        String scopeTenant = normalizeToken(tenantId, DEFAULT_SCOPE);
+        String scopeEnvironment = normalizeToken(environment, DEFAULT_SCOPE);
+        String scopeSourceId = normalizeToken(sourceId, "unknown-source");
+        String scopeRelease = normalizeToken(releaseId, DEFAULT_RELEASE);
+        String scopeSourceKind = normalizeToken(sourceKind, "unknown-kind");
+        String scopeChunkKind = normalizeToken(chunkKind, "unknown-chunk");
+        String scopeHash = normalizeToken(contentHash, "nohash");
+        int normalizedChunk = Math.max(0, chunkIndex);
+        return String.join(
+                "/",
+                scopeTenant,
+                scopeEnvironment,
+                scopeSourceId,
+                scopeRelease,
+                scopeSourceKind,
+                scopeChunkKind,
+                scopeHash,
+                Integer.toString(normalizedChunk));
+    }
+
     public static String normalizeToken(String rawValue, String fallback) {
         String normalized = normalize(rawValue);
         if (normalized == null) {
