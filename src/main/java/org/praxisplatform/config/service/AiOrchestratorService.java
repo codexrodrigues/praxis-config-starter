@@ -199,6 +199,9 @@ public class AiOrchestratorService {
     @Autowired(required = false)
     private AgenticAuthoringPreviewService agenticAuthoringPreviewService;
 
+    @Autowired(required = false)
+    private AiAssistantAdmissionService assistantAdmissionService;
+
     public AiOrchestratorResponse generatePatch(
             AiOrchestratorRequest request,
             String requestBaseUrl,
@@ -227,6 +230,30 @@ public class AiOrchestratorService {
                 return unknownComponentError(request);
             }
 
+            JsonNode currentState = context.getCurrentState();
+            JsonNode authoringManifest = normalizeAuthoringManifest(
+                    context.getComponentId(),
+                    extractAuthoringManifest(context.getComponentDefinition()));
+            List<AiCapability> configCapabilities = extractCapabilities(context.getComponentDefinition());
+            List<AiCapability> componentCapabilities = extractComponentCapabilities(context.getComponentDefinition());
+            JsonNode componentContext = extractComponentContextPack(context.getComponentDefinition());
+            JsonNode authoringContract = resolveAuthoringContract(
+                    request.getContextHints(),
+                    context,
+                    authoringManifest);
+            AiOrchestratorResponse admissionResponse = assistantAdmissionService != null
+                    ? assistantAdmissionService.evaluate(
+                            request,
+                            authoringContract,
+                            authoringManifest,
+                            configCapabilities,
+                            componentCapabilities,
+                            componentContext)
+                    : null;
+            if (admissionResponse != null) {
+                return admissionResponse;
+            }
+
             AiThread thread = threadService.resolveThread(
                     request,
                     tenantId,
@@ -248,16 +275,9 @@ public class AiOrchestratorService {
             String planningPrompt = resolveCurrentTurnPlanningPrompt(resolvedUserPrompt, memoryContext);
 
             List<String> warnings = new ArrayList<>();
-            JsonNode currentState = context.getCurrentState();
-            JsonNode authoringManifest = normalizeAuthoringManifest(
-                    context.getComponentId(),
-                    extractAuthoringManifest(context.getComponentDefinition()));
             if (authoringManifest != null && authoringManifest.isObject()) {
                 warnings.add("authoring-manifest-contract-used");
             }
-            List<AiCapability> configCapabilities = extractCapabilities(context.getComponentDefinition());
-            List<AiCapability> componentCapabilities = extractComponentCapabilities(context.getComponentDefinition());
-            JsonNode componentContext = extractComponentContextPack(context.getComponentDefinition());
             if (COMPONENT_ID_TABLE.equals(request.getComponentId())) {
                 warnings.add("table-local-text-routing-disabled-before-llm");
             }
@@ -348,10 +368,6 @@ public class AiOrchestratorService {
                         request.getRuntimeState(),
                         request.getContextHints())),
                 maxRuntimeMetadataChars);
-        JsonNode authoringContract = resolveAuthoringContract(
-                request.getContextHints(),
-                context,
-                authoringManifest);
         List<ColumnDescriptor> uiColumnDescriptors = extractColumnDescriptors(currentState);
         List<ColumnDescriptor> columnDescriptors = mergeColumnDescriptors(uiColumnDescriptors, request.getDataProfile());
         List<String> columnNames = extractColumnNames(columnDescriptors);

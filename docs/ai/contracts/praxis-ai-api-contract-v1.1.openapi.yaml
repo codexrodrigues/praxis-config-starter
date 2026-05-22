@@ -2946,6 +2946,12 @@ components:
         code:
           type: string
           nullable: true
+          description: >
+            Codigo funcional estavel. A policy canonica de admissao pode retornar
+            AI_TURN_POLICY_REJECTED antes de chamar provider LLM quando o pedido
+            solicita segredos, prompt interno, bypass, logging oculto ou execucao
+            destrutiva externa, e AI_TURN_OUT_OF_SCOPE quando o pedido publico nao
+            puder ser aterrado no componente, contrato, manifest ou capabilities atuais.
         type:
           type: string
           enum: [patch, clarification, error, info]

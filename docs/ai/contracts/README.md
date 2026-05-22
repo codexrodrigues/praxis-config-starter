@@ -99,6 +99,7 @@ Resolucao de intencao e chips ricos:
 Streaming de authoring:
 
 - O contrato `v1.1` ja cobre stream canonico para `/api/praxis/config/ai/patch/stream/**`, baseado em `AiTurnEventEnvelope`, `eventSchemaVersion=v1`, replay, heartbeat, cancelamento e event log.
+- `/api/praxis/config/ai/patch` e `/api/praxis/config/ai/patch/stream/**` executam a policy canonica de admissao antes de chamar provider LLM. Rejeicoes funcionais usam `AiOrchestratorResponse.type=info` com `code=AI_TURN_POLICY_REJECTED` para segredos, prompt interno, bypass, logging oculto ou execucao destrutiva externa; e `code=AI_TURN_OUT_OF_SCOPE` quando o pedido publico nao puder ser aterrado no componente, contrato, manifest ou capabilities atuais.
 - O fluxo `/api/praxis/config/ai/authoring/turn/stream/**` reutiliza `AiTurnEventEnvelope`, replay, cancelamento e event log, mas usa payloads de authoring como `thought.step`, `result`, `error` e `cancelled`.
 - Durante `intent.resolve`, o backend deve emitir fases incrementais como `intent.resolve.llm`, `intent.resolve.grounding`, `resource.discovery`, `preview.plan` e `preview.compile`; heartbeats out-of-band devem carregar `phase` e `summary` derivados do ultimo evento conhecido.
 - `llmDiagnostics` continua sendo diagnostico opt-in de turno concluido; feedback incremental deve vir pelos eventos SSE do turno.

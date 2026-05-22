@@ -377,6 +377,24 @@ POST `/api/praxis/config/ai/patch` accepts runtime state and user prompt and ret
 }
 ```
 
+### Assistant admission policy
+Before calling any LLM provider, `/api/praxis/config/ai/patch` and the generic
+`/api/praxis/config/ai/patch/stream/**` flow run the canonical assistant admission
+policy. This policy is not product intent routing; it only enforces platform
+safety and the declared component authoring scope before token-consuming work.
+
+Canonical non-provider responses:
+- `code=AI_TURN_POLICY_REJECTED`, `type=info`: the request asks for secrets,
+  internal prompts, auth material, hidden logging, bypass behavior, or external
+  destructive execution outside the component authoring contract.
+- `code=AI_TURN_OUT_OF_SCOPE`, `type=info`: the public assistant request cannot
+  be grounded in the current component, authoring contract, manifest or
+  capabilities.
+
+Clients should render these responses as assistant messages, not infrastructure
+errors. The stream surface emits them as terminal `result` payloads through the
+same `AiOrchestratorResponse` contract.
+
 ### Clarification responses (UI signature)
 When the backend needs more user input, it can respond with a clarification payload that includes an explicit UI
 signature. The frontend should render the response based on `clarification`.
