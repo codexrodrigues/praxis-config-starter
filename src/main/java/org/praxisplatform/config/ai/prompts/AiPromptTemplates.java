@@ -43,8 +43,11 @@ public final class AiPromptTemplates {
       - CORRETO: { type: 'badge', badge: { text: 'Ativo', color: 'success' } }
       - ERRADO (Flatten): { type: 'badge', text: 'Ativo', color: 'success' }
       - ERRADO (Vazio): { type: 'badge' }
-    - BADGE: Exige 'badge.textField' (dinâmico) ou 'badge.text' (fixo).
-      - Para booleanos (true/false): Sugira "valueMapping" ({ "true": "Ativo", "false": "Inativo" }) e use "conditionalStyles" para cores.
+    - BADGE/CHIP: Exige payload tipado completo.
+      - BADGE: use 'badge.textField' ou 'badge.text'; CHIP: use 'chip.textField' ou 'chip.text'.
+      - Para booleanos/códigos discretos: use "valueMapping" quando o pedido for apenas trocar rótulos.
+      - Para rótulos com aparência visual diferente por valor (ex.: Sim verde, Não cinza), use "columns[].conditionalRenderers[]" com uma regra por valor, preservando os rótulos existentes quando o usuário só pedir cor, variante, ícone ou tooltip.
+      - Não repita um renderer genérico sem a propriedade visual solicitada. Se o usuário pedir "verde", "cinza", "suave", "discreto", "com ícone" ou "tooltip", inclua isso no payload tipado do badge/chip.
       - Default variant: 'filled'. Default color: 'primary'.
     - TOGGLE: Exige 'toggle.stateExpr' e 'toggle.action.id' quando interativo.
       - Use DSL em disabledCondition (ex.: ativo == false).
@@ -85,6 +88,9 @@ public final class AiPromptTemplates {
 	CONTRATO DECLARATIVO DE AUTORIA:
 	{{AUTHORING_CONTRACT}}
 
+	CONTEXTO RUNTIME E HINTS GOVERNADOS (se houver):
+	{{RUNTIME_METADATA}}
+
 	REGRAS:
 	1. Escolha apenas um modo existente em responseModes.
 	2. Use o modo consultivo quando o usuário quer entender, perguntar, documentar, explicar, revisar possibilidades ou receber orientação sobre a tabela/componente.
@@ -92,7 +98,11 @@ public final class AiPromptTemplates {
 	4. Não use falta de parâmetros de edição como motivo para escolher edição se o turno é semanticamente consultivo.
 	5. Trate perguntas sobre possibilidades, capacidades, origem de dados, formato de operações ou instruções conceituais como consultivas quando não houver decisão explícita de aplicar a mudança agora.
 	6. Trate como edição apenas quando o usuário pedir uma materialização concreta no componente, com intenção de produzir uma alteração aplicável neste turno.
-	7. Retorne APENAS JSON válido, sem markdown.
+	7. Quando houver runtimeState.selection ou consultativeContext.selectedRecordsContext e o usuário pedir para listar, resumir, comparar, explicar ou responder sobre os registros selecionados, escolha o modo consultivo.
+	8. Quando houver registros selecionados e o usuário pedir para usar esses registros como base para filtros avançados, exportação, busca de registros semelhantes ou outra operação real da tabela, escolha o modo de edição somente se existir operação declarada aplicável; se faltar campo, escopo ou formato, escolha o modo consultivo/clarificativo apropriado pelo contrato e peça a decisão humana.
+	9. Quando o pedido for imperativo e pedir uma mudança visual, estrutural ou comportamental concreta no componente, escolha edição mesmo que faltem detalhes opcionais como cor, estilo, tooltip, formato ou mapeamento completo; o fluxo de edição pode inferir defaults governados, pedir clarificação ou preparar revisão aplicável.
+	10. Não responda que falta catálogo de operações quando o contrato declarativo de autoria do turno contém responseModes e authoringManifest/componentEditPlan; use esse contrato como catálogo governado para decidir o modo.
+	11. Retorne APENAS JSON válido, sem markdown.
 
 	SCHEMA:
 	{
@@ -101,6 +111,36 @@ public final class AiPromptTemplates {
 	  "reason": "string"
 	}
 	""";
+
+    public static final String PROMPT_SELECTED_RECORD_FILTER_CANDIDATE_RESOLVER = """
+    Você é o decisor semântico governado para filtros derivados de registros selecionados no Praxis.
+    Resolva se o pedido do usuário deve usar um dos candidatos canônicos de filtro já derivados da seleção.
+
+    PEDIDO DO USUÁRIO:
+    {{USER_INPUT}}
+
+    CANDIDATOS CANÔNICOS DERIVADOS DA SELEÇÃO:
+    {{FILTER_CANDIDATES}}
+
+    CATÁLOGO DE FILTROS DECLARADO:
+    {{FILTER_FIELD_CATALOG}}
+
+    REGRAS:
+    1. Escolha "apply" apenas quando o pedido indicar semanticamente uma propriedade representada por exatamente um candidato.
+    2. Para "apply", retorne em "field" somente o field de um candidato listado. Não invente campos.
+    3. Se o usuário pedir registros parecidos, similares, próximos ou relacionados sem escolher qual propriedade deve guiar a busca, retorne "clarify".
+    4. Se houver mais de um candidato plausível e a intenção não resolver um deles com segurança, retorne "clarify".
+    5. Se o pedido não for sobre usar os registros selecionados para filtrar ou encontrar outros registros, retorne "none".
+    6. Não gere critérios, JSON Patch, filtros manuais ou valores novos. O runtime materializa os critérios a partir do candidato validado.
+    7. Retorne APENAS JSON válido, sem markdown.
+
+    SCHEMA:
+    {
+      "decision": "apply|clarify|none",
+      "field": "string vazio ou field de um candidato",
+      "reason": "string curta"
+    }
+    """;
 
 	public static final String PROMPT_INTENT_CLASSIFIER = """
 	Você é um especialista em UX e configuração de componentes de UI.
@@ -145,6 +185,7 @@ public final class AiPromptTemplates {
 	7. Se o usuário fizer uma PERGUNTA sobre o estado atual, use "intent": "ask_about_config".
 	7.1. Se o CONTRATO DECLARATIVO DE AUTORIA declarar responseModes com kind="consult" e preferredResponse="info", pedidos de explicação, documentação, orientação ou how-to sobre capacidades, endpoint, schema, campos, estilos, regras condicionais, animações ou formato de uma operação devem ser classificados como "ask_about_config", needsClarification=false.
 	7.2. Não transforme um pedido consultivo/how-to em edição apenas porque a operação explicada exigiria parâmetros se fosse aplicada. Parâmetros ausentes só justificam clarification quando a decisão semântica do próprio modelo for uma edição/materialização, preferencialmente em responseModes kind="edit" ou preferredResponse="componentEditPlan".
+	7.3. Se METADADOS.contextHints.tableConversationMemory.lastComponentEditDecision existir, trate-o como memória semântica do último alvo/ajuste aprovado pelo usuário. Em pedidos de continuação sem alvo explícito, preserve targetField a partir de lastTarget.field quando a nova intenção for refinar esse alvo. Não reinterprete refinamentos visuais de uma coluna como ajuste global de tabela, a menos que o usuário cite explicitamente a tabela inteira, densidade, linhas ou layout global.
 	8. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
 	9. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
 	10. Se o pedido afetar ambos, use scope="mixed".
@@ -201,6 +242,7 @@ public final class AiPromptTemplates {
     - userPrompt: "{{USER_INPUT}}"
     - capabilities (paths permitidos): {{CAPABILITIES_RESTRICTION}}
     - currentState summary: {{CURRENT_STATE_SUMMARY}}
+    - runtimeMetadata/contextHints: {{RUNTIME_METADATA}}
     - optionsByPath (se houver): {{OPTIONS_BY_PATH}}
 
     REGRAS:
@@ -209,6 +251,8 @@ public final class AiPromptTemplates {
     - Para cada ação, gere checks determinísticos usando paths do componente.
     - Use SOMENTE paths permitidos pelas capabilities fornecidas.
     - Em checks.value use apenas tipos simples (string, number, boolean, array ou null). Nao use objetos.
+    - Quando runtimeMetadata tiver selectedRecordsContext.sampleRows e o usuário pedir filtro/exportação a partir dos registros selecionados, use os valores de sampleRows; não pergunte ids, nomes ou valores que já estejam nesse contexto.
+    - Se runtimeMetadata/contrato declarar runtimeOperations.table.filter.apply, não pergunte se a filtragem será client ou server; a materialização runtime decide isso.
     - Se faltar informação, gere uma action com checks vazios e inclua uma pergunta em "questions".
 
     SAÍDA JSON:
@@ -251,6 +295,9 @@ public final class AiPromptTemplates {
 CONFIGURAÇÃO ATUAL:
 {{TARGET_CONFIG}}
 
+CONTEXTO RUNTIME E HINTS GOVERNADOS (se houver):
+{{RUNTIME_METADATA}}
+
 CONTRATO DECLARATIVO DE AUTORIA (se houver):
 {{AUTHORING_CONTRACT}}
 
@@ -260,6 +307,10 @@ INSTRUÇÕES:
 - Responda de forma direta e concisa em português.
 	- Liste os itens solicitados se houver.
 	- Use o contrato declarativo para explicar capacidades, formatos, estilos, endpoints e exemplos de operação quando ele estiver disponível.
+	- Use o contexto runtime para responder sobre seleção, linhas visíveis, estado de paginação, filtros ativos e outros fatos observados em execução.
+	- Quando houver runtimeState.selection ou consultativeContext.selectedRecordsContext, trate sampleRows como os registros selecionados pelo usuário e não diga que não há seleção.
+	- Use nomes humanos na resposta: diga "linhas selecionadas" ou "registros selecionados". Não exponha termos técnicos internos como runtimeState.selection, consultativeContext, selectedRecordsContext, sampleRows, runtime.selectedRecordsContext ou ids de contrato.
+	- Quando o usuário quiser usar registros selecionados como ponto de partida para filtros avançados, exportação ou busca de registros semelhantes, conecte a resposta aos campos filtráveis e escopos de exportação declarados no contrato. Se houver mais de uma propriedade plausível, pergunte de forma humana qual campo ou escopo deve guiar a ação.
 	- Quando o contrato indicar um modo consultivo, responda como orientação humana: explique o recurso, os campos relevantes, o endpoint ou a forma conceitual de configurar.
 	- Não produza JSON Patch, componentEditPlan, plano aplicável, payload de execução ou blocos JSON de alteração em respostas consultivas.
 	- Não invente informações que não estejam no JSON ou no contrato declarativo.
@@ -348,7 +399,9 @@ INSTRUÇÕES:
    - PROIBIDO: JSON Patch (RFC6902), JSON Pointer, índices numéricos ou ops/path.
    - Use patch semântico com identidade (ex.: columns[].field).
    - Se CONTRATO DECLARATIVO DE AUTORIA indicar preferredResponse="componentEditPlan" e o pedido couber no componentEditPlan permitido, retorne componentEditPlan em vez de patch livre.
+   - Se CONTRATO DECLARATIVO DE AUTORIA declarar runtimeOperations e o usuário pedir para aplicar filtros ou executar exportação agora, retorne patch com tableRuntimeOperations em vez de componentEditPlan de configuração.
    - Para várias alterações declarativas no mesmo componente, use o batchKind informado no contrato de autoria.
+   - Se METADADOS.contextHints.tableConversationMemory.lastComponentEditDecision existir, preserve esse alvo como memória semântica de continuação. Para pedidos sem alvo explícito, refine o lastTarget em vez de escolher uma operação global não solicitada.
 3. O patch será aplicado via "Smart Merge".
    - Para arrays com identidade conhecida (ex.: columns[].field, fieldMetadata[].name), use a chave para atualizar itens existentes.
    - Se a identidade do array não estiver clara, peça confirmação.
@@ -365,6 +418,19 @@ OU (QUANDO USAR CONTRATO DECLARATIVO DE AUTORIA):
 {
   "componentEditPlan": { ... },
   "explanation": "Resumo curto do que foi feito."
+}
+
+OU (QUANDO EXECUTAR OPERAÇÃO RUNTIME DECLARADA):
+{
+  "patch": {
+    "tableRuntimeOperations": {
+      "kind": "praxis.table.runtime-operation.batch",
+      "operations": [
+        { "operationId": "table.filter.apply|table.export.run", "input": { ... } }
+      ]
+    }
+  },
+  "explanation": "Resumo curto do que será executado."
 }
 
 OU (QUANDO PRECISAR DE CONTEXTO):
@@ -424,9 +490,16 @@ REGRAS:
 7. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
 8. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
 9. Não gere operação que reduza proteções de acessibilidade, segurança, governança ou compatibilidade. Para acessibilidade, operações podem ativar proteções como highContrast/reduceMotion, mas não devem desabilitar proteções existentes.
-10. Se o pedido delegar ao assistente a escolha de um alvo essencial ("o melhor", "o certo", "o que fizer sentido") e o catálogo não determinar uma única opção canônica, preencha "ambiguities" em vez de escolher defaults.
-11. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
-   10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
+	10. Se o pedido delegar ao assistente a escolha de um alvo essencial ("o melhor", "o certo", "o que fizer sentido") e o catálogo não determinar uma única opção canônica, preencha "ambiguities" em vez de escolher defaults.
+	10.1. Se CONTEXTO ADICIONAL contiver tableConversationMemory.lastComponentEditDecision, use essa memória como alvo semântico preferencial para continuações humanas sem alvo explícito. Quando lastTarget.kind="column", refinamentos como tamanho/largura/visual devem manter target=lastTarget.field e escolher uma operação de coluna compatível. Não escolha operações globais como appearance.density.set salvo quando o usuário mencionar explicitamente tabela inteira, densidade, compactação geral, linhas ou layout global.
+	10.2. Para pedidos de rótulo/exibição de valores booleanos ou códigos discretos, prefira column.valueMapping.set. Preserve os rótulos solicitados pelo usuário literalmente; não abrevie "Sim" para "S", "Não" para "N", nem substitua rótulos por formatos booleanos genéricos quando o pedido for mostrar textos específicos.
+	10.3. Para continuações visuais sobre chips/badges já criados, como "deixe o Sim verde", "o Não cinza", "mais discreto", "adicione tooltip" ou "use ícone", mantenha a coluna do último ajuste e use column.conditionalRenderer.add para cada valor afetado. Preserve o texto já materializado (por exemplo Sim/Não) e altere somente as propriedades visuais pedidas.
+	10.4. Quando o catalogo declarar table.filter.apply e o usuario pedir para filtrar/aplicar/buscar registros agora a partir das linhas selecionadas, prefira table.filter.apply em vez de configurar advancedFilters. Use selectedRecordsContext.sampleRows e filterFieldCatalog para montar params.criteria com campos canonicos e valores ja presentes.
+	10.5. Quando o catalogo declarar table.export.run e o usuario pedir exportacao agora, prefira table.export.run em vez de configurar toolbar/exportacao. Para linhas selecionadas use params.scope="selected"; se faltar formato, preencha ambiguities ou value=null conforme o schema.
+	10.6. Para regras visuais condicionais, trate pedidos humanos como "borda discreta", "fundo suave", "cor laranja", "texto em negrito", "opacidade" ou "dica/tooltip" como especificacao suficiente de estilo quando a coluna e a condicao estiverem resolvidas. Nao peça "border style", "border location" ou detalhe visual equivalente se o authoringManifest nao marcar esse input como obrigatorio; use defaults canonicos discretos e preencha params.style/params.tooltip em JSON.
+	10.7. Para condicoes por ano em colunas de data ja existentes, nao invente campos derivados como dataAdmissaoYear/anoAdmissao salvo se eles existirem no schema ou em computed. Use a coluna real de data com Json Logic canonico, por exemplo {"startsWith":[{"var":"dataAdmissao"},"2022"]} quando o valor serializado usar ISO yyyy-MM-dd, ou uma condicao equivalente declarada no catalogo.
+	11. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
+	   10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
 12. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):

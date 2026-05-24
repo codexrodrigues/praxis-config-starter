@@ -14,6 +14,7 @@ import lombok.NoArgsConstructor;
 @Builder
 public class AiOrchestratorResponse {
     private UUID sessionId;
+    private UUID observationId;
     private String code;
     private String type;
     private String contractVersion;

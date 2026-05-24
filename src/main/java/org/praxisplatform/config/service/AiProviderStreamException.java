@@ -15,6 +15,7 @@ public final class AiProviderStreamException extends RuntimeException {
         TRANSPORT,
         TIMEOUT,
         RATE_LIMIT,
+        QUOTA_EXHAUSTED,
         CAPACITY,
         AUTH,
         CLIENT_ERROR,
@@ -55,7 +56,7 @@ public final class AiProviderStreamException extends RuntimeException {
         if (statusCode == 408 || statusCode == 504) {
             kind = Kind.TIMEOUT;
         } else if (statusCode == 429) {
-            kind = Kind.RATE_LIMIT;
+            kind = isQuotaExhausted(reason) ? Kind.QUOTA_EXHAUSTED : Kind.RATE_LIMIT;
         } else if (statusCode == 503) {
             kind = Kind.CAPACITY;
         } else if (statusCode == 401 || statusCode == 403) {
@@ -71,6 +72,19 @@ public final class AiProviderStreamException extends RuntimeException {
                 ? ""
                 : ": " + reason);
         return new AiProviderStreamException(provider, kind, statusCode, message, null);
+    }
+
+    private static boolean isQuotaExhausted(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return false;
+        }
+        String normalized = reason.toLowerCase();
+        return normalized.contains("insufficient_quota")
+                || normalized.contains("quota exhausted")
+                || normalized.contains("quota exceeded")
+                || normalized.contains("exceeded your current quota")
+                || normalized.contains("billing")
+                || normalized.contains("check your plan");
     }
 
     public static AiProviderStreamException timeout(String provider, Throwable cause) {

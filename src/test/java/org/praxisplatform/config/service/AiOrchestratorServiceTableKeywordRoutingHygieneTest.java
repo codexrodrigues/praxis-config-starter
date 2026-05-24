@@ -15,6 +15,7 @@ import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOption;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
+import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -47,6 +48,32 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
     }
 
     @Test
+    void consultModeUsesGovernedTableFormatAnswerBeforeReturningLlmTechnicalText() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/org/praxisplatform/config/service/AiOrchestratorService.java"));
+        String consultBody = source.substring(
+                source.indexOf("if (\"consult\".equals(selectedResponseMode))"),
+                source.indexOf("AiIntentClassification intent = classifyIntent", source.indexOf("if (\"consult\".equals(selectedResponseMode))")));
+
+        assertThat(consultBody)
+                .contains("answerTableFormatCapabilityQuestion(")
+                .contains("response.setMessage(governedFormatAnswer)")
+                .contains("table-format-capability-consultative-answer-used");
+    }
+
+    @Test
+    void structuredGuidedFormatSelectionIsHandledBeforeConsultModeSelection() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/org/praxisplatform/config/service/AiOrchestratorService.java"));
+        int guidedIndex = source.indexOf("format-option-selected-context-hint-manifest-backed");
+        int consultModeIndex = source.indexOf("String selectedResponseMode = selectAuthoringResponseMode");
+
+        assertThat(guidedIndex).isGreaterThan(0);
+        assertThat(consultModeIndex).isGreaterThan(0);
+        assertThat(guidedIndex).isLessThan(consultModeIndex);
+    }
+
+    @Test
     void qaPromptMustForbidHypotheticalEndpointInvention() {
         assertThat(AiPromptTemplates.PROMPT_QA)
                 .contains("endpoint/resourcePath")
@@ -55,10 +82,29 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
     }
 
     @Test
+    void qaPromptMustAvoidRuntimeSelectionContractLeakage() {
+        assertThat(AiPromptTemplates.PROMPT_QA)
+                .contains("linhas selecionadas")
+                .contains("registros selecionados")
+                .contains("Não exponha termos técnicos internos")
+                .contains("runtimeState.selection")
+                .contains("selectedRecordsContext")
+                .contains("sampleRows");
+    }
+
+    @Test
     void tableActionPlanPromptMustRequireSemanticSafetyGuardrails() {
         assertThat(AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN)
                 .contains("Não gere operação que reduza proteções de acessibilidade")
-                .contains("preencha \"ambiguities\" em vez de escolher defaults");
+                .contains("preencha \"ambiguities\" em vez de escolher defaults")
+                .contains("tableConversationMemory.lastComponentEditDecision")
+                .contains("Não escolha operações globais como appearance.density.set");
+        assertThat(AiPromptTemplates.PROMPT_INTENT_CLASSIFIER)
+                .contains("tableConversationMemory.lastComponentEditDecision")
+                .contains("Não reinterprete refinamentos visuais de uma coluna como ajuste global de tabela");
+        assertThat(AiPromptTemplates.PROMPT_EXECUTION_ENRICHED)
+                .contains("tableConversationMemory.lastComponentEditDecision")
+                .contains("refine o lastTarget em vez de escolher uma operação global");
     }
 
     @Test
@@ -79,6 +125,9 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 java.util.List.of(),
                 manifest);
 
+        assertThat(schema.targetClass())
+                .as("action-plan calls already carry a canonical JSON Schema and must not ask providers to infer a Java bean schema")
+                .isNull();
         JsonNode schemaJson = objectMapper.readTree(schema.jsonSchema());
         JsonNode operationEnum = schemaJson
                 .path("properties")
@@ -178,6 +227,224 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 .isEqualTo("BRL|symbol|2");
         assertThat(payloads.get(0).getContextHints().path("presentation").path("ctaLabel").asText())
                 .isEqualTo("Aplicar formato");
+    }
+
+    @Test
+    void booleanFormatPayloadsUseHumanPortugueseLabelsWithCanonicalValues() {
+        AiOrchestratorService service = newService();
+        List<?> contextOptions = List.of(
+                newContextOption("active-inactive", "Boolean active/inactive", "Active / Inactive"),
+                newContextOption("yes-no", "Boolean yes/no", "Yes / No"),
+                newContextOption("true-false", "Boolean true/false", "true / false"));
+
+        @SuppressWarnings("unchecked")
+        List<AiOption> payloads = (List<AiOption>) ReflectionTestUtils.invokeMethod(
+                service,
+                "buildFormatOptionPayloads",
+                "ativo",
+                contextOptions);
+
+        assertThat(payloads).extracting(AiOption::getLabel)
+                .containsExactly("Ativo/Inativo", "Sim/Não", "Verdadeiro/Falso");
+        assertThat(payloads).extracting(AiOption::getValue)
+                .containsExactly("active-inactive", "yes-no", "true-false");
+        assertThat(payloads.get(0).getContextHints().path("presentation").path("description").asText())
+                .contains("Ativo ou Inativo");
+    }
+
+    @Test
+    void dateFormatPayloadsUseHumanPortugueseLabelsWithCanonicalValues() {
+        AiOrchestratorService service = newService();
+        List<?> contextOptions = List.of(
+                newContextOption("shortDate", "Date short", "13/06/2022"),
+                newContextOption("longDate", "Date long", "13 de junho de 2022"),
+                newContextOption("fullDate", "Date full", "segunda-feira, 13 de junho de 2022"),
+                newContextOption("MMM/yyyy", "Month/Year", "jun./2022"));
+
+        @SuppressWarnings("unchecked")
+        List<AiOption> payloads = (List<AiOption>) ReflectionTestUtils.invokeMethod(
+                service,
+                "buildFormatOptionPayloads",
+                "dataAdmissao",
+                contextOptions);
+
+        assertThat(payloads).extracting(AiOption::getLabel)
+                .containsExactly("Data curta", "Data por extenso", "Data completa", "Mês e ano");
+        assertThat(payloads).extracting(AiOption::getValue)
+                .containsExactly("shortDate", "longDate", "fullDate", "MMM/yyyy");
+        assertThat(payloads).extracting(AiOption::getExample)
+                .containsExactly("13/06/2022", "13 de junho de 2022", "segunda-feira, 13 de junho de 2022", "jun./2022");
+        assertThat(payloads.get(1).getContextHints().path("presentation").path("description").asText())
+                .contains("por extenso")
+                .contains("13 de junho de 2022")
+                .doesNotContain("December");
+    }
+
+    @Test
+    void consultativeDateFormatOptionsAreRankedByResolvedPromptRefinementOnlyAfterSemanticScope() {
+        AiOrchestratorService service = newService();
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("format")
+                .targetField("dataAdmissao")
+                .build();
+        List<?> contextOptions = List.of(
+                newContextOption("shortDate", "Date short", "13/06/2022"),
+                newContextOption("mediumDate", "Date medium", "13 de jun. de 2022"),
+                newContextOption("longDate", "Date long", "13 de junho de 2022"),
+                newContextOption("fullDate", "Date full", "segunda-feira, 13 de junho de 2022"),
+                newContextOption("MMM/yyyy", "Month/Year", "jun./2022"),
+                newContextOption("shortTime", "Time short", "09:30"),
+                newContextOption("yyyy-MM-dd HH:mm", "Date time", "2022-06-13 09:30"));
+        JsonNode dataProfile = objectMapper.createObjectNode()
+                .set("columns", objectMapper.createObjectNode()
+                        .set("dataAdmissao", objectMapper.createObjectNode()
+                                .put("inferredType", "date")));
+
+        @SuppressWarnings("unchecked")
+        List<AiOption> payloads = (List<AiOption>) ReflectionTestUtils.invokeMethod(
+                service,
+                "buildConsultativeFormatActionOptions",
+                intent,
+                contextOptions,
+                dataProfile,
+                "mostre a data de admissao por extenso");
+
+        assertThat(payloads).extracting(AiOption::getValue)
+                .startsWith("longDate", "fullDate");
+        assertThat(payloads).extracting(AiOption::getValue)
+                .doesNotContain("shortTime", "yyyy-MM-dd HH:mm");
+        assertThat(payloads).extracting(AiOption::getLabel)
+                .startsWith("Data por extenso", "Data completa");
+    }
+
+    @Test
+    void consultativeDateFormatAnswerAvoidsCanonicalContractLeakage() throws Exception {
+        AiOrchestratorService service = newService();
+        JsonNode currentState = objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "dataAdmissao", "header": "Admissão", "type": "date", "format": "longDate" }
+                  ]
+                }
+                """);
+        List<?> contextOptions = List.of(
+                newContextOption("dd/MM/yyyy", "Date dd/MM/yyyy", "13/06/2022"),
+                newContextOption("fullDate", "Date full", "Friday, 01 December 2023"),
+                newContextOption("MMM/yyyy", "Month/Year", "Dec/2023"),
+                newContextOption("shortTime", "Time short", "09:30"),
+                newContextOption("yyyy-MM-dd HH:mm", "Date time", "2022-06-13 09:30"));
+
+        String answer = ReflectionTestUtils.invokeMethod(
+                service,
+                "answerTableFormatCapabilityQuestion",
+                "como posso formatar a data de admissão?",
+                currentState,
+                contextOptions);
+
+        assertThat(answer)
+                .contains("**Data brasileira**")
+                .contains("**Data completa**")
+                .contains("**Mês e ano**")
+                .contains("segunda-feira, 13 de junho de 2022")
+                .doesNotContain("fullDate")
+                .doesNotContain("MMM/yyyy")
+                .doesNotContain("column.format.set")
+                .doesNotContain("payload")
+                .doesNotContain("December")
+                .doesNotContain("Hora curta")
+                .doesNotContain("Data e hora técnica");
+    }
+
+    @Test
+    void formatReviewMessageUsesHumanLabelInsteadOfCanonicalValue() throws Exception {
+        AiOrchestratorService service = newService();
+        AiActionPlan.Action action = AiActionPlan.Action.builder()
+                .type("column.format.set")
+                .target("ativo")
+                .params(objectMapper.createObjectNode().put("format", "active-inactive"))
+                .build();
+        AiActionPlan actionPlan = AiActionPlan.builder()
+                .actions(List.of(action))
+                .build();
+
+        String review = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildActionPlanComponentEditExplanation",
+                actionPlan,
+                List.of(newColumnDescriptor("ativo", "Ativo")),
+                "fallback");
+
+        assertThat(review)
+                .isEqualTo("Vou formatar a coluna Ativo como Ativo/Inativo.")
+                .doesNotContain("active-inactive");
+    }
+
+    @Test
+    void selectedFormatReviewMessageUsesHumanLabelInsteadOfCanonicalValue() throws Exception {
+        AiOrchestratorService service = newService();
+        Object selection = newSelectedFormatSelection("ativo", "yes-no");
+
+        String review = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedFormatReviewMessage",
+                selection,
+                List.of(newColumnDescriptor("ativo", "Ativo")));
+
+        assertThat(review)
+                .isEqualTo("Vou formatar a coluna Ativo como Sim/Não.")
+                .doesNotContain("yes-no");
+    }
+
+    @Test
+    void consultativeTableAnswerGroundsMentionedBooleanColumnIntoActionButtons() throws Exception {
+        AiOrchestratorService service = newService();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("quais opções você recomenda para mostrar a coluna ativo de forma mais amigável?")
+                .build();
+        JsonNode currentState = objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "ativo", "header": "Ativo", "type": "boolean" }
+                  ]
+                }
+                """);
+        JsonNode dataProfile = objectMapper.readTree("""
+                {
+                  "columns": {
+                    "ativo": { "inferredType": "boolean" }
+                  }
+                }
+                """);
+        List<?> contextOptions = List.of(
+                newContextOption("active-inactive", "Boolean active/inactive", "Active / Inactive"),
+                newContextOption("yes-no", "Boolean yes/no", "Yes / No"),
+                newContextOption("BRL|symbol|2", "Currency BRL symbol", "R$ 12.700,00"));
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .intent("ask_about_config")
+                .category("format")
+                .build();
+        AiOrchestratorResponse response = AiOrchestratorResponse.builder()
+                .type("info")
+                .message("Você pode usar texto, chip ou badge.")
+                .build();
+
+        AiOrchestratorResponse enriched = ReflectionTestUtils.invokeMethod(
+                service,
+                "attachConsultativeTableActionOptions",
+                response,
+                request,
+                currentState,
+                contextOptions,
+                intent,
+                dataProfile);
+
+        assertThat(enriched.getOptionPayloads()).isNotEmpty();
+        assertThat(enriched.getOptionPayloads()).extracting(AiOption::getLabel)
+                .contains("Ativo/Inativo", "Sim/Não");
+        assertThat(enriched.getOptionPayloads()).extracting(AiOption::getValue)
+                .contains("active-inactive", "yes-no")
+                .doesNotContain("BRL|symbol|2");
+        assertThat(intent.getTargetField()).isEqualTo("ativo");
     }
 
     @Test
@@ -402,6 +669,72 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
     }
 
     @Test
+    void booleanChipVisualContinuationPreservesLabelsAndAppliesRequestedColors() throws Exception {
+        AiOrchestratorService service = newService();
+
+        AiActionPlan plan = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildBooleanStateRendererActionPlan",
+                "deixe o Sim verde suave e o Nao cinza discreto",
+                newColumnDescriptor("ativo", "Ativo"),
+                objectMapper.readTree("""
+                        {
+                          "columns": [
+                            {
+                              "field": "ativo",
+                              "header": "Ativo",
+                              "type": "boolean",
+                              "valueMapping": { "true": "Sim", "false": "Não" }
+                            }
+                          ]
+                        }
+                        """));
+
+        assertThat(plan).isNotNull();
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("Sim");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/color").asText())
+                .isEqualTo("success");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/variant").asText())
+                .isEqualTo("soft");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("Não");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/color").asText())
+                .isEqualTo("basic");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/variant").asText())
+                .isEqualTo("soft");
+    }
+
+    @Test
+    void naturalBooleanValueMappingContinuationPreservesActiveInactiveLabels() throws Exception {
+        AiOrchestratorService service = newService();
+        AiActionPlan plan = AiActionPlan.builder()
+                .actions(List.of(AiActionPlan.Action.builder()
+                        .type("column.valueMapping.set")
+                        .target("ativo")
+                        .params(objectMapper.readTree("""
+                                { "valueMapping": { "true": "S", "false": "N" } }
+                                """))
+                        .build()))
+                .ambiguities(List.of())
+                .build();
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "normalizeTableBooleanLabelActionsFromPrompt",
+                "prefiro ativo e inativo",
+                plan,
+                null);
+
+        assertThat(plan.getActions()).hasSize(1);
+        assertThat(plan.getActions().get(0).getParams().at("/valueMapping/true").asText())
+                .isEqualTo("Ativo");
+        assertThat(plan.getActions().get(0).getParams().at("/valueMapping/false").asText())
+                .isEqualTo("Inativo");
+    }
+
+    @Test
     void llmTablePlanForShortBooleanTextIsNormalizedBeforeMaterialization() throws Exception {
         AiOrchestratorService service = newService();
         AiActionPlan plan = AiActionPlan.builder()
@@ -427,7 +760,8 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
                 service,
                 "normalizeTableBooleanLabelActionsFromPrompt",
                 "deixe a coluna ativo como badge com texto curto",
-                plan);
+                plan,
+                null);
 
         assertThat(plan.getActions()).hasSize(2);
         assertThat(plan.getActions().get(0).getType()).isEqualTo("column.conditionalRenderer.add");
@@ -436,6 +770,128 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
         assertThat(plan.getActions().get(1).getType()).isEqualTo("column.conditionalRenderer.add");
         assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/text").asText())
                 .isEqualTo("N");
+    }
+
+    @Test
+    void visualContinuationOverExistingBooleanChipRebuildsRendererPlanFromCurrentState() throws Exception {
+        AiOrchestratorService service = newService();
+        AiActionPlan plan = AiActionPlan.builder()
+                .actions(List.of(
+                        AiActionPlan.Action.builder()
+                                .type("column.conditionalRenderer.add")
+                                .target("ativo")
+                                .params(objectMapper.readTree("""
+                                        {
+                                          "condition": { "==": [ { "var": "ativo" }, true ] },
+                                          "renderer": { "type": "chip", "chip": { "text": "Sim", "color": "primary", "variant": "filled" } }
+                                        }
+                                        """))
+                                .build(),
+                        AiActionPlan.Action.builder()
+                                .type("column.conditionalRenderer.add")
+                                .target("ativo")
+                                .params(objectMapper.readTree("""
+                                        {
+                                          "condition": { "==": [ { "var": "ativo" }, false ] },
+                                          "renderer": { "type": "chip", "chip": { "text": "Não", "color": "accent", "variant": "filled" } }
+                                        }
+                                        """))
+                                .build()))
+                .ambiguities(List.of())
+                .build();
+        JsonNode currentState = objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "ativo",
+                      "header": "Ativo",
+                      "type": "boolean",
+                      "conditionalRenderers": [
+                        {
+                          "condition": { "==": [ { "var": "ativo" }, true ] },
+                          "renderer": { "type": "chip", "chip": { "text": "Sim", "color": "primary", "variant": "filled" } }
+                        },
+                        {
+                          "condition": { "==": [ { "var": "ativo" }, false ] },
+                          "renderer": { "type": "chip", "chip": { "text": "Não", "color": "accent", "variant": "filled" } }
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "normalizeTableBooleanLabelActionsFromPrompt",
+                "deixe o Sim verde suave e o Nao cinza discreto",
+                plan,
+                currentState);
+
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getType()).isEqualTo("column.conditionalRenderer.add");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("Sim");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/color").asText())
+                .isEqualTo("success");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/variant").asText())
+                .isEqualTo("soft");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("Não");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/color").asText())
+                .isEqualTo("basic");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/variant").asText())
+                .isEqualTo("soft");
+    }
+
+    @Test
+    void visualContinuationOverRepeatedBooleanRendererPlanDoesNotRequireCurrentState() throws Exception {
+        AiOrchestratorService service = newService();
+        AiActionPlan plan = AiActionPlan.builder()
+                .actions(List.of(
+                        AiActionPlan.Action.builder()
+                                .type("column.conditionalRenderer.add")
+                                .target("ativo")
+                                .params(objectMapper.readTree("""
+                                        {
+                                          "condition": { "==": [ { "var": "ativo" }, true ] },
+                                          "renderer": { "type": "chip", "chip": { "text": "Sim", "color": "primary", "variant": "filled" } }
+                                        }
+                                        """))
+                                .build(),
+                        AiActionPlan.Action.builder()
+                                .type("column.conditionalRenderer.add")
+                                .target("ativo")
+                                .params(objectMapper.readTree("""
+                                        {
+                                          "condition": { "==": [ { "var": "ativo" }, false ] },
+                                          "renderer": { "type": "chip", "chip": { "text": "Não", "color": "accent", "variant": "filled" } }
+                                        }
+                                        """))
+                                .build()))
+                .ambiguities(List.of())
+                .build();
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "normalizeTableBooleanLabelActionsFromPrompt",
+                "deixe o Sim verde suave e o Nao cinza discreto",
+                plan,
+                null);
+
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("Sim");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/color").asText())
+                .isEqualTo("success");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/variant").asText())
+                .isEqualTo("soft");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/text").asText())
+                .isEqualTo("Não");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/color").asText())
+                .isEqualTo("basic");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/variant").asText())
+                .isEqualTo("soft");
     }
 
     @Test
@@ -558,6 +1014,17 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
             var constructor = type.getDeclaredConstructor(String.class, String.class, String.class);
             constructor.setAccessible(true);
             return constructor.newInstance(value, label, example);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private Object newSelectedFormatSelection(String targetField, String value) {
+        try {
+            Class<?> type = Class.forName("org.praxisplatform.config.service.AiOrchestratorService$SelectedFormatSelection");
+            var constructor = type.getDeclaredConstructor(String.class, List.class, String.class, String.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(targetField, List.of(targetField), value, "format");
         } catch (Exception ex) {
             throw new IllegalStateException(ex);
         }

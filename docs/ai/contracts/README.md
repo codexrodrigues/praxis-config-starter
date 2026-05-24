@@ -7,6 +7,10 @@ Arquivo fonte unico atual:
 Escopo coberto:
 
 - `POST /api/praxis/config/ai/patch`
+- `GET /api/praxis/config/ai/triage/observations`
+- `GET /api/praxis/config/ai/triage/observations/{observationId}`
+- `GET /api/praxis/config/ai/triage/summary`
+- `POST /api/praxis/config/ai/triage/observations/{observationId}/feedback`
 - `POST /api/praxis/config/ai/patch/stream/start`
 - `GET /api/praxis/config/ai/patch/stream/{streamId}`
 - `GET /api/praxis/config/ai/patch/stream/{streamId}/probe`
@@ -48,6 +52,10 @@ Importante:
 
 - `ai/authoring` continua sendo a superfÃƒÂ­cie canÃƒÂ´nica para authoring de
   componente/pÃƒÂ¡gina;
+- `ai/triage` e a superficie protegida para observabilidade governada de
+  interacoes do assistente; ela publica observacoes redigidas, hashes, outcomes
+  e feedback estruturado, mas nao historico bruto de conversa, prompt bruto ou
+  resposta bruta do LLM;
 - business-rule authoring nÃƒÂ£o deve ser modelado como destino primÃƒÂ¡rio de
   `componentEditPlan`;
 - a evolução canônica para decisão compartilhada deve acontecer na superfície
@@ -99,7 +107,8 @@ Resolucao de intencao e chips ricos:
 Streaming de authoring:
 
 - O contrato `v1.1` ja cobre stream canonico para `/api/praxis/config/ai/patch/stream/**`, baseado em `AiTurnEventEnvelope`, `eventSchemaVersion=v1`, replay, heartbeat, cancelamento e event log.
-- `/api/praxis/config/ai/patch` e `/api/praxis/config/ai/patch/stream/**` executam a policy canonica de admissao antes de chamar provider LLM. Rejeicoes funcionais usam `AiOrchestratorResponse.type=info` com `code=AI_TURN_POLICY_REJECTED` para segredos, prompt interno, bypass, logging oculto ou execucao destrutiva externa; e `code=AI_TURN_OUT_OF_SCOPE` quando o pedido publico nao puder ser aterrado no componente, contrato, manifest ou capabilities atuais.
+- `/api/praxis/config/ai/patch` e `/api/praxis/config/ai/patch/stream/**` executam a policy canonica de admissao antes de chamar provider LLM. Rejeicoes funcionais usam `AiOrchestratorResponse.type=info` com `code=AI_TURN_POLICY_REJECTED` para segredos, prompt interno, bypass, logging oculto ou execucao destrutiva externa; e `code=AI_TURN_OUT_OF_SCOPE` quando o pedido publico nao puder ser aterrado no componente, contrato, manifest ou capabilities atuais. Quando a idempotencia de turno detectar processamento concorrente, o backend usa `code=TURN_IN_PROGRESS`; clientes devem manter estado transitório de processamento e não renderizar esse retorno como resposta final da IA.
+- `AiOrchestratorResponse`, `AiPatchStreamStartResponse` e `AgenticAuthoringTurnStreamStartResponse` podem incluir `observationId`. Clientes publicos devem usar esse identificador para feedback write-only em `/api/praxis/config/ai/triage/observations/{observationId}/feedback`; consultas de triagem permanecem administrativas e retornam apenas dados redigidos.
 - O fluxo `/api/praxis/config/ai/authoring/turn/stream/**` reutiliza `AiTurnEventEnvelope`, replay, cancelamento e event log, mas usa payloads de authoring como `thought.step`, `result`, `error` e `cancelled`.
 - Durante `intent.resolve`, o backend deve emitir fases incrementais como `intent.resolve.llm`, `intent.resolve.grounding`, `resource.discovery`, `preview.plan` e `preview.compile`; heartbeats out-of-band devem carregar `phase` e `summary` derivados do ultimo evento conhecido.
 - `llmDiagnostics` continua sendo diagnostico opt-in de turno concluido; feedback incremental deve vir pelos eventos SSE do turno.

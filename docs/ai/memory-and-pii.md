@@ -6,7 +6,9 @@
 - Older messages are marked as redacted and their content is cleared after summarization.
 - Behavior can be tuned via `praxis.ai.memory.summary.*` and `praxis.ai.memory.prune.redact`.
 - Turn idempotency uses `ai_turn` with TTL (`praxis.ai.memory.turn.timeout-seconds`).
-- When a turn is still processing, the backend may return an `info` response like "Turno em processamento." so the client can wait/retry.
+- When a turn is still processing, the backend may return `AiOrchestratorResponse.type=info`
+  with `code=TURN_IN_PROGRESS`; clients must treat this as transient state, not as a final
+  assistant answer.
 
 ## PII scrubbing
 - Persisted `ai_message.content` is scrubbed for basic PII patterns before storage.

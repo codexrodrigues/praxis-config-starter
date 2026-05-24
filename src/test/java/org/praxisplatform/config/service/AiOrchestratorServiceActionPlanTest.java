@@ -16,6 +16,7 @@ import org.praxisplatform.config.dto.AiActionItem;
 import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
+import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.praxisplatform.config.dto.AiOption;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -65,6 +66,38 @@ class AiOrchestratorServiceActionPlanTest {
     String prompt = ReflectionTestUtils.invokeMethod(service, "resolveUserPrompt", request);
 
     assertThat(prompt).isEqualTo("Agora mostre a admissão por extenso.");
+  }
+
+  @Test
+  void shouldReturnRecoverableProviderTimeoutError() {
+    AiProviderCallException timeout =
+        AiProviderCallException.timeout("openai", new java.net.http.HttpTimeoutException("request timed out"));
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(service, "providerCallErrorResponse", timeout);
+
+    assertThat(response.getType()).isEqualTo("error");
+    assertThat(response.getCode()).isEqualTo("AI_PROVIDER_TIMEOUT");
+    assertThat(response.getMessage()).contains("Tente novamente em instantes");
+    assertThat(response.getExplanation()).contains("Nenhuma alteracao foi aplicada");
+  }
+
+  @Test
+  void shouldReturnActionableProviderQuotaError() {
+    AiProviderCallException quota =
+        AiProviderCallException.fromHttpStatus("openai", 429, "insufficient_quota: check your plan and billing");
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(service, "providerCallErrorResponse", quota);
+
+    assertThat(response.getType()).isEqualTo("error");
+    assertThat(response.getCode()).isEqualTo("AI_PROVIDER_QUOTA_EXHAUSTED");
+    assertThat(response.getMessage())
+        .contains("quota")
+        .contains("creditos")
+        .contains("billing")
+        .doesNotContain("temporariamente");
+    assertThat(response.getExplanation()).contains("Nenhuma alteracao foi aplicada");
   }
 
   @Test
@@ -153,6 +186,41 @@ class AiOrchestratorServiceActionPlanTest {
 
     assertThat(explanation).isEqualTo("Vou formatar a coluna Data Admissao como data por extenso.");
     assertThat(explanation).doesNotContain("longDate");
+  }
+
+  @Test
+  void shouldLetAuthoringManifestDecideOptionalVisualInputs() throws Exception {
+    JsonNode manifest =
+        objectMapper.readTree(
+            """
+            {
+              "operations": [
+                {
+                  "operationId": "column.conditionalStyle.add",
+                  "target": { "required": true },
+                  "inputSchema": {
+                    "required": ["id", "condition"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "condition": { "type": "object" },
+                      "style": { "type": "object" },
+                      "tooltip": { "type": "object" }
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+
+    List<String> filtered =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "filterManifestOptionalMissingTokens",
+            "column.conditionalStyle.add",
+            List.of("params.borderLocation", "params.borderStyle", "params.style", "params.condition"),
+            manifest);
+
+    assertThat(filtered).containsExactly("params.condition");
   }
 
   @Test
@@ -378,6 +446,999 @@ class AiOrchestratorServiceActionPlanTest {
             manifest);
 
     assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void shouldConvertTableRendererPatchToManifestBackedComponentEditPlan() throws Exception {
+    JsonNode patch =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "severidade",
+                  "renderer": {
+                    "type": "chip",
+                    "chip": {
+                      "textField": "severidade",
+                      "variant": "filled",
+                      "color": "primary"
+                    }
+                  }
+                }
+              ]
+            }
+            """);
+    List<String> warnings = new ArrayList<>();
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromPatch",
+            "praxis-table",
+            patch,
+            tableRendererManifest(),
+            warnings);
+
+    assertThat(plan).isNotNull();
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("column.renderer.set");
+    assertThat(plan.at("/operations/0/target/field").asText()).isEqualTo("severidade");
+    assertThat(plan.at("/operations/0/input/type").asText()).isEqualTo("chip");
+    assertThat(plan.at("/operations/0/input/chip/textField").asText()).isEqualTo("severidade");
+    assertThat(warnings).contains("praxis-table patch livre convertido para componentEditPlan manifest-backed.");
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            plan,
+            tableRendererManifest());
+
+    assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void shouldAugmentTableManifestFromRuntimeComponentEditPlanContract() throws Exception {
+    JsonNode staleManifest =
+        objectMapper.readTree(
+            """
+            {
+              "componentId": "praxis-table",
+              "operations": [
+                {
+                  "operationId": "column.format.set",
+                  "target": { "kind": "column", "resolver": "column-by-field", "required": true },
+                  "inputSchema": {
+                    "type": "object",
+                    "required": ["format"],
+                    "properties": { "format": { "type": "string" } }
+                  }
+                }
+              ]
+            }
+            """);
+    JsonNode runtimeContract =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "allowedOperationIds": [
+                  "column.renderer.set",
+                  "column.valueMapping.set",
+                  "column.conditionalRenderer.add"
+                ]
+              }
+            }
+            """);
+
+    JsonNode manifest =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "augmentAuthoringManifestFromRuntimeContract",
+            "praxis-table",
+            staleManifest,
+            runtimeContract);
+    JsonNode patch =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "severidade",
+                  "renderer": {
+                    "type": "chip",
+                    "chip": { "textField": "severidade", "variant": "filled" }
+                  }
+                }
+              ]
+            }
+            """);
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromPatch",
+            "praxis-table",
+            patch,
+            manifest,
+            new ArrayList<String>());
+
+    assertThat(plan).isNotNull();
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("column.renderer.set");
+    assertThat(manifest.at("/editableTargets").toString()).contains("renderer-in-column");
+    assertThat(manifest.at("/editableTargets").toString()).contains("conditional-renderer-in-column");
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            plan,
+            manifest);
+
+    assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void shouldPromoteTableAuthoringExamplesToExecutableManifestOperations() throws Exception {
+    JsonNode examplesOnlyManifest =
+        objectMapper.readTree(
+            """
+            {
+              "componentId": "praxis-table",
+              "examples": [
+                {
+                  "operationId": "column.renderer.set",
+                  "target": "severidade",
+                  "request": "Mostre severidade como etiqueta visual"
+                },
+                {
+                  "operationId": "column.conditionalRenderer.add",
+                  "target": "severidade",
+                  "request": "Use badge por severidade"
+                }
+              ]
+            }
+            """);
+
+    JsonNode manifest =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "augmentAuthoringManifestFromRuntimeContract",
+            "praxis-table",
+            examplesOnlyManifest,
+            null);
+    JsonNode patch =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "severidade",
+                  "renderer": {
+                    "type": "badge",
+                    "badge": { "textField": "severidade", "variant": "filled" }
+                  }
+                }
+              ]
+            }
+            """);
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromPatch",
+            "praxis-table",
+            patch,
+            manifest,
+            new ArrayList<String>());
+
+    assertThat(plan).isNotNull();
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("column.renderer.set");
+    assertThat(manifest.at("/operations").toString()).contains("column.renderer.set");
+    assertThat(manifest.at("/editableTargets").toString()).contains("renderer-in-column");
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            plan,
+            manifest);
+
+    assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void shouldConvertTableValueMappingAndConditionalRendererPatchToManifestBackedPlan()
+      throws Exception {
+    JsonNode patch =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "severidade",
+                  "valueMapping": {
+                    "CRITICA": "Crítica",
+                    "ALTA": "Alta"
+                  },
+                  "conditionalRenderers": [
+                    {
+                      "condition": { "==": [ { "var": "severidade" }, "CRITICA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": {
+                          "text": "Crítica",
+                          "variant": "filled",
+                          "color": "warn"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    List<String> warnings = new ArrayList<>();
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromPatch",
+            "praxis-table",
+            patch,
+            tableRendererManifest(),
+            warnings);
+
+    assertThat(plan).isNotNull();
+    assertThat(plan.path("operations")).hasSize(2);
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("column.valueMapping.set");
+    assertThat(plan.at("/operations/0/input/valueMapping/CRITICA").asText()).isEqualTo("Crítica");
+    assertThat(plan.at("/operations/1/operationId").asText()).isEqualTo("column.conditionalRenderer.add");
+    assertThat(plan.at("/operations/1/input/id").asText()).isEqualTo("renderer-severidade-1");
+    assertThat(plan.at("/operations/1/input/renderer/type").asText()).isEqualTo("badge");
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            plan,
+            tableRendererManifest());
+
+    assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void shouldNormalizeTableConditionalRendererTextConditionToJsonLogic()
+      throws Exception {
+    JsonNode patch =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "severidade",
+                  "conditionalRenderers": [
+                    {
+                      "condition": "severidade == 'ALTA'",
+                      "renderer": {
+                        "type": "badge",
+                        "badge": {
+                          "textField": "severidade",
+                          "variant": "filled",
+                          "color": "warn"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildComponentEditPlanFromPatch",
+            "praxis-table",
+            patch,
+            tableRendererManifest(),
+            new ArrayList<String>());
+
+    assertThat(plan).isNotNull();
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("column.conditionalRenderer.add");
+    assertThat(plan.at("/operations/0/input/condition/==/0/var").asText()).isEqualTo("severidade");
+    assertThat(plan.at("/operations/0/input/condition/==/1").asText()).isEqualTo("ALTA");
+
+    List<String> failures =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "validateComponentEditPlanAgainstAuthoringManifest",
+            plan,
+            tableRendererManifest());
+
+    assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void shouldCompleteCategoricalBadgeRenderersFromCurrentStateValues()
+      throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "column.renderer.set",
+                    "target": { "kind": "renderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "type": "badge",
+                      "badge": { "variant": "filled", "textField": "severidade" }
+                    }
+                  },
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "id": "renderer-severidade-1",
+                      "condition": { "==": [ { "var": "severidade" }, "ALTA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "warn" }
+                      }
+                    }
+                  },
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "id": "renderer-severidade-2",
+                      "condition": { "==": [ { "var": "severidade" }, "MEDIA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "accent" }
+                      }
+                    }
+                  }
+                ]
+              },
+              "explanation": "Vou ajustar a apresentacao visual da coluna Severidade."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("deixe a coluna severidade como etiquetas coloridas")
+            .currentState(
+                objectMapper.readTree(
+                    """
+                    {
+                      "dataSource": {
+                        "data": [
+                          { "severidade": "CRITICA" },
+                          { "severidade": "ALTA" },
+                          { "severidade": "MEDIA" },
+                          { "severidade": "BAIXA" }
+                        ]
+                      }
+                    }
+                    """))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            warnings,
+            tableRendererManifest());
+
+    JsonNode plan = response.getComponentEditPlan();
+    assertThat(plan.path("operations")).hasSize(5);
+    assertThat(plan.at("/operations/3/input/condition/==/1").asText()).isEqualTo("CRITICA");
+    assertThat(plan.at("/operations/3/input/renderer/badge/color").asText()).isEqualTo("warn");
+    assertThat(plan.at("/operations/4/input/condition/==/1").asText()).isEqualTo("BAIXA");
+    assertThat(plan.at("/operations/4/input/renderer/badge/color").asText()).isEqualTo("success");
+    assertThat(response.getWarnings())
+        .contains("table-categorical-renderer-values-grounded-from-data-profile");
+  }
+
+  @Test
+  void shouldNormalizeCompleteCategoricalBadgeRendererColors()
+      throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "column.renderer.set",
+                    "target": { "kind": "renderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "type": "badge",
+                      "badge": { "variant": "filled", "textField": "severidade" }
+                    }
+                  },
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "id": "renderer-severidade-1",
+                      "condition": { "==": [ { "var": "severidade" }, "ALTA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "primary" }
+                      }
+                    }
+                  },
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "id": "renderer-severidade-2",
+                      "condition": { "==": [ { "var": "severidade" }, "MEDIA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "accent" }
+                      }
+                    }
+                  },
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "id": "renderer-severidade-3",
+                      "condition": { "==": [ { "var": "severidade" }, "BAIXA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "warn" }
+                      }
+                    }
+                  },
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "severidade", "field": "severidade" },
+                    "input": {
+                      "id": "renderer-severidade-4",
+                      "condition": { "==": [ { "var": "severidade" }, "CRITICA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "success" }
+                      }
+                    }
+                  }
+                ]
+              },
+              "explanation": "Vou ajustar a apresentacao visual da coluna Severidade."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("deixe a coluna severidade como etiquetas coloridas")
+            .currentState(
+                objectMapper.readTree(
+                    """
+                    {
+                      "dataSource": {
+                        "data": [
+                          { "severidade": "ALTA" },
+                          { "severidade": "MEDIA" },
+                          { "severidade": "BAIXA" },
+                          { "severidade": "CRITICA" }
+                        ]
+                      }
+                    }
+                    """))
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            new ArrayList<String>(),
+            tableRendererManifest());
+
+    JsonNode operations = response.getComponentEditPlan().path("operations");
+    assertThat(operations.get(1).at("/input/renderer/badge/color").asText()).isEqualTo("warn");
+    assertThat(operations.get(2).at("/input/renderer/badge/color").asText()).isEqualTo("accent");
+    assertThat(operations.get(3).at("/input/renderer/badge/color").asText()).isEqualTo("success");
+    assertThat(operations.get(4).at("/input/renderer/badge/color").asText()).isEqualTo("warn");
+    assertThat(response.getWarnings())
+        .contains("table-categorical-renderer-values-grounded-from-data-profile");
+  }
+
+  @Test
+  void shouldPreserveHumanRequestedCategoricalRendererColorForResolvedValue()
+      throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "estadoCivil", "field": "estadoCivil" },
+                    "input": {
+                      "id": "renderer-estadoCivil-solteiro",
+                      "condition": { "==": [ { "var": "estadoCivil" }, "solteiro" ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "textField": "estadoCivil", "variant": "filled", "color": "primary" }
+                      }
+                    }
+                  }
+                ]
+              },
+              "explanation": "Vou ajustar o chip de Solteiro."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("agora deixe solteiro laranja e com tooltip pessoa solteira")
+            .currentState(
+                objectMapper.readTree(
+                    """
+                    {
+                      "dataSource": {
+                        "data": [
+                          { "estadoCivil": "solteiro" },
+                          { "estadoCivil": "viuvo" }
+                        ]
+                      }
+                    }
+                    """))
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            new ArrayList<String>(),
+            tableRendererManifest());
+
+    JsonNode operation = response.getComponentEditPlan().path("operations").get(0);
+    assertThat(operation.at("/input/renderer/chip/color").asText()).isEqualTo("#FFA500");
+    assertThat(operation.at("/input/renderer/chip/variant").asText()).isEqualTo("filled");
+    assertThat(operation.at("/input/tooltip/text").asText()).isEqualTo("pessoa solteira");
+  }
+
+  @Test
+  void shouldApplyHumanRequestedCategoricalRendererVariantForResolvedValue()
+      throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "estadoCivil", "field": "estadoCivil" },
+                    "input": {
+                      "id": "renderer-estadoCivil-viuvo",
+                      "condition": { "==": [ { "var": "estadoCivil" }, "viuvo" ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "textField": "estadoCivil", "variant": "filled", "color": "primary" }
+                      }
+                    }
+                  }
+                ]
+              },
+              "explanation": "Vou ajustar o chip de Viúvo."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("agora deixe viuvo com contorno")
+            .currentState(
+                objectMapper.readTree(
+                    """
+                    {
+                      "dataSource": {
+                        "data": [
+                          { "estadoCivil": "solteiro" },
+                          { "estadoCivil": "viuvo" }
+                        ]
+                      }
+                    }
+                    """))
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            new ArrayList<String>(),
+            tableRendererManifest());
+
+    JsonNode operation = response.getComponentEditPlan().path("operations").get(0);
+    assertThat(operation.at("/input/renderer/chip/variant").asText()).isEqualTo("outlined");
+  }
+
+  @Test
+  void shouldPromoteCategoricalStyleRefinementToRendererOperation()
+      throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "column.conditionalStyle.add",
+                    "target": { "kind": "rule", "id": "estadoCivil", "field": "estadoCivil" },
+                    "input": {
+                      "id": "style-estadoCivil-solteiro",
+                      "condition": { "==": [ { "var": "estadoCivil" }, "solteiro" ] },
+                      "style": { "backgroundColor": "#FFA500" },
+                      "description": "Destacar Solteiro."
+                    }
+                  }
+                ]
+              },
+              "explanation": "Vou destacar a coluna Estado Civil quando for Solteiro."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("agora deixe solteiro laranja e com tooltip pessoa solteira")
+            .currentState(
+                objectMapper.readTree(
+                    """
+                    {
+                      "columns": [
+                        {
+                          "field": "estadoCivil",
+                          "renderer": {
+                            "type": "chip",
+                            "chip": { "textField": "estadoCivil", "variant": "filled" }
+                          },
+                          "conditionalRenderers": [
+                            {
+                              "condition": { "==": [ { "var": "estadoCivil" }, "solteiro" ] },
+                              "renderer": {
+                                "type": "chip",
+                                "chip": { "textField": "estadoCivil", "variant": "filled", "color": "primary" }
+                              }
+                            },
+                            {
+                              "condition": { "==": [ { "var": "estadoCivil" }, "viuvo" ] },
+                              "renderer": {
+                                "type": "chip",
+                                "chip": { "textField": "estadoCivil", "variant": "filled", "color": "accent" }
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "dataSource": {
+                        "data": [
+                          { "estadoCivil": "solteiro" },
+                          { "estadoCivil": "viuvo" }
+                        ]
+                      }
+                    }
+                    """))
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            new ArrayList<String>(),
+            tableRendererManifest());
+
+    JsonNode operation = response.getComponentEditPlan().path("operations").get(0);
+    assertThat(operation.path("operationId").asText()).isEqualTo("column.conditionalRenderer.add");
+    assertThat(operation.at("/target/kind").asText()).isEqualTo("conditionalRenderer");
+    assertThat(operation.at("/input/style").isMissingNode()).isTrue();
+    assertThat(operation.at("/input/renderer/chip/color").asText()).isEqualTo("#FFA500");
+    assertThat(operation.at("/input/renderer/chip/variant").asText()).isEqualTo("filled");
+    assertThat(operation.at("/input/tooltip/text").asText()).isEqualTo("pessoa solteira");
+    assertThat(response.getWarnings())
+        .contains("table-categorical-style-promoted-to-renderer-refinement");
+  }
+
+  @Test
+  void shouldContinueCategoricalRendererTooltipFromAmbiguousValueOptions()
+      throws Exception {
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .ambiguities(
+                List.of(
+                    AiActionPlan.Ambiguity.builder()
+                        .alias("estado civil")
+                        .candidates(List.of("viuvo", "viúvo", "Viuvo"))
+                        .reason("Valor categórico a refinar.")
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("adicione tooltip também dizendo pessoa viúva")
+            .build();
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "estadoCivil",
+                  "renderer": {
+                    "type": "chip",
+                    "chip": { "textField": "estadoCivil", "variant": "filled" }
+                  },
+                  "conditionalRenderers": [
+                    {
+                      "id": "renderer-estadoCivil-solteiro",
+                      "condition": { "==": [ { "var": "estadoCivil" }, "solteiro" ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "textField": "estadoCivil", "variant": "filled", "color": "#FFA500" }
+                      },
+                      "tooltip": { "text": "pessoa solteira", "position": "top" }
+                    },
+                    {
+                      "id": "renderer-estadoCivil-viuvo",
+                      "condition": { "==": [ { "var": "estadoCivil" }, "viuvo" ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "textField": "estadoCivil", "variant": "outlined", "color": "accent" }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "dataSource": {
+                "data": [
+                  { "estadoCivil": "solteiro" },
+                  { "estadoCivil": "viuvo" }
+                ]
+              }
+            }
+            """);
+    ArrayList<String> warnings = new ArrayList<>();
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildCategoricalRendererContinuationPlanFromAmbiguity",
+            actionPlan,
+            List.of("viuvo", "viúvo", "Viuvo"),
+            request,
+            null,
+            currentState,
+            tableRendererManifest(),
+            warnings);
+
+    assertThat(plan).isNotNull();
+    JsonNode operation = plan.path("operations").get(0);
+    assertThat(operation.path("operationId").asText()).isEqualTo("column.conditionalRenderer.add");
+    assertThat(operation.at("/target/field").asText()).isEqualTo("estadoCivil");
+    assertThat(operation.at("/input/condition/==/1").asText()).isEqualTo("viuvo");
+    assertThat(operation.at("/input/renderer/chip/variant").asText()).isEqualTo("outlined");
+    assertThat(operation.at("/input/tooltip/text").asText()).isEqualTo("pessoa viúva");
+    assertThat(warnings)
+        .contains("table-categorical-renderer-continuation-grounded-from-ambiguity");
+  }
+
+  @Test
+  void shouldPreferSemanticTargetFieldWhenContinuingCategoricalRendererTooltip()
+      throws Exception {
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .ambiguities(
+                List.of(
+                    AiActionPlan.Ambiguity.builder()
+                        .alias("viuvo")
+                        .candidates(List.of("viuvo", "viúvo", "Viuvo"))
+                        .reason("Valor categórico a refinar.")
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("no estado civil viuvo, adicione tooltip dizendo pessoa viúva")
+            .build();
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "nomeCompleto",
+                  "renderer": {
+                    "type": "compose",
+                    "compose": { "items": [ { "type": "avatar" }, { "type": "chip" } ] }
+                  }
+                },
+                {
+                  "field": "estadoCivil",
+                  "renderer": {
+                    "type": "chip",
+                    "chip": { "textField": "estadoCivil", "variant": "filled" }
+                  },
+                  "conditionalRenderers": [
+                    {
+                      "id": "renderer-estadoCivil-viuvo",
+                      "condition": { "==": [ { "var": "estadoCivil" }, "viuvo" ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "textField": "estadoCivil", "variant": "outlined", "color": "accent" }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "dataSource": {
+                "data": [
+                  { "nomeCompleto": "Mira Drax", "estadoCivil": "viuvo" }
+                ]
+              }
+            }
+            """);
+    ArrayList<String> warnings = new ArrayList<>();
+
+    JsonNode plan =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildCategoricalRendererContinuationPlanFromAmbiguity",
+            actionPlan,
+            List.of("viuvo", "viúvo", "Viuvo"),
+            request,
+            "estadoCivil",
+            currentState,
+            tableRendererManifest(),
+            warnings);
+
+    assertThat(plan).isNotNull();
+    JsonNode operation = plan.path("operations").get(0);
+    assertThat(operation.at("/target/field").asText()).isEqualTo("estadoCivil");
+    assertThat(operation.at("/input/condition/==/1").asText()).isEqualTo("viuvo");
+    assertThat(operation.at("/input/tooltip/text").asText()).isEqualTo("pessoa viúva");
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void shouldNormalizePatchConvertedCategoricalRendererColorsUsingTurnDataProfile()
+      throws Exception {
+    JsonNode suggestedPatch =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "severidade",
+                  "renderer": {
+                    "type": "badge",
+                    "badge": { "variant": "filled", "textField": "severidade" }
+                  },
+                  "conditionalRenderers": [
+                    {
+                      "id": "renderer-severidade-1",
+                      "condition": { "==": [ { "var": "severidade" }, "ALTA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "primary" }
+                      }
+                    },
+                    {
+                      "id": "renderer-severidade-2",
+                      "condition": { "==": [ { "var": "severidade" }, "MEDIA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "accent" }
+                      }
+                    },
+                    {
+                      "id": "renderer-severidade-3",
+                      "condition": { "==": [ { "var": "severidade" }, "BAIXA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "warn" }
+                      }
+                    },
+                    {
+                      "id": "renderer-severidade-4",
+                      "condition": { "==": [ { "var": "severidade" }, "CRITICA" ] },
+                      "renderer": {
+                        "type": "badge",
+                        "badge": { "textField": "severidade", "variant": "filled", "color": "success" }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "severidade", "header": "Severidade" }
+              ]
+            }
+            """);
+    JsonNode dataProfile =
+        objectMapper.readTree(
+            """
+            {
+              "columns": {
+                "severidade": {
+                  "inferredType": "string",
+                  "cardinality": 4,
+                  "topValues": ["ALTA", "MEDIA", "BAIXA", "CRITICA"]
+                }
+              }
+            }
+            """);
+    ThreadLocal<JsonNode> manifestThreadLocal =
+        (ThreadLocal<JsonNode>) ReflectionTestUtils.getField(service, "turnAuthoringManifest");
+    ThreadLocal<JsonNode> dataProfileThreadLocal =
+        (ThreadLocal<JsonNode>) ReflectionTestUtils.getField(service, "turnDataProfile");
+    manifestThreadLocal.set(tableRendererManifest());
+    dataProfileThreadLocal.set(dataProfile);
+
+    try {
+      AiOrchestratorResponse response =
+          ReflectionTestUtils.invokeMethod(
+              service,
+              "applySuggestedPatch",
+              suggestedPatch,
+              currentState,
+              "praxis-table",
+              new ArrayList<String>(),
+              List.of(),
+              List.of(),
+              objectMapper.createObjectNode(),
+              false);
+
+      JsonNode operations = response.getComponentEditPlan().path("operations");
+      assertThat(operations.get(1).at("/input/renderer/badge/color").asText()).isEqualTo("warn");
+      assertThat(operations.get(2).at("/input/renderer/badge/color").asText()).isEqualTo("accent");
+      assertThat(operations.get(3).at("/input/renderer/badge/color").asText()).isEqualTo("success");
+      assertThat(operations.get(4).at("/input/renderer/badge/color").asText()).isEqualTo("warn");
+      assertThat(response.getWarnings())
+          .contains("table-categorical-renderer-values-grounded-from-data-profile");
+    } finally {
+      manifestThreadLocal.remove();
+      dataProfileThreadLocal.remove();
+    }
   }
 
   @Test
@@ -1203,6 +2264,457 @@ class AiOrchestratorServiceActionPlanTest {
     assertThat(trueAction.getParams().at("/renderer/type").asText()).isEqualTo("chip");
     assertThat(trueAction.getParams().at("/renderer/chip/text").asText()).isEqualTo("Sim");
     assertThat(trueAction.getParams().at("/renderer/chip/variant").asText()).isEqualTo("outlined");
+  }
+
+  @Test
+  void shouldKeepBooleanStateRendererContextWhenAddingTooltipToResolvedChipTarget() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "ativo",
+                  "header": "Ativo",
+                  "conditionalRenderers": [
+                    {
+                      "condition": { "==": [ { "var": "ativo" }, true ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "text": "Sim", "color": "primary", "variant": "filled" }
+                      }
+                    },
+                    {
+                      "condition": { "==": [ { "var": "ativo" }, false ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "text": "Não", "color": "warn", "variant": "filled" }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    Object targetColumn = columns.get(0);
+    AiActionPlan fallback =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildBooleanStateRendererActionPlan",
+            "agora deixe o Sim um pouco mais discreto e com tooltip funcionario ativo",
+            targetColumn,
+            currentState);
+
+    assertThat(fallback).isNotNull();
+    AiActionPlan.Action trueAction = fallback.getActions().get(0);
+    AiActionPlan.Action falseAction = fallback.getActions().get(1);
+    assertThat(trueAction.getTarget()).isEqualTo("ativo");
+    assertThat(trueAction.getParams().at("/renderer/chip/text").asText()).isEqualTo("Sim");
+    assertThat(trueAction.getParams().at("/renderer/chip/color").asText()).isEqualTo("basic");
+    assertThat(trueAction.getParams().at("/renderer/chip/variant").asText()).isEqualTo("soft");
+    assertThat(trueAction.getParams().at("/tooltip/text").asText()).isEqualTo("funcionario ativo");
+    assertThat(falseAction.getParams().has("tooltip")).isFalse();
+  }
+
+  @Test
+  void shouldRespectExplicitBooleanChipTextRefinementWithoutChangingIntentRouting() throws Exception {
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("ativo")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "ativo" }, true ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "text": "S", "color": "#66BB6A", "variant": "filled" }
+                                  }
+                                }
+                                """))
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("ativo")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "ativo" }, false ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "text": "N", "color": "warn", "variant": "filled" }
+                                  }
+                                }
+                                """))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+
+    ReflectionTestUtils.invokeMethod(
+        service,
+        "normalizeTableBooleanLabelActionsFromPrompt",
+        "nao use S, escreva Ativo no chip",
+        plan,
+        null);
+
+    assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/text").asText())
+        .isEqualTo("Ativo");
+    assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/text").asText())
+        .isEqualTo("Inativo");
+  }
+
+  @Test
+  void shouldPreserveBooleanChipLabelsWhenOnlyRefiningStyle() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                {
+                  "field": "ativo",
+                  "header": "Ativo",
+                  "conditionalRenderers": [
+                    {
+                      "condition": { "==": [ { "var": "ativo" }, true ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "text": "Ativo", "color": "primary", "variant": "filled" }
+                      }
+                    },
+                    {
+                      "condition": { "==": [ { "var": "ativo" }, false ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "text": "Inativo", "color": "warn", "variant": "filled" }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("ativo")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "ativo" }, true ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "text": "S", "color": "#A8E6A1", "variant": "filled" }
+                                  }
+                                }
+                                """))
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("ativo")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "ativo" }, false ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "text": "N", "color": "warn", "variant": "filled" }
+                                  }
+                                }
+                                """))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+
+    ReflectionTestUtils.invokeMethod(
+        service,
+        "normalizeTableBooleanLabelActionsFromPrompt",
+        "agora use verde suave",
+        plan,
+        currentState);
+
+    assertThat(plan.getActions().get(0).getParams().at("/renderer/chip/text").asText())
+        .isEqualTo("Ativo");
+    assertThat(plan.getActions().get(1).getParams().at("/renderer/chip/text").asText())
+        .isEqualTo("Inativo");
+  }
+
+  @Test
+  void shouldExplainConditionalRendererTooltipAsTipNotCondition() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "ativo", "header": "Ativo" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("ativo")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "ativo" }, true ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "text": "Ativo", "color": "#A5D6A7", "variant": "outlined" }
+                                  },
+                                  "description": "Adicionar dica (tooltip) indicando que o funcionário está ativo."
+                                }
+                                """))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+
+    String explanation =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildActionPlanComponentEditExplanation",
+            plan,
+            columns,
+            "fallback");
+
+    assertThat(explanation)
+        .contains("Vou adicionar uma dica na coluna Ativo")
+        .doesNotContain("quando adicionar dica");
+  }
+
+  @Test
+  void shouldExplainConditionalRendererTooltipAndSoftVariantFromParams() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "ativo", "header": "Ativo" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("ativo")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "ativo" }, true ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "text": "Sim", "color": "success", "variant": "soft" }
+                                  },
+                                  "tooltip": { "text": "funcionario ativo", "position": "top" },
+                                  "description": "Aplica Sim quando ativo for true."
+                                }
+                                """))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+
+    String explanation =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildActionPlanComponentEditExplanation",
+            plan,
+            columns,
+            "fallback");
+
+    assertThat(explanation)
+        .contains("Ativo")
+        .contains("rótulo Sim")
+        .contains("cor verde")
+        .contains("visual suave")
+        .contains("dica \"funcionario ativo\"");
+  }
+
+  @Test
+  void shouldExplainConditionalRendererColorFromParams() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "estadoCivil", "header": "Estado Civil" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("estadoCivil")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "estadoCivil" }, "solteiro" ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "textField": "estadoCivil", "color": "#FFA500", "variant": "filled" }
+                                  },
+                                  "tooltip": { "text": "pessoa solteira", "position": "top" },
+                                  "description": "Aplica Solteiro quando estadoCivil for solteiro."
+                                }
+                                """))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+
+    String explanation =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildActionPlanComponentEditExplanation",
+            plan,
+            columns,
+            "fallback");
+
+    assertThat(explanation)
+        .contains("Estado Civil")
+        .contains("cor laranja suave")
+        .contains("dica \"pessoa solteira\"");
+  }
+
+  @Test
+  void shouldExplainCategoricalRendererTooltipContinuationNaturally() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "estadoCivil", "header": "Estado Civil" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalRenderer.add")
+                        .target("estadoCivil")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "estadoCivil" }, "viuvo" ] },
+                                  "renderer": {
+                                    "type": "chip",
+                                    "chip": { "textField": "estadoCivil", "variant": "outlined", "color": "accent" }
+                                  },
+                                  "tooltip": { "text": "pessoa viúva", "position": "top" },
+                                  "description": "Adicionar tooltip para entradas viuvo mostrando 'pessoa viúva'."
+                                }
+                                """))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+
+    String explanation =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildActionPlanComponentEditExplanation",
+            plan,
+            columns,
+            "fallback");
+
+    assertThat(explanation)
+        .contains("Vou adicionar uma dica na coluna Estado Civil para viuvo: \"pessoa viúva\".")
+        .doesNotContain("entradas viuvo mostrando")
+        .doesNotContain("Adicionar tooltip");
+  }
+
+  @Test
+  void shouldExplainConditionalStyleWithoutGenericConditionOrOperationalTooltip() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "dataAdmissao", "header": "Data Admissao" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiActionPlan plan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.conditionalStyle.add")
+                        .target("dataAdmissao")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "condition": { "==": [ { "var": "dataAdmissao" }, "2022" ] },
+                                  "style": { "borderLeft": "2px solid rgba(25, 118, 210, 0.35)" },
+                                  "tooltip": { "text": "Adicionar borda discreta para datas de admissão de 2022", "position": "top" },
+                                  "description": "a condicao for atendida"
+                                }
+                                """))
+                        .build()))
+            .ambiguities(List.of())
+            .build();
+
+    String explanation =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildActionPlanComponentEditExplanation",
+            plan,
+            columns,
+            "fallback");
+
+    assertThat(explanation)
+        .contains("Vou destacar a coluna Data Admissao usando borda lateral")
+        .contains("dica \"Borda discreta para datas de admissão de 2022\"")
+        .doesNotContain("condicao")
+        .doesNotContain("condição for atendida")
+        .doesNotContain("Adicionar");
+  }
+
+  @Test
+  void shouldPolishComponentEditPlanExplanationBeforeReturningToUser() {
+    String explanation =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "polishComponentEditPlanExplanation",
+            "Vou destacar a coluna Data Admissao quando a condicao for atendida usando borda discreta com tooltip Borda discreta para datas de admissão ocorridas em 2022.");
+
+    assertThat(explanation)
+        .isEqualTo(
+            "Vou destacar a coluna Data Admissao usando borda discreta com dica \"Borda discreta para datas de admissão ocorridas em 2022\".");
   }
 
   @Test
@@ -3857,6 +5369,65 @@ class AiOrchestratorServiceActionPlanTest {
             {
               "operationId": "export.configure",
               "inputSchema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "formats": { "type": "array" } } }
+            }
+          ]
+        }
+        """);
+  }
+
+  private JsonNode tableRendererManifest() throws Exception {
+    return objectMapper.readTree(
+        """
+        {
+          "componentId": "praxis-table",
+          "editableTargets": [
+            { "kind": "column", "resolver": "column-by-field" },
+            { "kind": "renderer", "resolver": "renderer-in-column" },
+            { "kind": "conditionalRenderer", "resolver": "conditional-renderer-in-column-or-row" }
+          ],
+          "operations": [
+            {
+              "operationId": "column.renderer.set",
+              "target": { "kind": "renderer", "resolver": "renderer-in-column", "required": true },
+              "inputSchema": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": { "type": "string" },
+                  "badge": { "type": "object" },
+                  "chip": { "type": "object" }
+                }
+              }
+            },
+            {
+              "operationId": "column.valueMapping.set",
+              "target": { "kind": "column", "resolver": "column-by-field", "required": true },
+              "inputSchema": {
+                "type": "object",
+                "required": ["valueMapping"],
+                "properties": {
+                  "valueMapping": { "type": "object" }
+                }
+              }
+            },
+            {
+              "operationId": "column.conditionalRenderer.add",
+              "target": {
+                "kind": "conditionalRenderer",
+                "resolver": "conditional-renderer-in-column-or-row",
+                "required": true
+              },
+              "inputSchema": {
+                "type": "object",
+                "required": ["id", "condition"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "condition": { "type": "object" },
+                  "renderer": { "type": "object" },
+                  "animation": { "type": "object" },
+                  "description": { "type": "string" }
+                }
+              }
             }
           ]
         }

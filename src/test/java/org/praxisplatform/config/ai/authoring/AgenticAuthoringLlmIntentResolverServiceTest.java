@@ -935,7 +935,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
-    void classifiesNormalizedProviderRateLimitFailureWithoutLeakingProviderBody() throws Exception {
+    void classifiesNormalizedProviderQuotaFailureWithoutLeakingProviderBody() throws Exception {
         when(providerManagementService.generateJson(
                 any(),
                 any(AiJsonSchema.class),
@@ -972,7 +972,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
 
         assertThat(resolution.resolved()).isFalse();
         assertThat(resolution.warnings())
-                .contains("llm-intent-resolution-failed", "llm-provider-error", "llm-provider-rate-limit")
+                .contains("llm-intent-resolution-failed", "llm-provider-error", "llm-provider-quota-exhausted")
                 .doesNotContain("quota exceeded for request id req_secret_123");
         assertThat(resolution.assistantMessage())
                 .doesNotContain("quota")

@@ -232,6 +232,8 @@ class AgenticAuthoringPagePreviewHttpTest {
         AgenticAuthoringPreviewService previewService = mock(AgenticAuthoringPreviewService.class);
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 mock(AgenticAuthoringConsultativeAnswerService.class);
+        when(intentResolverService.resolve(any(), isNull(), isNull(), isNull()))
+                .thenReturn(consultativeComponentIntent());
         when(consultativeAnswerService.answer(
                 any(AgenticAuthoringPlanRequest.class),
                 any(),
@@ -279,9 +281,9 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("warnings")).extracting(JsonNode::asText)
                 .contains(
                         "domain-api-consultative-projection-used",
-                        "preview-consultative-fast-path-used",
+                        "preview-consultative-semantic-intent-used",
                         "preview-materialization-skipped-consultative-answer");
-        verify(intentResolverService, never()).resolve(any(), isNull(), isNull(), isNull());
+        verify(intentResolverService).resolve(any(), isNull(), isNull(), isNull());
         verify(previewService, never()).preview(any(), any(), any(), any(), any());
     }
 

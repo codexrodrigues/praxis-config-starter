@@ -137,7 +137,7 @@ class AiStreamServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void shouldKeepIdempotencyAllowlistAlignedWithRequestContractFields() {
-        Set<String> internalOnlyFields = Set.of("streamTransport", "streamTurnPreclaimed");
+        Set<String> internalOnlyFields = Set.of("streamTransport", "streamTurnPreclaimed", "observationId");
         Set<String> requestContractFields = Arrays.stream(AiOrchestratorRequest.class.getDeclaredFields())
                 .filter(field -> !Modifier.isStatic(field.getModifiers()))
                 .map(field -> field.getName())
@@ -323,8 +323,6 @@ class AiStreamServiceTest {
         when(turnEventService.findLastEvent(streamId))
                 .thenReturn(Optional.empty(), Optional.of(completed));
         when(turnEventService.isTerminalType("result")).thenReturn(true);
-        when(turnEventService.appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("cancelled"), any()))
-                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "terminal already reached"));
 
         AiPatchStreamCancelResponse response = streamService.cancelStream(
                 streamId,
@@ -818,6 +816,81 @@ class AiStreamServiceTest {
                 .summary();
         assertThat(summary).isNotNull();
         assertThat(summary.count()).isGreaterThan(0);
+    }
+
+    @Test
+    void shouldAppendTerminalErrorWhenProcessingExceedsStreamTimeout() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Atualizar tabela")
+                .clientTurnId(turnId)
+                .currentState(new ObjectMapper().createObjectNode())
+                .build();
+        AiThread thread = AiThread.builder()
+                .threadId(threadId)
+                .tenantId("tenant-a")
+                .userId("user-a")
+                .environment("prod")
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .build();
+        AtomicLong seq = new AtomicLong(0L);
+        AtomicReference<AiTurnEventEnvelope> terminal = new AtomicReference<>();
+
+        ReflectionTestUtils.setField(streamService, "processingTimeoutSeconds", 1L);
+        when(threadService.resolveThread(request, "tenant-a", "user-a", "prod", "Atualizar tabela"))
+                .thenReturn(thread);
+        when(turnEventService.findStartMetadata(threadId, turnId)).thenReturn(Optional.empty());
+        when(turnEventService.findLastEvent(any()))
+                .thenAnswer(invocation -> Optional.ofNullable(terminal.get()));
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> {
+                    String eventType = invocation.getArgument(0, String.class);
+                    return "result".equalsIgnoreCase(eventType)
+                            || "error".equalsIgnoreCase(eventType)
+                            || "cancelled".equalsIgnoreCase(eventType);
+                });
+        when(turnEventService.appendEvent(any(), any(), eq(threadId), eq(turnId), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    String eventType = invocation.getArgument(4, String.class);
+                    AiTurnEventEnvelope event = AiTurnEventEnvelope.builder()
+                            .eventId(UUID.randomUUID())
+                            .streamId(invocation.getArgument(1, UUID.class))
+                            .threadId(threadId)
+                            .turnId(turnId)
+                            .seq(seq.incrementAndGet())
+                            .type(eventType)
+                            .timestamp(Instant.now())
+                            .payload(new ObjectMapper().valueToTree(invocation.getArgument(5)))
+                            .build();
+                    if ("result".equalsIgnoreCase(eventType)
+                            || "error".equalsIgnoreCase(eventType)
+                            || "cancelled".equalsIgnoreCase(eventType)) {
+                        terminal.set(event);
+                    }
+                    return event;
+                });
+        when(orchestratorService.generatePatch(any(), eq("http://localhost:8088"), eq("tenant-a"), eq("user-a"), eq("prod")))
+                .thenAnswer(invocation -> {
+                    Thread.sleep(2_500L);
+                    return org.praxisplatform.config.dto.AiOrchestratorResponse.builder()
+                            .type("patch")
+                            .build();
+                });
+
+        streamService.startStream(request, "http://localhost:8088", new AiPrincipalContext("tenant-a", "user-a", "prod", true));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloadCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(turnEventService, timeout(3_000)).appendEvent(any(), any(), eq(threadId), eq(turnId), eq("error"), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue()).containsEntry("code", "ai-stream-processing-timeout");
+        verify(turnService, timeout(3_000)).expireTurn(threadId, turnId);
+
+        Thread.sleep(2_000L);
+        verify(turnEventService, never()).appendEvent(any(), any(), eq(threadId), eq(turnId), eq("result"), any());
     }
 
     @Test

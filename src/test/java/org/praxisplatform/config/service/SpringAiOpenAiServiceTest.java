@@ -202,9 +202,33 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
-    void directCallRaisesNormalizedProviderExceptionForHttpFailures() throws Exception {
+    void directCallRaisesNormalizedProviderExceptionForQuotaFailures() throws Exception {
         HttpServer server = errorServer(429, """
-                {"error":{"message":"quota exhausted for request req_secret_123"}}
+                {"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"You exceeded your current quota. Check your plan and billing details. request req_secret_123"}}
+                """);
+        server.start();
+        try {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+
+        AiProviderCallException ex = assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+        assertEquals("openai", ex.getProvider());
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, ex.getKind());
+        assertEquals(429, ex.getStatusCode());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void directCallKeepsRateLimitForTransientHttp429Failures() throws Exception {
+        HttpServer server = errorServer(429, """
+                {"error":{"message":"Rate limit reached for requests per minute."}}
                 """);
         server.start();
         try {

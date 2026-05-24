@@ -31,7 +31,7 @@ Add the dependency to your Host Application's `pom.xml` (e.g., `praxis-api-quick
 <dependency>
     <groupId>io.github.codexrodrigues</groupId>
     <artifactId>praxis-config-starter</artifactId>
-    <version>0.1.0-rc.38</version>
+    <version>0.1.0-rc.42</version>
 </dependency>
 ```
 
@@ -75,6 +75,11 @@ Para upgrades com histórico de migrações, mantenha `classpath:db/migration`.
 praxis:
   ai:
     provider: gemini # gemini|openai|xai
+    provider-fallback:
+      enabled: true
+      # Tentados apenas em falhas operacionais recuperaveis, como rate limit, timeout,
+      # capacidade ou erro 5xx. Use provider ou provider:model.
+      candidates: gemini:gemini-2.0-flash,openai:gpt-5-mini
     timeout-seconds: 75
     retry:
       max-attempts: 2
@@ -146,6 +151,7 @@ curl -sS -X POST http://localhost:8080/api/praxis/config/ai/providers/test \
 Variáveis úteis:
 ```properties
 praxis.ai.gemini.prefer-genai-api=true
+praxis.ai.gemini.json-min-output-tokens=8192
 ```
 ```
 
@@ -178,6 +184,10 @@ Headers `X-Tenant-ID` e `X-Env` (opcionais) são armazenados no metadata do RAG 
 | GET | `/api/praxis/config/ai-context/{componentId}` | Returns AI context (runtime + metadata). Requires `X-Tenant-ID` header and `componentType` query param. |
 | POST | `/api/praxis/config/ai-context/{componentId}` | Returns AI context using runtime `currentState` sent by the caller. |
 | POST | `/api/praxis/config/ai/patch` | Orchestrates prompt → patch generation using runtime `currentState`. |
+| GET | `/api/praxis/config/ai/triage/observations` | Lists redacted assistant interaction observations for operational triage. |
+| GET | `/api/praxis/config/ai/triage/observations/{observationId}` | Reads one redacted assistant observation, including feedback when authorized in scope. |
+| GET | `/api/praxis/config/ai/triage/summary` | Aggregates assistant observations by outcome/component for triage. |
+| POST | `/api/praxis/config/ai/triage/observations/{observationId}/feedback` | Attaches structured feedback to an observation without reprocessing the prompt. |
 | POST | `/api/praxis/config/ai/providers/models` | Lists available LLM models for a provider (accepts `provider`, `apiKey`). |
 | POST | `/api/praxis/config/ai/providers/test` | Tests provider connection using supplied `apiKey`/`model` (or defaults). |
 | POST | `/api/praxis/config/ai/keys/clear` | Clears stored `ai.apiKey` for a config entry (requires tenant/user headers). |
@@ -394,6 +404,20 @@ Canonical non-provider responses:
 Clients should render these responses as assistant messages, not infrastructure
 errors. The stream surface emits them as terminal `result` payloads through the
 same `AiOrchestratorResponse` contract.
+
+### Assistant triage observations
+Assistant attempts are captured as redacted, queryable observations in
+`ai_assistant_observation`. This is not conversation memory and does not replace
+`ai_thread`, `ai_message` or `ai_turn_event`: it is the governed triage surface
+for rejected prompts, provider errors, cancelled/failed streams and feedback
+about responses that did not meet user expectations.
+
+Responses from `/ai/patch`, `/ai/patch/stream/start` and
+`/ai/authoring/turn/stream/start` include `observationId` when observation is
+enabled. Clients should use that identifier to submit feedback through
+`POST /api/praxis/config/ai/triage/observations/{observationId}/feedback`.
+The triage API returns only hash/preview/outcome metadata; it must not be used
+as raw prompt or raw LLM response storage.
 
 ### Clarification responses (UI signature)
 When the backend needs more user input, it can respond with a clarification payload that includes an explicit UI

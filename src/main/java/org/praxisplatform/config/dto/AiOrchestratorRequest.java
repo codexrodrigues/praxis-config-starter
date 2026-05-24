@@ -50,6 +50,7 @@ public class AiOrchestratorRequest {
     private String schemaHash;
     private AiSchemaContext schemaContext;
     private String variantId;
+    private UUID observationId;
 
     private String apiMethod;
     private String apiTags;
@@ -60,4 +61,3 @@ public class AiOrchestratorRequest {
     private Boolean streamTransport;
     private Boolean streamTurnPreclaimed;
 }
-

@@ -13,6 +13,7 @@ tags:
   - name: ai-patch
   - name: ai-stream
   - name: ai-authoring
+  - name: ai-triage
   - name: domain-rules
   - name: domain-knowledge
 
@@ -1276,10 +1277,183 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
 
+  /api/praxis/config/ai/triage/observations:
+    get:
+      tags: [ai-triage]
+      operationId: searchAiAssistantObservations
+      summary: Lista observacoes redigidas do assistente para triagem governada
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: surface
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: componentId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: componentType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: admissionOutcome
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: terminalOutcome
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: qualityOutcome
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: promptHash
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: hasFeedback
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Observacoes redigidas no escopo do principal
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AiAssistantObservationResponse'
+
+  /api/praxis/config/ai/triage/observations/{observationId}:
+    get:
+      tags: [ai-triage]
+      operationId: getAiAssistantObservation
+      summary: Consulta uma observacao redigida do assistente
+      parameters:
+        - $ref: '#/components/parameters/ObservationIdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      responses:
+        '200':
+          description: Observacao redigida no escopo do principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAssistantObservationResponse'
+        '404':
+          description: Observacao inexistente ou fora do escopo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
+  /api/praxis/config/ai/triage/summary:
+    get:
+      tags: [ai-triage]
+      operationId: summarizeAiAssistantObservations
+      summary: Resume observacoes do assistente por outcomes para triagem
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Agregados por admission, terminal, quality e componente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAssistantObservationSummaryResponse'
+
+  /api/praxis/config/ai/triage/observations/{observationId}/feedback:
+    post:
+      tags: [ai-triage]
+      operationId: attachAiAssistantObservationFeedback
+      summary: Registra feedback de qualidade para uma observacao do assistente
+      parameters:
+        - $ref: '#/components/parameters/ObservationIdPath'
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiAssistantObservationFeedbackRequest'
+      responses:
+        '200':
+          description: Feedback registrado com comentario redigido/truncado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAssistantObservationFeedbackResponse'
+        '404':
+          description: Observacao inexistente ou fora do escopo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
 components:
   parameters:
     StreamIdPath:
       name: streamId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ObservationIdPath:
+      name: observationId
       in: path
       required: true
       schema:
@@ -1328,7 +1502,7 @@ components:
       required: false
       schema:
         type: string
-        default: 33c545b58f49404695bf845d2094a5b2858538a54200745f1ecb3ca2d0628f01
+        default: 41767dafdf6ebea802c083d77187ad6612937d6831188938dc21adce384b57a2
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1358,7 +1532,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 33c545b58f49404695bf845d2094a5b2858538a54200745f1ecb3ca2d0628f01
+        example: 41767dafdf6ebea802c083d77187ad6612937d6831188938dc21adce384b57a2
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -3021,6 +3195,186 @@ components:
             type: string
         memory:
           $ref: '#/components/schemas/AiMemoryInfo'
+        observationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Identificador redigido de observabilidade para feedback/triagem do assistente.
+      additionalProperties: false
+
+    AiAssistantObservationResponse:
+      type: object
+      properties:
+        observationId:
+          type: string
+          format: uuid
+        requestId:
+          type: string
+          nullable: true
+        tenantId:
+          type: string
+        environment:
+          type: string
+          nullable: true
+        userId:
+          type: string
+          nullable: true
+        surface:
+          type: string
+        componentId:
+          type: string
+          nullable: true
+        componentType:
+          type: string
+          nullable: true
+        routeKey:
+          type: string
+          nullable: true
+        variantId:
+          type: string
+          nullable: true
+        schemaHash:
+          type: string
+          nullable: true
+        contractVersion:
+          type: string
+          nullable: true
+        sessionId:
+          type: string
+          format: uuid
+          nullable: true
+        clientTurnId:
+          type: string
+          format: uuid
+          nullable: true
+        threadId:
+          type: string
+          format: uuid
+          nullable: true
+        turnId:
+          type: string
+          format: uuid
+          nullable: true
+        streamId:
+          type: string
+          format: uuid
+          nullable: true
+        promptHash:
+          type: string
+        promptPreview:
+          type: string
+          nullable: true
+          description: Preview redigido/truncado; nao contem prompt bruto.
+        promptLength:
+          type: integer
+          nullable: true
+        admissionOutcome:
+          type: string
+        terminalOutcome:
+          type: string
+          nullable: true
+        qualityOutcome:
+          type: string
+        errorCategory:
+          type: string
+          nullable: true
+        errorCode:
+          type: string
+          nullable: true
+        errorMessagePreview:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        llmCallCount:
+          type: integer
+        latencyMs:
+          type: integer
+          format: int64
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        feedback:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiAssistantObservationFeedbackResponse'
+      additionalProperties: false
+
+    AiAssistantObservationSummaryResponse:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiAssistantObservationSummaryRow'
+      additionalProperties: false
+
+    AiAssistantObservationSummaryRow:
+      type: object
+      properties:
+        admissionOutcome:
+          type: string
+          nullable: true
+        terminalOutcome:
+          type: string
+          nullable: true
+        qualityOutcome:
+          type: string
+          nullable: true
+        componentId:
+          type: string
+          nullable: true
+        componentType:
+          type: string
+          nullable: true
+        total:
+          type: integer
+          format: int64
+      additionalProperties: false
+
+    AiAssistantObservationFeedbackRequest:
+      type: object
+      properties:
+        rating:
+          type: string
+          enum: [positive, negative, inaccurate, unsafe, irrelevant, incomplete]
+        reasonCode:
+          type: string
+          nullable: true
+        comment:
+          type: string
+          nullable: true
+          description: Comentario sera redigido/truncado antes de persistir.
+      additionalProperties: false
+
+    AiAssistantObservationFeedbackResponse:
+      type: object
+      properties:
+        feedbackId:
+          type: string
+          format: uuid
+        observationId:
+          type: string
+          format: uuid
+        rating:
+          type: string
+        reasonCode:
+          type: string
+          nullable: true
+        commentPreview:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     AiPatchDiff:
@@ -3174,6 +3528,11 @@ components:
         streamAccessToken:
           type: string
           nullable: true
+        observationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Identificador redigido de observabilidade para feedback/triagem do assistente.
         expiresAt:
           type: string
           format: date-time
@@ -3203,6 +3562,11 @@ components:
         eventSchemaVersion:
           type: string
           example: v1
+        observationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Identificador redigido de observabilidade para feedback/triagem do assistente.
         streamAuthMode:
           type: string
           enum: [cookie, signed_url_token]

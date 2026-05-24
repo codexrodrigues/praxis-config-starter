@@ -285,6 +285,7 @@ export interface AiOrchestratorRequestContract {
   apiMethod?: string;
   apiTags?: string;
   apiSearchLimit?: number;
+  observationId?: string;
 }
 
 export type AiOrchestratorResponseType = 'patch' | 'clarification' | 'error' | 'info';
@@ -337,6 +338,79 @@ export interface AiOrchestratorResponseContract {
   providedValue?: AiJsonValue;
   allowedValues?: string[] | null;
   memory?: AiMemoryInfoContract;
+  observationId?: string | null;
+}
+
+export type AiAssistantObservationFeedbackRating =
+  | 'positive'
+  | 'negative'
+  | 'inaccurate'
+  | 'unsafe'
+  | 'irrelevant'
+  | 'incomplete';
+
+export interface AiAssistantObservationFeedbackRequestContract {
+  rating?: AiAssistantObservationFeedbackRating;
+  reasonCode?: string | null;
+  comment?: string | null;
+}
+
+export interface AiAssistantObservationFeedbackResponseContract {
+  feedbackId?: string | null;
+  observationId?: string | null;
+  rating?: string | null;
+  reasonCode?: string | null;
+  commentPreview?: string | null;
+  createdAt?: string | null;
+}
+
+export interface AiAssistantObservationResponseContract {
+  observationId?: string | null;
+  requestId?: string | null;
+  tenantId?: string | null;
+  environment?: string | null;
+  userId?: string | null;
+  surface?: string | null;
+  componentId?: string | null;
+  componentType?: string | null;
+  routeKey?: string | null;
+  variantId?: string | null;
+  schemaHash?: string | null;
+  contractVersion?: string | null;
+  sessionId?: string | null;
+  clientTurnId?: string | null;
+  threadId?: string | null;
+  turnId?: string | null;
+  streamId?: string | null;
+  promptHash?: string | null;
+  promptPreview?: string | null;
+  promptLength?: number | null;
+  admissionOutcome?: string | null;
+  terminalOutcome?: string | null;
+  qualityOutcome?: string | null;
+  errorCategory?: string | null;
+  errorCode?: string | null;
+  errorMessagePreview?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  llmCallCount?: number | null;
+  latencyMs?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  feedback?: AiAssistantObservationFeedbackResponseContract[];
+}
+
+export interface AiAssistantObservationSummaryRowContract {
+  admissionOutcome?: string | null;
+  terminalOutcome?: string | null;
+  qualityOutcome?: string | null;
+  componentId?: string | null;
+  componentType?: string | null;
+  total?: number | null;
+}
+
+export interface AiAssistantObservationSummaryResponseContract {
+  rows?: AiAssistantObservationSummaryRowContract[];
 }
 
 export interface AgenticAuthoringConversationMessageContract {
@@ -751,6 +825,7 @@ export interface AiPatchStreamStartResponseContract {
   eventSchemaVersion: string;
   streamAuthMode?: 'cookie' | 'signed_url_token' | null;
   streamAccessToken?: string | null;
+  observationId?: string | null;
   expiresAt: string;
   fallbackPatchUrl: string;
 }
@@ -762,6 +837,7 @@ export interface AgenticAuthoringTurnStreamStartResponseContract {
   eventSchemaVersion: string;
   streamAuthMode?: 'cookie' | 'signed_url_token' | null;
   streamAccessToken?: string | null;
+  observationId?: string | null;
   expiresAt: string;
   fallbackAuthoringUrl: string;
 }

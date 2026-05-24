@@ -41,6 +41,39 @@ if ! command -v perl >/dev/null 2>&1; then
   exit 1
 fi
 
+trim_env_value() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+load_env_file() {
+  local env_file="$1"
+  local normalized_line name value
+  while IFS= read -r normalized_line || [[ -n "$normalized_line" ]]; do
+    normalized_line="${normalized_line#"${normalized_line%%[![:space:]]*}"}"
+    normalized_line="${normalized_line%"${normalized_line##*[![:space:]]}"}"
+    case "$normalized_line" in
+      ''|\#*|'#!'*) continue ;;
+    esac
+    case "$normalized_line" in
+      export\ *) normalized_line="${normalized_line#export }" ;;
+    esac
+    name="$(trim_env_value "${normalized_line%%=*}")"
+    value="${normalized_line#*=}"
+    value="$(trim_env_value "$value")"
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    if [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      export "$name=$value"
+    fi
+  done < <(LC_ALL=C perl -pe 's/^\xEF\xBB\xBF// if $. == 1; s/\r$//;' "$env_file")
+}
+
 JAR_PATH="${JAR_PATH:-}"
 if [[ -z "$JAR_PATH" ]]; then
   JAR_PATH="$(
@@ -66,10 +99,12 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/
   exit 1
 fi
 
-set -a
-# Normalize secrets file at runtime only. Do not modify or print its contents.
-eval "$(LC_ALL=C perl -pe 's/^\xEF\xBB\xBF// if $. == 1; s/\r$//;' "$ENV_FILE" | sed '/^#!/d')"
-set +a
+# Normalize secrets file at runtime only. Do not modify, expand, or print its contents.
+load_env_file "$ENV_FILE"
+
+export CONFIG_DATASOURCE_URL="${CONFIG_DATASOURCE_URL:-${SPRING_DATASOURCE_URL:-}}"
+export CONFIG_DATASOURCE_USERNAME="${CONFIG_DATASOURCE_USERNAME:-${SPRING_DATASOURCE_USERNAME:-}}"
+export CONFIG_DATASOURCE_PASSWORD="${CONFIG_DATASOURCE_PASSWORD:-${SPRING_DATASOURCE_PASSWORD:-}}"
 
 export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"
@@ -104,13 +139,16 @@ if [[ -n "${PRAXIS_AI_OPENAI_MODEL:-}" ]]; then
   export SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL="$PRAXIS_AI_OPENAI_MODEL"
 fi
 
-if [[ "${EMBEDDING_PROVIDER,,}" == "mock" && "${ALLOW_MOCK_EMBEDDINGS_FOR_LOCAL_E2E:-false}" != "true" ]]; then
+EMBEDDING_PROVIDER_NORMALIZED="$(printf '%s' "$EMBEDDING_PROVIDER" | tr '[:upper:]' '[:lower:]')"
+PROVIDER_NORMALIZED="$(printf '%s' "$PROVIDER" | tr '[:upper:]' '[:lower:]')"
+
+if [[ "$EMBEDDING_PROVIDER_NORMALIZED" == "mock" && "${ALLOW_MOCK_EMBEDDINGS_FOR_LOCAL_E2E:-false}" != "true" ]]; then
   echo "EMBEDDING_PROVIDER=mock is not allowed for local live LLM/browser E2E." >&2
   echo "Use EMBEDDING_PROVIDER=$PROVIDER for Page Builder/assistant validation, or set ALLOW_MOCK_EMBEDDINGS_FOR_LOCAL_E2E=true only for explicitly deterministic non-LLM lanes." >&2
   exit 1
 fi
 
-case "${PROVIDER,,}" in
+case "$PROVIDER_NORMALIZED" in
   openai)
     if [[ -z "${PRAXIS_AI_OPENAI_API_KEY:-}" && -z "${SPRING_AI_OPENAI_API_KEY:-}" ]]; then
       echo "OpenAI provider selected, but no OpenAI API key is loaded." >&2

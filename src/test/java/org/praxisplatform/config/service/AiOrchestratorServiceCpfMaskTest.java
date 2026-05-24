@@ -177,11 +177,11 @@ class AiOrchestratorServiceCpfMaskTest {
 
     assertThat(answer)
         .contains("**Formatos de data disponíveis**")
-        .contains("`fullDate`")
-        .contains("`MMM/yyyy`")
-        .contains("`dd/MM/yyyy`")
+        .contains("Data completa")
+        .contains("Mês e ano")
+        .contains("Data brasileira")
         .contains("a coluna `Admissão`")
-        .contains("Formato atual da coluna: `dd/MM/yyyy`");
+        .contains("Formato atual da coluna: **data no padrao brasileiro**");
     assertThat(answer).doesNotContain("BRL|symbol|2");
   }
 
@@ -236,8 +236,8 @@ class AiOrchestratorServiceCpfMaskTest {
 
     assertThat(answer)
         .contains("**Formatos de data disponíveis**")
-        .contains("`dd/MM/yyyy`")
-        .contains("`fullDate`")
+        .contains("Data brasileira")
+        .contains("Data completa")
         .contains("a coluna `Data de Admissão`");
   }
 
@@ -443,6 +443,12 @@ class AiOrchestratorServiceCpfMaskTest {
             .type("info")
             .message("Posso sugerir formatos de data para Primeira ação e Última ação.")
             .build();
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("ask_about_config")
+            .category("format")
+            .needsClarification(false)
+            .build();
 
     AiOrchestratorResponse enriched =
         (AiOrchestratorResponse)
@@ -452,7 +458,9 @@ class AiOrchestratorServiceCpfMaskTest {
                 response,
                 request,
                 currentState,
-                List.of());
+                List.of(),
+                intent,
+                null);
 
     assertThat(enriched.getOptionPayloads()).hasSize(3);
     assertThat(enriched.getOptionPayloads())
@@ -490,6 +498,12 @@ class AiOrchestratorServiceCpfMaskTest {
             .type("info")
             .message("Posso sugerir formas de destacar descontos e valores altos.")
             .build();
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("ask_about_config")
+            .category("appearance")
+            .needsClarification(false)
+            .build();
 
     AiOrchestratorResponse enriched =
         (AiOrchestratorResponse)
@@ -499,7 +513,9 @@ class AiOrchestratorServiceCpfMaskTest {
                 response,
                 request,
                 currentState,
-                List.of());
+                List.of(),
+                intent,
+                null);
 
     assertThat(enriched.getOptionPayloads()).hasSize(3);
     assertThat(enriched.getOptionPayloads())

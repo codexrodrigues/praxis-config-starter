@@ -124,6 +124,9 @@ public class SpringAiGeminiService implements AiProvider {
     @Value("${praxis.ai.max-tokens:2048}")
     private int maxTokens;
 
+    @Value("${praxis.ai.gemini.json-min-output-tokens:8192}")
+    private int jsonMinOutputTokens;
+
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
 
@@ -264,10 +267,14 @@ public class SpringAiGeminiService implements AiProvider {
     }
 
     private GoogleGenAiChatOptions buildOptions(AiCallConfig config, boolean jsonMode, String resolvedModel) {
+        int resolvedMaxTokens = resolveMaxTokens(config);
+        if (jsonMode && (config == null || config.getMaxTokens() == null)) {
+            resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinOutputTokens));
+        }
         GoogleGenAiChatOptions.Builder builder = GoogleGenAiChatOptions.builder()
                 .model(resolvedModel)
                 .temperature(resolveTemperature(config))
-                .maxOutputTokens(resolveMaxTokens(config));
+                .maxOutputTokens(resolvedMaxTokens);
         if (jsonMode) {
             builder.responseMimeType("application/json");
         }
@@ -413,6 +420,9 @@ public class SpringAiGeminiService implements AiProvider {
             String resolvedModel) {
         double resolvedTemperature = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
+        if (jsonMode && (config == null || config.getMaxTokens() == null)) {
+            resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinOutputTokens));
+        }
         ObjectNode payload = objectMapper.createObjectNode();
         addTextContent(payload, prompt);
         ObjectNode generationConfig = payload.putObject("generationConfig");
@@ -437,11 +447,25 @@ public class SpringAiGeminiService implements AiProvider {
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
-                throw new IllegalStateException("Gemini API HTTP " + response.statusCode() + ": " + response.body());
+                throw AiProviderCallException.fromHttpStatus(
+                        "gemini",
+                        response.statusCode(),
+                        summarizeErrorBody(response.body()));
             }
             JsonNode root = objectMapper.readTree(response.body());
             return extractContentFromGemini(root);
+        } catch (AiProviderCallException providerException) {
+            throw providerException;
         } catch (Exception e) {
+            if (e instanceof java.net.http.HttpTimeoutException timeoutException) {
+                throw AiProviderCallException.timeout("gemini", timeoutException);
+            }
+            if (e instanceof IOException
+                    || e instanceof java.net.ConnectException
+                    || e instanceof java.net.SocketException
+                    || e instanceof java.net.UnknownHostException) {
+                throw AiProviderCallException.transport("gemini", e);
+            }
             throw new IllegalStateException("Failed to call Gemini", e);
         }
     }

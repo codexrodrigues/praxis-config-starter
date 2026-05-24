@@ -114,6 +114,7 @@ public class AiMessageService {
         if (decision == AiTurnService.TurnDecision.IN_PROGRESS) {
             AiOrchestratorResponse cached = AiOrchestratorResponse.builder()
                     .type("info")
+                    .code("TURN_IN_PROGRESS")
                     .message("Turno em processamento.")
                     .build();
             return new AiMemoryContext(

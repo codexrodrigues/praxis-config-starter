@@ -124,9 +124,9 @@ local ou depender de timers opacos no frontend.
 O processamento assincrono do turno deve respeitar
 `praxis.ai.stream.processing-timeout-seconds` para evitar que o cliente fique
 preso em estados intermediarios quando retrieval, provider LLM ou compilacao de
-preview nao concluem. O default da plataforma e `180s`, porque turnos reais de
-authoring podem envolver discovery, RAG, chamada LLM e compilacao de preview no
-mesmo ciclo. Smokes e hosts podem reduzir esse valor explicitamente quando
+preview nao concluem. O default da plataforma e `360s`, porque turnos reais de
+authoring podem envolver discovery, RAG, multiplas chamadas LLM e materializacao
+no mesmo ciclo. Smokes e hosts podem reduzir esse valor explicitamente quando
 usarem doubles deterministas. Ao estourar esse limite, o backend emite `error`
 terminal com `code=agentic-authoring-timeout` e expira a reserva do turno.
 
@@ -286,7 +286,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -Provider openai `
   -QuickstartRoot ..\praxis-api-quickstart `
   -UiRoot ..\praxis-ui-angular `
-  -StreamProcessingTimeoutSeconds 180
+  -StreamProcessingTimeoutSeconds 360
 ```
 
 Resultado:

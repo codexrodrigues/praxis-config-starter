@@ -39,6 +39,7 @@ import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiPatchStreamStartResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -113,9 +114,13 @@ public class AiStreamService {
     private final AiSensitiveDataRedactor sensitiveDataRedactor;
     private final AiStreamAccessTokenService streamAccessTokenService;
 
+    @Autowired(required = false)
+    private AiAssistantObservationService assistantObservationService;
+
     private final Map<UUID, Set<SseEmitter>> emittersByStream = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> heartbeatTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> replayTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledFuture<?>> processingTimeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> cancelSignals = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> replayCursorByStream = new ConcurrentHashMap<>();
     private final Set<UUID> activeProcessingStreams = ConcurrentHashMap.newKeySet();
@@ -146,6 +151,9 @@ public class AiStreamService {
 
     @Value("${praxis.ai.stream.processing-max-polls:30}")
     private int processingMaxPolls;
+
+    @Value("${praxis.ai.stream.processing-timeout-seconds:180}")
+    private long processingTimeoutSeconds;
 
     @Value("${praxis.ai.stream.max-active-global:200}")
     private int maxActiveGlobal;
@@ -200,6 +208,13 @@ public class AiStreamService {
                 AiTurnEventService.StreamStartMetadata existingMetadata = turnEventService.findStartMetadata(threadId, turnId)
                         .orElse(null);
                 if (existingMetadata != null) {
+                    UUID observationId = captureStreamObservation(
+                            request,
+                            principalContext,
+                            existingMetadata.streamId(),
+                            existingMetadata.threadId(),
+                            existingMetadata.turnId(),
+                            prompt);
                     validateIdempotentRequest(existingMetadata.requestHash(), requestHash, legacyRequestHash);
                     turnEventService.requireOwnership(existingMetadata.streamId(), principalContext);
                     AiTurnEventEnvelope tail = turnEventService.findLastEvent(existingMetadata.streamId()).orElse(null);
@@ -218,6 +233,7 @@ public class AiStreamService {
                                     AiOrchestratorRequest resumedRequest = copyRequest(request);
                                     resumedRequest.setSessionId(existingMetadata.threadId());
                                     resumedRequest.setClientTurnId(existingMetadata.turnId());
+                                    resumedRequest.setObservationId(observationId);
                                     resumedRequest.setStreamTransport(Boolean.TRUE);
                                     resumedRequest.setStreamTurnPreclaimed(Boolean.TRUE);
                                     startProcessing(
@@ -241,6 +257,7 @@ public class AiStreamService {
                     }
                     AiPatchStreamStartResponse response = AiPatchStreamStartResponse.builder()
                             .streamId(existingMetadata.streamId())
+                        .observationId(observationId)
                         .threadId(existingMetadata.threadId())
                         .turnId(existingMetadata.turnId())
                         .eventSchemaVersion(eventSchemaVersion)
@@ -263,6 +280,7 @@ public class AiStreamService {
             }
 
             UUID streamId = UUID.randomUUID();
+            UUID observationId = captureStreamObservation(request, principalContext, streamId, threadId, turnId, prompt);
             reserveCapacityPermit(streamId, principalContext);
             Instant expiresAt = Instant.now().plusSeconds(Math.max(streamExpiresSeconds, 60L));
             try {
@@ -294,6 +312,7 @@ public class AiStreamService {
             }
 
             AiOrchestratorRequest streamRequest = copyRequest(request);
+            streamRequest.setObservationId(observationId);
             streamRequest.setStreamTransport(Boolean.TRUE);
             streamRequest.setStreamTurnPreclaimed(Boolean.FALSE);
             startProcessing(
@@ -306,6 +325,7 @@ public class AiStreamService {
                     true);
             AiPatchStreamStartResponse response = AiPatchStreamStartResponse.builder()
                     .streamId(streamId)
+                    .observationId(observationId)
                     .threadId(threadId)
                     .turnId(turnId)
                     .eventSchemaVersion(eventSchemaVersion)
@@ -425,7 +445,7 @@ public class AiStreamService {
         AiStreamExecutionContextHolder.abortStream(streamId);
         AiPatchStreamCancelResponse response;
         try {
-            appendAndEmit(
+            AiTurnEventEnvelope cancelEvent = appendAndEmit(
                     new AiPrincipalContext(
                             ownership.tenantId(),
                             ownership.userId(),
@@ -436,13 +456,24 @@ public class AiStreamService {
                     ownership.turnId(),
                     "cancelled",
                     Map.of("state", "cancelled", "message", "Turno cancelado."));
-            response = AiPatchStreamCancelResponse.builder()
-                    .streamId(streamId)
-                    .threadId(ownership.threadId())
-                    .turnId(ownership.turnId())
-                    .terminalState("cancelled")
-                    .message("Turn cancelled.")
-                    .build();
+            if (cancelEvent != null && !"cancelled".equalsIgnoreCase(cancelEvent.getType())) {
+                reconcileTurnState(ownership.threadId(), ownership.turnId(), cancelEvent.getType());
+                response = AiPatchStreamCancelResponse.builder()
+                        .streamId(streamId)
+                        .threadId(ownership.threadId())
+                        .turnId(ownership.turnId())
+                        .terminalState(resolveTerminalState(cancelEvent))
+                        .message("Turn already reached terminal state.")
+                        .build();
+            } else {
+                response = AiPatchStreamCancelResponse.builder()
+                        .streamId(streamId)
+                        .threadId(ownership.threadId())
+                        .turnId(ownership.turnId())
+                        .terminalState("cancelled")
+                        .message("Turn cancelled.")
+                        .build();
+            }
         } catch (ResponseStatusException ex) {
             if (ex.getStatusCode() == null || ex.getStatusCode().value() != HttpStatus.CONFLICT.value()) {
                 throw ex;
@@ -496,6 +527,7 @@ public class AiStreamService {
         cancelSignals.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
         UUID threadId = request.getSessionId();
         UUID turnId = request.getClientTurnId();
+        scheduleProcessingTimeout(streamId, threadId, turnId, principalContext);
         try {
             streamExecutor.execute(() -> withLogCorrelation(
                     requestId,
@@ -506,6 +538,7 @@ public class AiStreamService {
         } catch (RejectedExecutionException rejectedExecutionException) {
             activeProcessingStreams.remove(streamId);
             cancelSignals.remove(streamId);
+            cancelProcessingTimeout(streamId);
             releaseCapacityPermit(streamId);
             log.warn("[AiStreamService] Stream executor saturated. streamId={}", streamId);
             logLifecycle("process.rejected", requestId, streamId, threadId, turnId, "reason=executor_saturated");
@@ -628,13 +661,17 @@ public class AiStreamService {
                 return;
             }
             log.warn("[AiStreamService] Stream processing failed: {}", safeMessage(ex.getMessage(), "processing failure"));
-            appendAndEmit(
-                    principalContext,
-                    streamId,
-                    threadId,
-                    turnId,
-                    "error",
-                    Map.of("message", safeMessage(ex.getMessage(), "Falha no processamento do stream.")));
+            safeAppendProcessingError(principalContext, streamId, threadId, turnId, ex);
+        } catch (Throwable throwable) {
+            if (throwable instanceof VirtualMachineError || throwable instanceof ThreadDeath) {
+                throw throwable;
+            }
+            if (isCancellationRequested(streamId)) {
+                return;
+            }
+            log.warn("[AiStreamService] Stream processing failed with non-Exception throwable: {}",
+                    safeMessage(throwable.getMessage(), "processing failure"));
+            safeAppendProcessingError(principalContext, streamId, threadId, turnId, throwable);
         } finally {
             double elapsedMs = Math.max(0d, (System.nanoTime() - startedAtNanos) / 1_000_000d);
             recordStreamDuration(providerTag, startedAtNanos);
@@ -648,6 +685,95 @@ public class AiStreamService {
             activeProcessingStreams.remove(streamId);
             cancelSignals.remove(streamId);
             releaseCapacityPermit(streamId);
+        }
+    }
+
+    private void safeAppendProcessingError(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            Throwable throwable) {
+        try {
+            appendAndEmit(
+                    principalContext,
+                    streamId,
+                    threadId,
+                    turnId,
+                    "error",
+                    Map.of("message", safeMessage(
+                            throwable != null ? throwable.getMessage() : null,
+                            "Falha no processamento do stream.")));
+        } catch (Exception appendException) {
+            log.debug("[AiStreamService] Failed to append processing error event: {}",
+                    appendException.getMessage());
+        }
+    }
+
+    private void scheduleProcessingTimeout(
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            AiPrincipalContext principalContext) {
+        if (streamId == null || threadId == null || turnId == null) {
+            return;
+        }
+        long timeoutSeconds = Math.max(1L, processingTimeoutSeconds);
+        ScheduledFuture<?> timeoutTask = scheduler.schedule(
+                () -> processTimeout(streamId, threadId, turnId, principalContext, timeoutSeconds),
+                timeoutSeconds,
+                TimeUnit.SECONDS);
+        ScheduledFuture<?> previous = processingTimeoutTasks.put(streamId, timeoutTask);
+        if (previous != null) {
+            previous.cancel(false);
+        }
+    }
+
+    private void processTimeout(
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            AiPrincipalContext principalContext,
+            long timeoutSeconds) {
+        try {
+            AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+            if (tail != null && turnEventService.isTerminalType(tail.getType())) {
+                completeStream(streamId);
+                return;
+            }
+            AtomicBoolean cancelSignal = cancelSignals.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
+            cancelSignal.set(true);
+            AiStreamExecutionContextHolder.abortStream(streamId);
+            appendAndEmit(
+                    principalContext,
+                    streamId,
+                    threadId,
+                    turnId,
+                    "error",
+                    Map.of(
+                            "message", "Tempo limite aguardando resposta da IA.",
+                            "assistantMessage", "Demorei demais para concluir esse ajuste. Tente novamente em instantes ou detalhe um pouco mais o pedido.",
+                            "code", "ai-stream-processing-timeout",
+                            "phase", "processing-timeout",
+                            "timeoutSeconds", timeoutSeconds));
+            turnService.expireTurn(threadId, turnId);
+            logLifecycle(
+                    "process.timeout",
+                    streamId,
+                    threadId,
+                    turnId,
+                    "timeout_seconds=" + timeoutSeconds);
+        } catch (ResponseStatusException ex) {
+            if (ex.getStatusCode() == null || ex.getStatusCode().value() != HttpStatus.CONFLICT.value()) {
+                log.debug("[AiStreamService] Failed to append processing timeout event: {}", ex.getMessage());
+            }
+        } catch (Exception ex) {
+            log.debug("[AiStreamService] Failed to append processing timeout event: {}", ex.getMessage());
+        } finally {
+            activeProcessingStreams.remove(streamId);
+            cancelSignals.remove(streamId);
+            releaseCapacityPermit(streamId);
+            completeStream(streamId);
         }
     }
 
@@ -764,6 +890,10 @@ public class AiStreamService {
                 threadId,
                 turnId,
                 () -> {
+                    AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+                    if (tail != null && turnEventService.isTerminalType(tail.getType())) {
+                        return tail;
+                    }
                     AiTurnEventEnvelope envelope = turnEventService.appendEvent(
                             principalContext,
                             streamId,
@@ -773,6 +903,7 @@ public class AiStreamService {
                             payload);
                     emitToActiveEmitters(streamId, envelope);
                     if (turnEventService.isTerminalType(eventType)) {
+                        markObservationTerminal(streamId, threadId, turnId, eventType, payload);
                         logLifecycle(
                                 "terminal." + eventType.toLowerCase(),
                                 streamId,
@@ -821,6 +952,36 @@ public class AiStreamService {
                 throw ex;
             }
         }
+    }
+
+    private void markObservationTerminal(
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String eventType,
+            Object payload) {
+        if (assistantObservationService == null) {
+            return;
+        }
+        UUID observationId = assistantObservationService.findObservationId(threadId, turnId, streamId).orElse(null);
+        if (observationId == null) {
+            return;
+        }
+        JsonNode payloadNode = objectMapper.valueToTree(payload);
+        String terminal = "cancelled".equalsIgnoreCase(eventType) ? "cancelled"
+                : "error".equalsIgnoreCase(eventType) ? "error"
+                : "result";
+        String code = text(payloadNode, "code");
+        String message = text(payloadNode, "message");
+        assistantObservationService.markTerminal(observationId, terminal, code, message);
+    }
+
+    private String text(JsonNode node, String fieldName) {
+        if (node == null || fieldName == null) {
+            return null;
+        }
+        JsonNode value = node.get(fieldName);
+        return value != null && value.isTextual() ? value.asText() : null;
     }
 
     private void emitThoughtStepForResponse(
@@ -1101,6 +1262,7 @@ public class AiStreamService {
     }
 
     private void completeStream(UUID streamId) {
+        cancelProcessingTimeout(streamId);
         stopHeartbeat(streamId);
         stopIncrementalReplay(streamId);
         Set<SseEmitter> emitters = emittersByStream.remove(streamId);
@@ -1114,6 +1276,13 @@ public class AiStreamService {
             }
         }
         replayCursorByStream.remove(streamId);
+    }
+
+    private void cancelProcessingTimeout(UUID streamId) {
+        ScheduledFuture<?> timeoutTask = processingTimeoutTasks.remove(streamId);
+        if (timeoutTask != null) {
+            timeoutTask.cancel(false);
+        }
     }
 
     private void stopHeartbeat(UUID streamId) {
@@ -1258,6 +1427,26 @@ public class AiStreamService {
         }
     }
 
+    private UUID captureStreamObservation(
+            AiOrchestratorRequest request,
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String prompt) {
+        if (assistantObservationService == null) {
+            return null;
+        }
+        return assistantObservationService.captureStream(
+                request,
+                principalContext,
+                AiAssistantObservationService.SURFACE_PATCH_STREAM,
+                streamId,
+                threadId,
+                turnId,
+                prompt);
+    }
+
     private String safeMessage(String message, String fallback) {
         String cleaned = normalize(message);
         if (cleaned == null) {
@@ -1269,19 +1458,21 @@ public class AiStreamService {
 
     private void recordStreamDuration(String providerTag, long startedAtNanos) {
         double elapsedMs = Math.max(0d, (System.nanoTime() - startedAtNanos) / 1_000_000d);
-        durationSummary(providerTag).record(elapsedMs);
+        try {
+            durationSummary(providerTag).record(elapsedMs);
+        } catch (Throwable throwable) {
+            if (throwable instanceof VirtualMachineError || throwable instanceof ThreadDeath) {
+                throw throwable;
+            }
+            log.debug("[AiStreamService] Could not record stream duration metric: {}", throwable.getMessage());
+        }
     }
 
     private DistributionSummary durationSummary(String providerTag) {
         String normalizedProvider = normalizeMetricTag(providerTag, METRIC_TAG_UNKNOWN);
         return streamDurationSummaries.computeIfAbsent(
                 normalizedProvider,
-                key -> DistributionSummary.builder(METRIC_STREAM_DURATION_MS)
-                        .baseUnit("milliseconds")
-                        .description("Stream turn processing duration in milliseconds.")
-                        .publishPercentileHistogram(true)
-                        .tag(METRIC_TAG_PROVIDER, key)
-                        .register(Metrics.globalRegistry));
+                key -> Metrics.summary(METRIC_STREAM_DURATION_MS, METRIC_TAG_PROVIDER, key));
     }
 
     private String resolveProviderTag(AiPrincipalContext principalContext) {

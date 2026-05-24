@@ -22,6 +22,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -159,6 +160,24 @@ public class AiOrchestratorService {
     @Value("${praxis.ai.prompt.max-chars.concepts:4000}")
     private int maxConceptsChars;
 
+    @Value("${praxis.ai.prompt.max-chars.intent-runtime-metadata:8000}")
+    private int maxIntentRuntimeMetadataChars = 8000;
+
+    @Value("${praxis.ai.prompt.max-chars.intent-field-types:8000}")
+    private int maxIntentFieldTypesChars = 8000;
+
+    @Value("${praxis.ai.prompt.max-chars.intent-authoring-contract:8000}")
+    private int maxIntentAuthoringContractChars = 8000;
+
+    @Value("${praxis.ai.prompt.max-chars.response-mode-authoring-contract:6000}")
+    private int maxResponseModeAuthoringContractChars = 6000;
+
+    @Value("${praxis.ai.prompt.max-chars.qa-config:12000}")
+    private int maxQaConfigChars = 12000;
+
+    @Value("${praxis.ai.prompt.max-chars.qa-authoring-contract:16000}")
+    private int maxQaAuthoringContractChars = 16000;
+
     @Value("${praxis.ai.action-plan.provider:#{null}}")
     private String actionPlanProvider;
 
@@ -179,6 +198,9 @@ public class AiOrchestratorService {
 
     @Value("${praxis.ai.provider.text-stream.fallback-sync-on-error:true}")
     private boolean providerTextStreamFallbackSyncOnError;
+
+    @Value("${spring.ai.openai.chat.options.model:}")
+    private String defaultOpenAiChatModel;
 
     private final AiContextService contextService;
     private final AiProvider aiProvider;
@@ -202,18 +224,31 @@ public class AiOrchestratorService {
     @Autowired(required = false)
     private AiAssistantAdmissionService assistantAdmissionService;
 
+    @Autowired(required = false)
+    private AiAssistantObservationService assistantObservationService;
+
+    private final ThreadLocal<JsonNode> turnAuthoringManifest = new ThreadLocal<>();
+    private final ThreadLocal<JsonNode> turnDataProfile = new ThreadLocal<>();
+
     public AiOrchestratorResponse generatePatch(
             AiOrchestratorRequest request,
             String requestBaseUrl,
             String tenantId,
             String userId,
             String environment) {
+        long observationStartedAt = System.nanoTime();
         String resolvedUserPrompt = resolveUserPrompt(request);
         if (resolvedUserPrompt == null || resolvedUserPrompt.isBlank()) {
             return error("Prompt vazio.");
         }
         request.setUserPrompt(resolvedUserPrompt);
         interactionLogger.logDiagnostic(request, "request_timeline", buildRequestTimelineSnapshot(request));
+        UUID observationId = captureObservation(
+                request,
+                tenantId,
+                userId,
+                environment,
+                resolvedUserPrompt);
 
         AiMemoryContext memoryContext = null;
         try {
@@ -227,7 +262,11 @@ public class AiOrchestratorService {
                     request.getSchemaContext());
 
             if (context.getComponentDefinition() == null) {
-                return unknownComponentError(request);
+                AiOrchestratorResponse response = unknownComponentError(request);
+                applyObservationMetadata(response, observationId);
+                markObservationAdmission(observationId, "unknown_component", response.getCode(), response.getMessage());
+                markObservationCompleted(observationId, response, observationStartedAt);
+                return response;
             }
 
             JsonNode currentState = context.getCurrentState();
@@ -241,6 +280,12 @@ public class AiOrchestratorService {
                     request.getContextHints(),
                     context,
                     authoringManifest);
+            authoringManifest = augmentAuthoringManifestFromRuntimeContract(
+                    context.getComponentId(),
+                    authoringManifest,
+                    authoringContract);
+            turnAuthoringManifest.set(authoringManifest);
+            turnDataProfile.set(request.getDataProfile());
             AiOrchestratorResponse admissionResponse = assistantAdmissionService != null
                     ? assistantAdmissionService.evaluate(
                             request,
@@ -251,8 +296,16 @@ public class AiOrchestratorService {
                             componentContext)
                     : null;
             if (admissionResponse != null) {
+                applyObservationMetadata(admissionResponse, observationId);
+                markObservationAdmission(
+                        observationId,
+                        resolveAdmissionOutcome(admissionResponse),
+                        admissionResponse.getCode(),
+                        admissionResponse.getMessage());
+                markObservationCompleted(observationId, admissionResponse, observationStartedAt);
                 return admissionResponse;
             }
+            markObservationAdmission(observationId, "allowed", null, null);
 
             AiThread thread = threadService.resolveThread(
                     request,
@@ -264,11 +317,15 @@ public class AiOrchestratorService {
                     thread,
                     request,
                     resolvedUserPrompt);
+            linkObservation(observationId, memoryContext);
             AiOrchestratorResponse cachedResponse = memoryContext != null
                     ? memoryContext.getCachedResponse()
                     : null;
             if (cachedResponse != null) {
                 messageService.applyMemoryMetadata(cachedResponse, memoryContext);
+                applyObservationMetadata(cachedResponse, observationId);
+                linkObservation(observationId, memoryContext);
+                markObservationCompleted(observationId, cachedResponse, observationStartedAt);
                 return cachedResponse;
             }
             String modelPrompt = buildPromptWithMemory(resolvedUserPrompt, memoryContext);
@@ -441,11 +498,75 @@ public class AiOrchestratorService {
             return finalizeResponse(contextHintPatch, memoryContext);
         }
 
+        if (selectedFormat != null && !isBlank(selectedFormat.value)) {
+            JsonNode selectedPatch = buildFormatPatchFromSelection(
+                    selectedFormat,
+                    null,
+                    columnDescriptors,
+                    columnResolverKeys);
+            if (selectedPatch != null) {
+                JsonNode selectedPlan = buildComponentEditPlanFromPatch(
+                        request.getComponentId(),
+                        selectedPatch,
+                        authoringManifest,
+                        warnings);
+                if (selectedPlan != null && selectedPlan.isObject()) {
+                    ObjectNode planResult = objectMapper.createObjectNode();
+                    planResult.set("componentEditPlan", selectedPlan);
+                    planResult.put(
+                            "explanation",
+                            buildSelectedFormatReviewMessage(selectedFormat, columnDescriptors));
+                    warnings.add("format-option-selected-context-hint-manifest-backed");
+                    return finalizeResponse(
+                            componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                            memoryContext);
+                }
+                warnings.add("Formato selecionado aplicado via contexto estruturado.");
+                return finalizeResponse(applySuggestedPatch(
+                        selectedPatch,
+                        currentState,
+                        request.getComponentId(),
+                        warnings,
+                        configCapabilities,
+                        componentCapabilities,
+                        componentContext,
+                        true), memoryContext);
+            }
+        }
+
         String selectedResponseMode = selectAuthoringResponseMode(
                 planningPrompt,
                 authoringContract,
                 request,
                 frontendConfig);
+        JsonNode selectedRecordsRuntimeFilterPatchFromSemanticHints =
+                buildSelectedRecordsRuntimeFilterPatchFromSemanticContextHints(request, authoringManifest);
+        if (selectedRecordsRuntimeFilterPatchFromSemanticHints != null
+                && selectedRecordsRuntimeFilterPatchFromSemanticHints.isObject()) {
+            selectedRecordsRuntimeFilterPatchFromSemanticHints = appendTableRuntimeExportIfRequested(
+                    selectedRecordsRuntimeFilterPatchFromSemanticHints,
+                    request,
+                    authoringManifest,
+                    "filtered");
+            warnings.add("table-runtime-filter gerado a partir de decisao semantica de clarification.");
+            return finalizeResponse(
+                    tableRuntimeOperationResponse(
+                            selectedRecordsRuntimeFilterPatchFromSemanticHints,
+                            request,
+                            warnings,
+                            "Vou aplicar o filtro com base nas linhas selecionadas."),
+                    memoryContext);
+        }
+        AiOrchestratorResponse selectedRecordFilterCandidateDecision =
+                resolveSelectedRecordFilterCandidateDecision(
+                        planningPrompt,
+                        request,
+                        authoringManifest,
+                        frontendConfig,
+                        warnings);
+        if (selectedRecordFilterCandidateDecision != null) {
+            return finalizeResponse(selectedRecordFilterCandidateDecision, memoryContext);
+        }
         if ("consult".equals(selectedResponseMode)) {
             AiOrchestratorResponse response = info(answerQuestion(
                     resolvedUserPrompt,
@@ -453,8 +574,87 @@ public class AiOrchestratorService {
                     request,
                     frontendConfig,
                     authoringContract));
+            AiIntentClassification consultIntent = classifyConsultIntentSafely(
+                    planningPrompt,
+                    availableFields,
+                    inputKeys,
+                    outputKeys,
+                    configCategories,
+                    componentCategories,
+                    runtimeMetadata,
+                    fieldTypeHints,
+                    authoringContract,
+                    request,
+                    frontendConfig,
+                    warnings);
+            if (consultIntent != null) {
+                consultIntent = normalizeIntent(
+                        consultIntent,
+                        request != null ? request.getContextHints() : null,
+                        request != null ? request.getUserPrompt() : null,
+                        columnDescriptors,
+                        columnResolverKeys,
+                        availableFields,
+                        columnOptions,
+                        configCategories,
+                        componentCategories,
+                        isTable,
+                        warnings);
+            }
+            JsonNode selectedRecordsRuntimeFilterPatchFromConsultIntent =
+                    buildSelectedRecordsRuntimeFilterPatchFromIntent(
+                            consultIntent,
+                            request,
+                            authoringManifest);
+            if (selectedRecordsRuntimeFilterPatchFromConsultIntent != null
+                    && selectedRecordsRuntimeFilterPatchFromConsultIntent.isObject()) {
+                selectedRecordsRuntimeFilterPatchFromConsultIntent = appendTableRuntimeExportIfRequested(
+                        selectedRecordsRuntimeFilterPatchFromConsultIntent,
+                        request,
+                        authoringManifest,
+                        "filtered");
+                warnings.add("table-runtime-filter gerado a partir de decisao semantica consultiva.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                selectedRecordsRuntimeFilterPatchFromConsultIntent,
+                                request,
+                                warnings,
+                                "Vou aplicar o filtro com base nas linhas selecionadas."),
+                        memoryContext);
+            }
+            JsonNode tableRuntimeExportPatchFromConsultIntent = buildTableRuntimeExportPatchFromIntent(
+                    consultIntent,
+                    request,
+                    authoringManifest);
+            if (tableRuntimeExportPatchFromConsultIntent != null
+                    && tableRuntimeExportPatchFromConsultIntent.isObject()) {
+                warnings.add("table-runtime-export gerado a partir de decisao semantica consultiva.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                tableRuntimeExportPatchFromConsultIntent,
+                                request,
+                                warnings,
+                                "Vou exportar os dados solicitados da tabela."),
+                        memoryContext);
+            }
+            String governedFormatAnswer = answerTableFormatCapabilityQuestion(
+                    request != null ? request.getUserPrompt() : null,
+                    currentState,
+                    formatOptions);
+            if (governedFormatAnswer != null
+                    && consultIntent != null
+                    && "format".equalsIgnoreCase(consultIntent.getCategory())) {
+                response.setMessage(governedFormatAnswer);
+                warnings.add("table-format-capability-consultative-answer-used");
+            }
             return finalizeResponse(
-                    attachConsultativeTableActionOptions(response, request, currentState, formatOptions),
+                    attachConsultativeTableActionOptions(
+                            response,
+                            request,
+                            currentState,
+                            formatOptions,
+                            consultIntent,
+                            request != null ? request.getDataProfile() : null),
                     memoryContext);
         }
 
@@ -528,7 +728,7 @@ public class AiOrchestratorService {
                     planResult.set("componentEditPlan", selectedPlan);
                     planResult.put(
                             "explanation",
-                            "Vou aplicar o formato escolhido nas colunas selecionadas.");
+                            buildSelectedFormatReviewMessage(selectedFormat, columnDescriptors));
                     warnings.add("format-option-selected-manifest-backed");
                     return finalizeResponse(
                             componentEditPlanResponse(planResult, request, warnings, authoringManifest),
@@ -808,12 +1008,26 @@ public class AiOrchestratorService {
                 if (!actionOptions.isEmpty()) {
                     response.setOptionPayloads(actionOptions);
                 }
-                return finalizeResponse(response, memoryContext);
+                return finalizeResponse(
+                        attachConsultativeTableActionOptions(
+                                response,
+                                request,
+                                currentState,
+                                formatOptions,
+                                intent,
+                                request != null ? request.getDataProfile() : null),
+                        memoryContext);
             }
             String answer = answerQuestion(resolvedUserPrompt, currentState, request, frontendConfig, authoringContract);
             AiOrchestratorResponse response = info(answer);
             return finalizeResponse(
-                    attachConsultativeTableActionOptions(response, request, currentState, formatOptions),
+                    attachConsultativeTableActionOptions(
+                            response,
+                            request,
+                            currentState,
+                            formatOptions,
+                            intent,
+                            request != null ? request.getDataProfile() : null),
                     memoryContext);
         }
 
@@ -857,7 +1071,8 @@ public class AiOrchestratorService {
                     warnings);
             normalizeTableBooleanLabelActionsFromPrompt(
                     request != null ? request.getUserPrompt() : null,
-                    actionPlan);
+                    actionPlan,
+                    currentState);
             actionPlan = pruneTableActionPlanByClassifiedIntent(
                     actionPlan,
                     intent,
@@ -906,6 +1121,19 @@ public class AiOrchestratorService {
                     && actionPlan.getAmbiguities() != null
                     && !actionPlan.getAmbiguities().isEmpty();
             createOnlyPlan = isCreateOnlyPlan(actionPlan, componentActions);
+            JsonNode selectedRecordsRuntimeFilterPatchFromHints = buildSelectedRecordsRuntimeFilterPatchFromContextHints(
+                    request,
+                    authoringManifest);
+            if (selectedRecordsRuntimeFilterPatchFromHints != null && selectedRecordsRuntimeFilterPatchFromHints.isObject()) {
+                warnings.add("table-runtime-filter gerado a partir de selecao e filtro escolhido em clarification.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                selectedRecordsRuntimeFilterPatchFromHints,
+                                request,
+                                warnings,
+                                "Vou aplicar o filtro com base nas linhas selecionadas."),
+                        memoryContext);
+            }
             if (hasAmbiguity
                     && expectedActions.isEmpty()
                     && !createOnlyPlan
@@ -913,6 +1141,24 @@ public class AiOrchestratorService {
                 List<String> options = !ambiguityOptions.isEmpty()
                         ? ambiguityOptions
                         : columnOptions;
+                JsonNode categoricalContinuationPlan = buildCategoricalRendererContinuationPlanFromAmbiguity(
+                        actionPlan,
+                        options,
+                        request,
+                        intent != null ? intent.getTargetField() : null,
+                        currentState,
+                        authoringManifest,
+                        warnings);
+                if (categoricalContinuationPlan != null && categoricalContinuationPlan.isObject()) {
+                    ObjectNode planResult = objectMapper.createObjectNode();
+                    planResult.set("componentEditPlan", categoricalContinuationPlan);
+                    planResult.put(
+                            "explanation",
+                            "Vou continuar o ajuste visual no chip selecionado.");
+                    return finalizeResponse(
+                            componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                            memoryContext);
+                }
                 List<AiOption> payloads = buildFilterFieldOptionPayloads(
                         options,
                         request != null ? request.getContextHints() : null);
@@ -980,6 +1226,68 @@ public class AiOrchestratorService {
                         message,
                         formatChoices,
                         formatPayloads), memoryContext);
+            }
+            JsonNode selectedRecordsRuntimeFilterPatchFromIntent = buildSelectedRecordsRuntimeFilterPatchFromIntent(
+                    intent,
+                    request,
+                    authoringManifest);
+            if (selectedRecordsRuntimeFilterPatchFromIntent != null
+                    && selectedRecordsRuntimeFilterPatchFromIntent.isObject()) {
+                selectedRecordsRuntimeFilterPatchFromIntent = appendTableRuntimeExportIfRequested(
+                        selectedRecordsRuntimeFilterPatchFromIntent,
+                        request,
+                        authoringManifest,
+                        "filtered");
+                warnings.add("table-runtime-filter gerado a partir de selecao e alvo semantico da intencao.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                selectedRecordsRuntimeFilterPatchFromIntent,
+                                request,
+                                warnings,
+                                "Vou aplicar o filtro com base nas linhas selecionadas."),
+                        memoryContext);
+            }
+            JsonNode tableRuntimeExportPatchFromIntent = buildTableRuntimeExportPatchFromIntent(
+                    intent,
+                    request,
+                    authoringManifest);
+            if (tableRuntimeExportPatchFromIntent != null
+                    && tableRuntimeExportPatchFromIntent.isObject()) {
+                warnings.add("table-runtime-export gerado a partir de decisao semantica da intencao.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                tableRuntimeExportPatchFromIntent,
+                                request,
+                                warnings,
+                                "Vou exportar os dados solicitados da tabela."),
+                        memoryContext);
+            }
+            JsonNode tableRuntimeOperationPatch = buildTableRuntimeOperationPatchFromActionPlan(
+                    actionPlan,
+                    authoringManifest);
+            if (tableRuntimeOperationPatch != null && tableRuntimeOperationPatch.isObject()) {
+                warnings.add("table-runtime-operation gerada a partir do action plan manifest-backed.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                tableRuntimeOperationPatch,
+                                request,
+                                warnings,
+                                "Vou executar a operacao solicitada na tabela."),
+                        memoryContext);
+            }
+            JsonNode selectedRecordsRuntimeFilterPatch = buildSelectedRecordsRuntimeFilterPatchFromActionPlan(
+                    actionPlan,
+                    request,
+                    authoringManifest);
+            if (selectedRecordsRuntimeFilterPatch != null && selectedRecordsRuntimeFilterPatch.isObject()) {
+                warnings.add("table-runtime-filter gerado a partir de selecao e alvo semantico do action plan.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                selectedRecordsRuntimeFilterPatch,
+                                request,
+                                warnings,
+                                "Vou aplicar o filtro com base nas linhas selecionadas."),
+                        memoryContext);
             }
             JsonNode tableManifestBackedPlan = buildComponentEditPlanFromActionPlan(actionPlan, authoringManifest);
             if (tableManifestBackedPlan != null && tableManifestBackedPlan.isObject()) {
@@ -1522,9 +1830,19 @@ public class AiOrchestratorService {
                 .explanation(explanation)
                 .warnings(warnings.isEmpty() ? null : warnings)
                 .build(), memoryContext);
+        } catch (AiProviderCallException ex) {
+            messageService.expireTurn(memoryContext);
+            markObservationFailed(observationId, ex, observationStartedAt);
+            AiOrchestratorResponse response = providerCallErrorResponse(ex);
+            applyObservationMetadata(response, observationId);
+            return finalizeResponse(response, memoryContext);
         } catch (Exception ex) {
             messageService.expireTurn(memoryContext);
+            markObservationFailed(observationId, ex, observationStartedAt);
             throw ex;
+        } finally {
+            turnAuthoringManifest.remove();
+            turnDataProfile.remove();
         }
     }
 
@@ -1534,10 +1852,91 @@ public class AiOrchestratorService {
         if (response == null) {
             return null;
         }
+        response.setExplanation(polishComponentEditPlanExplanation(response.getExplanation()));
+        response.setMessage(polishComponentEditPlanExplanation(response.getMessage()));
         messageService.storeAssistantResponse(memoryContext, response);
         boolean summaryUpdated = messageService.summarizeIfNeeded(memoryContext);
         messageService.applyMemoryMetadata(response, memoryContext, summaryUpdated);
+        UUID observationId = resolveObservationId(response.getObservationId(), memoryContext);
+        applyObservationMetadata(response, observationId);
+        linkObservation(observationId, memoryContext);
+        markObservationCompleted(observationId, response, 0L);
         return response;
+    }
+
+    private UUID captureObservation(
+            AiOrchestratorRequest request,
+            String tenantId,
+            String userId,
+            String environment,
+            String resolvedUserPrompt) {
+        if (assistantObservationService == null) {
+            return null;
+        }
+        String surface = request != null && Boolean.TRUE.equals(request.getStreamTransport())
+                ? AiAssistantObservationService.SURFACE_PATCH_STREAM
+                : AiAssistantObservationService.SURFACE_SYNC_PATCH;
+        return assistantObservationService.capture(
+                request,
+                tenantId,
+                userId,
+                environment,
+                surface,
+                resolvedUserPrompt);
+    }
+
+    private void applyObservationMetadata(AiOrchestratorResponse response, UUID observationId) {
+        if (response != null && observationId != null) {
+            response.setObservationId(observationId);
+        }
+    }
+
+    private UUID resolveObservationId(UUID observationId, AiMemoryContext memoryContext) {
+        if (observationId != null || assistantObservationService == null || memoryContext == null) {
+            return observationId;
+        }
+        return assistantObservationService.findObservationId(
+                        memoryContext.getThreadId(),
+                        memoryContext.getTurnId(),
+                        null)
+                .orElse(null);
+    }
+
+    private void linkObservation(UUID observationId, AiMemoryContext memoryContext) {
+        if (assistantObservationService != null && observationId != null && memoryContext != null) {
+            assistantObservationService.link(observationId, memoryContext.getThreadId(), memoryContext.getTurnId(), null);
+        }
+    }
+
+    private void markObservationAdmission(UUID observationId, String outcome, String code, String message) {
+        if (assistantObservationService != null && observationId != null) {
+            assistantObservationService.markAdmission(observationId, outcome, code, message);
+        }
+    }
+
+    private void markObservationCompleted(UUID observationId, AiOrchestratorResponse response, long startedAtNanos) {
+        if (assistantObservationService != null && observationId != null) {
+            long latencyMs = startedAtNanos > 0 ? elapsedMs(startedAtNanos) : 0L;
+            assistantObservationService.markCompleted(observationId, response, latencyMs);
+        }
+    }
+
+    private void markObservationFailed(UUID observationId, Throwable error, long startedAtNanos) {
+        if (assistantObservationService != null && observationId != null) {
+            long latencyMs = startedAtNanos > 0 ? elapsedMs(startedAtNanos) : 0L;
+            assistantObservationService.markFailed(observationId, error, latencyMs);
+        }
+    }
+
+    private String resolveAdmissionOutcome(AiOrchestratorResponse response) {
+        String code = response != null ? response.getCode() : null;
+        if (AiAssistantAdmissionService.CODE_POLICY_REJECTED.equals(code)) {
+            return "policy_rejected";
+        }
+        if (AiAssistantAdmissionService.CODE_OUT_OF_SCOPE.equals(code)) {
+            return "out_of_scope";
+        }
+        return "blocked";
     }
 
     private String resolveUserPrompt(AiOrchestratorRequest request) {
@@ -1702,9 +2101,18 @@ public class AiOrchestratorService {
                         "COLUMNS_LIST", objectMapper.valueToTree(columns).toString(),
                         "INPUTS_LIST", objectMapper.valueToTree(inputs).toString(),
                         "OUTPUTS_LIST", objectMapper.valueToTree(outputs).toString(),
-                        "RUNTIME_METADATA", safeMetadata(runtimeMetadata),
-                        "FIELD_TYPES", safeMetadata(fieldTypeHints),
-                        "AUTHORING_CONTRACT", safeMetadata(formatAuthoringContract(authoringContract)),
+                        "RUNTIME_METADATA", truncateBlock(
+                                "intent_runtime_metadata",
+                                safeMetadata(runtimeMetadata),
+                                maxIntentRuntimeMetadataChars),
+                        "FIELD_TYPES", truncateBlock(
+                                "intent_field_types",
+                                safeMetadata(fieldTypeHints),
+                                maxIntentFieldTypesChars),
+                        "AUTHORING_CONTRACT", truncateBlock(
+                                "intent_authoring_contract",
+                                formatAuthoringContract(authoringContract),
+                                maxIntentAuthoringContractChars),
                         "CONFIG_CATEGORIES", objectMapper.valueToTree(configCategories).toString(),
                         "COMPONENT_CATEGORIES", objectMapper.valueToTree(componentCategories).toString()));
         AiJsonSchema schema = buildIntentSchema();
@@ -1714,6 +2122,45 @@ public class AiOrchestratorService {
         }
         if (json == null) return null;
         return objectMapper.convertValue(json, AiIntentClassification.class);
+    }
+
+    private AiIntentClassification classifyConsultIntentSafely(
+            String userPrompt,
+            List<String> columns,
+            List<String> inputs,
+            List<String> outputs,
+            List<String> configCategories,
+            List<String> componentCategories,
+            String runtimeMetadata,
+            String fieldTypeHints,
+            JsonNode authoringContract,
+            AiOrchestratorRequest request,
+            AiCallConfig callConfig,
+            List<String> warnings) {
+        try {
+            return classifyIntent(
+                    userPrompt,
+                    columns,
+                    inputs,
+                    outputs,
+                    configCategories,
+                    componentCategories,
+                    runtimeMetadata,
+                    fieldTypeHints,
+                    authoringContract,
+                    request,
+                    callConfig);
+        } catch (AiProviderCallException ex) {
+            if (warnings != null) {
+                warnings.add("consultative-intent-classification-degraded: " + ex.getKind());
+            }
+            log.warn(
+                    "[AiOrchestratorService] Consultative intent classification degraded. provider={} kind={} message={}",
+                    ex.getProvider(),
+                    ex.getKind(),
+                    ex.getMessage());
+            return null;
+        }
     }
 
     private String selectAuthoringResponseMode(
@@ -1738,7 +2185,18 @@ public class AiOrchestratorService {
                 AiPromptTemplates.PROMPT_AUTHORING_RESPONSE_MODE_CLASSIFIER,
                 Map.of(
                         "USER_INPUT", safe(userPrompt),
-                        "AUTHORING_CONTRACT", safeMetadata(formatAuthoringContract(authoringContract))));
+                        "AUTHORING_CONTRACT", truncateBlock(
+                                "response_mode_authoring_contract",
+                                formatAuthoringResponseModeContract(authoringContract),
+                                maxResponseModeAuthoringContractChars),
+                        "RUNTIME_METADATA", truncateBlock(
+                                "response_mode_runtime_metadata",
+                                safeMetadata(formatRuntimeMetadata(
+                                        request != null ? request.getDataProfile() : null,
+                                        request != null ? request.getSchemaFields() : null,
+                                        request != null ? request.getRuntimeState() : null,
+                                        request != null ? request.getContextHints() : null)),
+                                maxIntentRuntimeMetadataChars)));
         JsonNode json = callAiJson(
                 "authoring_response_mode_classification",
                 prompt,
@@ -1957,6 +2415,14 @@ public class AiOrchestratorService {
         }
         ArrayNode actionsNode = buildTableOperationCatalogNode(authoringManifest, actionCatalog);
         String formatChoices = objectMapper.valueToTree(buildOptionLabels(formatOptions)).toString();
+        String actionRuntimeMetadata = truncateBlock(
+                "table_action_plan_runtime_metadata",
+                safeMetadata(formatRuntimeMetadata(
+                        request != null ? request.getDataProfile() : null,
+                        request != null ? request.getSchemaFields() : null,
+                        request != null ? request.getRuntimeState() : null,
+                        request != null ? request.getContextHints() : null)),
+                maxRuntimeMetadataChars);
         String prompt = AiPromptTemplates.buildPrompt(
                 AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN,
                 Map.of(
@@ -1965,7 +2431,7 @@ public class AiOrchestratorService {
                         "ACTION_CATALOG", actionsNode.toString(),
                         "RAG_HINTS", safe(ragHints),
                         "FORMAT_OPTIONS", formatChoices,
-                        "CONTEXT_HINTS", formatContextHints(request != null ? request.getContextHints() : null)));
+                        "CONTEXT_HINTS", actionRuntimeMetadata));
         AiJsonSchema planSchema = buildTableActionPlanSchema(actionCatalog, authoringManifest);
         JsonNode json = generateActionPlanJson("table_action_plan", prompt, planSchema, request, callConfig);
         ContextRequest contextRequest = parseContextRequest(json);
@@ -1982,6 +2448,14 @@ public class AiOrchestratorService {
             JsonNode merged = mergeContextHints(
                     request != null ? request.getContextHints() : null,
                     resolvedHints.hints());
+            String retryRuntimeMetadata = truncateBlock(
+                    "table_action_plan_runtime_metadata",
+                    safeMetadata(formatRuntimeMetadata(
+                            request != null ? request.getDataProfile() : null,
+                            request != null ? request.getSchemaFields() : null,
+                            request != null ? request.getRuntimeState() : null,
+                            merged)),
+                    maxRuntimeMetadataChars);
             String retryPrompt = AiPromptTemplates.buildPrompt(
                     AiPromptTemplates.PROMPT_TABLE_ACTION_PLAN,
                     Map.of(
@@ -1990,7 +2464,7 @@ public class AiOrchestratorService {
                             "ACTION_CATALOG", actionsNode.toString(),
                             "RAG_HINTS", safe(ragHints),
                             "FORMAT_OPTIONS", formatChoices,
-                            "CONTEXT_HINTS", formatContextHints(merged)));
+                            "CONTEXT_HINTS", retryRuntimeMetadata));
             json = generateActionPlanJson("table_action_plan", retryPrompt, planSchema, request, callConfig);
         }
         if (json == null) {
@@ -2000,30 +2474,46 @@ public class AiOrchestratorService {
             return null;
         }
         AiActionPlan plan = objectMapper.convertValue(json, AiActionPlan.class);
-        normalizeTableBooleanLabelActionsFromPrompt(userPrompt, plan);
+        normalizeTableBooleanLabelActionsFromPrompt(userPrompt, plan, null);
         return plan;
     }
 
-    private void normalizeTableBooleanLabelActionsFromPrompt(String userPrompt, AiActionPlan plan) {
+    private void normalizeTableBooleanLabelActionsFromPrompt(String userPrompt, AiActionPlan plan, JsonNode currentState) {
         if (plan == null || plan.getActions() == null || plan.getActions().isEmpty()) {
             return;
         }
         String normalizedPrompt = normalizeText(userPrompt);
         String[] labels = inferBooleanStateRendererLabels(userPrompt, normalizeText(userPrompt));
-        if (labels == null || isBlank(labels[0]) || isBlank(labels[1])) {
-            return;
+        String explicitTrueLabel = inferBooleanStateRendererTrueLabel(userPrompt, normalizedPrompt);
+        String explicitFalseLabel = inferBooleanStateRendererFalseLabel(userPrompt, normalizedPrompt);
+        if ((labels == null || isBlank(labels[0])) && !isBlank(explicitTrueLabel)) {
+            labels = new String[] { explicitTrueLabel, labels != null && labels.length > 1 ? labels[1] : null };
+        }
+        if ((labels == null || labels.length < 2 || isBlank(labels[1])) && !isBlank(explicitFalseLabel)) {
+            labels = new String[] {
+                    labels != null && labels.length > 0 ? labels[0] : null,
+                    explicitFalseLabel
+            };
         }
         String rendererTarget = findBooleanRendererActionTarget(plan);
-        if (!isBlank(rendererTarget) && looksLikeBooleanStateRendererPrompt(normalizedPrompt)) {
+        if (!isBlank(rendererTarget)
+                && (looksLikeBooleanStateRendererPrompt(normalizedPrompt)
+                || looksLikeBooleanStateRendererRefinementPrompt(normalizedPrompt, currentState, rendererTarget)
+                || looksLikeBooleanStateRendererRefinementFromPlan(normalizedPrompt, plan))) {
             AiActionPlan rendererPlan = buildBooleanStateRendererActionPlan(
                     userPrompt,
                     new ColumnDescriptor(rendererTarget, rendererTarget),
-                    null);
+                    currentState);
             if (rendererPlan != null && rendererPlan.getActions() != null && !rendererPlan.getActions().isEmpty()) {
                 plan.setActions(rendererPlan.getActions());
                 plan.setAmbiguities(List.of());
                 return;
             }
+        }
+        normalizeBooleanRendererLabelsFromCurrentState(plan, currentState, normalizedPrompt);
+        if (labels == null || isBlank(labels[0]) || isBlank(labels[1])) {
+            normalizePartialBooleanRendererLabels(labels, plan);
+            return;
         }
         for (AiActionPlan.Action action : plan.getActions()) {
             if (action == null || isBlank(action.getType())) {
@@ -2049,6 +2539,166 @@ public class AiOrchestratorService {
                     } else if ("false".equalsIgnoreCase(expected.asText())) {
                         visual.put("text", labels[1]);
                     }
+                }
+            }
+        }
+    }
+
+    private boolean looksLikeBooleanStateRendererRefinementFromPlan(String normalizedPrompt, AiActionPlan plan) {
+        if (!looksLikeVisualRendererRefinementPrompt(normalizedPrompt)
+                || plan == null
+                || plan.getActions() == null
+                || plan.getActions().isEmpty()) {
+            return false;
+        }
+        boolean hasPositiveBranch = false;
+        boolean hasNegativeBranch = false;
+        for (AiActionPlan.Action action : plan.getActions()) {
+            if (action == null || !"column.conditionalRenderer.add".equals(action.getType())) {
+                continue;
+            }
+            JsonNode params = action.getParams();
+            if (params == null || !params.isObject()) {
+                continue;
+            }
+            JsonNode expected = params.path("condition").path("==").path(1);
+            if (expected.isBoolean()) {
+                hasPositiveBranch = hasPositiveBranch || expected.asBoolean();
+                hasNegativeBranch = hasNegativeBranch || !expected.asBoolean();
+            } else if ("true".equalsIgnoreCase(expected.asText())) {
+                hasPositiveBranch = true;
+            } else if ("false".equalsIgnoreCase(expected.asText())) {
+                hasNegativeBranch = true;
+            }
+            if (hasPositiveBranch && hasNegativeBranch) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean looksLikeBooleanStateRendererRefinementPrompt(
+            String normalizedPrompt,
+            JsonNode currentState,
+            String field) {
+        if (normalizedPrompt == null || normalizedPrompt.isBlank() || currentState == null || isBlank(field)) {
+            return false;
+        }
+        if (!looksLikeVisualRendererRefinementPrompt(normalizedPrompt)) {
+            return false;
+        }
+        JsonNode columnState = findColumnState(currentState, field);
+        if (columnState == null || columnState.isMissingNode() || columnState.isNull()) {
+            return false;
+        }
+        JsonNode valueMapping = columnState.path("valueMapping");
+        if (valueMapping.has("true") || valueMapping.has("false")) {
+            return true;
+        }
+        return !isBlank(findBooleanConditionalRendererLabel(columnState, true))
+                || !isBlank(findBooleanConditionalRendererLabel(columnState, false));
+    }
+
+    private boolean looksLikeVisualRendererRefinementPrompt(String normalizedPrompt) {
+        if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
+            return false;
+        }
+        return normalizedPrompt.contains("verde")
+                || normalizedPrompt.contains("cinza")
+                || normalizedPrompt.contains("vermelh")
+                || normalizedPrompt.contains("laranja")
+                || normalizedPrompt.contains("suave")
+                || normalizedPrompt.contains("discreto")
+                || normalizedPrompt.contains("cor ")
+                || normalizedPrompt.contains("cores")
+                || normalizedPrompt.contains("icone")
+                || normalizedPrompt.contains("ícone")
+                || normalizedPrompt.contains("tooltip");
+    }
+
+    private void normalizeBooleanRendererLabelsFromCurrentState(
+            AiActionPlan plan,
+            JsonNode currentState,
+            String normalizedPrompt) {
+        if (plan == null || plan.getActions() == null || currentState == null) {
+            return;
+        }
+        String normalized = normalizedPrompt != null ? normalizedPrompt : "";
+        if (normalized.contains("curto") || normalized.contains("s/n") || normalized.contains("sn")) {
+            return;
+        }
+        for (AiActionPlan.Action action : plan.getActions()) {
+            if (action == null || !"column.conditionalRenderer.add".equals(action.getType())) {
+                continue;
+            }
+            String field = trimToNull(action.getTarget());
+            if (field == null || action.getParams() == null || !action.getParams().isObject()) {
+                continue;
+            }
+            ObjectNode params = (ObjectNode) action.getParams();
+            JsonNode expected = params.path("condition").path("==").path(1);
+            Boolean expectedBoolean = null;
+            if (expected.isBoolean()) {
+                expectedBoolean = expected.asBoolean();
+            } else if ("true".equalsIgnoreCase(expected.asText()) || "false".equalsIgnoreCase(expected.asText())) {
+                expectedBoolean = Boolean.parseBoolean(expected.asText());
+            }
+            if (expectedBoolean == null) {
+                continue;
+            }
+            JsonNode columnState = findColumnState(currentState, field);
+            String existingLabel = findBooleanConditionalRendererLabel(columnState, expectedBoolean);
+            if (isBlank(existingLabel)) {
+                continue;
+            }
+            ObjectNode visual = firstRendererVisualNode(params.path("renderer"));
+            if (visual != null) {
+                visual.put("text", existingLabel);
+            }
+        }
+    }
+
+    private void normalizePartialBooleanRendererLabels(String[] labels, AiActionPlan plan) {
+        if (labels == null || plan == null || plan.getActions() == null) {
+            return;
+        }
+        String trueLabel = labels.length > 0 ? trimToNull(labels[0]) : null;
+        String falseLabel = labels.length > 1 ? trimToNull(labels[1]) : null;
+        if (trueLabel == null && falseLabel == null) {
+            return;
+        }
+        for (AiActionPlan.Action action : plan.getActions()) {
+            if (action == null || isBlank(action.getType())) {
+                continue;
+            }
+            JsonNode params = action.getParams();
+            if (params == null || params.isNull() || !params.isObject()) {
+                continue;
+            }
+            ObjectNode objectParams = (ObjectNode) params;
+            if ("column.valueMapping.set".equals(action.getType())) {
+                ObjectNode valueMapping = objectParams.with("valueMapping");
+                if (trueLabel != null) {
+                    valueMapping.put("true", trueLabel);
+                }
+                if (falseLabel != null) {
+                    valueMapping.put("false", falseLabel);
+                }
+            } else if ("column.conditionalRenderer.add".equals(action.getType())) {
+                JsonNode expected = objectParams.path("condition").path("==").path(1);
+                ObjectNode visual = firstRendererVisualNode(objectParams.path("renderer"));
+                if (visual == null) {
+                    continue;
+                }
+                if (expected.isBoolean()) {
+                    String label = expected.asBoolean() ? trueLabel : falseLabel;
+                    if (label != null) {
+                        visual.put("text", label);
+                    }
+                } else if ("true".equalsIgnoreCase(expected.asText()) && trueLabel != null) {
+                    visual.put("text", trueLabel);
+                } else if ("false".equalsIgnoreCase(expected.asText()) && falseLabel != null) {
+                    visual.put("text", falseLabel);
                 }
             }
         }
@@ -2189,6 +2839,7 @@ public class AiOrchestratorService {
                     null,
                     elapsedMs(start),
                     null);
+            recordObservationLlmCall(request, callType, prompt, config, elapsedMs(start), null);
             return json;
         } catch (Exception ex) {
             interactionLogger.logLlmInteraction(
@@ -2201,6 +2852,7 @@ public class AiOrchestratorService {
                     null,
                     elapsedMs(start),
                     ex);
+            recordObservationLlmCall(request, callType, prompt, config, elapsedMs(start), ex);
             throw ex;
         }
     }
@@ -2224,6 +2876,7 @@ public class AiOrchestratorService {
                     text,
                     elapsedMs(start),
                     null);
+            recordObservationLlmCall(request, callType, prompt, config, elapsedMs(start), null);
             return text;
         } catch (Exception ex) {
             interactionLogger.logLlmInteraction(
@@ -2236,8 +2889,40 @@ public class AiOrchestratorService {
                     null,
                     elapsedMs(start),
                     ex);
+            recordObservationLlmCall(request, callType, prompt, config, elapsedMs(start), ex);
             throw ex;
         }
+    }
+
+    private void recordObservationLlmCall(
+            AiOrchestratorRequest request,
+            String callType,
+            String prompt,
+            AiCallConfig config,
+            long durationMs,
+            Throwable error) {
+        if (assistantObservationService != null && request != null && request.getObservationId() != null) {
+            assistantObservationService.recordLlmCall(
+                    request.getObservationId(),
+                    resolveProviderName(config),
+                    resolveEffectiveModel(config),
+                    callType,
+                    prompt != null ? prompt.length() : null,
+                    durationMs,
+                    error);
+        }
+    }
+
+    private String resolveEffectiveModel(AiCallConfig config) {
+        String configured = config != null ? trimToNull(config.getModel()) : null;
+        if (configured != null) {
+            return configured;
+        }
+        String provider = resolveProviderName(config);
+        if ("openai".equalsIgnoreCase(provider)) {
+            return trimToNull(defaultOpenAiChatModel);
+        }
+        return null;
     }
 
     private String resolveTextGeneration(
@@ -2289,6 +2974,7 @@ public class AiOrchestratorService {
                 case TRANSPORT -> "transport";
                 case TIMEOUT -> "timeout";
                 case RATE_LIMIT -> "rate_limit";
+                case QUOTA_EXHAUSTED -> "quota_exhausted";
                 case CAPACITY -> "capacity";
                 default -> null;
             };
@@ -2731,7 +3417,7 @@ public class AiOrchestratorService {
         properties.putObject("message").put("type", "string");
         required.add("message");
 
-        return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
+        return AiJsonSchema.ofSchema(schema.toString());
     }
 
     private AiJsonSchema buildComponentActionPlanSchema(List<ComponentAction> actionCatalog) {
@@ -2795,7 +3481,7 @@ public class AiOrchestratorService {
         properties.putObject("message").put("type", "string");
         required.add("message");
 
-        return AiJsonSchema.of(schema.toString(), AiActionPlan.class);
+        return AiJsonSchema.ofSchema(schema.toString());
     }
 
     private void appendActionParamsSchema(ObjectNode actionProps, Set<String> paramKeys) {
@@ -3887,7 +4573,10 @@ public class AiOrchestratorService {
         options.add(new ContextOption("1.0-0", "Number integer", "1234"));
         options.add(new ContextOption("1.2-2", "Number decimal", "1.234,56"));
         options.add(new ContextOption("1.0-2|x100", "Percent", "12,34%"));
-        options.add(new ContextOption("yes-no", "Boolean yes/no", "Sim/Não"));
+        options.add(new ContextOption("active-inactive", "Ativo/Inativo", "Ativo / Inativo"));
+        options.add(new ContextOption("yes-no", "Sim/Não", "Sim / Não"));
+        options.add(new ContextOption("custom|Sim|Nao", "Sim/Não personalizado", "Sim / Não"));
+        options.add(new ContextOption("true-false", "Verdadeiro/Falso", "true / false"));
         return options;
     }
 
@@ -4547,31 +5236,189 @@ public class AiOrchestratorService {
         JsonNode valueMapping = columnState != null ? columnState.path("valueMapping") : null;
         String mappedTrue = textOrNull(valueMapping != null ? valueMapping.get("true") : null);
         String mappedFalse = textOrNull(valueMapping != null ? valueMapping.get("false") : null);
+        if (isBlank(mappedTrue)) {
+            mappedTrue = findBooleanConditionalRendererLabel(columnState, true);
+        }
+        if (isBlank(mappedFalse)) {
+            mappedFalse = findBooleanConditionalRendererLabel(columnState, false);
+        }
         boolean wantsYesNo = normalizedPrompt != null
                 && (normalizedPrompt.contains("sim") || normalizedPrompt.contains("nao") || normalizedPrompt.contains("não"));
         String[] selectedLabels = inferBooleanStateRendererLabels(prompt, normalizedPrompt);
+        String explicitTrueLabel = inferBooleanStateRendererTrueLabel(prompt, normalizedPrompt);
+        String explicitFalseLabel = inferBooleanStateRendererFalseLabel(prompt, normalizedPrompt);
         String trueLabel = selectedLabels != null && !isBlank(selectedLabels[0])
                 ? selectedLabels[0]
-                : (!isBlank(mappedTrue) ? mappedTrue : (wantsYesNo ? "Sim" : "Ativo"));
+                : (!isBlank(explicitTrueLabel)
+                        ? explicitTrueLabel
+                        : (!isBlank(mappedTrue) ? mappedTrue : (wantsYesNo ? "Sim" : "Ativo")));
         String falseLabel = selectedLabels != null && !isBlank(selectedLabels[1])
                 ? selectedLabels[1]
-                : (!isBlank(mappedFalse) ? mappedFalse : ("Sim".equals(trueLabel) ? "Não" : "Inativo"));
+                : (!isBlank(explicitFalseLabel) ? explicitFalseLabel
+                : (!isBlank(mappedFalse) ? mappedFalse : ("Sim".equals(trueLabel) ? "Não" : "Inativo")));
+        String trueColor = inferBooleanStateRendererColor(normalizedPrompt, true, "primary");
+        String falseColor = inferBooleanStateRendererColor(normalizedPrompt, false, "warn");
+        String tooltipText = inferBooleanStateRendererTooltipText(prompt, normalizedPrompt);
+        boolean tooltipForFalse = !isBlank(tooltipText)
+                && (containsNear(normalizedPrompt, "tooltip", "inativo")
+                || containsNear(normalizedPrompt, "tooltip", "false")
+                || containsNear(normalizedPrompt, "tooltip", "nao")
+                || containsNear(normalizedPrompt, "tooltip", "não"));
+        boolean tooltipForTrue = !isBlank(tooltipText) && !tooltipForFalse;
 
         List<AiActionPlan.Action> actions = new ArrayList<>();
         actions.add(AiActionPlan.Action.builder()
                 .type("column.conditionalRenderer.add")
                 .target(targetColumn.field)
-                .params(buildBooleanStateRendererParams(targetColumn.field, true, rendererType, trueLabel, "primary", variant))
+                .params(buildBooleanStateRendererParams(
+                        targetColumn.field,
+                        true,
+                        rendererType,
+                        trueLabel,
+                        trueColor,
+                        variant,
+                        tooltipForTrue ? tooltipText : null))
                 .build());
         actions.add(AiActionPlan.Action.builder()
                 .type("column.conditionalRenderer.add")
                 .target(targetColumn.field)
-                .params(buildBooleanStateRendererParams(targetColumn.field, false, rendererType, falseLabel, "warn", variant))
+                .params(buildBooleanStateRendererParams(
+                        targetColumn.field,
+                        false,
+                        rendererType,
+                        falseLabel,
+                        falseColor,
+                        variant,
+                        tooltipForFalse ? tooltipText : null))
                 .build());
         return AiActionPlan.builder()
                 .actions(actions)
                 .ambiguities(List.of())
                 .build();
+    }
+
+    private String inferBooleanStateRendererColor(String normalizedPrompt, boolean expected, String fallback) {
+        String normalized = normalizedPrompt != null ? normalizedPrompt : "";
+        String positiveScope = expected ? "sim" : "nao";
+        String positiveScopeAlt = expected ? "ativo" : "inativo";
+        String positiveScopeRaw = expected ? "true" : "false";
+        boolean scopedGreen = containsNear(normalized, positiveScope, "verde")
+                || containsNear(normalized, positiveScopeAlt, "verde")
+                || containsNear(normalized, positiveScopeRaw, "verde");
+        boolean scopedGray = containsNear(normalized, positiveScope, "cinza")
+                || containsNear(normalized, positiveScopeAlt, "cinza")
+                || containsNear(normalized, positiveScopeRaw, "cinza")
+                || containsNear(normalized, positiveScope, "discreto")
+                || containsNear(normalized, positiveScopeAlt, "discreto");
+        boolean scopedWarn = containsNear(normalized, positiveScope, "vermelh")
+                || containsNear(normalized, positiveScopeAlt, "vermelh")
+                || containsNear(normalized, positiveScopeRaw, "vermelh")
+                || containsNear(normalized, positiveScope, "laranja")
+                || containsNear(normalized, positiveScopeAlt, "laranja");
+        if (scopedGreen) {
+            return "success";
+        }
+        if (scopedGray) {
+            return "basic";
+        }
+        if (scopedWarn) {
+            return "warn";
+        }
+        if (expected && normalized.contains("verde") && !normalized.contains("nao verde") && !normalized.contains("não verde")) {
+            return "success";
+        }
+        return fallback;
+    }
+
+    private boolean containsNear(String normalizedText, String left, String right) {
+        if (isBlank(normalizedText) || isBlank(left) || isBlank(right)) {
+            return false;
+        }
+        int leftIndex = normalizedText.indexOf(left);
+        while (leftIndex >= 0) {
+            int rightIndex = normalizedText.indexOf(right, leftIndex);
+            if (rightIndex >= 0 && rightIndex - leftIndex <= 48) {
+                return true;
+            }
+            leftIndex = normalizedText.indexOf(left, leftIndex + left.length());
+        }
+        return false;
+    }
+
+    private String findBooleanConditionalRendererLabel(JsonNode columnState, boolean expected) {
+        JsonNode renderers = columnState != null ? columnState.get("conditionalRenderers") : null;
+        if (renderers == null || !renderers.isArray()) {
+            return null;
+        }
+        for (JsonNode rendererRule : renderers) {
+            if (rendererRule == null || !rendererRule.isObject()) {
+                continue;
+            }
+            JsonNode conditionExpected = rendererRule.path("condition").path("==").path(1);
+            boolean matches = conditionExpected.isBoolean()
+                    ? conditionExpected.asBoolean() == expected
+                    : Boolean.toString(expected).equalsIgnoreCase(conditionExpected.asText());
+            if (!matches) {
+                continue;
+            }
+            ObjectNode visual = firstRendererVisualNode(rendererRule.path("renderer"));
+            String label = textOrNull(visual != null ? visual.get("text") : null);
+            if (!isBlank(label)) {
+                return label;
+            }
+        }
+        return null;
+    }
+
+    private String inferBooleanStateRendererTrueLabel(String prompt, String normalizedPrompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String label = extractLabelAfterPromptCue(prompt, "(?i)(?:texto\\s+para|escreva|mostrar\\s+como|mostre\\s+como)\\s+(.+?)(?:\\s+no\\s+(?:chip|badge|selo|indicador)\\b|\\s+e\\s+use\\b|\\s+com\\s+cor\\b|\\s*$)");
+        if (isBlank(label)) {
+            return null;
+        }
+        String normalizedLabel = normalizeText(label);
+        if (isBlank(normalizedLabel)
+                || "s".equals(normalizedLabel)
+                || "n".equals(normalizedLabel)
+                || normalizedLabel.contains("verde")
+                || normalizedLabel.contains("suave")) {
+            return null;
+        }
+        String normalized = normalizedPrompt != null ? normalizedPrompt : "";
+        if ((normalized.contains("nao use s") || normalized.contains("não use s")) && "s".equalsIgnoreCase(label)) {
+            return null;
+        }
+        return label;
+    }
+
+    private String inferBooleanStateRendererFalseLabel(String prompt, String normalizedPrompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String normalized = normalizedPrompt != null ? normalizedPrompt : "";
+        if (normalized.contains("inativo")) {
+            return "Inativo";
+        }
+        String label = extractLabelAfterPromptCue(prompt, "(?i)(?:falso\\s+como|inativo\\s+como)\\s+(.+?)(?:\\s+no\\s+(?:chip|badge|selo|indicador)\\b|\\s+e\\s+use\\b|\\s+com\\s+cor\\b|\\s*$)");
+        return trimToNull(label);
+    }
+
+    private String extractLabelAfterPromptCue(String prompt, String regex) {
+        Matcher matcher = Pattern.compile(regex).matcher(prompt);
+        if (!matcher.find()) {
+            return null;
+        }
+        String label = trimToNull(matcher.group(1));
+        if (label == null) {
+            return null;
+        }
+        label = label.replaceAll("(?i)^['\"“”‘’]|['\"“”‘’]$", "").trim();
+        if (label.length() > 24) {
+            return null;
+        }
+        return trimToNull(label);
     }
 
     private String[] inferBooleanStateRendererLabels(String prompt, String normalizedPrompt) {
@@ -4600,6 +5447,9 @@ public class AiOrchestratorService {
         }
         if (normalized.contains("simnao") || normalized.contains("simounao")) {
             return new String[]{"Sim", "Não"};
+        }
+        if (normalized.contains("ativo") && normalized.contains("inativo")) {
+            return new String[]{"Ativo", "Inativo"};
         }
         return null;
     }
@@ -4708,7 +5558,8 @@ public class AiOrchestratorService {
             String rendererType,
             String label,
             String color,
-            String variant) {
+            String variant,
+            String tooltipText) {
         ObjectNode params = objectMapper.createObjectNode();
         String id = slugifyComponentId("state-" + rendererType + "-" + field + "-" + expected);
         params.put("id", id != null ? id : "state-" + rendererType + "-" + expected);
@@ -4725,8 +5576,26 @@ public class AiOrchestratorService {
         visual.put("text", label);
         visual.put("color", color);
         visual.put("variant", sanitizeTableRendererVariant(rendererType, isBlank(variant) ? null : variant));
+        if (!isBlank(tooltipText)) {
+            ObjectNode tooltip = params.putObject("tooltip");
+            tooltip.put("text", tooltipText);
+            tooltip.put("position", "top");
+        }
         params.put("description", "Aplica " + label + " quando " + field + " for " + expected + ".");
         return params;
+    }
+
+    private String inferBooleanStateRendererTooltipText(String prompt, String normalizedPrompt) {
+        if (isBlank(prompt) || isBlank(normalizedPrompt)) {
+            return null;
+        }
+        String tooltipText = extractLabelAfterPromptCue(
+                prompt,
+                "(?i)(?:tooltip|dica)\\s+(.+?)(?:\\s+e\\s+(?:com|deixe|use|aplique|coloque)\\b|\\s*$)");
+        if (isBlank(tooltipText)) {
+            return null;
+        }
+        return tooltipText.replaceAll("[*_`]+", "").replaceAll("[.;:,]+$", "").trim();
     }
 
     private boolean looksLikeAvatarRendererRepairPrompt(String normalizedPrompt) {
@@ -5150,7 +6019,9 @@ public class AiOrchestratorService {
             return "soft";
         }
         if ("chip".equals(normalizedType)) {
-            if ("filled".equals(normalizedVariant) || "outlined".equals(normalizedVariant)) {
+            if ("filled".equals(normalizedVariant)
+                    || "outlined".equals(normalizedVariant)
+                    || "soft".equals(normalizedVariant)) {
                 return normalizedVariant;
             }
             return "filled";
@@ -5170,7 +6041,10 @@ public class AiOrchestratorService {
             if (normalizedPrompt.contains("preenchido") || normalizedPrompt.contains("filled")) {
                 return "filled";
             }
-            if (normalizedPrompt.contains("suave") || normalizedPrompt.contains("soft")) {
+            if (normalizedPrompt.contains("suave")
+                    || normalizedPrompt.contains("discreto")
+                    || normalizedPrompt.contains("discreta")
+                    || normalizedPrompt.contains("soft")) {
                 return "soft";
             }
         }
@@ -5184,6 +6058,9 @@ public class AiOrchestratorService {
         if (normalizedPrompt != null) {
             if (normalizedPrompt.contains("vermelh") || normalizedPrompt.contains("erro") || normalizedPrompt.contains("warn")) {
                 return "warn";
+            }
+            if (normalizedPrompt.contains("laranja") || normalizedPrompt.contains("orange")) {
+                return "#FFA500";
             }
             if (normalizedPrompt.contains("accent") || normalizedPrompt.contains("secund")) {
                 return "accent";
@@ -7867,13 +8744,47 @@ public class AiOrchestratorService {
         if (missingTokens == null || missingTokens.isEmpty()) {
             return List.of();
         }
-        if (!missingTokens.contains("target")
-                || !isManifestTargetOptional(authoringManifest, actionType)) {
+        JsonNode operation = findManifestOperation(authoringManifest, actionType);
+        if (operation == null) {
             return missingTokens;
         }
         List<String> filtered = new ArrayList<>(missingTokens);
-        filtered.removeIf("target"::equals);
+        if (isManifestTargetOptional(authoringManifest, actionType)) {
+            filtered.removeIf("target"::equals);
+        }
+        Set<String> requiredInputs = manifestRequiredInputFields(operation);
+        filtered.removeIf(token -> isManifestOptionalInputToken(token, requiredInputs));
         return filtered;
+    }
+
+    private Set<String> manifestRequiredInputFields(JsonNode operation) {
+        if (operation == null || !operation.isObject()) {
+            return Set.of();
+        }
+        JsonNode required = operation.at("/inputSchema/required");
+        if (required == null || !required.isArray() || required.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> fields = new LinkedHashSet<>();
+        for (JsonNode fieldNode : required) {
+            String field = textOrNull(fieldNode);
+            if (!isBlank(field)) {
+                fields.add(field);
+            }
+        }
+        return fields;
+    }
+
+    private boolean isManifestOptionalInputToken(String token, Set<String> requiredInputs) {
+        if (isBlank(token) || !token.startsWith("params.")) {
+            return false;
+        }
+        String path = token.substring("params.".length());
+        if (isBlank(path)) {
+            return false;
+        }
+        String root = path.split("\\.", 2)[0];
+        return !requiredInputs.contains(root);
     }
 
     private boolean isManifestTargetOptional(JsonNode authoringManifest, String actionType) {
@@ -8003,6 +8914,973 @@ public class AiOrchestratorService {
         componentEditPlan.put("componentId", textOrNull(authoringManifest.get("componentId")));
         componentEditPlan.set("operations", operations);
         return componentEditPlan;
+    }
+
+    private JsonNode buildTableRuntimeOperationPatchFromActionPlan(
+            AiActionPlan actionPlan,
+            JsonNode authoringManifest) {
+        if (actionPlan == null
+                || actionPlan.getActions() == null
+                || actionPlan.getActions().isEmpty()
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return null;
+        }
+        Set<String> declaredRuntimeOperations = tableManifestRuntimeOperationIds(authoringManifest);
+        if (declaredRuntimeOperations.isEmpty()) {
+            return null;
+        }
+        ArrayNode operations = objectMapper.createArrayNode();
+        for (AiActionPlan.Action action : actionPlan.getActions()) {
+            String operationId = normalizeActionKey(action != null ? action.getType() : null);
+            if (operationId == null || !declaredRuntimeOperations.contains(operationId)) {
+                return null;
+            }
+            ObjectNode operation = buildTableRuntimeOperation(action, operationId);
+            if (operation == null) {
+                return null;
+            }
+            operations.add(operation);
+        }
+        if (operations.isEmpty()) {
+            return null;
+        }
+        ObjectNode batch = objectMapper.createObjectNode();
+        batch.put("kind", "praxis.table.runtime-operation.batch");
+        batch.set("operations", operations);
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.set("tableRuntimeOperations", batch);
+        return patch;
+    }
+
+    private JsonNode buildSelectedRecordsRuntimeFilterPatchFromActionPlan(
+            AiActionPlan actionPlan,
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest) {
+        if (actionPlan == null
+                || actionPlan.getActions() == null
+                || actionPlan.getActions().isEmpty()
+                || request == null
+                || !tableManifestRuntimeOperationIds(authoringManifest).contains("table.filter.apply")) {
+            return null;
+        }
+        JsonNode selectedRecordsContext = resolveSelectedRecordsContext(
+                request.getRuntimeState(),
+                request.getContextHints());
+        JsonNode sampleRows = selectedRecordsContext != null ? selectedRecordsContext.get("sampleRows") : null;
+        if (sampleRows == null || !sampleRows.isArray() || sampleRows.isEmpty()) {
+            return null;
+        }
+        String field = resolveSelectedRecordsRuntimeFilterField(actionPlan, sampleRows);
+        if (isBlank(field)) {
+            return null;
+        }
+        RuntimeFilterCriterion runtimeCriterion = selectedRecordsRuntimeFilterCriterion(sampleRows, field);
+        if (runtimeCriterion == null) {
+            return null;
+        }
+        return buildSelectedRecordsRuntimeFilterPatch(runtimeCriterion.filterField(), runtimeCriterion.criterion());
+    }
+
+    private JsonNode buildSelectedRecordsRuntimeFilterPatchFromContextHints(
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest) {
+        if (request == null
+                || !tableManifestRuntimeOperationIds(authoringManifest).contains("table.filter.apply")) {
+            return null;
+        }
+        String filterField = resolveTargetFieldFromHints(request.getContextHints());
+        if (isBlank(filterField)) {
+            return null;
+        }
+        JsonNode selectedRecordsContext = resolveSelectedRecordsContext(
+                request.getRuntimeState(),
+                request.getContextHints());
+        JsonNode sampleRows = selectedRecordsContext != null ? selectedRecordsContext.get("sampleRows") : null;
+        RuntimeFilterCriterion runtimeCriterion = selectedRecordsRuntimeFilterCriterion(sampleRows, filterField);
+        if (runtimeCriterion == null) {
+            return null;
+        }
+        return buildSelectedRecordsRuntimeFilterPatch(runtimeCriterion.filterField(), runtimeCriterion.criterion());
+    }
+
+    private JsonNode buildSelectedRecordsRuntimeFilterPatchFromIntent(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest) {
+        if (intent == null
+                || request == null
+                || !isFilterIntent(intent)
+                || !tableManifestRuntimeOperationIds(authoringManifest).contains("table.filter.apply")) {
+            return null;
+        }
+        JsonNode selectedRecordsContext = resolveSelectedRecordsContext(
+                request.getRuntimeState(),
+                request.getContextHints());
+        JsonNode sampleRows = selectedRecordsContext != null ? selectedRecordsContext.get("sampleRows") : null;
+        if (sampleRows == null || !sampleRows.isArray() || sampleRows.isEmpty()) {
+            return null;
+        }
+        List<FilterFieldDescriptor> catalog = extractFilterFieldCatalog(request.getContextHints());
+        for (String field : intentFilterFieldCandidates(intent, request.getContextHints())) {
+            if (!catalog.isEmpty() && catalog.stream().noneMatch(candidate ->
+                    candidate != null && normalizeToken(candidate.name()).equals(normalizeToken(field)))) {
+                continue;
+            }
+            RuntimeFilterCriterion runtimeCriterion = selectedRecordsRuntimeFilterCriterion(sampleRows, field);
+            if (runtimeCriterion != null) {
+                return buildSelectedRecordsRuntimeFilterPatch(runtimeCriterion.filterField(), runtimeCriterion.criterion());
+            }
+        }
+        return null;
+    }
+
+    private JsonNode buildTableRuntimeExportPatchFromIntent(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest) {
+        if (intent == null
+                || request == null
+                || !"export".equalsIgnoreCase(intent.getCategory())
+                || !isTableRuntimeOperationAllowed(request, authoringManifest, "table.export.run")) {
+            return null;
+        }
+        String normalizedPrompt = normalizeSearchToken(request.getUserPrompt());
+        String format = resolveExportFormatValue(normalizedPrompt);
+        if (isBlank(format) || !tableRuntimeExportFormats(authoringManifest).contains(format)) {
+            return null;
+        }
+        String scope = resolveTableRuntimeExportScope(intent, request, normalizedPrompt, authoringManifest);
+        if (isBlank(scope)) {
+            return null;
+        }
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("format", format);
+        input.put("scope", scope);
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", "table.export.run");
+        operation.set("input", input);
+        ObjectNode batch = objectMapper.createObjectNode();
+        batch.put("kind", "praxis.table.runtime-operation.batch");
+        batch.putArray("operations").add(operation);
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.set("tableRuntimeOperations", batch);
+        return patch;
+    }
+
+    private JsonNode appendTableRuntimeExportIfRequested(
+            JsonNode runtimePatch,
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest,
+            String defaultScope) {
+        if (runtimePatch == null
+                || !runtimePatch.isObject()
+                || request == null
+                || !isTableRuntimeOperationAllowed(request, authoringManifest, "table.export.run")) {
+            return runtimePatch;
+        }
+        String normalizedPrompt = normalizeSearchToken(request.getUserPrompt());
+        String format = resolveExportFormatValue(normalizedPrompt);
+        if (isBlank(format) || !tableRuntimeExportFormats(authoringManifest).contains(format)) {
+            return runtimePatch;
+        }
+        ObjectNode result = runtimePatch.deepCopy();
+        JsonNode operationsNode = result.at("/tableRuntimeOperations/operations");
+        if (operationsNode == null || !operationsNode.isArray()) {
+            return runtimePatch;
+        }
+        for (JsonNode operationNode : operationsNode) {
+            if ("table.export.run".equals(textOrNull(operationNode.get("operationId")))) {
+                return result;
+            }
+        }
+        String scope = normalizeTableRuntimeExportScope(defaultScope);
+        if (isBlank(scope) || !tableRuntimeExportScopes(authoringManifest).contains(scope)) {
+            return result;
+        }
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("format", format);
+        input.put("scope", scope);
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", "table.export.run");
+        operation.set("input", input);
+        ((ArrayNode) operationsNode).add(operation);
+        return result;
+    }
+
+    private boolean isTableRuntimeOperationAllowed(
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest,
+            String operationId) {
+        if (isBlank(operationId)) {
+            return false;
+        }
+        if (tableManifestRuntimeOperationIds(authoringManifest).contains(operationId)) {
+            return true;
+        }
+        JsonNode contextHints = request != null ? request.getContextHints() : null;
+        JsonNode authoringContract = pathOrMissing(contextHints, "/authoringContract");
+        return tableRuntimeOperationIds(authoringContract).contains(operationId);
+    }
+
+    private String resolveTableRuntimeExportScope(
+            AiIntentClassification intent,
+            AiOrchestratorRequest request,
+            String normalizedPrompt,
+            JsonNode authoringManifest) {
+        Set<String> allowedScopes = tableRuntimeExportScopes(authoringManifest);
+        String explicitScope = normalizeTableRuntimeExportScope(firstNonBlank(
+                intent != null ? intent.getTargetField() : null,
+                intent != null ? intent.getScope() : null));
+        if (!isBlank(explicitScope) && allowedScopes.contains(explicitScope)) {
+            return explicitScope;
+        }
+        if (mentionsSelectedRecordsForRuntimeExport(normalizedPrompt)
+                && allowedScopes.contains("selected")
+                && hasSelectedRecords(request)) {
+            return "selected";
+        }
+        if (normalizedPrompt.contains("filtrad") && allowedScopes.contains("filtered")) {
+            return "filtered";
+        }
+        if ((normalizedPrompt.contains("pagina atual") || normalizedPrompt.contains("currentpage"))
+                && allowedScopes.contains("currentPage")) {
+            return "currentPage";
+        }
+        if ((normalizedPrompt.contains("todos") || normalizedPrompt.contains("all"))
+                && allowedScopes.contains("all")) {
+            return "all";
+        }
+        return null;
+    }
+
+    private boolean mentionsSelectedRecordsForRuntimeExport(String normalizedPrompt) {
+        if (isBlank(normalizedPrompt)) {
+            return false;
+        }
+        return normalizedPrompt.contains("selecionad")
+                || normalizedPrompt.contains("selection")
+                || normalizedPrompt.contains("selected")
+                || normalizedPrompt.contains("esses")
+                || normalizedPrompt.contains("estes")
+                || normalizedPrompt.contains("essas")
+                || normalizedPrompt.contains("estas");
+    }
+
+    private boolean hasSelectedRecords(AiOrchestratorRequest request) {
+        if (request == null) {
+            return false;
+        }
+        JsonNode selectedRecordsContext = resolveSelectedRecordsContext(
+                request.getRuntimeState(),
+                request.getContextHints());
+        return selectedRecordsContext != null
+                && selectedRecordsContext.isObject()
+                && selectedRecordsContext.path("selectedCount").asInt(0) > 0;
+    }
+
+    private String normalizeTableRuntimeExportScope(String value) {
+        if (isBlank(value)) {
+            return null;
+        }
+        String normalized = normalizeSearchToken(value);
+        return switch (normalized) {
+            case "selected", "selecionados", "selecionadas", "selecionado", "selecionada" -> "selected";
+            case "filtered", "filtrados", "filtradas", "filtrado", "filtrada" -> "filtered";
+            case "currentpage", "paginaatual" -> "currentPage";
+            case "all", "todos", "todas" -> "all";
+            case "auto" -> "auto";
+            default -> null;
+        };
+    }
+
+    private Set<String> tableRuntimeExportFormats(JsonNode authoringManifest) {
+        Set<String> formats = new LinkedHashSet<>();
+        JsonNode operation = findManifestOperation(authoringManifest, "table.export.run");
+        JsonNode enumValues = operation != null
+                ? operation.at("/inputSchema/properties/format/enum")
+                : MissingNode.getInstance();
+        if (enumValues != null && enumValues.isArray()) {
+            for (JsonNode enumValue : enumValues) {
+                String value = textOrNull(enumValue);
+                if (!isBlank(value)) {
+                    formats.add(value.trim().toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        if (formats.isEmpty()) {
+            formats.addAll(List.of("excel", "pdf", "csv", "json", "print"));
+        }
+        return formats;
+    }
+
+    private Set<String> tableRuntimeExportScopes(JsonNode authoringManifest) {
+        Set<String> scopes = new LinkedHashSet<>();
+        JsonNode operation = findManifestOperation(authoringManifest, "table.export.run");
+        JsonNode enumValues = operation != null
+                ? operation.at("/inputSchema/properties/scope/enum")
+                : MissingNode.getInstance();
+        if (enumValues != null && enumValues.isArray()) {
+            for (JsonNode enumValue : enumValues) {
+                String value = textOrNull(enumValue);
+                if (!isBlank(value)) {
+                    scopes.add(value.trim());
+                }
+            }
+        }
+        if (scopes.isEmpty()) {
+            scopes.addAll(List.of("auto", "selected", "filtered", "currentPage", "all"));
+        }
+        return scopes;
+    }
+
+    private AiOrchestratorResponse resolveSelectedRecordFilterCandidateDecision(
+            String userPrompt,
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest,
+            AiCallConfig callConfig,
+            List<String> warnings) {
+        if (request == null
+                || isBlank(userPrompt)
+                || !tableManifestRuntimeOperationIds(authoringManifest).contains("table.filter.apply")) {
+            return null;
+        }
+        JsonNode selectedRecordsContext = resolveSelectedRecordsContextWithFilterCandidates(
+                request.getRuntimeState(),
+                request.getContextHints());
+        List<SelectedRecordFilterCandidate> candidates = selectedRecordFilterCandidates(selectedRecordsContext);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        ArrayNode candidateCatalog = selectedRecordFilterCandidateCatalog(candidates);
+        String prompt = AiPromptTemplates.buildPrompt(
+                AiPromptTemplates.PROMPT_SELECTED_RECORD_FILTER_CANDIDATE_RESOLVER,
+                Map.of(
+                        "USER_INPUT", safe(userPrompt),
+                        "FILTER_CANDIDATES", candidateCatalog.toPrettyString(),
+                        "FILTER_FIELD_CATALOG", safeMetadata(formatFilterFieldCatalog(request.getContextHints()))));
+        JsonNode decision;
+        try {
+            decision = callAiJson(
+                    "selected_record_filter_candidate_resolution",
+                    prompt,
+                    buildSelectedRecordFilterCandidateDecisionSchema(candidates),
+                    callConfig,
+                    request,
+                    1);
+        } catch (AiProviderCallException ex) {
+            if (warnings != null) {
+                warnings.add("selected-record-filter-candidate-resolution-degraded: " + ex.getKind());
+            }
+            log.warn(
+                    "[AiOrchestratorService] Selected-record filter candidate resolution degraded. provider={} kind={} message={}",
+                    ex.getProvider(),
+                    ex.getKind(),
+                    ex.getMessage());
+            return null;
+        }
+        String decisionKind = normalizeToken(textOrNull(decision != null ? decision.get("decision") : null));
+        if ("apply".equals(decisionKind)) {
+            SelectedRecordFilterCandidate candidate = findSelectedRecordFilterCandidate(
+                    textOrNull(decision != null ? decision.get("field") : null),
+                    candidates);
+            if (candidate == null) {
+                if (warnings != null) {
+                    warnings.add("selected-record-filter-candidate-resolution-ignored-invalid-field");
+                }
+                return null;
+            }
+            JsonNode patch = buildSelectedRecordsRuntimeFilterPatchFromCandidate(candidate, selectedRecordsContext);
+            if (patch == null || !patch.isObject()) {
+                return null;
+            }
+            patch = appendTableRuntimeExportIfRequested(
+                    patch,
+                    request,
+                    authoringManifest,
+                    "filtered");
+            if (warnings != null) {
+                warnings.add("table-runtime-filter gerado a partir de candidato semantico validado.");
+            }
+            return tableRuntimeOperationResponse(
+                    patch,
+                    request,
+                    warnings,
+                    "Vou aplicar o filtro com base nas linhas selecionadas.");
+        }
+        if ("clarify".equals(decisionKind)) {
+            List<AiOption> optionPayloads = buildSelectedRecordFilterCandidateOptionPayloads(candidates);
+            List<String> options = buildAiOptionLabels(optionPayloads);
+            return clarification(
+                    "Qual propriedade dos registros selecionados deve guiar o filtro?",
+                    options,
+                    optionPayloads);
+        }
+        return null;
+    }
+
+    private AiJsonSchema buildSelectedRecordFilterCandidateDecisionSchema(
+            List<SelectedRecordFilterCandidate> candidates) {
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.put("type", "object");
+        schema.put("additionalProperties", false);
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("decision")
+                .put("type", "string")
+                .putArray("enum")
+                .add("apply")
+                .add("clarify")
+                .add("none");
+        ObjectNode field = properties.putObject("field");
+        field.put("type", "string");
+        ArrayNode fieldEnum = field.putArray("enum");
+        fieldEnum.add("");
+        if (candidates != null) {
+            for (SelectedRecordFilterCandidate candidate : candidates) {
+                if (candidate != null && !isBlank(candidate.field())) {
+                    fieldEnum.add(candidate.field());
+                }
+            }
+        }
+        properties.putObject("reason").put("type", "string");
+        schema.putArray("required").add("decision").add("field").add("reason");
+        return AiJsonSchema.ofSchema(schema.toString());
+    }
+
+    private String formatFilterFieldCatalog(JsonNode contextHints) {
+        JsonNode catalog = resolveFilterFieldCatalogContext(contextHints);
+        return catalog != null && !catalog.isMissingNode() && !catalog.isNull()
+                ? catalog.toPrettyString()
+                : "N/A";
+    }
+
+    private List<SelectedRecordFilterCandidate> selectedRecordFilterCandidates(JsonNode selectedRecordsContext) {
+        JsonNode candidates = selectedRecordsContext != null ? selectedRecordsContext.get("filterCandidates") : null;
+        if (candidates == null || !candidates.isArray() || candidates.isEmpty()) {
+            return List.of();
+        }
+        List<SelectedRecordFilterCandidate> result = new ArrayList<>();
+        LinkedHashSet<String> emitted = new LinkedHashSet<>();
+        for (JsonNode candidate : candidates) {
+            if (candidate == null || !candidate.isObject()) {
+                continue;
+            }
+            String field = textOrNull(candidate.get("field"));
+            if (isBlank(field) || !emitted.add(normalizeToken(field))) {
+                continue;
+            }
+            String label = firstNonBlank(
+                    textOrNull(candidate.get("label")),
+                    textOrNull(candidate.get("title")),
+                    humanizeFilterFieldName(field));
+            result.add(new SelectedRecordFilterCandidate(
+                    field.trim(),
+                    label,
+                    candidate.get("criterionKind"),
+                    candidate.get("criteria"),
+                    candidate.get("displayValues"),
+                    candidate));
+        }
+        return result;
+    }
+
+    private ArrayNode selectedRecordFilterCandidateCatalog(List<SelectedRecordFilterCandidate> candidates) {
+        ArrayNode catalog = objectMapper.createArrayNode();
+        if (candidates == null) {
+            return catalog;
+        }
+        for (SelectedRecordFilterCandidate candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            ObjectNode node = catalog.addObject();
+            node.put("field", candidate.field());
+            node.put("label", candidate.label());
+            if (candidate.criterionKind() != null && !candidate.criterionKind().isNull()) {
+                node.set("criterionKind", candidate.criterionKind());
+            }
+            if (candidate.displayValues() != null && !candidate.displayValues().isNull()) {
+                node.set("displayValues", candidate.displayValues());
+            }
+            if (candidate.criteria() != null && !candidate.criteria().isNull()) {
+                node.set("criteria", candidate.criteria());
+            }
+        }
+        return catalog;
+    }
+
+    private SelectedRecordFilterCandidate findSelectedRecordFilterCandidate(
+            String field,
+            List<SelectedRecordFilterCandidate> candidates) {
+        if (isBlank(field) || candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        String normalized = normalizeToken(field);
+        for (SelectedRecordFilterCandidate candidate : candidates) {
+            if (candidate != null && normalized.equals(normalizeToken(candidate.field()))) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode buildSelectedRecordsRuntimeFilterPatchFromCandidate(
+            SelectedRecordFilterCandidate candidate,
+            JsonNode selectedRecordsContext) {
+        if (candidate == null || isBlank(candidate.field())) {
+            return null;
+        }
+        JsonNode criteria = candidate.criteria();
+        if (criteria != null && criteria.isObject() && criteria.size() > 0) {
+            return buildSelectedRecordsRuntimeFilterPatch(criteria);
+        }
+        JsonNode sampleRows = selectedRecordsContext != null ? selectedRecordsContext.get("sampleRows") : null;
+        RuntimeFilterCriterion runtimeCriterion = selectedRecordsRuntimeFilterCriterion(sampleRows, candidate.field());
+        return runtimeCriterion != null
+                ? buildSelectedRecordsRuntimeFilterPatch(runtimeCriterion.filterField(), runtimeCriterion.criterion())
+                : null;
+    }
+
+    private List<AiOption> buildSelectedRecordFilterCandidateOptionPayloads(
+            List<SelectedRecordFilterCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        List<AiOption> payloads = new ArrayList<>();
+        for (SelectedRecordFilterCandidate candidate : candidates) {
+            if (candidate == null || isBlank(candidate.field())) {
+                continue;
+            }
+            ObjectNode selection = objectMapper.createObjectNode();
+            selection.put("value", candidate.field());
+            ObjectNode selected = objectMapper.createObjectNode();
+            selected.put("targetField", candidate.field());
+            selected.set("selection", selection);
+            ObjectNode presentation = objectMapper.createObjectNode();
+            presentation.put("kind", "guided-option");
+            presentation.put("icon", filterFieldOptionIcon(candidate.field()));
+            presentation.put("ctaLabel", "Usar");
+            ObjectNode hints = objectMapper.createObjectNode();
+            hints.set("optionSelected", selected);
+            hints.set("presentation", presentation);
+            hints.put("filterField", candidate.field());
+            hints.put("runtimeOperationId", "table.filter.apply");
+            payloads.add(AiOption.builder()
+                    .value(candidate.field())
+                    .label(firstNonBlank(candidate.label(), humanizeFilterFieldName(candidate.field())))
+                    .contextHints(hints)
+                    .build());
+        }
+        return payloads;
+    }
+
+    private boolean isFilterIntent(AiIntentClassification intent) {
+        if (intent == null) {
+            return false;
+        }
+        return "filter".equalsIgnoreCase(trimToNull(intent.getCategory()))
+                || "filtering".equalsIgnoreCase(trimToNull(intent.getCategory()));
+    }
+
+    private List<String> intentFilterFieldCandidates(AiIntentClassification intent, JsonNode contextHints) {
+        if (intent == null) {
+            return List.of();
+        }
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        addIntentFilterFieldCandidate(candidates, intent.getTargetField(), contextHints);
+        addIntentFilterFieldCandidate(candidates, intent.getNewField(), contextHints);
+        if (intent.getBaseFields() != null) {
+            for (String field : intent.getBaseFields()) {
+                addIntentFilterFieldCandidate(candidates, field, contextHints);
+            }
+        }
+        if (intent.getOptions() != null) {
+            for (String option : intent.getOptions()) {
+                addIntentFilterFieldCandidate(candidates, option, contextHints);
+            }
+        }
+        return new ArrayList<>(candidates);
+    }
+
+    private void addIntentFilterFieldCandidate(
+            LinkedHashSet<String> candidates,
+            String value,
+            JsonNode contextHints) {
+        if (candidates == null || isBlank(value)) {
+            return;
+        }
+        List<FilterFieldDescriptor> catalog = extractFilterFieldCatalog(contextHints);
+        String catalogField = resolveFilterFieldFromCatalogValue(value, catalog);
+        if (!isBlank(catalogField)) {
+            candidates.add(catalogField);
+        }
+        for (FilterFieldDescriptor field : catalog) {
+            if (field != null && isRelatedSelectedRecordFilterField(value, field.name())) {
+                candidates.add(field.name());
+            }
+        }
+        candidates.add(value.trim());
+    }
+
+    private boolean isRelatedSelectedRecordFilterField(String selectedRecordField, String filterField) {
+        String selectedStem = selectedRecordFilterStem(selectedRecordField);
+        String filterStem = selectedRecordFilterStem(filterField);
+        return !isBlank(selectedStem)
+                && !isBlank(filterStem)
+                && selectedStem.equals(filterStem);
+    }
+
+    private String selectedRecordFilterStem(String field) {
+        if (isBlank(field)) {
+            return null;
+        }
+        String normalized = normalizeToken(field);
+        for (String suffix : List.of("idsin", "idin", "in", "nome", "name", "id")) {
+            if (normalized.endsWith(suffix) && normalized.length() > suffix.length()) {
+                normalized = normalized.substring(0, normalized.length() - suffix.length());
+                break;
+            }
+        }
+        return normalized;
+    }
+
+    private JsonNode buildSelectedRecordsRuntimeFilterPatchFromSemanticContextHints(
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest) {
+        if (!isTableRuntimeFilterApplyHint(request != null ? request.getContextHints() : null)) {
+            return null;
+        }
+        return buildSelectedRecordsRuntimeFilterPatchFromContextHints(request, authoringManifest);
+    }
+
+    private boolean isTableRuntimeFilterApplyHint(JsonNode contextHints) {
+        if (contextHints == null || contextHints.isNull() || !contextHints.isObject()) {
+            return false;
+        }
+        String operationId = textOrNull(contextHints.get("runtimeOperationId"));
+        if ("table.filter.apply".equals(operationId)) {
+            return true;
+        }
+        JsonNode selected = contextHints.get("optionSelected");
+        if (selected != null && selected.isObject()
+                && "table.filter.apply".equals(textOrNull(selected.get("runtimeOperationId")))) {
+            return true;
+        }
+        JsonNode canonicalAction = contextHints.get("canonicalAction");
+        if (canonicalAction != null && canonicalAction.isObject()) {
+            String actionOperationId = textOrNull(canonicalAction.get("operationId"));
+            return "table.filter.apply".equals(actionOperationId);
+        }
+        return false;
+    }
+
+    private RuntimeFilterCriterion selectedRecordsRuntimeFilterCriterion(JsonNode sampleRows, String filterField) {
+        if (sampleRows == null || !sampleRows.isArray() || sampleRows.isEmpty() || isBlank(filterField)) {
+            return null;
+        }
+        String criterionField = filterField;
+        JsonNode criterion = selectedRecordCriterionForField(sampleRows, filterField);
+        if (criterion == null || criterion.isNull() || isBlankTextNode(criterion)) {
+            String sourceField = resolveSelectedRecordSourceFieldForFilterField(sampleRows, filterField);
+            if (isBlank(sourceField)) {
+                return null;
+            }
+            criterion = selectedRecordCriterionForField(sampleRows, sourceField);
+            if (criterion == null || criterion.isNull() || isBlankTextNode(criterion)) {
+                return null;
+            }
+            if (normalizeToken(sourceField).equals(normalizeToken(filterField))) {
+                criterionField = sourceField;
+            }
+        }
+        return new RuntimeFilterCriterion(criterionField, criterion);
+    }
+
+    private JsonNode buildSelectedRecordsRuntimeFilterPatch(String filterField, JsonNode criterion) {
+        if (isBlank(filterField) || criterion == null || criterion.isNull() || isBlankTextNode(criterion)) {
+            return null;
+        }
+        ObjectNode criteria = objectMapper.createObjectNode();
+        criteria.set(filterField, criterion);
+        return buildSelectedRecordsRuntimeFilterPatch(criteria);
+    }
+
+    private JsonNode buildSelectedRecordsRuntimeFilterPatch(JsonNode criteria) {
+        if (criteria == null || !criteria.isObject() || criteria.size() == 0) {
+            return null;
+        }
+        ObjectNode input = objectMapper.createObjectNode();
+        input.set("criteria", criteria.deepCopy());
+        input.put("source", "selected-records");
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", "table.filter.apply");
+        operation.set("input", input);
+        ObjectNode batch = objectMapper.createObjectNode();
+        batch.put("kind", "praxis.table.runtime-operation.batch");
+        batch.putArray("operations").add(operation);
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.set("tableRuntimeOperations", batch);
+        return patch;
+    }
+
+    private String resolveSelectedRecordSourceFieldForFilterField(JsonNode sampleRows, String filterField) {
+        if (sampleRows == null || !sampleRows.isArray() || isBlank(filterField)) {
+            return null;
+        }
+        List<String> sampleFields = sampleRowFieldNames(sampleRows);
+        if (sampleFields.isEmpty()) {
+            return null;
+        }
+        List<String> candidates = selectedRecordSourceFieldCandidates(filterField);
+        for (String candidate : candidates) {
+            String matched = matchSampleField(candidate, sampleFields);
+            if (!isBlank(matched) && selectedRecordCriterionForField(sampleRows, matched) != null) {
+                return matched;
+            }
+        }
+        return null;
+    }
+
+    private List<String> selectedRecordSourceFieldCandidates(String filterField) {
+        if (isBlank(filterField)) {
+            return List.of();
+        }
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        candidates.add(filterField);
+        String trimmed = filterField.trim();
+        if (trimmed.endsWith("IdsIn") && trimmed.length() > "IdsIn".length()) {
+            candidates.add(trimmed.substring(0, trimmed.length() - "IdsIn".length()) + "Id");
+        }
+        if (trimmed.endsWith("IdIn") && trimmed.length() > "IdIn".length()) {
+            candidates.add(trimmed.substring(0, trimmed.length() - "In".length()));
+        }
+        if (trimmed.endsWith("In") && trimmed.length() > "In".length()) {
+            candidates.add(trimmed.substring(0, trimmed.length() - "In".length()));
+        }
+        return new ArrayList<>(candidates);
+    }
+
+    private String resolveSelectedRecordsRuntimeFilterField(AiActionPlan actionPlan, JsonNode sampleRows) {
+        List<String> candidates = collectActionPlanFieldCandidates(actionPlan);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        List<String> sampleFields = sampleRowFieldNames(sampleRows);
+        for (String candidate : candidates) {
+            if (selectedRecordsRuntimeFilterCriterion(sampleRows, candidate) != null) {
+                return candidate;
+            }
+            String matched = matchSampleField(candidate, sampleFields);
+            if (!isBlank(matched) && selectedRecordCriterionForField(sampleRows, matched) != null) {
+                return matched;
+            }
+        }
+        return null;
+    }
+
+    private List<String> collectActionPlanFieldCandidates(AiActionPlan actionPlan) {
+        List<String> candidates = new ArrayList<>();
+        if (actionPlan == null || actionPlan.getActions() == null) {
+            return candidates;
+        }
+        for (AiActionPlan.Action action : actionPlan.getActions()) {
+            if (action == null) continue;
+            addCandidate(candidates, action.getTarget());
+            addCandidate(candidates, textOrNull(action.getValue()));
+            collectFieldCandidatesFromNode(candidates, action.getParams());
+        }
+        return candidates;
+    }
+
+    private void collectFieldCandidatesFromNode(List<String> candidates, JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return;
+        }
+        if (node.isTextual()) {
+            addCandidate(candidates, node.asText());
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectFieldCandidatesFromNode(candidates, item);
+            }
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        JsonNode criteria = node.get("criteria");
+        if (criteria != null && criteria.isObject()) {
+            criteria.fieldNames().forEachRemaining(fieldName -> {
+                addCandidate(candidates, fieldName);
+                collectFieldCandidatesFromNode(candidates, criteria.get(fieldName));
+            });
+        }
+        for (String fieldName : List.of(
+                "field",
+                "fields",
+                "fieldId",
+                "fieldIds",
+                "selectedFieldIds",
+                "alwaysVisibleFields",
+                "visibleFields")) {
+            JsonNode value = node.get(fieldName);
+            if (value != null) {
+                collectFieldCandidatesFromNode(candidates, value);
+            }
+        }
+    }
+
+    private void addCandidate(List<String> candidates, String value) {
+        if (candidates == null || isBlank(value)) {
+            return;
+        }
+        String trimmed = value.trim();
+        if (candidates.stream().noneMatch(existing -> normalizeToken(existing).equals(normalizeToken(trimmed)))) {
+            candidates.add(trimmed);
+        }
+    }
+
+    private List<String> sampleRowFieldNames(JsonNode sampleRows) {
+        LinkedHashSet<String> fields = new LinkedHashSet<>();
+        if (sampleRows != null && sampleRows.isArray()) {
+            for (JsonNode row : sampleRows) {
+                if (row != null && row.isObject()) {
+                    row.fieldNames().forEachRemaining(fields::add);
+                }
+            }
+        }
+        return new ArrayList<>(fields);
+    }
+
+    private String matchSampleField(String candidate, List<String> sampleFields) {
+        if (isBlank(candidate) || sampleFields == null || sampleFields.isEmpty()) {
+            return null;
+        }
+        String normalizedCandidate = normalizeToken(candidate);
+        for (String field : sampleFields) {
+            if (normalizeToken(field).equals(normalizedCandidate)) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode selectedRecordCriterionForField(JsonNode sampleRows, String field) {
+        if (sampleRows == null || !sampleRows.isArray() || isBlank(field)) {
+            return null;
+        }
+        ArrayNode values = objectMapper.createArrayNode();
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        for (JsonNode row : sampleRows) {
+            JsonNode value = row != null && row.isObject() ? row.get(field) : null;
+            if (value == null || value.isNull() || isBlankTextNode(value)) {
+                continue;
+            }
+            String key = value.toString();
+            if (seen.add(key)) {
+                values.add(value);
+            }
+        }
+        if (values.isEmpty()) {
+            return null;
+        }
+        if (values.size() == 1) {
+            return values.get(0);
+        }
+        return values;
+    }
+
+    private Set<String> tableManifestRuntimeOperationIds(JsonNode authoringManifest) {
+        Set<String> operationIds = new LinkedHashSet<>();
+        if (authoringManifest == null || !authoringManifest.isObject()) {
+            return operationIds;
+        }
+        JsonNode operations = authoringManifest.get("operations");
+        if (operations == null || !operations.isArray()) {
+            return operationIds;
+        }
+        for (JsonNode operation : operations) {
+            String operationId = normalizeActionKey(textOrNull(operation != null ? operation.get("operationId") : null));
+            String submissionImpact = textOrNull(operation != null ? operation.get("submissionImpact") : null);
+            if (!isBlank(operationId)
+                    && ("runtime".equalsIgnoreCase(submissionImpact)
+                    || "table.filter.apply".equals(operationId)
+                    || "table.export.run".equals(operationId))) {
+                operationIds.add(operationId);
+            }
+        }
+        return operationIds;
+    }
+
+    private ObjectNode buildTableRuntimeOperation(AiActionPlan.Action action, String operationId) {
+        if (action == null || isBlank(operationId)) {
+            return null;
+        }
+        ObjectNode input = ensureParamsObject(action.getParams()).deepCopy();
+        JsonNode value = action.getValue();
+        if ("table.filter.apply".equals(operationId)) {
+            if (!input.has("criteria") && value != null && value.isObject()) {
+                input.set("criteria", value);
+            }
+            JsonNode criteria = input.get("criteria");
+            if (!hasUsableRuntimeFilterCriteria(criteria)) {
+                return null;
+            }
+        } else if ("table.export.run".equals(operationId)) {
+            if (!input.has("format") && value != null && value.isTextual() && !value.asText().isBlank()) {
+                input.put("format", value.asText().trim().toLowerCase(Locale.ROOT));
+            }
+            JsonNode format = input.get("format");
+            if (format == null || !format.isTextual() || format.asText().isBlank()) {
+                return null;
+            }
+            if (input.has("format")) {
+                input.put("format", input.get("format").asText().trim().toLowerCase(Locale.ROOT));
+            }
+        } else {
+            return null;
+        }
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", operationId);
+        operation.set("input", input);
+        return operation;
+    }
+
+    private boolean hasUsableRuntimeFilterCriteria(JsonNode criteria) {
+        if (criteria == null || !criteria.isObject() || criteria.isEmpty()) {
+            return false;
+        }
+        Iterator<JsonNode> values = criteria.elements();
+        while (values.hasNext()) {
+            JsonNode value = values.next();
+            if (value == null || value.isNull() || value.isMissingNode() || isBlankTextNode(value)) {
+                continue;
+            }
+            if (value.isArray() && value.isEmpty()) {
+                continue;
+            }
+            if (value.isObject() && value.isEmpty()) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private AiOrchestratorResponse tableRuntimeOperationResponse(
+            JsonNode patch,
+            AiOrchestratorRequest request,
+            List<String> warnings,
+            String explanation) {
+        return AiOrchestratorResponse.builder()
+                .type("patch")
+                .componentId(request != null ? request.getComponentId() : null)
+                .componentType(request != null ? request.getComponentType() : null)
+                .patch(patch)
+                .explanation(explanation)
+                .warnings(warnings == null || warnings.isEmpty() ? null : List.copyOf(warnings))
+                .build();
     }
 
     private JsonNode buildComponentEditPlanFromPatch(
@@ -8243,19 +10121,12 @@ public class AiOrchestratorService {
             String label = column != null ? displayColumnLabel(column, countHeaders(columns)) : field;
             JsonNode params = action.getParams();
             if ("column.conditionalStyle.add".equals(action.getType())) {
-                String description = textOrNull(params != null ? params.get("description") : null);
-                String styleSummary = summarizeConditionalStyle(params != null ? params.get("style") : null);
-                parts.add("Vou destacar a coluna " + label
-                        + (!isBlank(description) ? " quando " + lowercaseFirst(stripLeadingAppliesRule(description)) : "")
-                        + (!isBlank(styleSummary) ? ", usando " + styleSummary : "")
-                        + ".");
+                parts.add(buildConditionalStyleExplanation(label, params));
             } else if ("column.conditionalRenderer.add".equals(action.getType())) {
                 String description = textOrNull(params != null ? params.get("description") : null);
                 String rendererType = textOrNull(params != null ? params.at("/renderer/type") : null);
                 String rendererLabel = "badge".equalsIgnoreCase(rendererType) ? "badge" : "chip";
-                parts.add("Vou adicionar um " + rendererLabel + " condicional na coluna " + label
-                        + (!isBlank(description) ? " quando " + lowercaseFirst(stripLeadingAppliesRule(description)) : "")
-                        + ".");
+                parts.add(buildConditionalRendererExplanation(label, rendererLabel, description, params));
             } else if ("column.computed.add".equals(action.getType())) {
                 String header = textOrNull(params != null ? params.get("header") : null);
                 String computedField = textOrNull(params != null ? params.get("field") : null);
@@ -8289,9 +10160,138 @@ public class AiOrchestratorService {
         return parts.isEmpty() ? fallback : String.join(" ", parts);
     }
 
+    private String buildConditionalStyleExplanation(String label, JsonNode params) {
+        String description = cleanConditionalStyleDescription(textOrNull(params != null ? params.get("description") : null));
+        String styleSummary = summarizeConditionalStyle(params != null ? params.get("style") : null);
+        String tooltipText = cleanConditionalStyleTooltip(firstNonBlank(
+                textOrNull(params != null ? params.at("/tooltip/text") : null),
+                textOrNull(params != null ? params.at("/style/tooltip/text") : null)));
+        List<String> details = new ArrayList<>();
+        if (!isBlank(styleSummary)) {
+            details.add(styleSummary);
+        }
+        if (!isBlank(tooltipText)) {
+            details.add("dica \"" + tooltipText + "\"");
+        }
+        return "Vou destacar a coluna " + label
+                + (!isBlank(description) ? " quando " + lowercaseFirst(description) : "")
+                + (!details.isEmpty() ? " usando " + String.join(", ", details) : "")
+                + ".";
+    }
+
+    private String buildConditionalRendererExplanation(
+            String label,
+            String rendererLabel,
+            String description,
+            JsonNode params) {
+        String rendererType = textOrNull(params != null ? params.at("/renderer/type") : null);
+        JsonNode visual = !isBlank(rendererType) && params != null
+                ? params.at("/renderer/" + rendererType)
+                : null;
+        String suffix = buildConditionalRendererExplanationSuffix(
+                textOrNull(visual != null ? visual.get("text") : null),
+                textOrNull(visual != null ? visual.get("color") : null),
+                textOrNull(visual != null ? visual.get("variant") : null),
+                firstNonBlank(
+                        textOrNull(params != null ? params.at("/tooltip/text") : null),
+                        textOrNull(visual != null ? visual.at("/tooltip/text") : null)));
+        String tooltipText = firstNonBlank(
+                textOrNull(params != null ? params.at("/tooltip/text") : null),
+                textOrNull(visual != null ? visual.at("/tooltip/text") : null));
+        if (isBlank(description)) {
+            return "Vou adicionar um " + rendererLabel + " condicional na coluna " + label + suffix + ".";
+        }
+        String normalized = normalizeText(description);
+        String descriptionLower = description.toLowerCase(Locale.ROOT);
+        String cleanDescription = stripLeadingAppliesRule(description);
+        if (normalized.contains("tooltip")
+                || normalized.contains("dica")
+                || descriptionLower.contains("tooltip")
+                || descriptionLower.contains("dica")) {
+            String conditionLabel = conditionalRendererConditionLabel(params);
+            if (!isBlank(tooltipText)) {
+                return "Vou adicionar uma dica na coluna " + label
+                        + (!isBlank(conditionLabel) ? " para " + conditionLabel : "")
+                        + ": \"" + tooltipText + "\""
+                        + ".";
+            }
+            String descriptionTooltipText = cleanDescription
+                    .replaceFirst("(?i)^\\s*adicionar\\s+dica\\s*\\(tooltip\\)\\s*(?:indicando\\s+que\\s+)?", "")
+                    .replaceFirst("(?i)^\\s*adicionar\\s+dica\\s*(?:indicando\\s+que\\s+)?", "")
+                    .replaceFirst("(?i)^\\s*adicionar\\s+tooltip\\s*(?:para\\s+entradas?\\s+[^\\s]+\\s+)?(?:mostrando\\s+)?", "")
+                    .replaceFirst("(?i)^\\s*tooltip\\s*", "")
+                    .replaceFirst("[\\s.]+$", "")
+                    .replaceAll("^['\"]|['\"]$", "")
+                    .trim();
+            if (!isBlank(descriptionTooltipText)) {
+                return "Vou adicionar uma dica na coluna " + label
+                        + (!isBlank(conditionLabel) ? " para " + conditionLabel : "")
+                        + ": \"" + lowercaseFirst(descriptionTooltipText) + "\""
+                        + ".";
+            }
+            return "Vou adicionar uma dica na coluna " + label + ".";
+        }
+        return "Vou adicionar um " + rendererLabel + " condicional na coluna " + label
+                + " quando " + lowercaseFirst(cleanDescription)
+                + suffix
+                + ".";
+    }
+
+    private String conditionalRendererConditionLabel(JsonNode params) {
+        if (params == null || !params.isObject()) {
+            return null;
+        }
+        String value = extractEqualityConditionLiteral(params.get("condition"), null);
+        if (!isBlank(value)) {
+            String normalized = normalizeText(value);
+            if ("true".equals(normalized) || "false".equals(normalized)) {
+                return null;
+            }
+            return value;
+        }
+        return null;
+    }
+
+    private String buildConditionalRendererExplanationSuffix(
+            String visualText,
+            String color,
+            String variant,
+            String tooltipText) {
+        List<String> details = new ArrayList<>();
+        if (!isBlank(visualText)) {
+            details.add("rótulo " + visualText);
+        }
+        String colorLabel = tableRendererColorLabel(color);
+        if (!isBlank(colorLabel)) {
+            details.add("cor " + colorLabel);
+        }
+        if (!isBlank(variant)) {
+            String variantLabel = switch (variant.trim().toLowerCase(Locale.ROOT)) {
+                case "soft" -> "visual suave";
+                case "outlined" -> "visual com contorno";
+                case "filled" -> "visual preenchido";
+                default -> null;
+            };
+            if (!isBlank(variantLabel)) {
+                details.add(variantLabel);
+            }
+        }
+        if (!isBlank(tooltipText)) {
+            details.add("dica \"" + tooltipText + "\"");
+        }
+        return details.isEmpty() ? "" : ", com " + String.join(", ", details);
+    }
+
     private String humanizeTableFormatForExplanation(String format) {
         if (isBlank(format)) {
             return "o formato solicitado";
+        }
+        if (format.startsWith("custom|")) {
+            String[] parts = format.split("\\|");
+            if (parts.length >= 3 && !isBlank(parts[1]) && !isBlank(parts[2])) {
+                return parts[1] + "/" + parts[2];
+            }
+            return "formato personalizado";
         }
         return switch (format) {
             case "shortDate" -> "data curta";
@@ -8306,8 +10306,27 @@ public class AiOrchestratorService {
             case "yyyy-MM-dd HH:mm" -> "data e hora";
             case "BRL|symbol|2" -> "moeda brasileira";
             case "000.000.000-00" -> "CPF brasileiro";
+            case "active-inactive" -> "Ativo/Inativo";
+            case "yes-no" -> "Sim/Não";
+            case "true-false" -> "Verdadeiro/Falso";
+            case "on-off", "onoff" -> "Ligado/Desligado";
             default -> format;
         };
+    }
+
+    private String buildSelectedFormatReviewMessage(
+            SelectedFormatSelection selectedFormat,
+            List<ColumnDescriptor> columns) {
+        String label = selectedFormat != null ? selectedFormat.targetField : null;
+        ColumnDescriptor column = findColumnByField(label, columns);
+        if (column != null) {
+            label = displayColumnLabel(column, countHeaders(columns));
+        }
+        if (isBlank(label)) {
+            label = "coluna selecionada";
+        }
+        String format = selectedFormat != null ? selectedFormat.value : null;
+        return "Vou formatar a coluna " + label + " como " + humanizeTableFormatForExplanation(format) + ".";
     }
 
     private String summarizeConditionalStyle(JsonNode style) {
@@ -8336,6 +10355,38 @@ public class AiOrchestratorService {
             parts.add("opacidade reduzida");
         }
         return parts.isEmpty() ? null : String.join(" e ", parts);
+    }
+
+    private String cleanConditionalStyleDescription(String description) {
+        if (isBlank(description)) {
+            return null;
+        }
+        String clean = stripLeadingAppliesRule(description)
+                .replace("condicao", "condição")
+                .replace("Condicao", "Condição")
+                .replaceFirst("(?i)^\\s*adicionar\\s+.+?\\s+para\\s+", "")
+                .replaceFirst("(?i)^\\s*deixa\\s+", "")
+                .replaceFirst("(?i)^\\s*deixe\\s+", "")
+                .replaceFirst("[\\s.]+$", "")
+                .trim();
+        if (clean.matches("(?i)^(a\\s+)?condição\\s+for\\s+atendida$")) {
+            return null;
+        }
+        return isBlank(clean) ? null : clean;
+    }
+
+    private String cleanConditionalStyleTooltip(String tooltipText) {
+        if (isBlank(tooltipText)) {
+            return null;
+        }
+        String clean = tooltipText
+                .replaceFirst("(?i)^\\s*adicionar\\s+(?:uma\\s+)?(?:dica\\s*)?(?:\\(tooltip\\)\\s*)?", "")
+                .replaceFirst("(?i)^\\s*tooltip\\s*", "")
+                .replaceFirst("(?i)^\\s*(?:dizendo|com|de)\\s+", "")
+                .replaceFirst("(?i)^\\s*para\\s+", "")
+                .replaceFirst("[\\s.]+$", "")
+                .trim();
+        return isBlank(clean) ? null : capitalizeFirst(clean);
     }
 
     private boolean containsColorToken(String value, String token) {
@@ -9982,9 +12033,9 @@ public class AiOrchestratorService {
                     option.example != null ? option.example : ""));
             if (isNumericFormatType(normalizedType) && isNumericFormatOption(haystack)) {
                 filtered.add(option);
-            } else if (isDateLikeType(normalizedType) && isDateFormatOption(option.value)) {
+            } else if (isDateLikeType(normalizedType) && isDateFormatOptionAllowedForType(option.value, normalizedType)) {
                 filtered.add(option);
-            } else if (isBooleanType(normalizedType, null) && haystack.contains("boolean")) {
+            } else if (isBooleanType(normalizedType, null) && isBooleanFormatOption(option)) {
                 filtered.add(option);
             } else if (normalizedType.contains("string") && haystack.contains("string")) {
                 filtered.add(option);
@@ -10017,6 +12068,29 @@ public class AiOrchestratorService {
                 || normalizedType.contains("timestamp");
     }
 
+    private boolean isDateFormatOptionAllowedForType(String value, String normalizedType) {
+        if (!isDateFormatOption(value)) {
+            return false;
+        }
+        if (normalizedType == null) {
+            return true;
+        }
+        boolean dateTimeType = normalizedType.contains("datetime")
+                || normalizedType.contains("timestamp")
+                || normalizedType.contains("datehour")
+                || normalizedType.contains("datehora");
+        boolean timeOnlyType = normalizedType.equals("time")
+                || normalizedType.contains("timeonly")
+                || normalizedType.contains("hora");
+        if (timeOnlyType && !dateTimeType) {
+            return "shortTime".equals(value);
+        }
+        if (!dateTimeType) {
+            return !Set.of("shortTime", "short", "yyyy-MM-dd HH:mm").contains(value);
+        }
+        return true;
+    }
+
     private boolean isNumericFormatOption(String normalizedOption) {
         if (normalizedOption == null) {
             return false;
@@ -10027,6 +12101,25 @@ public class AiOrchestratorService {
                 || normalizedOption.contains("usd")
                 || normalizedOption.contains("eur")
                 || normalizedOption.contains("percent");
+    }
+
+    private boolean isBooleanFormatOption(ContextOption option) {
+        if (option == null) {
+            return false;
+        }
+        String value = normalizeText(option.value);
+        String label = normalizeText(option.label);
+        return value.contains("boolean")
+                || value.equals("yesno")
+                || value.equals("activeinactive")
+                || value.equals("truefalse")
+                || value.equals("onoff")
+                || value.startsWith("custom")
+                || label.contains("boolean")
+                || label.contains("simnao")
+                || label.contains("ativoinativo")
+                || label.contains("verdadeirofalso")
+                || label.contains("ligadodesligado");
     }
 
     private boolean shouldOfferFormatChoiceFromLlmIntent(
@@ -11779,6 +13872,7 @@ public class AiOrchestratorService {
             hints.set("optionSelected", selected);
             hints.set("presentation", presentation);
             hints.put("filterField", fieldName);
+            hints.put("runtimeOperationId", "table.filter.apply");
             payloads.add(AiOption.builder()
                     .value(fieldName)
                     .label(label)
@@ -14204,8 +16298,22 @@ public class AiOrchestratorService {
                 AiPromptTemplates.PROMPT_QA,
                 Map.of(
                         "USER_INPUT", safe(userPrompt),
-                        "TARGET_CONFIG", currentState != null ? currentState.toPrettyString() : "{}",
-                        "AUTHORING_CONTRACT", safeMetadata(formatAuthoringContract(authoringContract))));
+                        "TARGET_CONFIG", truncateBlock(
+                                "qa_target_config",
+                                currentState != null ? currentState.toPrettyString() : "{}",
+                                maxQaConfigChars),
+                        "RUNTIME_METADATA", truncateBlock(
+                                "qa_runtime_metadata",
+                                formatRuntimeMetadata(
+                                        request != null ? request.getDataProfile() : null,
+                                        request != null ? request.getSchemaFields() : null,
+                                        request != null ? request.getRuntimeState() : null,
+                                        request != null ? request.getContextHints() : null),
+                                maxRuntimeMetadataChars),
+                        "AUTHORING_CONTRACT", truncateBlock(
+                                "qa_authoring_contract",
+                                formatQaAuthoringContract(authoringContract),
+                                maxQaAuthoringContractChars)));
         return callAiText("qa_answer", prompt, callConfig, request, 1);
     }
 
@@ -14213,27 +16321,118 @@ public class AiOrchestratorService {
             AiOrchestratorResponse response,
             AiOrchestratorRequest request,
             JsonNode currentState,
-            List<ContextOption> formatOptions) {
+            List<ContextOption> formatOptions,
+            AiIntentClassification intent,
+            JsonNode dataProfile) {
         if (response == null || response.getOptionPayloads() != null && !response.getOptionPayloads().isEmpty()) {
             return response;
         }
-        String userPrompt = request != null ? request.getUserPrompt() : null;
-        if (!isConsultativeTableGuidanceQuestion(userPrompt)) {
+        if (intent == null) {
             return response;
         }
-        // This runs only after semantic consult mode was selected by the LLM. Local text/catalog checks below
-        // only ground clickable recommendations in the current table contract; they do not route the primary intent.
-        List<AiOption> actionOptions = new ArrayList<>();
-        if (canMaterializeTableFormatActions(userPrompt, currentState)) {
-            actionOptions.addAll(buildTableDateFormatActionOptions(userPrompt, currentState, formatOptions));
+        String groundedTargetField = intent.getTargetField();
+        if (isBlank(groundedTargetField) && request != null) {
+            ColumnDescriptor promptedColumn = findPromptedFormatColumn(
+                    currentState,
+                    normalizeText(request.getUserPrompt()));
+            if (promptedColumn != null && !isBlank(promptedColumn.field)) {
+                groundedTargetField = promptedColumn.field;
+                intent.setTargetField(groundedTargetField);
+            }
         }
-        if (actionOptions.isEmpty()) {
-            actionOptions.addAll(buildConsultativeTableRuleActionOptions(userPrompt, currentState));
+        List<AiOption> actionOptions = new ArrayList<>();
+        if (!isBlank(groundedTargetField) && intent != null && "format".equalsIgnoreCase(intent.getCategory())) {
+            actionOptions.addAll(buildConsultativeFormatActionOptions(
+                    intent,
+                    formatOptions,
+                    dataProfile,
+                    request != null ? request.getUserPrompt() : null));
+        }
+        if (actionOptions.isEmpty()
+                && "renderer".equalsIgnoreCase(intent.getCategory())
+                && !isBlank(groundedTargetField)
+                && intent.getOptions() != null
+                && !intent.getOptions().isEmpty()) {
+            actionOptions.addAll(buildRendererOptionPayloads(groundedTargetField, intent.getOptions()));
+        }
+        if (actionOptions.isEmpty() && request != null) {
+            actionOptions.addAll(buildTableDateFormatActionOptions(request.getUserPrompt(), currentState, formatOptions));
+        }
+        if (actionOptions.isEmpty() && request != null) {
+            actionOptions.addAll(buildConsultativeTableRuleActionOptions(request.getUserPrompt(), currentState));
+        }
+        if (actionOptions.isEmpty() && !isBlank(groundedTargetField)) {
+            actionOptions.addAll(buildRendererOptionPayloads(
+                    groundedTargetField,
+                    defaultRendererOptionsForField(groundedTargetField)));
         }
         if (!actionOptions.isEmpty()) {
             response.setOptionPayloads(actionOptions);
         }
         return response;
+    }
+
+    private List<AiOption> buildConsultativeFormatActionOptions(
+            AiIntentClassification intent,
+            List<ContextOption> formatOptions,
+            JsonNode dataProfile,
+            String userPrompt) {
+        if (intent == null || isBlank(intent.getTargetField())) {
+            return List.of();
+        }
+        List<ContextOption> choices = formatOptions != null ? formatOptions : List.of();
+        if (choices.isEmpty()) {
+            choices = defaultTableFormatOptionsForPrompt("", intent.getTargetField());
+        }
+        choices = filterFormatOptionsForField(intent.getTargetField(), choices, dataProfile);
+        choices = rankFormatOptionsForPrompt(choices, userPrompt);
+        List<AiOption> payloads = buildFormatOptionPayloads(intent.getTargetField(), choices);
+        if (payloads.size() > 4) {
+            return List.copyOf(payloads.subList(0, 4));
+        }
+        return payloads;
+    }
+
+    private List<ContextOption> rankFormatOptionsForPrompt(List<ContextOption> choices, String userPrompt) {
+        if (choices == null || choices.size() < 2 || isBlank(userPrompt)) {
+            return choices != null ? choices : List.of();
+        }
+        String normalizedPrompt = normalizeText(userPrompt);
+        List<ContextOption> ranked = new ArrayList<>(choices);
+        ranked.sort((left, right) -> Integer.compare(
+                formatOptionPromptRank(left, normalizedPrompt),
+                formatOptionPromptRank(right, normalizedPrompt)));
+        return ranked;
+    }
+
+    private int formatOptionPromptRank(ContextOption option, String normalizedPrompt) {
+        if (option == null || isBlank(option.value) || isBlank(normalizedPrompt)) {
+            return 100;
+        }
+        String value = option.value;
+        if (("fullDate".equals(value) || "longDate".equals(value))
+                && (normalizedPrompt.contains("extenso")
+                || normalizedPrompt.contains("completa")
+                || normalizedPrompt.contains("longa"))) {
+            return "longDate".equals(value) ? 0 : 1;
+        }
+        if ("MMM/yyyy".equals(value)
+                && (normalizedPrompt.contains("meseano")
+                || normalizedPrompt.contains("mesano")
+                || normalizedPrompt.contains("competencia")
+                || normalizedPrompt.contains("mensal"))) {
+            return 0;
+        }
+        if ("dd/MM/yyyy".equals(value)
+                && (normalizedPrompt.contains("brasileiro")
+                || normalizedPrompt.contains("padraobrasileiro")
+                || normalizedPrompt.contains("curta")
+                || normalizedPrompt.contains("curto")
+                || normalizedPrompt.contains("compacta")
+                || normalizedPrompt.contains("compacto"))) {
+            return 0;
+        }
+        return 50;
     }
 
     private boolean canMaterializeTableFormatActions(String userPrompt, JsonNode currentState) {
@@ -14485,8 +16684,13 @@ public class AiOrchestratorService {
             return answer.toString();
         }
 
+        ColumnDescriptor targetColumn = findPromptedFormatColumn(currentState, normalizedPrompt);
+        String targetField = targetColumn != null ? targetColumn.field : findPromptedDateColumnField(currentState, normalizedPrompt);
+        String targetColumnType = findCurrentStateColumnType(currentState, targetField);
         List<ContextOption> dateOptions = formatOptions.stream()
                 .filter(option -> option != null && isDateFormatOption(option.value))
+                .filter(option -> isBlank(targetColumnType)
+                        || isDateFormatOptionAllowedForType(option.value, normalizeText(targetColumnType)))
                 .collect(Collectors.toList());
         if (dateOptions.isEmpty()) {
             return null;
@@ -14497,20 +16701,60 @@ public class AiOrchestratorService {
         StringBuilder answer = new StringBuilder();
         answer.append("**Formatos de data disponíveis**\n\n");
         for (ContextOption option : dateOptions) {
-            answer.append("- `").append(option.value).append("`: ")
-                    .append(describeDateFormat(option.value));
-            if (option.example != null && !option.example.isBlank()) {
-                answer.append(" Exemplo: ").append(option.example).append(".");
+            String label = displayFormatOptionLabel(option);
+            String description = displayFormatOptionDescription(option);
+            answer.append("- **")
+                    .append(label != null && !label.isBlank() ? label : "Formato de data")
+                    .append("**: ")
+                    .append(stripTrailingPeriod(description));
+            String example = displayFormatOptionExample(option);
+            if (!example.isBlank() && !description.contains(example)) {
+                answer.append(". Exemplo: ").append(example);
             }
-            answer.append("\n");
+            answer.append(".\n");
         }
         answer.append("\n**Minha recomendação**\n\n");
-        answer.append("Para ").append(targetLabel).append(", eu recomendo `dd/MM/yyyy` em tabelas operacionais, porque é compacto e familiar no Brasil.");
-        answer.append(" Use `fullDate` quando a leitura por extenso for mais importante que densidade, e `MMM/yyyy` quando a análise for por mês ou competência.");
+        answer.append("Para ").append(targetLabel).append(", eu recomendo **Data brasileira** em tabelas operacionais, porque é compacta e familiar no Brasil.");
+        answer.append(" Use **Data completa** quando a leitura por extenso for mais importante que densidade, e **Mês e ano** quando a análise for por competência ou agrupamento mensal.");
         if (currentFormat != null && !currentFormat.isBlank()) {
-            answer.append("\n\nFormato atual da coluna: `").append(currentFormat).append("`.");
+            answer.append("\n\nFormato atual da coluna: **")
+                    .append(humanizeTableFormatForExplanation(currentFormat))
+                    .append("**.");
         }
         return answer.toString();
+    }
+
+    private String findCurrentStateColumnType(JsonNode currentState, String targetField) {
+        if (currentState == null || isBlank(targetField)) {
+            return null;
+        }
+        JsonNode columns = currentState.get("columns");
+        if (columns == null || !columns.isArray()) {
+            return null;
+        }
+        for (JsonNode column : columns) {
+            if (column == null || !column.isObject()) continue;
+            String field = textOrNull(column.get("field"));
+            if (targetField.equals(field)) {
+                String type = textOrNull(column.get("type"));
+                if (!isBlank(type)) {
+                    return type;
+                }
+                return textOrNull(column.get("inferredType"));
+            }
+        }
+        return null;
+    }
+
+    private String stripTrailingPeriod(String text) {
+        if (text == null) {
+            return "";
+        }
+        String trimmed = text.trim();
+        while (trimmed.endsWith(".")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1).trim();
+        }
+        return trimmed;
     }
 
     private boolean isConsultativeTableGuidanceQuestion(String userPrompt) {
@@ -14620,6 +16864,31 @@ public class AiOrchestratorService {
         return firstDateFormat;
     }
 
+    private String findPromptedDateColumnField(JsonNode currentState, String normalizedPrompt) {
+        JsonNode columns = currentState != null ? currentState.get("columns") : null;
+        if (columns == null || !columns.isArray()) {
+            return null;
+        }
+        String firstDateField = null;
+        for (JsonNode column : columns) {
+            if (column == null || !column.isObject()) continue;
+            String type = textOrNull(column.get("type"));
+            String field = textOrNull(column.get("field"));
+            String header = textOrNull(column.get("header"));
+            boolean isDate = "date".equalsIgnoreCase(type)
+                    || normalizeText(field).contains("data")
+                    || normalizeText(header).contains("data");
+            if (!isDate) continue;
+            if (firstDateField == null && !isBlank(field)) {
+                firstDateField = field;
+            }
+            if (matchesPromptedDateColumn(normalizedPrompt, field, header)) {
+                return field;
+            }
+        }
+        return firstDateField;
+    }
+
     private List<AiOption> buildTableDateFormatActionOptions(
             String userPrompt,
             JsonNode currentState,
@@ -14635,6 +16904,9 @@ public class AiOrchestratorService {
                     ? targetColumn.header
                     : targetField;
             return buildMaskOptionPayloads(targetField, targetLabel, buildMaskOptionsForField(targetField));
+        }
+        if (!canMaterializeTableFormatActions(userPrompt, currentState)) {
+            return List.of();
         }
         String targetLabel = findPromptedDateActionTargetLabel(currentState, normalizedPrompt);
         if (isBlank(targetLabel)) {
@@ -15073,6 +17345,14 @@ public class AiOrchestratorService {
             AiCallConfig callConfig,
             String category) {
         JsonNode definition = context != null ? context.getComponentDefinition() : null;
+        String runtimeMetadata = truncateBlock(
+                "intent_plan_runtime_metadata",
+                safeMetadata(formatRuntimeMetadata(
+                        request != null ? request.getDataProfile() : null,
+                        request != null ? request.getSchemaFields() : null,
+                        request != null ? request.getRuntimeState() : null,
+                        request != null ? request.getContextHints() : null)),
+                maxRuntimeMetadataChars);
         String prompt = buildIntentPlanPrompt(
                 context != null ? context.getComponentId() : null,
                 request != null ? request.getComponentType() : null,
@@ -15081,7 +17361,8 @@ public class AiOrchestratorService {
                 currentState,
                 componentContext,
                 definition,
-                category);
+                category,
+                runtimeMetadata);
         AiJsonSchema schema = buildIntentPlanSchema();
         JsonNode json = generateIntentPlanJson(prompt, schema, request, callConfig);
         if (json == null) {
@@ -15115,7 +17396,8 @@ public class AiOrchestratorService {
             JsonNode currentState,
             JsonNode componentContext,
             JsonNode componentDefinition,
-            String category) {
+            String category,
+            String runtimeMetadata) {
         String categoryOverride = category;
         if ("praxis-dynamic-page".equals(componentId) && "page".equalsIgnoreCase(category)) {
             categoryOverride = null;
@@ -15144,6 +17426,7 @@ public class AiOrchestratorService {
                         "USER_INPUT", safe(userPrompt),
                         "CAPABILITIES_RESTRICTION", caps,
                         "CURRENT_STATE_SUMMARY", stateSummary,
+                        "RUNTIME_METADATA", runtimeMetadata != null ? runtimeMetadata : "N/A",
                         "OPTIONS_BY_PATH", optionsSummary));
     }
 
@@ -15731,11 +18014,13 @@ public class AiOrchestratorService {
             JsonNode runtimeState,
             JsonNode contextHints) {
         ObjectNode metadata = objectMapper.createObjectNode();
-        if (dataProfile != null && !dataProfile.isNull()) {
-            metadata.set("dataProfile", dataProfile);
+        JsonNode selectedRecordsContext = resolveSelectedRecordsContext(runtimeState, contextHints);
+        if (selectedRecordsContext != null) {
+            metadata.set("selectedRecordsContext", selectedRecordsContext);
         }
-        if (schemaFields != null && !schemaFields.isNull()) {
-            metadata.set("schemaFields", schemaFields);
+        JsonNode filterFieldCatalog = resolveFilterFieldCatalogContext(contextHints);
+        if (filterFieldCatalog != null) {
+            metadata.set("filterFieldCatalog", filterFieldCatalog);
         }
         if (runtimeState != null && !runtimeState.isNull()) {
             metadata.set("runtimeState", runtimeState);
@@ -15743,10 +18028,105 @@ public class AiOrchestratorService {
         if (contextHints != null && !contextHints.isNull()) {
             metadata.set("contextHints", contextHints);
         }
+        if (schemaFields != null && !schemaFields.isNull()) {
+            metadata.set("schemaFields", schemaFields);
+        }
+        if (dataProfile != null && !dataProfile.isNull()) {
+            metadata.set("dataProfile", dataProfile);
+        }
         if (metadata.size() == 0) {
             return "N/A";
         }
         return metadata.toPrettyString();
+    }
+
+    private JsonNode resolveSelectedRecordsContext(JsonNode runtimeState, JsonNode contextHints) {
+        return bestSelectedRecordsContext(
+                pathOrMissing(runtimeState, "/selection"),
+                pathOrMissing(runtimeState, "/selectedRecordsContext"),
+                pathOrMissing(contextHints, "/selectedRecordsContext"),
+                pathOrMissing(contextHints, "/authoringContract/consultativeContext/selectedRecordsContext"));
+    }
+
+    private JsonNode resolveSelectedRecordsContextWithFilterCandidates(JsonNode runtimeState, JsonNode contextHints) {
+        return bestSelectedRecordsContext(
+                pathOrMissing(contextHints, "/authoringContract/consultativeContext/selectedRecordsContext"),
+                pathOrMissing(contextHints, "/selectedRecordsContext"),
+                pathOrMissing(runtimeState, "/selectedRecordsContext"),
+                pathOrMissing(runtimeState, "/selection"));
+    }
+
+    private boolean isUsefulSelectedRecordsContext(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return false;
+        }
+        return node.path("selectedCount").asInt(0) > 0
+                || node.path("sampleRows").isArray()
+                || node.path("selectedIds").isArray()
+                || node.path("filterCandidates").isArray();
+    }
+
+    private JsonNode bestSelectedRecordsContext(JsonNode... candidates) {
+        JsonNode best = null;
+        int bestScore = -1;
+        if (candidates == null) {
+            return null;
+        }
+        for (JsonNode candidate : candidates) {
+            if (!isUsefulSelectedRecordsContext(candidate)) {
+                continue;
+            }
+            int score = selectedRecordsContextScore(candidate);
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    private int selectedRecordsContextScore(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return 0;
+        }
+        int score = Math.max(0, node.path("selectedCount").asInt(0));
+        JsonNode selectedIds = node.get("selectedIds");
+        if (selectedIds != null && selectedIds.isArray()) {
+            score += selectedIds.size();
+        }
+        JsonNode sampleRows = node.get("sampleRows");
+        if (sampleRows != null && sampleRows.isArray()) {
+            score += sampleRows.size() * 10;
+            for (JsonNode row : sampleRows) {
+                if (row != null && row.isObject()) {
+                    score += row.size();
+                }
+            }
+        }
+        JsonNode filterCandidates = node.get("filterCandidates");
+        if (filterCandidates != null && filterCandidates.isArray()) {
+            score += 1000 + filterCandidates.size() * 20;
+        }
+        return score;
+    }
+
+    private JsonNode resolveFilterFieldCatalogContext(JsonNode contextHints) {
+        return firstObjectNode(
+                pathOrMissing(contextHints, "/authoringContract/componentEditPlan/filterFieldCatalog"),
+                pathOrMissing(contextHints, "/authoringContract/filterFieldCatalog"),
+                pathOrMissing(contextHints, "/filterFieldCatalog"));
+    }
+
+    private JsonNode firstObjectNode(JsonNode... candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        for (JsonNode candidate : candidates) {
+            if (candidate != null && candidate.isObject()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private String formatContextHints(JsonNode contextHints) {
@@ -15791,6 +18171,8 @@ public class AiOrchestratorService {
         copyNodeField(runtimeContract, merged, "activeResponseMode");
         copyNodeField(runtimeContract, merged, "selectedResponseMode");
         copyNodeField(runtimeContract, merged, "responseMode");
+        copyNodeField(runtimeContract, merged, "componentEditPlan");
+        copyNodeField(runtimeContract, merged, "runtimeOperations");
         return merged;
     }
 
@@ -15868,6 +18250,273 @@ public class AiOrchestratorService {
         return normalized;
     }
 
+    private JsonNode augmentAuthoringManifestFromRuntimeContract(
+            String componentId,
+            JsonNode authoringManifest,
+            JsonNode authoringContract) {
+        if (!COMPONENT_ID_TABLE.equals(componentId)) {
+            return authoringManifest;
+        }
+        ObjectNode manifest = authoringManifest != null && authoringManifest.isObject()
+                ? ((ObjectNode) authoringManifest).deepCopy()
+                : objectMapper.createObjectNode();
+        if (!manifest.hasNonNull("componentId")) {
+            manifest.put("componentId", componentId);
+        }
+        ArrayNode operations = manifest.get("operations") instanceof ArrayNode existingOperations
+                ? existingOperations
+                : manifest.putArray("operations");
+        Set<String> existingOperationIds = new LinkedHashSet<>();
+        for (JsonNode operation : operations) {
+            String operationId = textOrNull(operation.get("operationId"));
+            if (!isBlank(operationId)) {
+                existingOperationIds.add(operationId);
+            }
+        }
+        Set<String> operationIdsToMaterialize = tableRuntimeOperationIds(authoringContract);
+        operationIdsToMaterialize.addAll(tableComponentEditPlanOperationIds(authoringContract));
+        operationIdsToMaterialize.addAll(tableExampleOperationIds(manifest));
+        if (operationIdsToMaterialize.isEmpty()) {
+            return authoringManifest;
+        }
+        for (String operationId : operationIdsToMaterialize) {
+            if (isBlank(operationId) || existingOperationIds.contains(operationId)) {
+                continue;
+            }
+            ObjectNode operation = tableManifestOperationFromRuntimeContract(operationId);
+            if (operation != null) {
+                appendManifestEditableTarget(manifest, operation);
+                operations.add(operation);
+                existingOperationIds.add(operationId);
+            }
+        }
+        return manifest;
+    }
+
+    private Set<String> tableComponentEditPlanOperationIds(JsonNode authoringContract) {
+        Set<String> operationIds = new LinkedHashSet<>();
+        if (authoringContract == null || !authoringContract.isObject()) {
+            return operationIds;
+        }
+        JsonNode allowedOperationIds = authoringContract.at("/componentEditPlan/allowedOperationIds");
+        if (allowedOperationIds != null && allowedOperationIds.isArray()) {
+            for (JsonNode allowedOperationIdNode : allowedOperationIds) {
+                String operationId = textOrNull(allowedOperationIdNode);
+                if (!isBlank(operationId)) {
+                    operationIds.add(operationId);
+                }
+            }
+        }
+        return operationIds;
+    }
+
+    private Set<String> tableRuntimeOperationIds(JsonNode authoringContract) {
+        Set<String> operationIds = new LinkedHashSet<>();
+        if (authoringContract == null || !authoringContract.isObject()) {
+            return operationIds;
+        }
+        JsonNode allowedOperationIds = authoringContract.at("/runtimeOperations/allowedOperationIds");
+        if (allowedOperationIds != null && allowedOperationIds.isArray()) {
+            for (JsonNode allowedOperationIdNode : allowedOperationIds) {
+                String operationId = textOrNull(allowedOperationIdNode);
+                if (!isBlank(operationId)) {
+                    operationIds.add(operationId);
+                }
+            }
+        }
+        return operationIds;
+    }
+
+    private Set<String> tableExampleOperationIds(JsonNode manifest) {
+        Set<String> operationIds = new LinkedHashSet<>();
+        if (manifest == null || !manifest.isObject()) {
+            return operationIds;
+        }
+        JsonNode examples = manifest.get("examples");
+        if (examples != null && examples.isArray()) {
+            for (JsonNode example : examples) {
+                String operationId = textOrNull(example.get("operationId"));
+                if (!isBlank(operationId)) {
+                    operationIds.add(operationId);
+                }
+            }
+        }
+        return operationIds;
+    }
+
+    private void appendManifestEditableTarget(ObjectNode manifest, JsonNode operation) {
+        if (manifest == null || operation == null || !operation.isObject()) {
+            return;
+        }
+        String targetKind = textOrNull(operation.at("/target/kind"));
+        String resolver = textOrNull(operation.at("/target/resolver"));
+        if (isBlank(targetKind) || isBlank(resolver)) {
+            return;
+        }
+        ArrayNode editableTargets = manifest.get("editableTargets") instanceof ArrayNode existingTargets
+                ? existingTargets
+                : manifest.putArray("editableTargets");
+        for (JsonNode target : editableTargets) {
+            if (targetKind.equals(textOrNull(target.get("kind")))
+                    && resolver.equals(textOrNull(target.get("resolver")))) {
+                return;
+            }
+        }
+        ObjectNode target = objectMapper.createObjectNode();
+        target.put("kind", targetKind);
+        target.put("resolver", resolver);
+        editableTargets.add(target);
+    }
+
+    private ObjectNode tableManifestOperationFromRuntimeContract(String operationId) {
+        return switch (operationId) {
+            case "column.renderer.set" -> tableManifestColumnRendererOperation();
+            case "column.valueMapping.set" -> tableManifestColumnValueMappingOperation();
+            case "column.conditionalRenderer.add" -> tableManifestColumnConditionalRendererOperation();
+            case "column.conditionalStyle.add" -> tableManifestColumnConditionalStyleOperation();
+            case "table.filter.apply" -> tableManifestRuntimeFilterApplyOperation();
+            case "table.export.run" -> tableManifestRuntimeExportRunOperation();
+            default -> null;
+        };
+    }
+
+    private ObjectNode tableManifestRuntimeFilterApplyOperation() {
+        ObjectNode operation = tableManifestRuntimeOperation(
+                "table.filter.apply",
+                "Aplica filtros na tabela em runtime");
+        ObjectNode inputSchema = operation.putObject("inputSchema");
+        inputSchema.put("type", "object");
+        inputSchema.putArray("required").add("criteria");
+        ObjectNode properties = inputSchema.putObject("properties");
+        properties.putObject("criteria").put("type", "object");
+        properties.putObject("source").put("type", "string");
+        return operation;
+    }
+
+    private ObjectNode tableManifestRuntimeExportRunOperation() {
+        ObjectNode operation = tableManifestRuntimeOperation(
+                "table.export.run",
+                "Executa exportacao da tabela em runtime");
+        ObjectNode inputSchema = operation.putObject("inputSchema");
+        inputSchema.put("type", "object");
+        ArrayNode required = inputSchema.putArray("required");
+        required.add("format");
+        ObjectNode properties = inputSchema.putObject("properties");
+        ObjectNode format = properties.putObject("format");
+        format.put("type", "string");
+        format.putArray("enum").add("excel").add("pdf").add("csv").add("json").add("print");
+        ObjectNode scope = properties.putObject("scope");
+        scope.put("type", "string");
+        scope.putArray("enum").add("auto").add("selected").add("filtered").add("currentPage").add("all");
+        return operation;
+    }
+
+    private ObjectNode tableManifestRuntimeOperation(String operationId, String title) {
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", operationId);
+        operation.put("title", title);
+        operation.put("scope", "runtime");
+        operation.put("submissionImpact", "runtime");
+        operation.put("requiresConfirmation", false);
+        operation.putArray("affectedPaths").add("tableRuntimeOperations");
+        return operation;
+    }
+
+    private ObjectNode tableManifestColumnRendererOperation() {
+        ObjectNode operation = tableManifestColumnOperation(
+                "column.renderer.set",
+                "renderer",
+                "renderer-in-column");
+        operation.set("inputSchema", tableRendererInputSchema());
+        return operation;
+    }
+
+    private ObjectNode tableManifestColumnValueMappingOperation() {
+        ObjectNode operation = tableManifestColumnOperation(
+                "column.valueMapping.set",
+                "column",
+                "column-by-field");
+        ObjectNode inputSchema = operation.putObject("inputSchema");
+        inputSchema.put("type", "object");
+        inputSchema.putArray("required").add("valueMapping");
+        inputSchema.putObject("properties").putObject("valueMapping").put("type", "object");
+        return operation;
+    }
+
+    private ObjectNode tableManifestColumnConditionalRendererOperation() {
+        ObjectNode operation = tableManifestColumnOperation(
+                "column.conditionalRenderer.add",
+                "conditionalRenderer",
+                "conditional-renderer-in-column");
+        ObjectNode inputSchema = operation.putObject("inputSchema");
+        inputSchema.put("type", "object");
+        ArrayNode required = inputSchema.putArray("required");
+        required.add("id");
+        required.add("condition");
+        ObjectNode properties = inputSchema.putObject("properties");
+        properties.putObject("id").put("type", "string");
+        properties.putObject("condition").put("type", "object");
+        properties.set("renderer", tableRendererInputSchema());
+        properties.putObject("tooltip").put("type", "object");
+        properties.putObject("animation").put("type", "object");
+        properties.putObject("effects").put("type", "array");
+        properties.putObject("enabled").put("type", "boolean");
+        properties.putObject("description").put("type", "string");
+        return operation;
+    }
+
+    private ObjectNode tableManifestColumnConditionalStyleOperation() {
+        ObjectNode operation = tableManifestColumnOperation(
+                "column.conditionalStyle.add",
+                "rule",
+                "style-rule-in-column-or-row");
+        ObjectNode inputSchema = operation.putObject("inputSchema");
+        inputSchema.put("type", "object");
+        ArrayNode required = inputSchema.putArray("required");
+        required.add("id");
+        required.add("condition");
+        ObjectNode properties = inputSchema.putObject("properties");
+        properties.putObject("id").put("type", "string");
+        properties.putObject("condition").put("type", "object");
+        properties.putObject("style").put("type", "object");
+        properties.putObject("tooltip").put("type", "object");
+        properties.putObject("description").put("type", "string");
+        return operation;
+    }
+
+    private ObjectNode tableManifestColumnOperation(
+            String operationId,
+            String targetKind,
+            String resolver) {
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", operationId);
+        operation.put("scope", "column");
+        operation.put("targetKind", targetKind);
+        ObjectNode target = operation.putObject("target");
+        target.put("kind", targetKind);
+        target.put("resolver", resolver);
+        target.put("ambiguityPolicy", "fail");
+        target.put("required", true);
+        return operation;
+    }
+
+    private ObjectNode tableRendererInputSchema() {
+        ObjectNode inputSchema = objectMapper.createObjectNode();
+        inputSchema.put("type", "object");
+        inputSchema.putArray("required").add("type");
+        ObjectNode properties = inputSchema.putObject("properties");
+        properties.putObject("type").put("type", "string");
+        properties.putObject("badge").put("type", "object");
+        properties.putObject("chip").put("type", "object");
+        properties.putObject("tooltip").put("type", "object");
+        properties.putObject("compose").put("type", "object");
+        properties.putObject("avatar").put("type", "object");
+        properties.putObject("button").put("type", "object");
+        properties.putObject("icon").put("type", "object");
+        properties.putObject("link").put("type", "object");
+        return inputSchema;
+    }
+
     private JsonNode buildAuthoringContractFromManifest(AiContextDTO context, JsonNode manifest) {
         ObjectNode contract = objectMapper.createObjectNode();
         contract.put("kind", "praxis.component-authoring-context");
@@ -15910,6 +18559,8 @@ public class AiOrchestratorService {
         ArrayNode instructions = objectMapper.createArrayNode();
         instructions.add("Return componentEditPlan with operations[].operationId from this manifest only.");
         instructions.add("Each operation must include target and input matching the operation target and inputSchema.");
+        instructions.add("If the user request requires multiple allowed operations, return all of them in the requested execution order instead of choosing only the first matching operation.");
+        instructions.add("For combined table runtime requests that apply filters and then export the filtered result, include table.filter.apply first and table.export.run second with input.scope=filtered.");
         instructions.add("Do not invent operations, target kinds, validators, aliases, intent examples or patch paths.");
         instructions.add("For destructive operations, set confirmed=true only when the user explicitly confirmed.");
         contract.set("instructions", instructions);
@@ -15935,6 +18586,40 @@ public class AiOrchestratorService {
             return "N/A";
         }
         return authoringContract.toPrettyString();
+    }
+
+    private String formatAuthoringResponseModeContract(JsonNode authoringContract) {
+        if (authoringContract == null || authoringContract.isNull() || authoringContract.isMissingNode()) {
+            return "N/A";
+        }
+        ObjectNode compact = objectMapper.createObjectNode();
+        copyNodeField(authoringContract, compact, "responseModes");
+        copyNodeField(authoringContract, compact, "activeResponseMode");
+        copyNodeField(authoringContract, compact, "selectedResponseMode");
+        copyNodeField(authoringContract, compact, "responseMode");
+        copyNodeField(authoringContract, compact, "consultativeContext");
+        copyNodeField(authoringContract, compact, "runtimeOperations");
+        copyNodeField(authoringContract, compact, "instructions");
+        return compact.size() > 0 ? compact.toPrettyString() : authoringContract.toPrettyString();
+    }
+
+    private String formatQaAuthoringContract(JsonNode authoringContract) {
+        if (authoringContract == null || authoringContract.isNull() || authoringContract.isMissingNode()) {
+            return "N/A";
+        }
+        ObjectNode compact = objectMapper.createObjectNode();
+        copyNodeField(authoringContract, compact, "responseModes");
+        copyNodeField(authoringContract, compact, "activeResponseMode");
+        copyNodeField(authoringContract, compact, "selectedResponseMode");
+        copyNodeField(authoringContract, compact, "responseMode");
+        copyNodeField(authoringContract, compact, "consultativeContext");
+        copyNodeField(authoringContract, compact, "formatPresets");
+        copyNodeField(authoringContract, compact, "rendererPresets");
+        copyNodeField(authoringContract, compact, "examples");
+        copyNodeField(authoringContract, compact, "capabilities");
+        copyNodeField(authoringContract, compact, "constraints");
+        copyNodeField(authoringContract, compact, "instructions");
+        return compact.size() > 0 ? compact.toPrettyString() : authoringContract.toPrettyString();
     }
 
     private String safeMetadata(String metadata) {
@@ -16996,7 +19681,7 @@ public class AiOrchestratorService {
         for (ContextOption option : options) {
             if (option == null) continue;
             String value = option.value != null ? option.value : option.label;
-            String label = option.label != null ? option.label : option.value;
+            String label = displayFormatOptionLabel(option);
             if (value == null || value.isBlank()) {
                 continue;
             }
@@ -17010,20 +19695,99 @@ public class AiOrchestratorService {
             selection.put("mode", "format");
             ObjectNode presentation = hints.putObject("presentation");
             presentation.put("kind", "guided-option");
-            presentation.put("description", option.example != null && !option.example.isBlank()
-                    ? "Exemplo: " + option.example + "."
-                    : "Aplica este formato na coluna.");
+            presentation.put("description", displayFormatOptionDescription(option));
             presentation.put("ctaLabel", "Aplicar formato");
             presentation.put("icon", "format_list_numbered");
             presentation.put("tone", "primary");
             out.add(AiOption.builder()
                     .value(value)
                     .label(label != null && !label.isBlank() ? label : value)
-                    .example(option.example)
+                    .example(displayFormatOptionExample(option))
                     .contextHints(hints)
                     .build());
         }
         return out;
+    }
+
+    private String displayFormatOptionLabel(ContextOption option) {
+        if (option == null) {
+            return null;
+        }
+        String value = option.value != null ? option.value.trim() : "";
+        String normalizedValue = normalizeText(value);
+        return switch (normalizedValue) {
+            case "shortdate" -> "Data curta";
+            case "mediumdate" -> "Data média";
+            case "longdate" -> "Data por extenso";
+            case "fulldate" -> "Data completa";
+            case "mmmyyyy" -> "Mês e ano";
+            case "ddmmyyyy" -> "Data brasileira";
+            case "yyyymmdd" -> "Data técnica";
+            case "yyyymmddhhmm" -> "Data e hora técnica";
+            case "shorttime" -> "Hora curta";
+            case "short" -> "Data e hora curtas";
+            case "activeinactive" -> "Ativo/Inativo";
+            case "yesno" -> "Sim/Não";
+            case "truefalse" -> "Verdadeiro/Falso";
+            case "onoff" -> "Ligado/Desligado";
+            default -> {
+                if (normalizedValue.startsWith("customsimnao")) {
+                    yield "Sim/Não personalizado";
+                }
+                yield option.label != null && !option.label.isBlank() ? option.label : option.value;
+            }
+        };
+    }
+
+    private String displayFormatOptionDescription(ContextOption option) {
+        if (option == null) {
+            return "Aplica este formato na coluna.";
+        }
+        String value = option.value != null ? option.value.trim() : "";
+        String normalizedValue = normalizeText(value);
+        String example = displayFormatOptionExample(option);
+        String suffix = !example.isBlank() ? " Exemplo: " + example + "." : "";
+        return switch (normalizedValue) {
+            case "shortdate" -> "Mostra a data em formato curto regional." + suffix;
+            case "mediumdate" -> "Mostra a data com mês abreviado, mantendo boa leitura." + suffix;
+            case "longdate" -> "Mostra a data por extenso sem o dia da semana." + suffix;
+            case "fulldate" -> "Mostra a data completa, incluindo o dia da semana." + suffix;
+            case "mmmyyyy" -> "Mostra apenas mês e ano, útil para competência ou agrupamento mensal." + suffix;
+            case "ddmmyyyy" -> "Mostra dia, mês e ano no padrão brasileiro." + suffix;
+            case "yyyymmdd" -> "Mostra a data em padrão técnico ISO simplificado." + suffix;
+            case "yyyymmddhhmm" -> "Mostra data e hora em padrão técnico." + suffix;
+            case "shorttime" -> "Mostra apenas a hora curta." + suffix;
+            case "short" -> "Mostra data e hora curtas." + suffix;
+            case "activeinactive" -> "Mostra valores booleanos como Ativo ou Inativo." + suffix;
+            case "yesno" -> "Mostra valores booleanos como Sim ou Não." + suffix;
+            case "truefalse" -> "Mostra valores booleanos preservando verdadeiro/falso." + suffix;
+            case "onoff" -> "Mostra valores booleanos como Ligado ou Desligado." + suffix;
+            default -> !example.isBlank() ? "Exemplo: " + example + "." : "Aplica este formato na coluna.";
+        };
+    }
+
+    private String displayFormatOptionExample(ContextOption option) {
+        if (option == null) {
+            return "";
+        }
+        String value = option.value != null ? option.value.trim() : "";
+        String normalizedValue = normalizeText(value);
+        String canonicalExample = switch (normalizedValue) {
+            case "shortdate", "ddmmyyyy" -> "13/06/2022";
+            case "mediumdate" -> "13 de jun. de 2022";
+            case "longdate" -> "13 de junho de 2022";
+            case "fulldate" -> "segunda-feira, 13 de junho de 2022";
+            case "mmmyyyy" -> "jun./2022";
+            case "yyyymmdd" -> "2022-06-13";
+            case "yyyymmddhhmm" -> "2022-06-13 09:30";
+            case "shorttime" -> "09:30";
+            case "short" -> "13/06/2022 09:30";
+            default -> null;
+        };
+        if (canonicalExample != null) {
+            return canonicalExample;
+        }
+        return option.example != null ? option.example.trim() : "";
     }
 
     private List<AiOption> buildRendererOptionPayloads(String targetField, List<String> options) {
@@ -17740,7 +20504,49 @@ public class AiOrchestratorService {
         if (computedHints != null) {
             return buildComputedPatchFromHints(computedHints);
         }
+        JsonNode valueMappingHints = resolveValueMappingHintsNode(contextHints);
+        if (valueMappingHints != null) {
+            JsonNode patch = buildValueMappingPatchFromHints(valueMappingHints);
+            if (patch != null) {
+                return patch;
+            }
+        }
         return null;
+    }
+
+    private JsonNode resolveValueMappingHintsNode(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode valueMapping = contextHints.get("valueMapping");
+        if (valueMapping != null && valueMapping.isObject()) {
+            return valueMapping;
+        }
+        return null;
+    }
+
+    private JsonNode buildValueMappingPatchFromHints(JsonNode valueMappingHints) {
+        if (valueMappingHints == null || !valueMappingHints.isObject()) {
+            return null;
+        }
+        String field = textOrNull(valueMappingHints.get("field"));
+        JsonNode values = valueMappingHints.get("values");
+        if (isBlank(field) || values == null || !values.isObject() || values.size() == 0) {
+            return null;
+        }
+        ObjectNode patch = objectMapper.createObjectNode();
+        ArrayNode columns = patch.putArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", field);
+        ObjectNode valueMapping = column.putObject("valueMapping");
+        values.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            String value = textOrNull(entry.getValue());
+            if (!isBlank(key) && !isBlank(value)) {
+                valueMapping.put(key, value);
+            }
+        });
+        return valueMapping.size() > 0 ? patch : null;
     }
 
     private JsonNode resolveBadgeHintsNode(JsonNode contextHints) {
@@ -18716,6 +21522,16 @@ public class AiOrchestratorService {
 
     private record FilterFieldDescriptor(String name, String label, List<String> candidates) {}
 
+    private record RuntimeFilterCriterion(String filterField, JsonNode criterion) {}
+
+    private record SelectedRecordFilterCandidate(
+            String field,
+            String label,
+            JsonNode criterionKind,
+            JsonNode criteria,
+            JsonNode displayValues,
+            JsonNode raw) {}
+
     private String inferDefaultFilterType(JsonNode schemaFields, JsonNode dataProfile, List<String> fields) {
         if ((schemaFields == null || schemaFields.isNull()) && (dataProfile == null || dataProfile.isNull())) {
             return null;
@@ -19532,6 +22348,22 @@ public class AiOrchestratorService {
                 appendColumnPropertyOperation(operations, operationsById, field, column, "filterable", "column.filterable.set");
                 appendColumnPropertyOperation(operations, operationsById, field, column, "width", "column.width.set");
                 appendColumnPropertyOperation(operations, operationsById, field, column, "sticky", "column.sticky.set");
+                appendColumnObjectOperation(operations, operationsById, field, column, "renderer", "column.renderer.set");
+                appendColumnObjectOperation(operations, operationsById, field, column, "valueMapping", "column.valueMapping.set");
+                appendColumnRulesOperation(
+                        operations,
+                        operationsById,
+                        field,
+                        column.get("conditionalStyles"),
+                        "column.conditionalStyle.add",
+                        "style");
+                appendColumnRulesOperation(
+                        operations,
+                        operationsById,
+                        field,
+                        column.get("conditionalRenderers"),
+                        "column.conditionalRenderer.add",
+                        "renderer");
             }
         }
 
@@ -19590,6 +22422,111 @@ public class AiOrchestratorService {
         target.put("id", field);
         target.put("field", field);
         operation.putObject("input").set(property, column.get(property).deepCopy());
+    }
+
+    private void appendColumnObjectOperation(
+            ArrayNode operations,
+            Map<String, JsonNode> operationsById,
+            String field,
+            JsonNode column,
+            String property,
+            String operationId) {
+        if (operations == null
+                || operationsById == null
+                || !operationsById.containsKey(operationId)
+                || isBlank(field)
+                || column == null
+                || !column.has(property)
+                || column.get(property) == null
+                || !column.get(property).isObject()
+                || column.get(property).isEmpty()) {
+            return;
+        }
+        ObjectNode operation = operations.addObject();
+        operation.put("operationId", operationId);
+        ObjectNode target = operation.putObject("target");
+        target.put("kind", textOrNull(operationsById.get(operationId).at("/target/kind")));
+        target.put("id", field);
+        target.put("field", field);
+        if ("column.renderer.set".equals(operationId)) {
+            operation.set("input", column.get(property).deepCopy());
+            return;
+        }
+        ObjectNode input = operation.putObject("input");
+        input.set(property, column.get(property).deepCopy());
+    }
+
+    private void appendColumnRulesOperation(
+            ArrayNode operations,
+            Map<String, JsonNode> operationsById,
+            String field,
+            JsonNode rules,
+            String operationId,
+            String defaultIdPrefix) {
+        if (operations == null
+                || operationsById == null
+                || !operationsById.containsKey(operationId)
+                || isBlank(field)
+                || rules == null
+                || !rules.isArray()
+                || rules.isEmpty()) {
+            return;
+        }
+        int index = 0;
+        for (JsonNode rule : rules) {
+            if (rule == null || !rule.isObject() || rule.isEmpty()) {
+                continue;
+            }
+            ObjectNode operation = operations.addObject();
+            operation.put("operationId", operationId);
+            ObjectNode target = operation.putObject("target");
+            target.put("kind", textOrNull(operationsById.get(operationId).at("/target/kind")));
+            target.put("id", field);
+            target.put("field", field);
+            ObjectNode input = ((ObjectNode) rule).deepCopy();
+            if (!input.has("id") || isBlankTextNode(input.get("id"))) {
+                input.put("id", defaultIdPrefix + "-" + field + "-" + (++index));
+            }
+            normalizeTableRuleConditionInput(input, field);
+            operation.set("input", input);
+        }
+    }
+
+    private void normalizeTableRuleConditionInput(ObjectNode input, String fallbackField) {
+        if (input == null || !input.has("condition") || !input.get("condition").isTextual()) {
+            return;
+        }
+        JsonNode normalized = parseSimpleTableCondition(input.get("condition").asText(), fallbackField);
+        if (normalized != null && normalized.isObject()) {
+            input.set("condition", normalized);
+        }
+    }
+
+    private JsonNode parseSimpleTableCondition(String condition, String fallbackField) {
+        if (isBlank(condition)) {
+            return null;
+        }
+        Matcher matcher = Pattern
+                .compile("^\\s*([A-Za-z_][A-Za-z0-9_.-]*)\\s*(==|===|=)\\s*['\\\"]?([^'\\\"]+)['\\\"]?\\s*$")
+                .matcher(condition);
+        if (!matcher.matches()) {
+            return null;
+        }
+        String field = matcher.group(1);
+        String value = matcher.group(3);
+        if (isBlank(field)) {
+            field = fallbackField;
+        }
+        if (isBlank(field) || isBlank(value)) {
+            return null;
+        }
+        ObjectNode normalized = objectMapper.createObjectNode();
+        ArrayNode args = normalized.putArray("==");
+        ObjectNode var = objectMapper.createObjectNode();
+        var.put("var", field);
+        args.add(var);
+        args.add(value.trim());
+        return normalized;
     }
 
     private boolean looksLikeTableFormatCommand(String promptLower) {
@@ -21590,18 +24527,24 @@ public class AiOrchestratorService {
                 continue;
             }
             String normalized = value.trim().toUpperCase(Locale.ROOT);
+            String semantic = normalizeText(value);
             if ("ERROR".equals(normalized) || "FAILED".equals(normalized)) {
                 out.put(value, "warn");
             } else if ("SUCCESS".equals(normalized) || "OK".equals(normalized)) {
                 out.put(value, "success");
             } else if ("PENDING".equals(normalized)) {
                 out.put(value, "accent");
-            } else if ("HIGH".equals(normalized)) {
+            } else if ("HIGH".equals(normalized) || "ALTA".equals(normalized)) {
                 out.put(value, "warn");
-            } else if ("MEDIUM".equals(normalized)) {
+            } else if ("MEDIUM".equals(normalized) || "MEDIA".equals(normalized)) {
                 out.put(value, "accent");
-            } else if ("LOW".equals(normalized)) {
+            } else if ("LOW".equals(normalized) || "BAIXA".equals(normalized)) {
                 out.put(value, "success");
+            } else if ("CRITICAL".equals(normalized)
+                    || "CRITICA".equals(normalized)
+                    || "critical".equals(semantic)
+                    || "critica".equals(semantic)) {
+                out.put(value, "warn");
             }
         }
         if (out.isEmpty()) {
@@ -21860,6 +24803,38 @@ public class AiOrchestratorService {
             return errorWithWarnings(semanticCheck.message, outWarnings);
         }
         JsonNode normalizedPatch = normalizePatch(componentId, semanticCheck.patch);
+        if (COMPONENT_ID_TABLE.equals(componentId)) {
+            JsonNode authoringManifest = turnAuthoringManifest.get();
+            JsonNode componentEditPlan = buildComponentEditPlanFromPatch(
+                    componentId,
+                    normalizedPatch,
+                    authoringManifest,
+                    outWarnings);
+            if (componentEditPlan != null && componentEditPlan.isObject()) {
+                componentEditPlan = augmentTableCategoricalRendererPlan(
+                        componentEditPlan,
+                        componentId,
+                        currentState,
+                        null,
+                        authoringManifest,
+                        outWarnings);
+                List<String> validationFailures = validateComponentEditPlanAgainstAuthoringManifest(
+                        componentEditPlan,
+                        authoringManifest);
+                if (validationFailures.isEmpty()) {
+                    if (authoringManifest != null && authoringManifest.isObject()) {
+                        outWarnings.add("component-edit-plan-validated-by-authoring-manifest");
+                    }
+                    return AiOrchestratorResponse.builder()
+                            .type("patch")
+                            .componentId(componentId)
+                            .componentEditPlan(componentEditPlan)
+                            .warnings(outWarnings.isEmpty() ? null : outWarnings)
+                            .build();
+                }
+                outWarnings.add("component-edit-plan-validation-failures:" + String.join("; ", validationFailures));
+            }
+        }
         List<AiCapability> allowedCaps = mergeCapabilities(configCapabilities, componentCapabilities);
         SanitizeResult sanitizeResult = sanitizePatch(normalizedPatch, allowedCaps, componentId);
         List<String> sanitizeWarnings = filterInternalWarnings(
@@ -22785,6 +25760,11 @@ public class AiOrchestratorService {
                 result.get("componentEditPlan"),
                 authoringManifest,
                 responseWarnings);
+        componentEditPlan = augmentTableCategoricalRendererPlan(
+                componentEditPlan,
+                request,
+                authoringManifest,
+                responseWarnings);
         List<String> validationFailures = validateComponentEditPlanAgainstAuthoringManifest(
                 componentEditPlan,
                 authoringManifest);
@@ -22803,9 +25783,762 @@ public class AiOrchestratorService {
                 .componentId(request != null ? request.getComponentId() : null)
                 .componentType(request != null ? request.getComponentType() : null)
                 .componentEditPlan(componentEditPlan)
-                .explanation(textOrNull(result.get("explanation")))
+                .explanation(polishComponentEditPlanExplanation(textOrNull(result.get("explanation"))))
                 .warnings(responseWarnings.isEmpty() ? null : List.copyOf(responseWarnings))
                 .build();
+    }
+
+    private String polishComponentEditPlanExplanation(String explanation) {
+        if (isBlank(explanation)) {
+            return explanation;
+        }
+        return explanation
+                .replace("condicao", "condição")
+                .replace("Condicao", "Condição")
+                .replaceAll("(?i)\\s+quando\\s+a\\s+condição\\s+for\\s+atendida\\s+usando\\s+", " usando ")
+                .replaceAll("(?i)\\s+quando\\s+a\\s+condição\\s+for\\s+atendida", "")
+                .replaceAll("(?i)\\bcom\\s+tooltip\\s+([^\\.\"\\n]+)\\.", "com dica \"$1\".")
+                .replaceAll("(?i)\\btooltip\\s+([^\\.\"\\n]+)\\.", "dica \"$1\".")
+                .replaceAll("(?i)dica\\s+\"Adicionar\\s+", "dica \"");
+    }
+
+    private JsonNode augmentTableCategoricalRendererPlan(
+            JsonNode componentEditPlan,
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        return augmentTableCategoricalRendererPlan(
+                componentEditPlan,
+                request != null ? request.getComponentId() : null,
+                request != null ? request.getCurrentState() : null,
+                request,
+                authoringManifest,
+                warnings);
+    }
+
+    private JsonNode augmentTableCategoricalRendererPlan(
+            JsonNode componentEditPlan,
+            String componentId,
+            JsonNode currentState,
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        if (componentEditPlan == null
+                || !componentEditPlan.isObject()
+                || !COMPONENT_ID_TABLE.equals(componentId)
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return componentEditPlan;
+        }
+        JsonNode operations = componentEditPlan.get("operations");
+        if (operations == null || !operations.isArray() || operations.isEmpty()) {
+            return componentEditPlan;
+        }
+        Map<String, JsonNode> manifestOperations = indexManifestOperations(authoringManifest, new ArrayList<>());
+        JsonNode conditionalRendererOperation = manifestOperations.get("column.conditionalRenderer.add");
+        if (conditionalRendererOperation == null || conditionalRendererOperation.isMissingNode()) {
+            return componentEditPlan;
+        }
+
+        ObjectNode augmented = ((ObjectNode) componentEditPlan).deepCopy();
+        ArrayNode augmentedOperations = (ArrayNode) augmented.withArray("operations");
+        boolean changed = promoteCategoricalStyleOperationsToRendererRefinements(
+                augmentedOperations,
+                currentState,
+                request != null ? request.getUserPrompt() : null,
+                warnings);
+
+        Map<String, String> rendererTypeByField = new LinkedHashMap<>();
+        Map<String, Set<String>> renderedValuesByField = new LinkedHashMap<>();
+        for (JsonNode operation : augmentedOperations) {
+            if (operation == null || !operation.isObject()) {
+                continue;
+            }
+            String operationId = componentEditPlanOperationId(operation);
+            String field = textOrNull(operation.at("/target/field"));
+            if (isBlank(field)) {
+                field = textOrNull(operation.at("/target/id"));
+            }
+            if (isBlank(field)) {
+                continue;
+            }
+            JsonNode input = operation.get("input");
+            if ("column.renderer.set".equals(operationId)) {
+                String rendererType = normalizeBadgeLikeRendererType(textOrNull(input != null ? input.get("type") : null));
+                if (rendererType != null) {
+                    rendererTypeByField.putIfAbsent(field, rendererType);
+                }
+                continue;
+            }
+            if ("column.conditionalRenderer.add".equals(operationId)) {
+                String rendererType = normalizeBadgeLikeRendererType(textOrNull(input != null ? input.at("/renderer/type") : null));
+                if (rendererType != null) {
+                    rendererTypeByField.putIfAbsent(field, rendererType);
+                }
+                String value = extractEqualityConditionLiteral(input != null ? input.get("condition") : null, field);
+                if (!isBlank(value)) {
+                    renderedValuesByField
+                            .computeIfAbsent(field, ignored -> new LinkedHashSet<>())
+                            .add(value);
+                }
+            }
+        }
+        if (rendererTypeByField.isEmpty()) {
+            return changed ? augmented : componentEditPlan;
+        }
+
+        for (Map.Entry<String, String> entry : rendererTypeByField.entrySet()) {
+            String field = entry.getKey();
+            String rendererType = entry.getValue();
+            JsonNode dataProfile = request != null ? request.getDataProfile() : turnDataProfile.get();
+            BadgeValuesContext context = request != null
+                    ? resolveBadgeValuesContext(request, field)
+                    : new BadgeValuesContext(
+                            limitBadgeValues(extractBadgeValuesFromProfile(dataProfile, field)),
+                            extractInferredType(dataProfile, field),
+                            null);
+            List<String> values = context != null ? context.values : List.of();
+            if (values == null || values.isEmpty()) {
+                values = extractBadgeValuesFromCurrentState(currentState, field);
+            }
+            if (values == null || values.size() < 2) {
+                continue;
+            }
+            Set<String> renderedValues = renderedValuesByField
+                    .computeIfAbsent(field, ignored -> new LinkedHashSet<>());
+            boolean isBoolean = context != null
+                    && (isBooleanType(context.inferredType, context.explicitType) || looksLikeBooleanValues(values));
+            boolean quoteValues = !isBoolean;
+            Map<String, String> colorMap = buildDefaultColorMap(
+                    values,
+                    request != null ? request.getUserPrompt() : null);
+            if (normalizeCategoricalRendererOperationVisuals(
+                    augmentedOperations,
+                    field,
+                    colorMap,
+                    request != null ? request.getUserPrompt() : null)) {
+                changed = true;
+            }
+            if (renderedValues.containsAll(values)) {
+                continue;
+            }
+            int index = renderedValues.size();
+            for (String value : values) {
+                if (isBlank(value) || renderedValues.contains(value)) {
+                    continue;
+                }
+                JsonNode operation = buildCategoricalConditionalRendererOperation(
+                        conditionalRendererOperation,
+                        field,
+                        rendererType,
+                        value,
+                        colorMap.get(value),
+                        quoteValues,
+                        ++index);
+                if (operation != null) {
+                    augmentedOperations.add(operation);
+                    renderedValues.add(value);
+                    changed = true;
+                }
+            }
+        }
+        if (changed && warnings != null) {
+            warnings.add("table-categorical-renderer-values-grounded-from-data-profile");
+        }
+        return changed ? augmented : componentEditPlan;
+    }
+
+    private boolean promoteCategoricalStyleOperationsToRendererRefinements(
+            ArrayNode operations,
+            JsonNode currentState,
+            String prompt,
+            List<String> warnings) {
+        if (operations == null || operations.isEmpty() || currentState == null || currentState.isNull()) {
+            return false;
+        }
+        boolean changed = false;
+        for (JsonNode operation : operations) {
+            if (operation == null
+                    || !operation.isObject()
+                    || !"column.conditionalStyle.add".equals(componentEditPlanOperationId(operation))) {
+                continue;
+            }
+            ObjectNode operationObject = (ObjectNode) operation;
+            String field = textOrNull(operation.at("/target/field"));
+            if (isBlank(field)) {
+                field = textOrNull(operation.at("/target/id"));
+            }
+            if (isBlank(field)) {
+                continue;
+            }
+            JsonNode input = operation.get("input");
+            String value = extractEqualityConditionLiteral(input != null ? input.get("condition") : null, field);
+            if (isBlank(value) || !mentionsCategoricalValue(normalizeText(prompt), value)) {
+                continue;
+            }
+            JsonNode existingRenderer = findExistingCategoricalConditionalRenderer(currentState, field, value);
+            if (existingRenderer == null || existingRenderer.isMissingNode() || !existingRenderer.isObject()) {
+                existingRenderer = findAnyBadgeLikeConditionalRenderer(currentState, field);
+            }
+            if (existingRenderer == null || existingRenderer.isMissingNode() || !existingRenderer.isObject()) {
+                continue;
+            }
+            String rendererType = normalizeBadgeLikeRendererType(textOrNull(existingRenderer.at("/renderer/type")));
+            if (rendererType == null) {
+                rendererType = normalizeBadgeLikeRendererType(textOrNull(existingRenderer.at("/type")));
+            }
+            if (rendererType == null) {
+                continue;
+            }
+
+            operationObject.put("operationId", "column.conditionalRenderer.add");
+            ObjectNode target = operationObject.with("target");
+            target.put("kind", "conditionalRenderer");
+            target.put("id", field);
+            target.put("field", field);
+
+            ObjectNode inputObject = input != null && input.isObject()
+                    ? (ObjectNode) input
+                    : operationObject.putObject("input");
+            inputObject.remove("style");
+            if (isBlank(textOrNull(inputObject.get("id")))) {
+                inputObject.put("id", "renderer-" + field + "-" + normalizeText(value).replace(' ', '-'));
+            }
+            if (!inputObject.has("renderer") || !inputObject.get("renderer").isObject()) {
+                inputObject.set("renderer", copyExistingRendererConfig(existingRenderer, rendererType, field));
+            }
+            ensureBadgeLikeRendererDefaults(inputObject.get("renderer"), rendererType, field);
+            changed = true;
+        }
+        if (changed && warnings != null) {
+            warnings.add("table-categorical-style-promoted-to-renderer-refinement");
+        }
+        return changed;
+    }
+
+    private JsonNode buildCategoricalRendererContinuationPlanFromAmbiguity(
+            AiActionPlan actionPlan,
+            List<String> ambiguityOptions,
+            AiOrchestratorRequest request,
+            String semanticTargetField,
+            JsonNode currentState,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        if (actionPlan == null
+                || ambiguityOptions == null
+                || ambiguityOptions.isEmpty()
+                || request == null
+                || currentState == null
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return null;
+        }
+        Map<String, JsonNode> manifestOperations = indexManifestOperations(authoringManifest, new ArrayList<>());
+        JsonNode manifestOperation = manifestOperations.get("column.conditionalRenderer.add");
+        if (manifestOperation == null || manifestOperation.isMissingNode()) {
+            return null;
+        }
+        String field = null;
+        if (!isBlank(semanticTargetField)
+                && findColumnState(currentState, semanticTargetField) != null
+                && findAnyBadgeLikeConditionalRenderer(currentState, semanticTargetField) != null) {
+            field = semanticTargetField;
+        }
+        if (isBlank(field)) {
+            field = findLastColumnFieldWithRendererAuthoring(currentState);
+        }
+        if (isBlank(field)) {
+            field = findLastColumnFieldWithConditionalAuthoring(currentState);
+        }
+        if (isBlank(field)) {
+            return null;
+        }
+        String value = selectPromptedCategoricalAmbiguityValue(
+                request.getUserPrompt(),
+                ambiguityOptions,
+                currentState,
+                field);
+        if (isBlank(value)) {
+            return null;
+        }
+        JsonNode existingRenderer = findExistingCategoricalConditionalRenderer(currentState, field, value);
+        if (existingRenderer == null || existingRenderer.isMissingNode() || !existingRenderer.isObject()) {
+            return null;
+        }
+        String rendererType = normalizeBadgeLikeRendererType(textOrNull(existingRenderer.at("/renderer/type")));
+        if (rendererType == null) {
+            return null;
+        }
+
+        ObjectNode componentEditPlan = objectMapper.createObjectNode();
+        componentEditPlan.put("schemaVersion", "praxis-component-edit-plan.v1");
+        componentEditPlan.put("componentId", COMPONENT_ID_TABLE);
+        ArrayNode operations = componentEditPlan.putArray("operations");
+        ObjectNode operation = operations.addObject();
+        operation.put("operationId", "column.conditionalRenderer.add");
+        ObjectNode target = operation.putObject("target");
+        target.put("kind", "conditionalRenderer");
+        target.put("id", field);
+        target.put("field", field);
+
+        ObjectNode input = operation.putObject("input");
+        input.put("id", firstNonBlank(
+                textOrNull(existingRenderer.get("id")),
+                "renderer-" + field + "-" + normalizeText(value).replace(' ', '-')));
+        JsonNode condition = existingRenderer.get("condition");
+        if (condition != null && !condition.isMissingNode() && !condition.isNull()) {
+            input.set("condition", condition.deepCopy());
+        } else {
+            JsonNode parsedCondition = parseSimpleTableCondition(buildEqualityCondition(field, value, true), field);
+            if (parsedCondition != null) {
+                input.set("condition", parsedCondition);
+            }
+        }
+        input.set("renderer", copyExistingRendererConfig(existingRenderer, rendererType, field));
+        String tooltipText = extractCategoricalRendererTooltipText(request.getUserPrompt());
+        if (!isBlank(tooltipText)) {
+            ObjectNode tooltip = input.putObject("tooltip");
+            tooltip.put("text", tooltipText);
+            tooltip.put("position", "top");
+        }
+        if (warnings != null) {
+            warnings.add("table-categorical-renderer-continuation-grounded-from-ambiguity");
+        }
+        return componentEditPlan;
+    }
+
+    private String selectPromptedCategoricalAmbiguityValue(
+            String prompt,
+            List<String> ambiguityOptions,
+            JsonNode currentState,
+            String field) {
+        if (ambiguityOptions == null || ambiguityOptions.isEmpty() || isBlank(field)) {
+            return null;
+        }
+        List<String> currentValues = extractBadgeValuesFromCurrentState(currentState, field);
+        String normalizedPrompt = normalizeText(prompt);
+        String best = null;
+        double bestScore = 0d;
+        for (String option : ambiguityOptions) {
+            if (isBlank(option)) {
+                continue;
+            }
+            String canonicalValue = resolveCategoricalValueOption(option, currentValues);
+            if (isBlank(canonicalValue)) {
+                continue;
+            }
+            String normalizedValue = normalizeText(canonicalValue);
+            double score = 0d;
+            if (!isBlank(normalizedPrompt) && normalizedPrompt.contains(normalizedValue)) {
+                score = 1d;
+            } else {
+                for (String promptToken : normalizeSearchPhrase(prompt).split("\\s+")) {
+                    if (promptToken == null || promptToken.isBlank()) {
+                        continue;
+                    }
+                    score = Math.max(score, similarityScore(promptToken, canonicalValue));
+                    score = Math.max(score, similarityScore(promptToken, option));
+                }
+            }
+            if (score > bestScore) {
+                best = canonicalValue;
+                bestScore = score;
+            }
+        }
+        return bestScore >= 0.8d ? best : null;
+    }
+
+    private String resolveCategoricalValueOption(String option, List<String> currentValues) {
+        if (isBlank(option)) {
+            return null;
+        }
+        if (currentValues == null || currentValues.isEmpty()) {
+            return option.trim();
+        }
+        String best = null;
+        double bestScore = 0d;
+        for (String value : currentValues) {
+            double score = similarityScore(option, value);
+            if (score > bestScore) {
+                best = value;
+                bestScore = score;
+            }
+        }
+        return bestScore >= 0.8d ? best : option.trim();
+    }
+
+    private JsonNode findExistingCategoricalConditionalRenderer(JsonNode currentState, String field, String value) {
+        JsonNode columnState = findColumnState(currentState, field);
+        JsonNode renderers = columnState != null ? columnState.get("conditionalRenderers") : null;
+        if (renderers == null || !renderers.isArray()) {
+            return null;
+        }
+        for (JsonNode renderer : renderers) {
+            if (renderer == null || !renderer.isObject()) {
+                continue;
+            }
+            String existingValue = extractEqualityConditionLiteral(renderer.get("condition"), field);
+            if (sameCanonicalValue(existingValue, value)
+                    && normalizeBadgeLikeRendererType(textOrNull(renderer.at("/renderer/type"))) != null) {
+                return renderer;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode findAnyBadgeLikeConditionalRenderer(JsonNode currentState, String field) {
+        JsonNode columnState = findColumnState(currentState, field);
+        JsonNode renderers = columnState != null ? columnState.get("conditionalRenderers") : null;
+        if (renderers == null || !renderers.isArray()) {
+            return null;
+        }
+        for (JsonNode renderer : renderers) {
+            if (renderer != null
+                    && renderer.isObject()
+                    && normalizeBadgeLikeRendererType(textOrNull(renderer.at("/renderer/type"))) != null) {
+                return renderer;
+            }
+        }
+        return null;
+    }
+
+    private ObjectNode copyExistingRendererConfig(JsonNode existingRenderer, String rendererType, String field) {
+        ObjectNode renderer = objectMapper.createObjectNode();
+        renderer.put("type", rendererType);
+        JsonNode sourceConfig = existingRenderer.at("/renderer/" + rendererType);
+        if (sourceConfig != null && sourceConfig.isObject()) {
+            renderer.set(rendererType, sourceConfig.deepCopy());
+        } else {
+            renderer.putObject(rendererType);
+        }
+        ensureBadgeLikeRendererDefaults(renderer, rendererType, field);
+        return renderer;
+    }
+
+    private void ensureBadgeLikeRendererDefaults(JsonNode renderer, String rendererType, String field) {
+        if (renderer == null || !renderer.isObject() || isBlank(rendererType)) {
+            return;
+        }
+        ObjectNode rendererObject = (ObjectNode) renderer;
+        rendererObject.put("type", rendererType);
+        JsonNode configNode = rendererObject.get(rendererType);
+        ObjectNode config = configNode != null && configNode.isObject()
+                ? (ObjectNode) configNode
+                : rendererObject.putObject(rendererType);
+        if (isBlank(textOrNull(config.get("textField"))) && !isBlank(field)) {
+            config.put("textField", field);
+        }
+        if (isBlank(textOrNull(config.get("variant")))) {
+            config.put("variant", "filled");
+        }
+    }
+
+    private boolean sameCanonicalValue(String left, String right) {
+        return !isBlank(left) && !isBlank(right) && normalizeText(left).equals(normalizeText(right));
+    }
+
+    private boolean normalizeCategoricalRendererOperationVisuals(
+            ArrayNode operations,
+            String field,
+            Map<String, String> colorMap,
+            String prompt) {
+        if (operations == null || isBlank(field) || colorMap == null || colorMap.isEmpty()) {
+            return false;
+        }
+        boolean changed = false;
+        for (JsonNode operation : operations) {
+            if (operation == null
+                    || !operation.isObject()
+                    || !"column.conditionalRenderer.add".equals(componentEditPlanOperationId(operation))) {
+                continue;
+            }
+            String operationField = textOrNull(operation.at("/target/field"));
+            if (isBlank(operationField)) {
+                operationField = textOrNull(operation.at("/target/id"));
+            }
+            if (!field.equalsIgnoreCase(operationField)) {
+                continue;
+            }
+            JsonNode input = operation.get("input");
+            String value = extractEqualityConditionLiteral(input != null ? input.get("condition") : null, field);
+            String requestedColor = inferCategoricalRendererRequestedColor(prompt, value);
+            String color = firstNonBlank(requestedColor, colorMap.get(value));
+            String rendererType = normalizeBadgeLikeRendererType(textOrNull(input != null ? input.at("/renderer/type") : null));
+            if (isBlank(value) || isBlank(color) || isBlank(rendererType)) {
+                continue;
+            }
+            JsonNode rendererConfig = input.at("/renderer/" + rendererType);
+            if (rendererConfig == null || !rendererConfig.isObject()) {
+                continue;
+            }
+            String currentColor = textOrNull(rendererConfig.get("color"));
+            if (!color.equals(currentColor)) {
+                ((ObjectNode) rendererConfig).put("color", color);
+                changed = true;
+            }
+            String requestedVariant = inferCategoricalRendererRequestedVariant(prompt, value, rendererType);
+            if (!isBlank(requestedVariant)) {
+                String currentVariant = textOrNull(rendererConfig.get("variant"));
+                if (!requestedVariant.equals(currentVariant)) {
+                    ((ObjectNode) rendererConfig).put("variant", requestedVariant);
+                    changed = true;
+                }
+            }
+            String requestedTooltip = inferCategoricalRendererRequestedTooltip(prompt, value);
+            if (!isBlank(requestedTooltip) && input instanceof ObjectNode inputObject) {
+                ObjectNode tooltip = inputObject.with("tooltip");
+                String currentTooltip = textOrNull(tooltip.get("text"));
+                if (!requestedTooltip.equals(currentTooltip)) {
+                    tooltip.put("text", requestedTooltip);
+                    tooltip.put("position", firstNonBlank(textOrNull(tooltip.get("position")), "top"));
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    private String inferCategoricalRendererRequestedColor(String prompt, String value) {
+        String normalizedPrompt = normalizeText(prompt);
+        if (isBlank(normalizedPrompt) || isBlank(value) || !mentionsCategoricalValue(normalizedPrompt, value)) {
+            return null;
+        }
+        if (normalizedPrompt.contains("laranja") || normalizedPrompt.contains("orange")) {
+            return "#FFA500";
+        }
+        if (normalizedPrompt.contains("vermelh") || normalizedPrompt.contains("erro") || normalizedPrompt.contains("warn")) {
+            return "warn";
+        }
+        if (normalizedPrompt.contains("verde") || normalizedPrompt.contains("sucesso")) {
+            return "success";
+        }
+        if (normalizedPrompt.contains("azul") || normalizedPrompt.contains("primar")) {
+            return "primary";
+        }
+        if (normalizedPrompt.contains("cinza") || normalizedPrompt.contains("neutro")
+                || normalizedPrompt.contains("discreto") || normalizedPrompt.contains("discreta")) {
+            return "basic";
+        }
+        return null;
+    }
+
+    private String inferCategoricalRendererRequestedVariant(String prompt, String value, String rendererType) {
+        String normalizedPrompt = normalizeText(prompt);
+        if (isBlank(normalizedPrompt) || isBlank(value) || !mentionsCategoricalValue(normalizedPrompt, value)) {
+            return null;
+        }
+        if (normalizedPrompt.contains("contorno")
+                || normalizedPrompt.contains("outlined")
+                || normalizedPrompt.contains("outline")) {
+            return sanitizeTableRendererVariant(rendererType, "outlined");
+        }
+        if (normalizedPrompt.contains("preenchido") || normalizedPrompt.contains("filled")) {
+            return sanitizeTableRendererVariant(rendererType, "filled");
+        }
+        if (normalizedPrompt.contains("suave")
+                || normalizedPrompt.contains("discreto")
+                || normalizedPrompt.contains("discreta")
+                || normalizedPrompt.contains("soft")) {
+            return sanitizeTableRendererVariant(rendererType, "soft");
+        }
+        return null;
+    }
+
+    private String inferCategoricalRendererRequestedTooltip(String prompt, String value) {
+        String normalizedPrompt = normalizeText(prompt);
+        if (isBlank(prompt)
+                || isBlank(normalizedPrompt)
+                || isBlank(value)
+                || !mentionsCategoricalValue(normalizedPrompt, value)
+                || (!normalizedPrompt.contains("tooltip") && !normalizedPrompt.contains("dica"))) {
+            return null;
+        }
+        return extractCategoricalRendererTooltipText(prompt);
+    }
+
+    private String extractCategoricalRendererTooltipText(String prompt) {
+        if (isBlank(prompt)) {
+            return null;
+        }
+        String tooltipText = extractLabelAfterPromptCue(
+                prompt,
+                "(?i)(?:tooltip|dica)(?:\\s+tamb[eé]m)?(?:\\s+(?:dizendo|com|de))?\\s+(.+?)(?:\\s+e\\s+(?:com|deixe|use|aplique|coloque)\\b|\\s*$)");
+        if (isBlank(tooltipText)) {
+            return null;
+        }
+        return tooltipText
+                .replaceAll("(?i)^tamb[eé]m\\s+", "")
+                .replaceAll("(?i)^(?:dizendo|com|de)\\s+", "")
+                .replaceAll("[*_`]+", "")
+                .replaceAll("[.;:,]+$", "")
+                .trim();
+    }
+
+    private boolean mentionsCategoricalValue(String normalizedPrompt, String value) {
+        if (isBlank(normalizedPrompt) || isBlank(value)) {
+            return false;
+        }
+        String normalizedValue = normalizeText(value);
+        if (normalizedPrompt.contains(normalizedValue)) {
+            return true;
+        }
+        String spaced = normalizedValue.replace("_", " ");
+        return !spaced.equals(normalizedValue) && normalizedPrompt.contains(spaced);
+    }
+
+    private String tableRendererColorLabel(String color) {
+        if (isBlank(color)) {
+            return null;
+        }
+        String normalized = color.trim().toLowerCase(Locale.ROOT);
+        if ("warn".equals(normalized) || "warning".equals(normalized)) {
+            return "de alerta";
+        }
+        if ("success".equals(normalized)) {
+            return "verde";
+        }
+        if ("primary".equals(normalized)) {
+            return "azul";
+        }
+        if ("accent".equals(normalized)) {
+            return "secundária";
+        }
+        if ("basic".equals(normalized) || "neutral".equals(normalized) || "default".equals(normalized)) {
+            return "neutra";
+        }
+        if ("#ffa500".equals(normalized)
+                || normalized.contains("orange")
+                || normalized.contains("255, 165, 0")) {
+            return "laranja suave";
+        }
+        return null;
+    }
+
+    private List<String> extractBadgeValuesFromCurrentState(JsonNode currentState, String field) {
+        if (currentState == null || currentState.isNull() || isBlank(field)) {
+            return List.of();
+        }
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        collectFieldValuesFromCurrentState(currentState, field, values, 0);
+        return new ArrayList<>(values);
+    }
+
+    private void collectFieldValuesFromCurrentState(
+            JsonNode node,
+            String field,
+            LinkedHashSet<String> values,
+            int depth) {
+        if (node == null
+                || node.isNull()
+                || isBlank(field)
+                || values == null
+                || values.size() >= BADGE_CARDINALITY_MAX
+                || depth > 8) {
+            return;
+        }
+        if (node.isObject()) {
+            JsonNode direct = node.get(field);
+            if (direct != null && !direct.isNull() && !direct.isContainerNode()) {
+                String value = direct.asText();
+                if (!isBlank(value)) {
+                    values.add(value.trim());
+                }
+            }
+            if (values.size() >= BADGE_CARDINALITY_MAX) {
+                return;
+            }
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext() && values.size() < BADGE_CARDINALITY_MAX) {
+                collectFieldValuesFromCurrentState(fields.next().getValue(), field, values, depth + 1);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (values.size() >= BADGE_CARDINALITY_MAX) {
+                    return;
+                }
+                collectFieldValuesFromCurrentState(item, field, values, depth + 1);
+            }
+        }
+    }
+
+    private String normalizeBadgeLikeRendererType(String rendererType) {
+        if (isBlank(rendererType)) {
+            return null;
+        }
+        String normalized = rendererType.trim().toLowerCase(Locale.ROOT);
+        if ("badge".equals(normalized) || "chip".equals(normalized)) {
+            return normalized;
+        }
+        return null;
+    }
+
+    private JsonNode buildCategoricalConditionalRendererOperation(
+            JsonNode manifestOperation,
+            String field,
+            String rendererType,
+            String value,
+            String color,
+            boolean quoteValue,
+            int index) {
+        if (manifestOperation == null
+                || isBlank(field)
+                || isBlank(rendererType)
+                || isBlank(value)) {
+            return null;
+        }
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", "column.conditionalRenderer.add");
+        ObjectNode target = operation.putObject("target");
+        target.put("kind", textOrNull(manifestOperation.at("/target/kind")));
+        target.put("id", field);
+        target.put("field", field);
+        ObjectNode input = operation.putObject("input");
+        input.put("id", "renderer-" + field + "-" + index);
+        JsonNode condition = parseSimpleTableCondition(buildEqualityCondition(field, value, quoteValue), field);
+        if (condition != null) {
+            input.set("condition", condition);
+        }
+        ObjectNode renderer = input.putObject("renderer");
+        renderer.put("type", rendererType);
+        ObjectNode rendererConfig = renderer.putObject(rendererType);
+        rendererConfig.put("textField", field);
+        rendererConfig.put("variant", "filled");
+        if (!isBlank(color)) {
+            rendererConfig.put("color", color);
+        }
+        return operation;
+    }
+
+    private String extractEqualityConditionLiteral(JsonNode condition, String expectedField) {
+        JsonNode normalized = condition;
+        if (condition != null && condition.isTextual()) {
+            normalized = parseSimpleTableCondition(condition.asText(), expectedField);
+        }
+        if (normalized == null || !normalized.isObject()) {
+            return null;
+        }
+        JsonNode equals = normalized.get("==");
+        if (equals == null || !equals.isArray() || equals.size() != 2) {
+            return null;
+        }
+        JsonNode left = equals.get(0);
+        JsonNode right = equals.get(1);
+        String field = textOrNull(left != null ? left.get("var") : null);
+        JsonNode literal = right;
+        if (isBlank(field)) {
+            field = textOrNull(right != null ? right.get("var") : null);
+            literal = left;
+        }
+        if (!isBlank(expectedField) && !expectedField.equalsIgnoreCase(field)) {
+            return null;
+        }
+        if (literal == null || literal.isNull() || literal.isObject() || literal.isArray()) {
+            return null;
+        }
+        String value = literal.asText();
+        return isBlank(value) ? null : value.trim();
     }
 
     private JsonNode normalizeComponentEditPlanForAuthoringManifest(
@@ -23431,17 +27164,6 @@ public class AiOrchestratorService {
                 continue;
             }
             operationsById.put(operationId, operation);
-            JsonNode target = operation.get("target");
-            if (target == null || !target.isObject()) {
-                failures.add("operacao " + operationId + " nao declara target estruturado.");
-            } else {
-                if (textOrNull(target.get("kind")) == null) {
-                    failures.add("operacao " + operationId + " nao declara target.kind.");
-                }
-                if (textOrNull(target.get("resolver")) == null) {
-                    failures.add("operacao " + operationId + " nao declara target.resolver.");
-                }
-            }
         }
         return operationsById;
     }
@@ -23709,6 +27431,35 @@ public class AiOrchestratorService {
                 .message(message)
                 .explanation(explanation)
                 .build();
+    }
+
+    private AiOrchestratorResponse providerCallErrorResponse(AiProviderCallException exception) {
+        AiProviderCallException.Kind kind = exception != null
+                ? exception.getKind()
+                : AiProviderCallException.Kind.UNKNOWN;
+        String provider = exception != null && !isBlank(exception.getProvider())
+                ? exception.getProvider()
+                : "provedor de IA";
+        String code = switch (kind) {
+            case TIMEOUT -> "AI_PROVIDER_TIMEOUT";
+            case RATE_LIMIT -> "AI_PROVIDER_RATE_LIMIT";
+            case QUOTA_EXHAUSTED -> "AI_PROVIDER_QUOTA_EXHAUSTED";
+            case CAPACITY -> "AI_PROVIDER_CAPACITY";
+            case AUTH -> "AI_PROVIDER_AUTH";
+            case TRANSPORT -> "AI_PROVIDER_TRANSPORT";
+            default -> "AI_PROVIDER_ERROR";
+        };
+        String message = switch (kind) {
+            case TIMEOUT -> "A IA demorou mais que o esperado para responder. Tente novamente em instantes.";
+            case RATE_LIMIT -> "O provedor de IA limitou temporariamente as chamadas. Tente novamente em instantes.";
+            case QUOTA_EXHAUSTED -> "A quota ou os creditos da conta do provedor de IA acabaram. Verifique billing, limites de uso ou adicione creditos antes de tentar novamente.";
+            case CAPACITY -> "O provedor de IA esta temporariamente sobrecarregado. Tente novamente em instantes.";
+            case AUTH -> "Nao consegui acessar o provedor de IA com a credencial configurada.";
+            case TRANSPORT -> "Nao consegui concluir a comunicacao com o provedor de IA.";
+            default -> "Nao consegui concluir a chamada ao provedor de IA.";
+        };
+        String explanation = "Falha operacional normalizada em " + provider + ". Nenhuma alteracao foi aplicada.";
+        return error(code, message, explanation);
     }
 
     private AiOrchestratorResponse errorWithWarnings(String message, List<String> warnings) {

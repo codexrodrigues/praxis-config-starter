@@ -28,10 +28,12 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiAssistantObservationService;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.AiTurnService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -49,6 +51,9 @@ public class AgenticAuthoringTurnStreamService {
     private final AiTurnEventService turnEventService;
     private final AiStreamAccessTokenService streamAccessTokenService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Autowired(required = false)
+    private AiAssistantObservationService assistantObservationService;
 
     private final Map<UUID, Set<SseEmitter>> emittersByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> replayCursorByStream = new ConcurrentHashMap<>();
@@ -107,10 +112,31 @@ public class AgenticAuthoringTurnStreamService {
         AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
                 .orElse(null);
         if (existing != null) {
-            return new StartResult(startResponse(existing.streamId(), threadId, turnId, existing.expiresAt(), baseUrl, principalContext), false);
+            UUID observationId = captureObservation(
+                    threadRequest,
+                    principalContext,
+                    existing.streamId(),
+                    threadId,
+                    turnId,
+                    request.userPrompt());
+            return new StartResult(startResponse(
+                    existing.streamId(),
+                    observationId,
+                    threadId,
+                    turnId,
+                    existing.expiresAt(),
+                    baseUrl,
+                    principalContext), false);
         }
 
         UUID streamId = UUID.randomUUID();
+        UUID observationId = captureObservation(
+                threadRequest,
+                principalContext,
+                streamId,
+                threadId,
+                turnId,
+                request.userPrompt());
         Instant expiresAt = Instant.now().plusSeconds(Math.max(streamExpiresSeconds, 60L));
         turnService.reserveTurnForStreaming(threadId, turnId);
         appendAndEmit(principalContext, streamId, threadId, turnId, "status", Map.of(
@@ -122,7 +148,7 @@ public class AgenticAuthoringTurnStreamService {
                 "expiresAt", expiresAt.toString()));
         scheduleProcessingTimeout(principalContext, streamId, threadId, turnId);
         executor.submit(() -> process(principalContext, streamId, threadId, turnId, effectiveRequest, baseUrl));
-        return new StartResult(startResponse(streamId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
+        return new StartResult(startResponse(streamId, observationId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
     }
 
     private AgenticAuthoringTurnStreamRequest withActiveSemanticDecision(
@@ -267,6 +293,7 @@ public class AgenticAuthoringTurnStreamService {
                 .updateAndGet(current -> Math.max(current, event.getSeq()));
         emittersByStream.getOrDefault(streamId, Set.of()).forEach(emitter -> send(emitter, event));
         if (turnEventService.isTerminalType(type)) {
+            markObservationTerminal(streamId, threadId, turnId, type, payload);
             complete(streamId);
         }
         return new StreamAppendResult(event, true);
@@ -480,11 +507,56 @@ public class AgenticAuthoringTurnStreamService {
                 .orElse(false);
     }
 
+    private UUID captureObservation(
+            AiOrchestratorRequest threadRequest,
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String prompt) {
+        if (assistantObservationService == null) {
+            return null;
+        }
+        return assistantObservationService.captureStream(
+                threadRequest,
+                principalContext,
+                AiAssistantObservationService.SURFACE_AGENTIC_AUTHORING_STREAM,
+                streamId,
+                threadId,
+                turnId,
+                prompt);
+    }
+
+    private void markObservationTerminal(
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String eventType,
+            Object payload) {
+        if (assistantObservationService == null) {
+            return;
+        }
+        UUID observationId = assistantObservationService.findObservationId(threadId, turnId, streamId).orElse(null);
+        if (observationId == null) {
+            return;
+        }
+        JsonNode payloadNode = objectMapper.valueToTree(payload);
+        String terminal = "cancelled".equalsIgnoreCase(eventType) ? "cancelled"
+                : "error".equalsIgnoreCase(eventType) ? "error"
+                : "result";
+        assistantObservationService.markTerminal(
+                observationId,
+                terminal,
+                payloadNode.path("code").isTextual() ? payloadNode.path("code").asText() : null,
+                payloadNode.path("message").isTextual() ? payloadNode.path("message").asText() : null);
+    }
+
     private record StreamAppendResult(AiTurnEventEnvelope event, boolean appended) {
     }
 
     private AgenticAuthoringTurnStreamStartResponse startResponse(
             UUID streamId,
+            UUID observationId,
             UUID threadId,
             UUID turnId,
             Instant expiresAt,
@@ -492,6 +564,7 @@ public class AgenticAuthoringTurnStreamService {
             AiPrincipalContext principalContext) {
         return AgenticAuthoringTurnStreamStartResponse.builder()
                 .streamId(streamId)
+                .observationId(observationId)
                 .threadId(threadId)
                 .turnId(turnId)
                 .eventSchemaVersion(eventSchemaVersion)

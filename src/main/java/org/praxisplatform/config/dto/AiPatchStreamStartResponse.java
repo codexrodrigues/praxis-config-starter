@@ -21,6 +21,7 @@ import lombok.NoArgsConstructor;
 @Builder
 public class AiPatchStreamStartResponse {
     private UUID streamId;
+    private UUID observationId;
     private UUID threadId;
     private UUID turnId;
     private String eventSchemaVersion;

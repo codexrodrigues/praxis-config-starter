@@ -3,9 +3,7 @@ package org.praxisplatform.config.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import java.io.IOException;
-import java.text.Normalizer;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyRequest;
@@ -324,13 +322,13 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
-            String baseUrl = currentContextBaseUrl();
-            Optional<AgenticAuthoringPreviewResult> consultativeFastPreview =
-                    previewConsultativeFastPath(request, tenantId, userId, environment);
-            if (consultativeFastPreview.isPresent()) {
-                return ResponseEntity.ok(consultativeFastPreview.get());
-            }
             AgenticAuthoringPlanRequest effectiveRequest = withResolvedIntent(request, tenantId, userId, environment);
+            String baseUrl = currentContextBaseUrl();
+            Optional<AgenticAuthoringPreviewResult> consultativePreview =
+                    previewConsultativeSemanticIntent(effectiveRequest, tenantId, userId, environment);
+            if (consultativePreview.isPresent()) {
+                return ResponseEntity.ok(consultativePreview.get());
+            }
             AgenticAuthoringPreviewResult result = previewService.preview(
                     effectiveRequest,
                     tenantId,
@@ -343,17 +341,15 @@ public class AgenticAuthoringController {
         }
     }
 
-    private Optional<AgenticAuthoringPreviewResult> previewConsultativeFastPath(
+    private Optional<AgenticAuthoringPreviewResult> previewConsultativeSemanticIntent(
             AgenticAuthoringPlanRequest request,
             String tenantId,
             String userId,
             String environment) {
         if (consultativeAnswerService == null
                 || request == null
-                || request.intentResolution() != null
-                || request.pendingClarification() != null
-                || (request.conversationMessages() != null && !request.conversationMessages().isEmpty())
-                || !shouldProbeConsultativeFastPath(request.userPrompt())) {
+                || !isConsultativeSemanticIntent(request.intentResolution())
+                || request.pendingClarification() != null) {
             return Optional.empty();
         }
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities =
@@ -371,7 +367,7 @@ public class AgenticAuthoringController {
         String artifactKind = "domain_api".equals(answer.category()) ? "api_catalog" : "component";
         String operationKind = "api_catalog".equals(artifactKind) ? "explore" : "explain";
         List<String> warnings = new java.util.ArrayList<>(answer.warnings() == null ? List.of() : answer.warnings());
-        warnings.add("preview-consultative-fast-path-used");
+        warnings.add("preview-consultative-semantic-intent-used");
         warnings.add("preview-materialization-skipped-consultative-answer");
         AgenticAuthoringIntentResolutionResult intentResolution = new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -412,38 +408,22 @@ public class AgenticAuthoringController {
                         "",
                         intentResolution.operationKind(),
                         intentResolution.changeKind(),
-                        "consultative-fast-path"),
+                        "consultative-semantic-intent"),
                 MissingNode.getInstance(),
                 answer.assistantMessage()));
     }
 
-    private boolean shouldProbeConsultativeFastPath(String prompt) {
-        String normalized = normalize(prompt);
-        if (normalized.isBlank()) {
+    private boolean isConsultativeSemanticIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
             return false;
         }
-        boolean question = prompt != null && prompt.contains("?")
-                || containsAny(normalized,
-                "quais", "qual", "que ", "como ", "o que", "posso", "explique", "explicar", "recomenda");
-        boolean immediateMaterialization = containsAny(normalized,
-                "crie ", "criar agora", "monte ", "montar agora", "gere ", "gerar agora",
-                "adicione ", "remova ", "altere ", "salve ", "publique ", "aplique ");
-        return question && !immediateMaterialization;
+        return equalsIgnoreCase(intentResolution.authoringProfile(), "consultative")
+                || equalsIgnoreCase(intentResolution.operationKind(), "explain")
+                || equalsIgnoreCase(intentResolution.operationKind(), "explore");
     }
 
-    private boolean containsAny(String value, String... tokens) {
-        for (String token : tokens) {
-            if (token != null && !token.isBlank() && value.contains(normalize(token))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private String normalize(String value) {
-        String normalized = Normalizer.normalize(value == null ? "" : value, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "");
-        return normalized.toLowerCase(Locale.ROOT).trim();
+    private boolean equalsIgnoreCase(String left, String right) {
+        return left != null && right != null && left.equalsIgnoreCase(right);
     }
 
     private AgenticAuthoringPlanRequest withResolvedIntent(

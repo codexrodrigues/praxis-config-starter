@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 @Builder
 public class AgenticAuthoringTurnStreamStartResponse {
     private UUID streamId;
+    private UUID observationId;
     private UUID threadId;
     private UUID turnId;
     private String eventSchemaVersion;

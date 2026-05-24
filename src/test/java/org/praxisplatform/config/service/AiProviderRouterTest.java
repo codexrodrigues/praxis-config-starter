@@ -2,8 +2,10 @@ package org.praxisplatform.config.service;
 
 import org.junit.jupiter.api.Tag;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -11,6 +13,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -71,13 +74,84 @@ class AiProviderRouterTest {
         AiProviderRouter router = new AiProviderRouter(geminiProvider, openaiProvider, xaiProvider, mockProvider);
         ReflectionTestUtils.setField(router, "provider", "xai");
 
-        when(xai.generateText("ping")).thenReturn("pong");
+        when(xai.generateText(eq("ping"), any())).thenReturn("pong");
 
         String result = router.generateText("ping");
 
         assertEquals("pong", result);
-        verify(xai).generateText("ping");
+        verify(xai).generateText(eq("ping"), any());
         verifyNoInteractions(gemini, openai, mock);
+    }
+
+    @Test
+    void generateTextFallsBackToNextConfiguredProviderForRateLimit() {
+        when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
+        when(geminiProvider.getIfAvailable(any())).thenReturn(gemini);
+        AiProviderRouter router = new AiProviderRouter(geminiProvider, openaiProvider, xaiProvider, mockProvider);
+        ReflectionTestUtils.setField(router, "provider", "openai");
+        ReflectionTestUtils.setField(router, "providerFallbackEnabled", true);
+        ReflectionTestUtils.setField(router, "providerFallbackCandidates", "gemini:gemini-2.0-flash");
+
+        when(openai.generateText(eq("prompt"), any()))
+                .thenThrow(AiProviderCallException.fromHttpStatus("openai", 429, "rate_limit_exceeded"));
+        when(gemini.generateText(eq("prompt"), any())).thenReturn("answer");
+
+        String result = router.generateText("prompt");
+
+        assertEquals("answer", result);
+        verify(openai).generateText(eq("prompt"), any());
+        ArgumentCaptor<AiCallConfig> fallbackConfig = ArgumentCaptor.forClass(AiCallConfig.class);
+        verify(gemini).generateText(eq("prompt"), fallbackConfig.capture());
+        assertEquals("gemini", fallbackConfig.getValue().getProvider());
+        assertEquals("gemini-2.0-flash", fallbackConfig.getValue().getModel());
+        verifyNoInteractions(xai, mock);
+    }
+
+    @Test
+    void generateTextFallsBackFromGeminiToOpenAiForRateLimit() {
+        when(geminiProvider.getIfAvailable(any())).thenReturn(gemini);
+        when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
+        AiProviderRouter router = new AiProviderRouter(geminiProvider, openaiProvider, xaiProvider, mockProvider);
+        ReflectionTestUtils.setField(router, "provider", "gemini");
+        ReflectionTestUtils.setField(router, "providerFallbackEnabled", true);
+        ReflectionTestUtils.setField(router, "providerFallbackCandidates", "openai:gpt-5-mini");
+
+        when(gemini.generateText(eq("prompt"), any()))
+                .thenThrow(AiProviderCallException.fromHttpStatus("gemini", 429, "rateLimitExceeded"));
+        when(openai.generateText(eq("prompt"), any())).thenReturn("answer");
+
+        String result = router.generateText("prompt");
+
+        assertEquals("answer", result);
+        verify(gemini).generateText(eq("prompt"), any());
+        ArgumentCaptor<AiCallConfig> fallbackConfig = ArgumentCaptor.forClass(AiCallConfig.class);
+        verify(openai).generateText(eq("prompt"), fallbackConfig.capture());
+        assertEquals("openai", fallbackConfig.getValue().getProvider());
+        assertEquals("gpt-5-mini", fallbackConfig.getValue().getModel());
+        verifyNoInteractions(xai, mock);
+    }
+
+    @Test
+    void generateTextDoesNotFallbackForQuotaFailures() {
+        when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
+        AiProviderRouter router = new AiProviderRouter(geminiProvider, openaiProvider, xaiProvider, mockProvider);
+        ReflectionTestUtils.setField(router, "provider", "openai");
+        ReflectionTestUtils.setField(router, "providerFallbackEnabled", true);
+        ReflectionTestUtils.setField(router, "providerFallbackCandidates", "gemini");
+
+        AiProviderCallException quotaFailure = AiProviderCallException.fromHttpStatus(
+                "openai",
+                429,
+                "insufficient_quota");
+        when(openai.generateText(eq("prompt"), any())).thenThrow(quotaFailure);
+
+        AiProviderCallException result = assertThrows(
+                AiProviderCallException.class,
+                () -> router.generateText("prompt"));
+
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, result.getKind());
+        verify(openai).generateText(eq("prompt"), any());
+        verifyNoInteractions(gemini, xai, mock);
     }
 
     @Test

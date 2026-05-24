@@ -527,6 +527,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             return switch (callException.getKind()) {
                 case AUTH -> "auth-error";
                 case RATE_LIMIT -> "rate-limit";
+                case QUOTA_EXHAUSTED -> "quota-exhausted";
                 case CAPACITY -> "capacity";
                 case TIMEOUT -> "timeout";
                 case TRANSPORT -> "transport-error";
@@ -540,7 +541,14 @@ public class AgenticAuthoringLlmIntentResolverService {
                 || message.contains("forbidden") || message.contains("api key")) {
             return "auth-error";
         }
-        if (message.contains("429") || message.contains("rate limit") || message.contains("quota")) {
+        if (message.contains("insufficient_quota")
+                || message.contains("quota exhausted")
+                || message.contains("quota exceeded")
+                || message.contains("exceeded your current quota")
+                || message.contains("billing")) {
+            return "quota-exhausted";
+        }
+        if (message.contains("429") || message.contains("rate limit")) {
             return "rate-limit";
         }
         if (message.contains("timeout") || message.contains("timed out")) {

@@ -95,6 +95,41 @@ class AiMessageServiceTest {
     }
 
     @Test
+    void shouldReturnCanonicalCodeWhenTurnIsAlreadyInProgress() {
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiThread thread = AiThread.builder()
+                .threadId(threadId)
+                .tenantId("tenant-a")
+                .userId("user-a")
+                .environment("prod")
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .status(AiThreadStatus.ACTIVE)
+                .summary("")
+                .createdAt(Instant.now())
+                .lastUsedAt(Instant.now())
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .clientTurnId(turnId)
+                .userPrompt("Atualizar tabela")
+                .build();
+
+        when(turnService.beginTurn(threadId, turnId)).thenReturn(AiTurnService.TurnDecision.IN_PROGRESS);
+
+        AiMemoryContext memoryContext = messageService.prepareTurn(thread, request, "Atualizar tabela");
+
+        assertThat(memoryContext).isNotNull();
+        assertThat(memoryContext.isCached()).isTrue();
+        assertThat(memoryContext.getCachedResponse()).isNotNull();
+        assertThat(memoryContext.getCachedResponse().getType()).isEqualTo("info");
+        assertThat(memoryContext.getCachedResponse().getCode()).isEqualTo("TURN_IN_PROGRESS");
+        assertThat(memoryContext.getCachedResponse().getMessage()).isEqualTo("Turno em processamento.");
+    }
+
+    @Test
     void shouldDeferTurnCompletionWhenMemoryContextRequiresIt() {
         UUID threadId = UUID.randomUUID();
         UUID turnId = UUID.randomUUID();
@@ -132,4 +167,3 @@ class AiMessageServiceTest {
         verify(turnService, never()).completeTurn(threadId, turnId);
     }
 }
-

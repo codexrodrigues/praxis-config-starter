@@ -12,7 +12,10 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -23,7 +26,9 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.domain.AiThread;
 import org.praxisplatform.config.dto.AiActionItem;
+import org.praxisplatform.config.dto.AiActionPlan;
 import org.praxisplatform.config.dto.AiContextDTO;
+import org.praxisplatform.config.dto.AiIntentClassification;
 import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiOrchestratorResponse;
@@ -303,7 +308,20 @@ class AiOrchestratorServiceContextHintsTest {
                   "responseModes": [
                     { "kind": "consult", "preferredResponse": "info" },
                     { "kind": "edit", "preferredResponse": "componentEditPlan" }
-                  ]
+                  ],
+                  "runtimeOperations": {
+                    "allowedOperationIds": ["table.filter.apply", "table.export.run"]
+                  },
+                  "consultativeContext": {
+                    "selectedRecordsContext": {
+                      "selectedCount": 2,
+                      "selectedIds": ["1", "2"],
+                      "sampleRows": [
+                        { "id": "1", "nome": "Ana Silva" },
+                        { "id": "2", "nome": "Carlos Souza" }
+                      ]
+                    }
+                  }
                 }
                 """);
         when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
@@ -318,9 +336,23 @@ class AiOrchestratorServiceContextHintsTest {
         String selected = ReflectionTestUtils.invokeMethod(
                 service,
                 "selectAuthoringResponseMode",
-                "como criar uma coluna que exibe a soma de duas outras colunas?",
+                "liste os registros selecionados",
                 authoringContract,
-                AiOrchestratorRequest.builder().userPrompt("como criar uma coluna que exibe a soma de duas outras colunas?").build(),
+                AiOrchestratorRequest.builder()
+                        .userPrompt("liste os registros selecionados")
+                        .runtimeState(objectMapper.readTree("""
+                                {
+                                  "selection": {
+                                    "selectedCount": 2,
+                                    "selectedIds": ["1", "2"],
+                                    "sampleRows": [
+                                      { "id": "1", "nome": "Ana Silva" },
+                                      { "id": "2", "nome": "Carlos Souza" }
+                                    ]
+                                  }
+                                }
+                                """))
+                        .build(),
                 null);
 
         assertThat(selected).isEqualTo("consult");
@@ -329,6 +361,13 @@ class AiOrchestratorServiceContextHintsTest {
         assertThat(promptCaptor.getValue()).contains("decisor semântico de modo de resposta");
         assertThat(promptCaptor.getValue()).contains("\"kind\" : \"consult\"");
         assertThat(promptCaptor.getValue()).contains("\"kind\" : \"edit\"");
+        assertThat(promptCaptor.getValue()).contains("CONTEXTO RUNTIME E HINTS GOVERNADOS");
+        assertThat(promptCaptor.getValue()).contains("selectedRecordsContext");
+        assertThat(promptCaptor.getValue()).contains("runtimeState");
+        assertThat(promptCaptor.getValue()).contains("runtimeOperations");
+        assertThat(promptCaptor.getValue()).contains("table.export.run");
+        assertThat(promptCaptor.getValue()).contains("usar esses registros como base para filtros avançados, exportação");
+        assertThat(promptCaptor.getValue()).contains("Ana Silva");
     }
 
     @Test
@@ -340,6 +379,30 @@ class AiOrchestratorServiceContextHintsTest {
                     { "kind": "consult", "preferredResponse": "info" },
                     { "kind": "edit", "preferredResponse": "componentEditPlan" }
                   ],
+                  "consultativeContext": {
+                    "selectedRecordsContext": {
+                      "selectedCount": 2,
+                      "selectedIds": ["1", "2"],
+                      "sampleRows": [
+                        {
+                          "id": "1",
+                          "nome": "Ana Silva",
+                          "departamento": "Engenharia",
+                          "cargo": "Dev Senior",
+                          "nivel": "Senior",
+                          "salario": 12000
+                        },
+                        {
+                          "id": "2",
+                          "nome": "Carlos Souza",
+                          "departamento": "Design",
+                          "cargo": "UI Designer",
+                          "nivel": "Pleno",
+                          "salario": 9500
+                        }
+                      ]
+                    }
+                  },
                   "operations": [
                     { "operationId": "column.computed.add", "title": "Adicionar coluna calculada" }
                   ]
@@ -362,6 +425,32 @@ class AiOrchestratorServiceContextHintsTest {
                         """),
                 AiOrchestratorRequest.builder()
                         .userPrompt("como criar uma coluna que exibe a soma de duas outras colunas?")
+                        .runtimeState(objectMapper.readTree("""
+                                {
+                                  "selection": {
+                                    "selectedIds": ["1", "2"],
+                                    "selectedCount": 2,
+                                    "sampleRows": [
+                                      {
+                                        "id": "1",
+                                        "nome": "Ana Silva",
+                                        "departamento": "Engenharia",
+                                        "cargo": "Dev Senior",
+                                        "nivel": "Senior",
+                                        "salario": 12000
+                                      },
+                                      {
+                                        "id": "2",
+                                        "nome": "Carlos Souza",
+                                        "departamento": "Design",
+                                        "cargo": "UI Designer",
+                                        "nivel": "Pleno",
+                                        "salario": 9500
+                                      }
+                                    ]
+                                  }
+                                }
+                                """))
                         .build(),
                 null,
                 authoringContract);
@@ -371,7 +460,1364 @@ class AiOrchestratorServiceContextHintsTest {
         verify(aiProvider).generateText(promptCaptor.capture(), nullable(AiCallConfig.class));
         assertThat(promptCaptor.getValue()).contains("responda como orientação humana");
         assertThat(promptCaptor.getValue()).contains("Não produza JSON Patch, componentEditPlan, plano aplicável");
+        assertThat(promptCaptor.getValue()).contains("CONTEXTO RUNTIME E HINTS GOVERNADOS");
+        assertThat(promptCaptor.getValue()).contains("runtimeState");
+        assertThat(promptCaptor.getValue()).contains("selectedRecordsContext");
+        assertThat(promptCaptor.getValue()).contains("Use nomes humanos na resposta");
+        assertThat(promptCaptor.getValue()).contains("Não exponha termos técnicos internos");
+        assertThat(promptCaptor.getValue()).contains("registros selecionados como ponto de partida para filtros avançados");
+        assertThat(promptCaptor.getValue()).contains("pergunte de forma humana qual campo ou escopo deve guiar a ação");
+        assertThat(promptCaptor.getValue()).contains("Ana Silva");
+        assertThat(promptCaptor.getValue()).contains("Carlos Souza");
         assertThat(promptCaptor.getValue()).contains("PERGUNTA DO USUÁRIO: \"como criar uma coluna que exibe a soma de duas outras colunas?\"");
+    }
+
+    @Test
+    void runtimeMetadataPrioritizesSelectedRecordsBeforeLargeDataProfile() throws Exception {
+        ReflectionTestUtils.setField(service, "maxRuntimeMetadataChars", 900);
+        ObjectNode dataProfile = objectMapper.createObjectNode();
+        dataProfile.put("padding", "x".repeat(5000));
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "authoringContract": {
+                    "componentEditPlan": {
+                      "filterFieldCatalog": {
+                        "fields": [
+                          { "name": "departamento", "label": "Departamento" }
+                        ]
+                      }
+                    },
+                    "consultativeContext": {
+                      "selectedRecordsContext": {
+                        "selectedCount": 2,
+                        "selectedIds": ["1", "4"],
+                        "sampleRows": [
+                          { "id": "1", "nome": "Ana Silva", "departamento": "Engenharia" },
+                          { "id": "4", "nome": "Pedro Lima", "departamento": "Engenharia" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """);
+        when(aiProvider.generateText(anyString(), nullable(AiCallConfig.class)))
+                .thenReturn("Vou usar Engenharia.");
+
+        String answer = ReflectionTestUtils.invokeMethod(
+                service,
+                "answerQuestion",
+                "filtre pelo departamento dos registros selecionados",
+                objectMapper.createObjectNode(),
+                AiOrchestratorRequest.builder()
+                        .userPrompt("filtre pelo departamento dos registros selecionados")
+                        .dataProfile(dataProfile)
+                        .contextHints(contextHints)
+                        .runtimeState(objectMapper.readTree("""
+                                {
+                                  "selection": {
+                                    "selectedCount": 2,
+                                    "selectedIds": ["1", "4"],
+                                    "sampleRows": [
+                                      { "id": "1", "nome": "Ana Silva", "departamento": "Engenharia" },
+                                      { "id": "4", "nome": "Pedro Lima", "departamento": "Engenharia" }
+                                    ]
+                                  }
+                                }
+                                """))
+                        .build(),
+                null,
+                contextHints.path("authoringContract"));
+
+        assertThat(answer).isEqualTo("Vou usar Engenharia.");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiProvider).generateText(promptCaptor.capture(), nullable(AiCallConfig.class));
+        String prompt = promptCaptor.getValue();
+        assertThat(prompt).contains("\"selectedRecordsContext\"");
+        assertThat(prompt).contains("\"departamento\" : \"Engenharia\"");
+        assertThat(prompt).contains("\"filterFieldCatalog\"");
+        assertThat(prompt.indexOf("\"selectedRecordsContext\""))
+                .isLessThan(prompt.indexOf("\"runtimeState\""));
+        assertThat(prompt).doesNotContain("\"padding\"");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tableRuntimeOperationIdsComeFromRuntimeOperationsContract() throws Exception {
+        JsonNode authoringContract = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "allowedOperationIds": ["column.visibility.set"]
+                  },
+                  "runtimeOperations": {
+                    "allowedOperationIds": ["table.filter.apply", "table.export.run"]
+                  }
+                }
+                """);
+
+        Set<String> operationIds = ReflectionTestUtils.invokeMethod(
+                service,
+                "tableRuntimeOperationIds",
+                authoringContract);
+
+        assertThat(operationIds).containsExactly("table.filter.apply", "table.export.run");
+    }
+
+    @Test
+    void runtimeOperationsAreMaterializedIntoRuntimePatchInsteadOfComponentEditPlan() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" },
+                          "source": { "type": "string" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiActionPlan actionPlan = AiActionPlan.builder()
+                .actions(List.of(AiActionPlan.Action.builder()
+                        .type("table.filter.apply")
+                        .target("")
+                        .params(objectMapper.readTree("""
+                                {
+                                  "criteria": { "departamento": "Engenharia" },
+                                  "source": "selected-records"
+                                }
+                                """))
+                        .build()))
+                .ambiguities(List.of())
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableRuntimeOperationPatchFromActionPlan",
+                actionPlan,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/kind").asText())
+                .isEqualTo("praxis.table.runtime-operation.batch");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/departamento").asText())
+                .isEqualTo("Engenharia");
+        assertThat(patch.has("componentEditPlan")).isFalse();
+    }
+
+    @Test
+    void runtimeOperationBatchKeepsFilterAndExportInExecutionOrder() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" },
+                          "source": { "type": "string" }
+                        }
+                      }
+                    },
+                    {
+                      "operationId": "table.export.run",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["format"],
+                        "properties": {
+                          "format": { "type": "string" },
+                          "scope": { "type": "string" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiActionPlan actionPlan = AiActionPlan.builder()
+                .actions(List.of(
+                        AiActionPlan.Action.builder()
+                                .type("table.filter.apply")
+                                .target("")
+                                .params(objectMapper.readTree("""
+                                        {
+                                          "criteria": { "cargoIdsIn": [7, 11] },
+                                          "source": "selected-records"
+                                        }
+                                        """))
+                                .build(),
+                        AiActionPlan.Action.builder()
+                                .type("table.export.run")
+                                .target("")
+                                .params(objectMapper.readTree("""
+                                        {
+                                          "format": "csv",
+                                          "scope": "filtered"
+                                        }
+                                        """))
+                                .build()))
+                .ambiguities(List.of())
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableRuntimeOperationPatchFromActionPlan",
+                actionPlan,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/operationId").asText())
+                .isEqualTo("table.export.run");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/input/format").asText())
+                .isEqualTo("csv");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/input/scope").asText())
+                .isEqualTo("filtered");
+    }
+
+    @Test
+    void exportIntentMaterializesSelectedRecordsRuntimePatch() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.export.run",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["format"],
+                        "properties": {
+                          "format": { "type": "string", "enum": ["excel", "pdf", "csv", "json", "print"] },
+                          "scope": { "type": "string", "enum": ["auto", "selected", "filtered", "currentPage", "all"] }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("export")
+                .scope("component")
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("execute agora a exportacao csv dos selecionados")
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 3,
+                            "selectedIds": ["194", "193", "192"],
+                            "sampleRows": [
+                              { "nome": "Sol Drax" },
+                              { "nome": "Ayla Hayes" },
+                              { "nome": "Jonah Sterling" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableRuntimeExportPatchFromIntent",
+                intent,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/kind").asText())
+                .isEqualTo("praxis.table.runtime-operation.batch");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.export.run");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/format").asText())
+                .isEqualTo("csv");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/scope").asText())
+                .isEqualTo("selected");
+        assertThat(patch.has("componentEditPlan")).isFalse();
+    }
+
+    @Test
+    void exportIntentUsesAuthoringContractRuntimeOperationWhenManifestIsDeclarativeOnly() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": []
+                }
+                """);
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("export")
+                .scope("component")
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("manda csv desses selecionados")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "kind": "praxis.component-authoring-context",
+                            "runtimeOperations": {
+                              "kind": "praxis.table.runtime-operations",
+                              "allowedOperationIds": ["table.export.run"]
+                            }
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 3,
+                            "selectedIds": ["194", "193", "192"],
+                            "sampleRows": [
+                              { "nome": "Sol Drax" },
+                              { "nome": "Ayla Hayes" },
+                              { "nome": "Jonah Sterling" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableRuntimeExportPatchFromIntent",
+                intent,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.export.run");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/format").asText())
+                .isEqualTo("csv");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/scope").asText())
+                .isEqualTo("selected");
+    }
+
+    @Test
+    void selectedRecordsFilterMaterializesRuntimePatchWhenActionPlanTargetsAdvancedFilterField() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    },
+                    {
+                      "operationId": "filter.advanced.fields.add",
+                      "target": { "kind": "filter", "resolver": "filter-field", "required": true },
+                      "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                          "selectedFieldIds": { "type": "array" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiActionPlan actionPlan = AiActionPlan.builder()
+                .actions(List.of(AiActionPlan.Action.builder()
+                        .type("filter.advanced.fields.add")
+                        .target("Departamento")
+                        .params(objectMapper.readTree("""
+                                { "selectedFieldIds": ["departamento"] }
+                                """))
+                        .build()))
+                .ambiguities(List.of())
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["1", "4"],
+                            "sampleRows": [
+                              { "nome": "Ana Silva", "departamento": "Engenharia", "status": "Ativo" },
+                              { "nome": "Pedro Lima", "departamento": "Engenharia", "status": "Ativo" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromActionPlan",
+                actionPlan,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/departamento").asText())
+                .isEqualTo("Engenharia");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+    }
+
+    @Test
+    void selectedRecordsFilterMapsFilterIdsInFieldToSelectedRowIdField() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiActionPlan actionPlan = AiActionPlan.builder()
+                .actions(List.of(AiActionPlan.Action.builder()
+                        .type("filter.advanced.fields.add")
+                        .target("departamentoIdsIn")
+                        .params(objectMapper.readTree("""
+                                { "selectedFieldIds": ["departamentoIdsIn"] }
+                                """))
+                        .build()))
+                .ambiguities(List.of())
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "departamentoId": 12, "departamentoNome": "Capsule Corp - Engenharia" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromActionPlan",
+                actionPlan,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/departamentoIdsIn").toString())
+                .isEqualTo("[23,12]");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+    }
+
+    @Test
+    void selectedRecordsFilterGroundsRuntimeFilterActionPlanWithEmptyCriteriaArray() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiActionPlan actionPlan = AiActionPlan.builder()
+                .actions(List.of(AiActionPlan.Action.builder()
+                        .type("table.filter.apply")
+                        .params(objectMapper.readTree("""
+                                { "criteria": { "departamentoIdsIn": [] } }
+                                """))
+                        .build()))
+                .ambiguities(List.of())
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "departamentoId": 21, "departamentoNome": "Capsule Corp - Engenharia" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromActionPlan",
+                actionPlan,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/departamentoIdsIn").toString())
+                .isEqualTo("[23,21]");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+    }
+
+    @Test
+    void selectedRecordsFilterMaterializesRuntimePatchFromConsultativeFilterIntent() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("filter")
+                .baseFields(List.of("departamentoNome"))
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "filterFieldCatalog": {
+                              "fields": [
+                                { "name": "departamentoIdsIn", "label": "Departamentos" }
+                              ]
+                            }
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "departamentoId": 21, "departamentoNome": "Capsule Corp - Engenharia" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromIntent",
+                intent,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/departamentoIdsIn").toString())
+                .isEqualTo("[23,21]");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+    }
+
+    @Test
+    void selectedRecordsFilterCanAppendRequestedExportRuntimeOperation() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("filter")
+                .baseFields(List.of("departamentoNome"))
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("filtra por departamento e exporta csv")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "filterFieldCatalog": {
+                              "fields": [
+                                { "name": "departamentoIdsIn", "label": "Departamentos" }
+                              ]
+                            },
+                            "runtimeOperations": {
+                              "kind": "praxis.table.runtime-operations",
+                              "allowedOperationIds": ["table.filter.apply", "table.export.run"]
+                            }
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "departamentoId": 21, "departamentoNome": "Capsule Corp - Engenharia" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode filterPatch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromIntent",
+                intent,
+                request,
+                authoringManifest);
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "appendTableRuntimeExportIfRequested",
+                filterPatch,
+                request,
+                authoringManifest,
+                "filtered");
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/operationId").asText())
+                .isEqualTo("table.export.run");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/input/format").asText())
+                .isEqualTo("csv");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/input/scope").asText())
+                .isEqualTo("filtered");
+    }
+
+    @Test
+    void selectedRecordsFilterPrefersRicherContextHintsSelectionOverEarlyRuntimeSnapshot() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("filtering")
+                .targetField("cargoIdsIn")
+                .baseFields(List.of("cargoNome"))
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "filterFieldCatalog": {
+                              "fields": [
+                                { "name": "cargoIdsIn", "label": "Cargos" }
+                              ]
+                            },
+                            "consultativeContext": {
+                              "selectedRecordsContext": {
+                                "selectedCount": 2,
+                                "selectedIds": ["194", "192"],
+                                "sampleRows": [
+                                  { "nomeCompleto": "Sol Drax", "cargoId": 8, "cargoNome": "Agente de Segurança" },
+                                  { "nomeCompleto": "Jonah Sterling", "cargoId": 3, "cargoNome": "Engenheiro de Software Sênior" }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "cargoNome": "Agente de Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "cargoNome": "Engenheiro de Software Sênior" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromIntent",
+                intent,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/cargoIdsIn").toString())
+                .isEqualTo("[8,3]");
+    }
+
+    @Test
+    void selectedRecordsFilterDoesNotEmitRuntimeCriteriaOutsideDeclaredFilterCatalog() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiIntentClassification intent = AiIntentClassification.builder()
+                .category("filtering")
+                .targetField("cargoNome")
+                .baseFields(List.of("cargoNome"))
+                .build();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "filterFieldCatalog": {
+                              "fields": [
+                                { "name": "cargoIdsIn", "label": "Cargos" }
+                              ]
+                            }
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "cargoNome": "Agente de Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "cargoNome": "Engenheiro de Software Sênior" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromIntent",
+                intent,
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNull();
+    }
+
+    @Test
+    void selectedRecordsFilterMaterializesRuntimePatchFromClarifiedFilterField() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "optionSelected": {
+                            "targetField": "departamentoIdsIn",
+                            "selection": { "value": "departamentoIdsIn" }
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "departamentoId": 12, "departamentoNome": "Capsule Corp - Engenharia" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromContextHints",
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/departamentoIdsIn").toString())
+                .isEqualTo("[23,12]");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+    }
+
+    @Test
+    void selectedRecordsFilterMaterializesRuntimePatchFromSemanticClarificationHint() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "runtimeOperationId": "table.filter.apply",
+                          "optionSelected": {
+                            "targetField": "departamentoIdsIn",
+                            "selection": { "value": "departamentoIdsIn" }
+                          },
+                          "pendingClarification": {
+                            "sourcePrompt": "filtre a tabela pelos departamentos dos registros selecionados"
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "departamentoId": 21, "departamentoNome": "Capsule Corp - Engenharia" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromSemanticContextHints",
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/departamentoIdsIn").toString())
+                .isEqualTo("[23,21]");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+    }
+
+    @Test
+    void selectedRecordsSemanticClarificationHintCanAppendRequestedFilteredExport() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    { "operationId": "table.filter.apply", "submissionImpact": "runtime" }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("filtra por departamento e exporta csv")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "runtimeOperationId": "table.filter.apply",
+                          "optionSelected": {
+                            "targetField": "departamentoIdsIn",
+                            "selection": { "value": "departamentoIdsIn" }
+                          },
+                          "authoringContract": {
+                            "runtimeOperations": {
+                              "kind": "praxis.table.runtime-operations",
+                              "allowedOperationIds": ["table.filter.apply", "table.export.run"]
+                            }
+                          }
+                        }
+                        """))
+                .runtimeState(objectMapper.readTree("""
+                        {
+                          "selection": {
+                            "selectedCount": 2,
+                            "selectedIds": ["194", "192"],
+                            "sampleRows": [
+                              { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                              { "nomeCompleto": "Jonah Sterling", "departamentoId": 21, "departamentoNome": "Capsule Corp - Engenharia" }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSelectedRecordsRuntimeFilterPatchFromSemanticContextHints",
+                request,
+                authoringManifest);
+        JsonNode combinedPatch = ReflectionTestUtils.invokeMethod(
+                service,
+                "appendTableRuntimeExportIfRequested",
+                patch,
+                request,
+                authoringManifest,
+                "filtered");
+
+        assertThat(combinedPatch).isNotNull();
+        assertThat(combinedPatch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(combinedPatch.at("/tableRuntimeOperations/operations/1/operationId").asText())
+                .isEqualTo("table.export.run");
+        assertThat(combinedPatch.at("/tableRuntimeOperations/operations/1/input/format").asText())
+                .isEqualTo("csv");
+        assertThat(combinedPatch.at("/tableRuntimeOperations/operations/1/input/scope").asText())
+                .isEqualTo("filtered");
+    }
+
+    @Test
+    void selectedRecordsFilterCandidateResolverMaterializesValidatedLlmChoice() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.filter.apply",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["criteria"],
+                        "properties": {
+                          "criteria": { "type": "object" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("busca os parecidos pelo cargo do pessoal que selecionei")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "filterFieldCatalog": {
+                              "fields": [
+                                { "name": "cargoIdsIn", "label": "Cargos" },
+                                { "name": "departamentoIdsIn", "label": "Departamentos" }
+                              ]
+                            },
+                            "consultativeContext": {
+                              "selectedRecordsContext": {
+                                "selectedCount": 3,
+                                "selectedIds": ["194", "195", "196"],
+                                "filterCandidates": [
+                                  {
+                                    "field": "departamentoIdsIn",
+                                    "label": "Departamentos",
+                                    "criterionKind": "in",
+                                    "criteria": { "departamentoIdsIn": [23, 21] },
+                                    "displayValues": ["Black Mesa - Segurança", "Capsule Corp - Engenharia"]
+                                  },
+                                  {
+                                    "field": "cargoIdsIn",
+                                    "label": "Cargos",
+                                    "criterionKind": "in",
+                                    "criteria": { "cargoIdsIn": [8, 3] },
+                                    "displayValues": ["Agente de Segurança", "Engenheiro de Software Sênior"]
+                                  }
+                                ],
+                                "sampleRows": [
+                                  { "nomeCompleto": "Sol Drax", "cargoId": 8, "cargoNome": "Agente de Segurança" },
+                                  { "nomeCompleto": "Jonah Sterling", "cargoId": 3, "cargoNome": "Engenheiro de Software Sênior" }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                        """))
+                .build();
+        when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenReturn(objectMapper.readTree("""
+                        { "decision": "apply", "field": "cargoIdsIn", "reason": "O pedido escolhe cargo." }
+                        """));
+        List<String> warnings = new ArrayList<>();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveSelectedRecordFilterCandidateDecision",
+                request.getUserPrompt(),
+                request,
+                authoringManifest,
+                null,
+                warnings);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        JsonNode patch = response.getPatch();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/criteria/cargoIdsIn").toString())
+                .isEqualTo("[8,3]");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+        assertThat(warnings).contains("table-runtime-filter gerado a partir de candidato semantico validado.");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiProvider).generateJson(promptCaptor.capture(), any(AiJsonSchema.class), nullable(AiCallConfig.class));
+        assertThat(promptCaptor.getValue()).contains("Agente de Segurança");
+        assertThat(promptCaptor.getValue()).contains("Black Mesa - Segurança");
+    }
+
+    @Test
+    void selectedRecordsFilterCandidateResolverAppendsRequestedExportOperation() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    { "operationId": "table.filter.apply", "submissionImpact": "runtime" }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("filtra por departamento e exporta csv")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "runtimeOperations": {
+                              "kind": "praxis.table.runtime-operations",
+                              "allowedOperationIds": ["table.filter.apply", "table.export.run"]
+                            },
+                            "consultativeContext": {
+                              "selectedRecordsContext": {
+                                "selectedCount": 3,
+                                "selectedIds": ["194", "193", "192"],
+                                "filterCandidates": [
+                                  {
+                                    "field": "departamentoIdsIn",
+                                    "label": "Departamentos",
+                                    "criterionKind": "in",
+                                    "criteria": { "departamentoIdsIn": [23, 22, 21] },
+                                    "displayValues": ["Black Mesa - Segurança", "Black Mesa - Pesquisa", "Capsule Corp - Engenharia"]
+                                  }
+                                ],
+                                "sampleRows": [
+                                  { "nomeCompleto": "Sol Drax", "departamentoId": 23, "departamentoNome": "Black Mesa - Segurança" },
+                                  { "nomeCompleto": "Ayla Hayes", "departamentoId": 22, "departamentoNome": "Black Mesa - Pesquisa" },
+                                  { "nomeCompleto": "Jonah Sterling", "departamentoId": 21, "departamentoNome": "Capsule Corp - Engenharia" }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                        """))
+                .build();
+        when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenReturn(objectMapper.readTree("""
+                        { "decision": "apply", "field": "departamentoIdsIn", "reason": "O pedido escolhe departamento." }
+                        """));
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveSelectedRecordFilterCandidateDecision",
+                request.getUserPrompt(),
+                request,
+                authoringManifest,
+                null,
+                new ArrayList<>());
+
+        assertThat(response).isNotNull();
+        JsonNode patch = response.getPatch();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/operationId").asText())
+                .isEqualTo("table.export.run");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/input/format").asText())
+                .isEqualTo("csv");
+        assertThat(patch.at("/tableRuntimeOperations/operations/1/input/scope").asText())
+                .isEqualTo("filtered");
+    }
+
+    @Test
+    void selectedRecordsFilterCandidateResolverClarifiesWhenLlmCannotChooseProperty() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    { "operationId": "table.filter.apply", "submissionImpact": "runtime" }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("mostra outros registros parecidos com esses")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "consultativeContext": {
+                              "selectedRecordsContext": {
+                                "selectedCount": 3,
+                                "filterCandidates": [
+                                  {
+                                    "field": "dataAdmissaoRange",
+                                    "label": "Período de Admissão",
+                                    "criteria": { "dataAdmissaoRange": { "startDate": "2022-05-22", "endDate": "2022-06-13" } },
+                                    "displayValues": ["22/05/2022 até 13/06/2022"]
+                                  },
+                                  {
+                                    "field": "salarioBetween",
+                                    "label": "Faixa Salarial",
+                                    "criteria": { "salarioBetween": { "start": 37500, "end": 41000 } },
+                                    "displayValues": ["37.500 até 41.000"]
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                        """))
+                .build();
+        when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenReturn(objectMapper.readTree("""
+                        { "decision": "clarify", "field": "", "reason": "Mais de uma propriedade pode guiar a busca." }
+                        """));
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveSelectedRecordFilterCandidateDecision",
+                request.getUserPrompt(),
+                request,
+                authoringManifest,
+                null,
+                new ArrayList<>());
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("clarification");
+        assertThat(response.getMessage()).contains("Qual propriedade");
+        assertThat(response.getOptionPayloads()).hasSize(2);
+        assertThat(response.getOptionPayloads().get(0).getLabel()).isEqualTo("Período de Admissão");
+        assertThat(response.getOptionPayloads().get(1).getContextHints().at("/runtimeOperationId").asText())
+                .isEqualTo("table.filter.apply");
+    }
+
+    @Test
+    void selectedRecordsFilterCandidateResolverIgnoresFieldOutsideCanonicalCandidates() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    { "operationId": "table.filter.apply", "submissionImpact": "runtime" }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .userPrompt("filtra pelos cargos dos selecionados")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "selectedRecordsContext": {
+                            "selectedCount": 2,
+                            "filterCandidates": [
+                              {
+                                "field": "cargoIdsIn",
+                                "label": "Cargos",
+                                "criteria": { "cargoIdsIn": [8, 3] }
+                              }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+        when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenReturn(objectMapper.readTree("""
+                        { "decision": "apply", "field": "departamentoIdsIn", "reason": "Campo inventado no teste." }
+                        """));
+        List<String> warnings = new ArrayList<>();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveSelectedRecordFilterCandidateDecision",
+                request.getUserPrompt(),
+                request,
+                authoringManifest,
+                null,
+                warnings);
+
+        assertThat(response).isNull();
+        assertThat(warnings).contains("selected-record-filter-candidate-resolution-ignored-invalid-field");
+    }
+
+    @Test
+    void runtimeOperationsFromContractEnterTableActionCatalog() throws Exception {
+        JsonNode authoringContract = objectMapper.readTree("""
+                {
+                  "runtimeOperations": {
+                    "allowedOperationIds": ["table.filter.apply", "table.export.run"]
+                  }
+                }
+                """);
+        JsonNode manifest = ReflectionTestUtils.invokeMethod(
+                service,
+                "augmentAuthoringManifestFromRuntimeContract",
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                authoringContract);
+
+        JsonNode catalog = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableOperationCatalogNode",
+                manifest,
+                List.of());
+
+        assertThat(catalog.toString()).contains("table.filter.apply");
+        assertThat(catalog.toString()).contains("table.export.run");
+        assertThat(catalog.toString()).contains("runtime");
+    }
+
+    @Test
+    void intentPlanPromptIncludesSelectedRecordsRuntimeMetadata() {
+        String prompt = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildIntentPlanPrompt",
+                "praxis-table",
+                "table",
+                "filtre pelo departamento dos registros selecionados",
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                "filter",
+                """
+                {
+                  "selectedRecordsContext": {
+                    "selectedCount": 2,
+                    "sampleRows": [
+                      { "nome": "Ana Silva", "departamento": "Engenharia" },
+                      { "nome": "Pedro Lima", "departamento": "Engenharia" }
+                    ]
+                  },
+                  "runtimeOperations": {
+                    "allowedOperationIds": ["table.filter.apply"]
+                  }
+                }
+                """);
+
+        assertThat(prompt).contains("runtimeMetadata/contextHints");
+        assertThat(prompt).contains("selectedRecordsContext");
+        assertThat(prompt).contains("Engenharia");
+        assertThat(prompt).contains("não pergunte ids, nomes ou valores que já estejam nesse contexto");
+        assertThat(prompt).contains("não pergunte se a filtragem será client ou server");
+    }
+
+    @Test
+    void consultativeIntentClassificationFailureDoesNotAbortConsultativeAnswer() {
+        when(aiProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenThrow(AiProviderCallException.transport("openai", new RuntimeException("network unavailable")));
+        List<String> warnings = new ArrayList<>();
+
+        AiIntentClassification intent = ReflectionTestUtils.invokeMethod(
+                service,
+                "classifyConsultIntentSafely",
+                "liste os registros selecionados",
+                List.of("nome", "departamento", "cargo"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                "{\"runtimeState\":{\"selection\":{\"selectedCount\":2}}}",
+                "N/A",
+                objectMapper.createObjectNode(),
+                AiOrchestratorRequest.builder()
+                        .userPrompt("liste os registros selecionados")
+                        .build(),
+                null,
+                warnings);
+
+        assertThat(intent).isNull();
+        assertThat(warnings).containsExactly("consultative-intent-classification-degraded: TRANSPORT");
     }
 
     @Test
@@ -413,6 +1859,9 @@ class AiOrchestratorServiceContextHintsTest {
                     ],
                     "consultativeContext": {
                       "resourcePath": "/api/human-resources/funcionarios"
+                    },
+                    "runtimeOperations": {
+                      "allowedOperationIds": ["table.filter.apply", "table.export.run"]
                     }
                   }
                 }
@@ -442,6 +1891,13 @@ class AiOrchestratorServiceContextHintsTest {
         assertThat(contract.at("/responseModes/0/kind").asText()).isEqualTo("consult");
         assertThat(contract.at("/consultativeContext/resourcePath").asText())
                 .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(contract.at("/runtimeOperations/allowedOperationIds/0").asText())
+                .isEqualTo("table.filter.apply");
+        assertThat(contract.at("/runtimeOperations/allowedOperationIds/1").asText())
+                .isEqualTo("table.export.run");
+        assertThat(contract.path("instructions").toString())
+                .contains("return all of them in the requested execution order")
+                .contains("table.filter.apply first and table.export.run second");
     }
 
     @Test
@@ -720,6 +2176,72 @@ class AiOrchestratorServiceContextHintsTest {
         assertThat(response.getWarnings()).contains("component-edit-plan-rejected-by-authoring-manifest");
         assertThat(response.getWarnings())
                 .anyMatch(warning -> warning.contains("operationId nao declarado"));
+    }
+
+    @Test
+    void componentEditPlanResponseDoesNotRejectPlanBecauseUnusedManifestOperationsHaveNoTarget() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [
+                    { "kind": "column", "resolver": "column-by-field" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "column.header.set",
+                      "target": {
+                        "kind": "column",
+                        "resolver": "column-by-field",
+                        "required": true
+                      },
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["header"]
+                      }
+                    },
+                    {
+                      "operationId": "table.filter.apply",
+                      "inputSchema": { "type": "object" }
+                    },
+                    {
+                      "operationId": "table.export.run",
+                      "inputSchema": { "type": "object" }
+                    }
+                  ]
+                }
+                """);
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "operations": [
+                      {
+                        "operationId": "column.header.set",
+                        "target": { "kind": "column", "field": "status" },
+                        "input": { "header": "Situacao" }
+                      }
+                    ]
+                  },
+                  "explanation": "Vou renomear a coluna Status."
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-manifest-contract-used"),
+                manifest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("patch");
+        assertThat(response.getWarnings()).contains("component-edit-plan-validated-by-authoring-manifest");
+        assertThat(response.getWarnings())
+                .noneMatch(warning -> warning.contains("nao declara target estruturado"));
     }
 
     @Test
