@@ -60,16 +60,70 @@ In a typical host, `praxis-metadata-starter` explains what backend resources are
 
 When the two starters disagree, treat `praxis-metadata-starter` as authoritative for resource/schema semantics and `praxis-config-starter` as authoritative for configuration, AI, authoring, and persistence semantics. Public examples and guides on [praxisui.dev](https://praxisui.dev/) should reflect both boundaries without redefining either one.
 
-## Architecture
+## How It Fits
+
+`praxis-config-starter` sits between backend metadata, UI runtime, persistent configuration, and governed AI authoring. It does not replace the metadata starter or the Angular runtime; it gives hosts a canonical place to store runtime configuration and govern how AI-assisted changes become configuration.
+
+```mermaid
+flowchart LR
+    metadata["praxis-metadata-starter<br/>Resource semantics, x-ui, schemas, actions"]
+    host["Spring Boot host<br/>Application resources and security"]
+    config["praxis-config-starter<br/>Config, AI registry, authoring, domain decisions"]
+    db[("PostgreSQL + pgvector<br/>Config, API metadata, registry, RAG, domain knowledge")]
+    angular["praxis-ui-angular<br/>Runtime components and editors"]
+    site["praxisui.dev<br/>Public docs, examples, playgrounds"]
+    quickstart["praxis-api-quickstart<br/>Operational proof host"]
+
+    metadata -->|"publishes /schemas and discovery"| host
+    config -->|"auto-configures /api/praxis/config/**"| host
+    host -->|"serves metadata and config APIs"| angular
+    angular -->|"reads and writes runtime config"| config
+    config -->|"persists governed state"| db
+    site -->|"documents examples and recipes"| angular
+    site -->|"explains platform boundaries"| metadata
+    site -->|"explains platform boundaries"| config
+    quickstart -->|"validates real host integration"| metadata
+    quickstart -->|"validates real host integration"| config
+```
 
 ```mermaid
 flowchart TD
-    metadata["Praxis Metadata Starter"] -->|publishes schemas and discovery| host["Spring Boot host"]
-    host -->|ingests API metadata and templates| config["Praxis Config Starter"]
-    config -->|persists governed state| postgres[("PostgreSQL + pgvector")]
-    angular["Praxis UI Angular"] -->|reads configuration and AI context| host
-    host -->|serves active runtime configuration| angular
-    config -->|grounds AI authoring decisions| assistant["Governed AI assistant"]
+    schemas["Resource schemas and x-ui<br/>from praxis-metadata-starter"]
+    apiCatalog["/api/praxis/config/api-catalog/**<br/>Ingested API metadata"]
+    registry["/api/praxis/config/ai-registry/**<br/>Component definitions and templates"]
+    uiConfig["/api/praxis/config/ui<br/>Tenant and user runtime config"]
+    context["/api/praxis/config/ai-context/**<br/>Merged AI context"]
+    runtime["Praxis UI runtime<br/>Forms, tables, pages, editors"]
+
+    schemas --> context
+    apiCatalog --> context
+    registry --> context
+    uiConfig --> context
+    context --> runtime
+    runtime -->|"save or delete config with ETag"| uiConfig
+    runtime -->|"request grounded suggestions"| context
+```
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Praxis UI
+    participant Config as praxis-config-starter
+    participant Metadata as praxis-metadata-starter
+    participant AI as AI provider
+    participant DB as PostgreSQL + pgvector
+
+    User->>UI: Ask for a page or component change
+    UI->>Config: Start authoring turn
+    Config->>Metadata: Resolve resource schemas and capabilities
+    Config->>DB: Load UI config, registry, API metadata, and domain knowledge
+    Config->>AI: Request governed plan or patch
+    AI-->>Config: Structured proposal
+    Config->>Config: Validate, compile, preview, and audit
+    Config-->>UI: Stream turn events and preview
+    User->>UI: Approve apply
+    UI->>Config: Apply governed patch
+    Config->>DB: Persist runtime configuration and audit trail
 ```
 
 ## When To Use It
