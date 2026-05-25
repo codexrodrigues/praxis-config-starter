@@ -21,6 +21,18 @@ It owns persistence and runtime semantics for:
 It also does not render UI. Runtime rendering belongs to
 [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular).
 
+## Source Of Truth Boundaries
+
+| Concern | Canonical owner |
+| --- | --- |
+| Backend resource semantics, `x-ui`, `/schemas/filtered`, discovery, and capabilities | [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter) |
+| Runtime configuration, AI registry, API metadata, templates, stream auth, and governed authoring state | `praxis-config-starter` |
+| Angular runtime rendering, materializers, editors, and host integration APIs | [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular) |
+| Public operational proof and downstream HTTP validation | [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart) |
+
+Assisted repository exploration is available through [CodeWiki](https://codewiki.google/github.com/codexrodrigues/praxis-config-starter/).
+CodeWiki is complementary navigation for code reading; the repository docs and source remain normative.
+
 ## Architecture
 
 ```mermaid
