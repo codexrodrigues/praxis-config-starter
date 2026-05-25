@@ -743,6 +743,81 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void runtimeMetadataPromotesRecordSurfacesAndRuntimeOperationsAheadOfLargeContextHints() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "authoringContract": {
+                    "consultativeContext": {
+                      "recordSurfaces": {
+                        "source": "dynamic-page-composition",
+                        "surfaces": [
+                          {
+                            "id": "summary",
+                            "label": "Selected mission summary",
+                            "operationId": "dynamicPage.surface.open"
+                          },
+                          {
+                            "id": "timeline",
+                            "label": "Timeline",
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "selectedRecordsContext": {
+                        "source": "table-row-selection",
+                        "selectedCount": 1,
+                        "selectedIds": ["30"],
+                        "sampleRows": [
+                          {
+                            "id": 30,
+                            "titulo": "Operacao Linha do Tempo Segura"
+                          }
+                        ]
+                      }
+                    },
+                    "runtimeOperations": {
+                      "kind": "praxis.table.runtime-operation.batch",
+                      "allowedOperationIds": ["table.filter.apply", "dynamicPage.surface.open"],
+                      "operations": [
+                        {
+                          "operationId": "dynamicPage.surface.open",
+                          "inputSchema": {
+                            "surfaceId": ["summary", "timeline"],
+                            "source": ["selected-records"]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+                """);
+        JsonNode runtimeState = objectMapper.readTree("""
+                {
+                  "selection": {
+                    "selectedCount": 1,
+                    "selectedIds": ["30"]
+                  }
+                }
+                """);
+
+        String metadata = ReflectionTestUtils.invokeMethod(
+                service,
+                "formatRuntimeMetadata",
+                null,
+                null,
+                runtimeState,
+                contextHints);
+
+        assertThat(metadata).contains("\"recordSurfaces\"");
+        assertThat(metadata).contains("\"runtimeOperations\"");
+        assertThat(metadata).contains("\"surfaceId\" : [ \"summary\", \"timeline\" ]");
+        assertThat(metadata.indexOf("\"recordSurfaces\""))
+                .isLessThan(metadata.indexOf("\"selectedRecordsContext\""));
+        assertThat(metadata.indexOf("\"runtimeOperations\""))
+                .isLessThan(metadata.indexOf("\"selectedRecordsContext\""));
+    }
+
+    @Test
     void exportIntentMaterializesSelectedRecordsRuntimePatch() throws Exception {
         JsonNode authoringManifest = objectMapper.readTree("""
                 {

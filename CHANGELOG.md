@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Project Knowledge Vector RAG checkpoint.
 
 ### Changed
+- Runtime metadata for table AI turns now promotes `recordSurfaces` and
+  `runtimeOperations` ahead of the full `contextHints`, reducing truncation risk
+  when the LLM must materialize declared dynamic-page surface operations.
 - Project Knowledge retrieval now treats Domain Knowledge as the canonical source
   of truth and vector search as candidate ranking only.
 - Vector-ranked Project Knowledge candidates are reloaded from canonical Domain

@@ -18049,6 +18049,14 @@ public class AiOrchestratorService {
             JsonNode runtimeState,
             JsonNode contextHints) {
         ObjectNode metadata = objectMapper.createObjectNode();
+        JsonNode recordSurfaces = resolveRecordSurfacesContext(contextHints);
+        if (recordSurfaces != null) {
+            metadata.set("recordSurfaces", recordSurfaces);
+        }
+        JsonNode runtimeOperations = resolveRuntimeOperationsContext(contextHints);
+        if (runtimeOperations != null) {
+            metadata.set("runtimeOperations", runtimeOperations);
+        }
         JsonNode selectedRecordsContext = resolveSelectedRecordsContext(runtimeState, contextHints);
         if (selectedRecordsContext != null) {
             metadata.set("selectedRecordsContext", selectedRecordsContext);
@@ -18150,6 +18158,19 @@ public class AiOrchestratorService {
                 pathOrMissing(contextHints, "/authoringContract/componentEditPlan/filterFieldCatalog"),
                 pathOrMissing(contextHints, "/authoringContract/filterFieldCatalog"),
                 pathOrMissing(contextHints, "/filterFieldCatalog"));
+    }
+
+    private JsonNode resolveRecordSurfacesContext(JsonNode contextHints) {
+        return firstObjectNode(
+                pathOrMissing(contextHints, "/authoringContract/consultativeContext/recordSurfaces"),
+                pathOrMissing(contextHints, "/consultativeContext/recordSurfaces"),
+                pathOrMissing(contextHints, "/recordSurfaces"));
+    }
+
+    private JsonNode resolveRuntimeOperationsContext(JsonNode contextHints) {
+        return firstObjectNode(
+                pathOrMissing(contextHints, "/authoringContract/runtimeOperations"),
+                pathOrMissing(contextHints, "/runtimeOperations"));
     }
 
     private JsonNode firstObjectNode(JsonNode... candidates) {
