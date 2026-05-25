@@ -20,6 +20,8 @@ It owns persistence and runtime semantics for:
 [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter).
 It also does not render UI. Runtime rendering belongs to
 [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular).
+The public Praxis UI site, examples, and documentation are available at
+[praxisui.dev](https://praxisui.dev/).
 
 ## Source Of Truth Boundaries
 
@@ -28,10 +30,35 @@ It also does not render UI. Runtime rendering belongs to
 | Backend resource semantics, `x-ui`, `/schemas/filtered`, discovery, and capabilities | [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter) |
 | Runtime configuration, AI registry, API metadata, templates, stream auth, and governed authoring state | `praxis-config-starter` |
 | Angular runtime rendering, materializers, editors, and host integration APIs | [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular) |
+| Public site, examples, playgrounds, and platform documentation | [praxisui.dev](https://praxisui.dev/) |
 | Public operational proof and downstream HTTP validation | [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart) |
 
 Assisted repository exploration is available through [CodeWiki](https://codewiki.google/github.com/codexrodrigues/praxis-config-starter/).
 CodeWiki is complementary navigation for code reading; the repository docs and source remain normative.
+
+## Relationship With Praxis Metadata Starter
+
+`praxis-metadata-starter` and `praxis-config-starter` are complementary backend starters, not substitutes.
+
+`praxis-metadata-starter` is the canonical source for resource-oriented metadata:
+
+- resource keys and resource controllers;
+- `x-ui` vocabulary and schema annotations;
+- `/schemas/filtered` structural schema output;
+- resource surfaces, actions, and capabilities discovery;
+- the operation/schema resolution model consumed by Praxis UI runtimes and hosts.
+
+`praxis-config-starter` consumes and enriches that metadata boundary with governed runtime state:
+
+- persisted UI configuration per tenant, environment, user, resource, and component;
+- API metadata ingestion used by search, RAG, and AI authoring context;
+- AI registry definitions, authoring manifests, templates, and diagnostics;
+- signed or cookie-based stream access for browser-compatible authoring flows;
+- governed domain decisions and materialization workflows under `/api/praxis/config/**`.
+
+In a typical host, `praxis-metadata-starter` explains what backend resources are and which UI/schema capabilities they expose. `praxis-config-starter` stores how a tenant or user configures those capabilities, how AI tools reason over them, and how governed authoring changes are validated before they become runtime configuration.
+
+When the two starters disagree, treat `praxis-metadata-starter` as authoritative for resource/schema semantics and `praxis-config-starter` as authoritative for configuration, AI, authoring, and persistence semantics. Public examples and guides on [praxisui.dev](https://praxisui.dev/) should reflect both boundaries without redefining either one.
 
 ## Architecture
 
