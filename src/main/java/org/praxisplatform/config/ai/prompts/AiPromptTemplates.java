@@ -99,7 +99,7 @@ public final class AiPromptTemplates {
 	5. Trate perguntas sobre possibilidades, capacidades, origem de dados, formato de operações ou instruções conceituais como consultivas quando não houver decisão explícita de aplicar a mudança agora.
 	6. Trate como edição apenas quando o usuário pedir uma materialização concreta no componente, com intenção de produzir uma alteração aplicável neste turno.
 	7. Quando houver runtimeState.selection ou consultativeContext.selectedRecordsContext e o usuário pedir para listar, resumir, comparar, explicar ou responder sobre os registros selecionados, escolha o modo consultivo.
-	8. Quando houver registros selecionados e o usuário pedir para usar esses registros como base para filtros avançados, exportação, busca de registros semelhantes ou outra operação real da tabela, escolha o modo de edição somente se existir operação declarada aplicável; se faltar campo, escopo ou formato, escolha o modo consultivo/clarificativo apropriado pelo contrato e peça a decisão humana.
+	8. Quando houver registros selecionados e o usuário pedir para usar esses registros como base para filtros avançados, exportação, busca de registros semelhantes ou outra operação real da tabela, escolha o modo runtime quando ele existir no contrato e houver operação declarada aplicável. Se runtime não existir mas houver modo aplicável equivalente, use esse modo declarado. Se faltar campo, escopo ou formato, escolha o modo consultivo/clarificativo apropriado pelo contrato e peça a decisão humana.
 	9. Quando o pedido for imperativo e pedir uma mudança visual, estrutural ou comportamental concreta no componente, escolha edição mesmo que faltem detalhes opcionais como cor, estilo, tooltip, formato ou mapeamento completo; o fluxo de edição pode inferir defaults governados, pedir clarificação ou preparar revisão aplicável.
 	10. Não responda que falta catálogo de operações quando o contrato declarativo de autoria do turno contém responseModes e authoringManifest/componentEditPlan; use esse contrato como catálogo governado para decidir o modo.
 	11. Retorne APENAS JSON válido, sem markdown.
@@ -114,6 +114,10 @@ public final class AiPromptTemplates {
 
     public static final String PROMPT_SELECTED_RECORD_FILTER_CANDIDATE_RESOLVER = """
     Você é o decisor semântico governado para filtros derivados de registros selecionados no Praxis.
+    Este decisor é subordinado ao classificador global de modo do turno. Ele só deve materializar
+    filtros quando a intenção primária já for executar uma operação runtime de filtro/exportação
+    baseada nos registros selecionados. Não decida autoria visual, renderer, formatação, colunas,
+    chips, badges, ícones, estilos ou outras mudanças de componente.
     Resolva se o pedido do usuário deve usar um dos candidatos canônicos de filtro já derivados da seleção.
 
     PEDIDO DO USUÁRIO:
@@ -131,6 +135,7 @@ public final class AiPromptTemplates {
     3. Se o usuário pedir registros parecidos, similares, próximos ou relacionados sem escolher qual propriedade deve guiar a busca, retorne "clarify".
     4. Se houver mais de um candidato plausível e a intenção não resolver um deles com segurança, retorne "clarify".
     5. Se o pedido não for sobre usar os registros selecionados para filtrar ou encontrar outros registros, retorne "none".
+    5.1. Se o pedido for sobre criar, configurar, formatar ou refinar coluna, chip, badge, ícone, renderer, estilo ou aparência visual, retorne "none" mesmo que mencione registros selecionados.
     6. Não gere critérios, JSON Patch, filtros manuais ou valores novos. O runtime materializa os critérios a partir do candidato validado.
     7. Retorne APENAS JSON válido, sem markdown.
 
@@ -399,7 +404,7 @@ INSTRUÇÕES:
    - PROIBIDO: JSON Patch (RFC6902), JSON Pointer, índices numéricos ou ops/path.
    - Use patch semântico com identidade (ex.: columns[].field).
    - Se CONTRATO DECLARATIVO DE AUTORIA indicar preferredResponse="componentEditPlan" e o pedido couber no componentEditPlan permitido, retorne componentEditPlan em vez de patch livre.
-   - Se CONTRATO DECLARATIVO DE AUTORIA declarar runtimeOperations e o usuário pedir para aplicar filtros ou executar exportação agora, retorne patch com tableRuntimeOperations em vez de componentEditPlan de configuração.
+   - Se CONTRATO DECLARATIVO DE AUTORIA declarar runtimeOperations e o usuário pedir para executar agora uma operação runtime declarada, como aplicar filtros, executar exportação ou abrir uma superfície relacionada, retorne patch com tableRuntimeOperations em vez de componentEditPlan de configuração.
    - Para várias alterações declarativas no mesmo componente, use o batchKind informado no contrato de autoria.
    - Se METADADOS.contextHints.tableConversationMemory.lastComponentEditDecision existir, preserve esse alvo como memória semântica de continuação. Para pedidos sem alvo explícito, refine o lastTarget em vez de escolher uma operação global não solicitada.
 3. O patch será aplicado via "Smart Merge".
@@ -426,7 +431,7 @@ OU (QUANDO EXECUTAR OPERAÇÃO RUNTIME DECLARADA):
     "tableRuntimeOperations": {
       "kind": "praxis.table.runtime-operation.batch",
       "operations": [
-        { "operationId": "table.filter.apply|table.export.run", "input": { ... } }
+        { "operationId": "table.filter.apply|table.export.run|dynamicPage.surface.open", "input": { ... } }
       ]
     }
   },

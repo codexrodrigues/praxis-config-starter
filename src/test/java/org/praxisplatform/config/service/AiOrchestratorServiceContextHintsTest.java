@@ -367,6 +367,7 @@ class AiOrchestratorServiceContextHintsTest {
         assertThat(promptCaptor.getValue()).contains("runtimeOperations");
         assertThat(promptCaptor.getValue()).contains("table.export.run");
         assertThat(promptCaptor.getValue()).contains("usar esses registros como base para filtros avançados, exportação");
+        assertThat(promptCaptor.getValue()).contains("escolha o modo runtime quando ele existir no contrato");
         assertThat(promptCaptor.getValue()).contains("Ana Silva");
     }
 
@@ -686,6 +687,59 @@ class AiOrchestratorServiceContextHintsTest {
                 .isEqualTo("csv");
         assertThat(patch.at("/tableRuntimeOperations/operations/1/input/scope").asText())
                 .isEqualTo("filtered");
+    }
+
+    @Test
+    void runtimeOperationBatchMaterializesDynamicPageSurfaceOpen() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "dynamicPage.surface.open",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["surfaceId"],
+                        "properties": {
+                          "surfaceId": { "type": "string" },
+                          "source": { "type": "string" }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        AiActionPlan actionPlan = AiActionPlan.builder()
+                .actions(List.of(AiActionPlan.Action.builder()
+                        .type("dynamicPage.surface.open")
+                        .target("")
+                        .params(objectMapper.readTree("""
+                                {
+                                  "surfaceId": "timeline",
+                                  "source": "selected-records"
+                                }
+                                """))
+                        .build()))
+                .ambiguities(List.of())
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableRuntimeOperationPatchFromActionPlan",
+                actionPlan,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/kind").asText())
+                .isEqualTo("praxis.table.runtime-operation.batch");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("dynamicPage.surface.open");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/surfaceId").asText())
+                .isEqualTo("timeline");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/source").asText())
+                .isEqualTo("selected-records");
+        assertThat(patch.has("componentEditPlan")).isFalse();
     }
 
     @Test
@@ -1555,6 +1609,192 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void selectedRecordsFilterCandidateResolverIsSubordinateToGlobalResponseMode() {
+        Boolean legacyWithoutResponseModes = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldResolveSelectedRecordFilterCandidateDecision",
+                (String) null);
+        Boolean runtimeMode = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldResolveSelectedRecordFilterCandidateDecision",
+                "runtime");
+        Boolean editMode = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldResolveSelectedRecordFilterCandidateDecision",
+                "edit");
+        Boolean consultMode = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldResolveSelectedRecordFilterCandidateDecision",
+                "consult");
+
+        assertThat(legacyWithoutResponseModes).isTrue();
+        assertThat(runtimeMode).isTrue();
+        assertThat(editMode).isFalse();
+        assertThat(consultMode).isFalse();
+    }
+
+    @Test
+    void generatePatchSkipsSelectedRecordsFilterCandidateResolverWhenGlobalModeIsEdit() throws Exception {
+        AiContextService contextService = mock(AiContextService.class);
+        AiProvider localProvider = mock(AiProvider.class);
+        AiThreadService threadService = mock(AiThreadService.class);
+        AiMessageService messageService = mock(AiMessageService.class);
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .currentState(objectMapper.readTree("""
+                        {
+                          "columns": [
+                            { "field": "mission", "header": "Mission" },
+                            { "field": "status", "header": "Status" }
+                          ]
+                        }
+                        """))
+                .componentDefinition(objectMapper.readTree("""
+                        {
+                          "authoringManifest": {
+                            "manifestVersion": "1.0.0",
+                            "operations": [
+                              {
+                                "operationId": "table.filter.apply",
+                                "submissionImpact": "runtime",
+                                "inputSchema": {
+                                  "type": "object",
+                                  "required": ["criteria"],
+                                  "properties": {
+                                    "criteria": { "type": "object" }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                        """))
+                .build();
+        when(contextService.buildContext(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(context);
+        when(threadService.resolveThread(any(), any(), any(), any(), anyString()))
+                .thenReturn(new AiThread());
+        when(messageService.prepareTurn(any(), any(), anyString())).thenReturn(null);
+        when(localProvider.generateJson(anyString(), any(AiJsonSchema.class), nullable(AiCallConfig.class)))
+                .thenAnswer(invocation -> {
+                    String prompt = invocation.getArgument(0, String.class);
+                    if (prompt.contains("decisor semântico governado para filtros derivados")) {
+                        throw new AssertionError("Selected-record filter resolver must not route visual authoring turns.");
+                    }
+                    if (prompt.contains("decisor semântico de modo de resposta")) {
+                        return objectMapper.readTree("""
+                                {
+                                  "kind": "edit",
+                                  "preferredResponse": "componentEditPlan",
+                                  "reason": "O usuário pediu autoria visual de chips e ícones na coluna status."
+                                }
+                                """);
+                    }
+                    if (prompt.contains("INTENT_PLAN")) {
+                        return objectMapper.readTree("""
+                                {
+                                  "intent": "update",
+                                  "actions": [],
+                                  "questions": []
+                                }
+                                """);
+                    }
+                    return objectMapper.readTree("""
+                            {
+                              "intent": "change_config",
+                              "scope": "config",
+                              "category": "columns",
+                              "targetField": "status",
+                              "newField": null,
+                              "baseFields": [],
+                              "computedFormat": null,
+                              "expression": null,
+                              "needsClarification": false,
+                              "missingContext": [],
+                              "options": []
+                            }
+                            """);
+                });
+        AiOrchestratorService localService = new AiOrchestratorService(
+                contextService,
+                localProvider,
+                mock(AiInteractionLogger.class),
+                mock(ContextRetrievalService.class),
+                schemaRetrievalService,
+                templateService,
+                mock(AiRagContextService.class),
+                mock(UserConfigService.class),
+                objectMapper,
+                mock(AiApiKeyCryptoService.class),
+                threadService,
+                messageService);
+        ReflectionTestUtils.setField(localService, "maxRuntimeMetadataChars", 4000);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("analise os registros selecionados na coluna status para criar chips equivalente com os valores. inclua também ícones equivalentes na formatação dos chips")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "runtimeOperationId": "table.filter.apply",
+                          "targetField": "status",
+                          "authoringContract": {
+                            "responseModes": [
+                              { "kind": "consult", "preferredResponse": "info" },
+                              { "kind": "edit", "preferredResponse": "componentEditPlan" },
+                              { "kind": "runtime", "preferredResponse": "praxis.table.runtime-operation.batch" }
+                            ],
+                            "consultativeContext": {
+                              "selectedRecordsContext": {
+                                "selectedCount": 10,
+                                "sampleRows": [
+                                  { "status": "PLANEJADA" },
+                                  { "status": "PAUSADA" },
+                                  { "status": "EM_ANDAMENTO" }
+                                ],
+                                "filterCandidates": [
+                                  {
+                                    "field": "status",
+                                    "label": "Status",
+                                    "criteria": { "status": ["PLANEJADA", "PAUSADA", "EM_ANDAMENTO"] },
+                                    "displayValues": ["PLANEJADA", "PAUSADA", "EM_ANDAMENTO"]
+                                  },
+                                  {
+                                    "field": "prioridade",
+                                    "label": "Prioridade",
+                                    "criteria": { "prioridade": ["ALTA", "MEDIA", "CRITICA"] },
+                                    "displayValues": ["ALTA", "MEDIA", "CRITICA"]
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                        """))
+                .build();
+
+        AiOrchestratorResponse response = localService.generatePatch(
+                request,
+                "http://localhost:8088",
+                "demo",
+                "codex",
+                "local");
+
+        assertThat(response.getType()).isNotEqualTo("clarification");
+        assertThat(response.getWarnings() == null ? List.<String>of() : response.getWarnings())
+                .doesNotContain(
+                        "table-runtime-filter gerado a partir de decisao semantica de clarification.",
+                        "table-runtime-filter gerado a partir de selecao e filtro escolhido em clarification.");
+        assertThat(response.getMessage()).doesNotContain("Qual propriedade dos registros selecionados");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(localProvider, org.mockito.Mockito.atLeastOnce())
+                .generateJson(promptCaptor.capture(), any(AiJsonSchema.class), nullable(AiCallConfig.class));
+        assertThat(promptCaptor.getAllValues())
+                .anyMatch(prompt -> prompt.contains("decisor semântico de modo de resposta"))
+                .noneMatch(prompt -> prompt.contains("decisor semântico governado para filtros derivados"));
+    }
+
+    @Test
     void selectedRecordsFilterCandidateResolverAppendsRequestedExportOperation() throws Exception {
         JsonNode authoringManifest = objectMapper.readTree("""
                 {
@@ -1735,7 +1975,7 @@ class AiOrchestratorServiceContextHintsTest {
         JsonNode authoringContract = objectMapper.readTree("""
                 {
                   "runtimeOperations": {
-                    "allowedOperationIds": ["table.filter.apply", "table.export.run"]
+                    "allowedOperationIds": ["table.filter.apply", "table.export.run", "dynamicPage.surface.open"]
                   }
                 }
                 """);
@@ -1754,6 +1994,8 @@ class AiOrchestratorServiceContextHintsTest {
 
         assertThat(catalog.toString()).contains("table.filter.apply");
         assertThat(catalog.toString()).contains("table.export.run");
+        assertThat(catalog.toString()).contains("dynamicPage.surface.open");
+        assertThat(catalog.toString()).contains("surfaceId");
         assertThat(catalog.toString()).contains("runtime");
     }
 

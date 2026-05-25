@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Governed table runtime authoring now projects `dynamicPage.surface.open` from
+  `runtimeOperations`, allowing selected-record related surfaces such as
+  timelines or teams to be materialized as canonical runtime operations.
 - Governed `praxis-filter` component authoring capability catalog so semantic
   page composition can materialize search/filter widgets from read/search
   intent without hard-coding UI-only aliases.
@@ -38,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must not be enabled implicitly by host applications.
 
 ### Fixed
+- Fixed table runtime operation compilation so selected-record related-surface
+  requests can produce `tableRuntimeOperations` with `surfaceId` instead of
+  falling back to column clarification.
 - Prevented inactive, reverted or superseded original evidence from remaining
   eligible for Project Knowledge authoring influence.
 - Fixed vector-ranked Project Knowledge retrieval reloading concepts without
@@ -51,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
+- Focal `AiOrchestratorServiceContextHintsTest` passed after adding
+  `dynamicPage.surface.open` runtime-operation coverage.
 - Focal agentic authoring tests passed for filter capability catalog loading,
   component capability exposure and search/master-detail page composition.
 - Prepared local `0.1.0-rc.38` Maven alignment for downstream quickstart

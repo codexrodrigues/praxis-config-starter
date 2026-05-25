@@ -539,33 +539,38 @@ public class AiOrchestratorService {
                 authoringContract,
                 request,
                 frontendConfig);
-        JsonNode selectedRecordsRuntimeFilterPatchFromSemanticHints =
-                buildSelectedRecordsRuntimeFilterPatchFromSemanticContextHints(request, authoringManifest);
-        if (selectedRecordsRuntimeFilterPatchFromSemanticHints != null
-                && selectedRecordsRuntimeFilterPatchFromSemanticHints.isObject()) {
-            selectedRecordsRuntimeFilterPatchFromSemanticHints = appendTableRuntimeExportIfRequested(
-                    selectedRecordsRuntimeFilterPatchFromSemanticHints,
-                    request,
-                    authoringManifest,
-                    "filtered");
-            warnings.add("table-runtime-filter gerado a partir de decisao semantica de clarification.");
-            return finalizeResponse(
-                    tableRuntimeOperationResponse(
-                            selectedRecordsRuntimeFilterPatchFromSemanticHints,
-                            request,
-                            warnings,
-                            "Vou aplicar o filtro com base nas linhas selecionadas."),
-                    memoryContext);
-        }
-        AiOrchestratorResponse selectedRecordFilterCandidateDecision =
-                resolveSelectedRecordFilterCandidateDecision(
-                        planningPrompt,
+        if (shouldResolveSelectedRecordFilterCandidateDecision(selectedResponseMode)) {
+            JsonNode selectedRecordsRuntimeFilterPatchFromSemanticHints =
+                    buildSelectedRecordsRuntimeFilterPatchFromSemanticContextHints(request, authoringManifest);
+            if (selectedRecordsRuntimeFilterPatchFromSemanticHints != null
+                    && selectedRecordsRuntimeFilterPatchFromSemanticHints.isObject()) {
+                selectedRecordsRuntimeFilterPatchFromSemanticHints = appendTableRuntimeExportIfRequested(
+                        selectedRecordsRuntimeFilterPatchFromSemanticHints,
                         request,
                         authoringManifest,
-                        frontendConfig,
-                        warnings);
-        if (selectedRecordFilterCandidateDecision != null) {
-            return finalizeResponse(selectedRecordFilterCandidateDecision, memoryContext);
+                        "filtered");
+                warnings.add("table-runtime-filter gerado a partir de decisao semantica de clarification.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                selectedRecordsRuntimeFilterPatchFromSemanticHints,
+                                request,
+                                warnings,
+                                "Vou aplicar o filtro com base nas linhas selecionadas."),
+                        memoryContext);
+            }
+            AiOrchestratorResponse selectedRecordFilterCandidateDecision =
+                    resolveSelectedRecordFilterCandidateDecision(
+                            planningPrompt,
+                            request,
+                            authoringManifest,
+                            frontendConfig,
+                            warnings);
+            if (selectedRecordFilterCandidateDecision != null) {
+                return finalizeResponse(selectedRecordFilterCandidateDecision, memoryContext);
+            }
+        } else {
+            warnings.add("selected-record-filter-candidate-resolver-skipped-by-response-mode:"
+                    + selectedResponseMode);
         }
         if ("consult".equals(selectedResponseMode)) {
             AiOrchestratorResponse response = info(answerQuestion(
@@ -2223,6 +2228,10 @@ public class AiOrchestratorService {
         properties.putObject("reason").put("type", "string");
         schema.putArray("required").add("kind").add("preferredResponse").add("reason");
         return AiJsonSchema.of(schema.toString(), null);
+    }
+
+    private boolean shouldResolveSelectedRecordFilterCandidateDecision(String selectedResponseMode) {
+        return selectedResponseMode == null || "runtime".equals(selectedResponseMode);
     }
 
     private boolean hasAuthoringResponseModes(JsonNode authoringContract) {
@@ -8932,7 +8941,7 @@ public class AiOrchestratorService {
         }
         ArrayNode operations = objectMapper.createArrayNode();
         for (AiActionPlan.Action action : actionPlan.getActions()) {
-            String operationId = normalizeActionKey(action != null ? action.getType() : null);
+            String operationId = canonicalTableRuntimeOperationId(action != null ? action.getType() : null);
             if (operationId == null || !declaredRuntimeOperations.contains(operationId)) {
                 return null;
             }
@@ -9801,16 +9810,30 @@ public class AiOrchestratorService {
             return operationIds;
         }
         for (JsonNode operation : operations) {
-            String operationId = normalizeActionKey(textOrNull(operation != null ? operation.get("operationId") : null));
+            String operationId = canonicalTableRuntimeOperationId(textOrNull(operation != null ? operation.get("operationId") : null));
             String submissionImpact = textOrNull(operation != null ? operation.get("submissionImpact") : null);
             if (!isBlank(operationId)
                     && ("runtime".equalsIgnoreCase(submissionImpact)
                     || "table.filter.apply".equals(operationId)
-                    || "table.export.run".equals(operationId))) {
+                    || "table.export.run".equals(operationId)
+                    || "dynamicPage.surface.open".equals(operationId))) {
                 operationIds.add(operationId);
             }
         }
         return operationIds;
+    }
+
+    private String canonicalTableRuntimeOperationId(String value) {
+        String normalized = normalizeActionKey(value);
+        if (isBlank(normalized)) {
+            return null;
+        }
+        return switch (normalized) {
+            case "table.filter.apply" -> "table.filter.apply";
+            case "table.export.run" -> "table.export.run";
+            case "dynamicpage.surface.open" -> "dynamicPage.surface.open";
+            default -> normalized;
+        };
     }
 
     private ObjectNode buildTableRuntimeOperation(AiActionPlan.Action action, String operationId) {
@@ -9837,6 +9860,18 @@ public class AiOrchestratorService {
             }
             if (input.has("format")) {
                 input.put("format", input.get("format").asText().trim().toLowerCase(Locale.ROOT));
+            }
+        } else if ("dynamicPage.surface.open".equals(operationId)) {
+            if (!input.has("surfaceId") && value != null && value.isTextual() && !value.asText().isBlank()) {
+                input.put("surfaceId", value.asText().trim());
+            }
+            JsonNode surfaceId = input.get("surfaceId");
+            if (surfaceId == null || !surfaceId.isTextual() || surfaceId.asText().isBlank()) {
+                return null;
+            }
+            input.put("surfaceId", surfaceId.asText().trim());
+            if (!input.has("source")) {
+                input.put("source", "selected-records");
             }
         } else {
             return null;
@@ -18301,7 +18336,7 @@ public class AiOrchestratorService {
         JsonNode allowedOperationIds = authoringContract.at("/componentEditPlan/allowedOperationIds");
         if (allowedOperationIds != null && allowedOperationIds.isArray()) {
             for (JsonNode allowedOperationIdNode : allowedOperationIds) {
-                String operationId = textOrNull(allowedOperationIdNode);
+                String operationId = canonicalTableRuntimeOperationId(textOrNull(allowedOperationIdNode));
                 if (!isBlank(operationId)) {
                     operationIds.add(operationId);
                 }
@@ -18376,6 +18411,7 @@ public class AiOrchestratorService {
             case "column.conditionalStyle.add" -> tableManifestColumnConditionalStyleOperation();
             case "table.filter.apply" -> tableManifestRuntimeFilterApplyOperation();
             case "table.export.run" -> tableManifestRuntimeExportRunOperation();
+            case "dynamicPage.surface.open" -> tableManifestDynamicPageSurfaceOpenOperation();
             default -> null;
         };
     }
@@ -18408,6 +18444,19 @@ public class AiOrchestratorService {
         ObjectNode scope = properties.putObject("scope");
         scope.put("type", "string");
         scope.putArray("enum").add("auto").add("selected").add("filtered").add("currentPage").add("all");
+        return operation;
+    }
+
+    private ObjectNode tableManifestDynamicPageSurfaceOpenOperation() {
+        ObjectNode operation = tableManifestRuntimeOperation(
+                "dynamicPage.surface.open",
+                "Abre uma superficie relacionada ao registro selecionado em runtime");
+        ObjectNode inputSchema = operation.putObject("inputSchema");
+        inputSchema.put("type", "object");
+        inputSchema.putArray("required").add("surfaceId");
+        ObjectNode properties = inputSchema.putObject("properties");
+        properties.putObject("surfaceId").put("type", "string");
+        properties.putObject("source").put("type", "string");
         return operation;
     }
 
