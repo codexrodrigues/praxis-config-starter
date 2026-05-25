@@ -18336,7 +18336,7 @@ public class AiOrchestratorService {
         JsonNode allowedOperationIds = authoringContract.at("/componentEditPlan/allowedOperationIds");
         if (allowedOperationIds != null && allowedOperationIds.isArray()) {
             for (JsonNode allowedOperationIdNode : allowedOperationIds) {
-                String operationId = canonicalTableRuntimeOperationId(textOrNull(allowedOperationIdNode));
+                String operationId = textOrNull(allowedOperationIdNode);
                 if (!isBlank(operationId)) {
                     operationIds.add(operationId);
                 }
@@ -18353,7 +18353,7 @@ public class AiOrchestratorService {
         JsonNode allowedOperationIds = authoringContract.at("/runtimeOperations/allowedOperationIds");
         if (allowedOperationIds != null && allowedOperationIds.isArray()) {
             for (JsonNode allowedOperationIdNode : allowedOperationIds) {
-                String operationId = textOrNull(allowedOperationIdNode);
+                String operationId = canonicalTableRuntimeOperationId(textOrNull(allowedOperationIdNode));
                 if (!isBlank(operationId)) {
                     operationIds.add(operationId);
                 }
