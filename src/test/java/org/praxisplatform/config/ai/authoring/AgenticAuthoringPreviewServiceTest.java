@@ -1167,6 +1167,58 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewUsesSelectableFilterFieldWhenDisplayFieldHasMultiSelectDtoPartner() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel geral de funcionarios por cargo.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                funcionariosCargoDashboardIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        ObjectNode cargoNome = properties.putObject("cargoNome");
+        cargoNome.put("type", "string");
+        cargoNome.put("description", "Nome do cargo para recortes analiticos conectados.");
+        cargoNome.putObject("x-ui")
+                .put("label", "Cargo")
+                .put("controlType", "input")
+                .put("name", "cargoNome");
+        ObjectNode cargoIdsIn = properties.putObject("cargoIdsIn");
+        cargoIdsIn.put("type", "array");
+        cargoIdsIn.put("description", "Conjunto de cargos aceitos para a busca.");
+        cargoIdsIn.putObject("items").put("type", "integer");
+        cargoIdsIn.putObject("x-ui")
+                .put("label", "Cargos")
+                .put("controlType", "async-select")
+                .put("multiple", true)
+                .put("endpoint", "/api/human-resources/cargos/options/filter")
+                .put("name", "cargoIdsIn");
+        properties.putObject("ativo")
+                .put("type", "boolean")
+                .putObject("x-ui")
+                .put("label", "Status")
+                .put("controlType", "checkbox");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        String widgets = result.uiCompositionPlan().path("widgets").toString();
+        assertThat(widgets)
+                .contains("\"selectedFieldIds\":[\"cargoIdsIn\"]")
+                .doesNotContain("\"selectedFieldIds\":[\"cargoNome\"]");
+        assertThat(result.warnings()).contains("semantic-filter-schema-field-replaced-with-selectable-field");
+    }
+
+    @Test
     void previewRepairsUnsupportedChartAxesWhenUserAsksForSchemaSafeAxes() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "ajuste os graficos usando apenas eixos seguros confirmados pelo schema",
@@ -2887,6 +2939,48 @@ class AgenticAuthoringPreviewServiceTest {
                 objectMapper.createObjectNode(),
                 objectMapper.createObjectNode(),
                 null);
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionariosCargoDashboardIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        0.94d,
+                        "matched employees",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Quero um painel geral de funcionarios por cargo.",
+                "Vou criar um dashboard inicial.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "employee-dashboard",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(visualizationAxis("role", "cargoNome", "Cargo", "bar", "vertical")),
+                        true,
+                        true,
+                        "llm-authored-semantic-decision"));
     }
 
     private AgenticAuthoringIntentResolutionResult chartTypeModificationIntent() {

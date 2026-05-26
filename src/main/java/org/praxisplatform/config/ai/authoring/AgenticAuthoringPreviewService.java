@@ -1305,12 +1305,75 @@ public class AgenticAuthoringPreviewService {
             String requestedField = fieldsArray.get(i).asText("");
             Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisProbe(requestedField), schemaFields);
             if (schemaField.isPresent()) {
-                fieldsArray.set(i, objectMapper.getNodeFactory().textNode(schemaField.get().name()));
+                SchemaFieldDescriptor selectedField = preferredFilterInputField(schemaField.get(), schemaFields)
+                        .orElse(schemaField.get());
+                fieldsArray.set(i, objectMapper.getNodeFactory().textNode(selectedField.name()));
+                if (!normalize(selectedField.name()).equals(normalize(schemaField.get().name()))) {
+                    addWarningOnce(warnings, "semantic-filter-schema-field-replaced-with-selectable-field");
+                }
             } else {
                 fieldsArray.remove(i);
                 addWarningOnce(warnings, "semantic-filter-schema-verification-unsupported-field");
             }
         }
+    }
+
+    private Optional<SchemaFieldDescriptor> preferredFilterInputField(
+            SchemaFieldDescriptor requestedField,
+            Map<String, SchemaFieldDescriptor> schemaFields) {
+        if (requestedField == null || schemaFields == null || schemaFields.isEmpty()) {
+            return Optional.empty();
+        }
+        if (isSelectableFilterInputField(requestedField)) {
+            return Optional.of(requestedField);
+        }
+        SchemaFieldDescriptor best = null;
+        int bestScore = 0;
+        for (SchemaFieldDescriptor candidate : schemaFields.values()) {
+            if (candidate == null || normalize(candidate.name()).equals(normalize(requestedField.name()))) {
+                continue;
+            }
+            if (!isSelectableFilterInputField(candidate)) {
+                continue;
+            }
+            int score = filterInputSemanticMatchScore(requestedField, candidate);
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        return best != null && bestScore >= 4 ? Optional.of(best) : Optional.empty();
+    }
+
+    private boolean isSelectableFilterInputField(SchemaFieldDescriptor field) {
+        if (field == null) {
+            return false;
+        }
+        String controlType = normalize(field.controlType());
+        return field.multiple()
+                || field.hasEnum()
+                || !field.endpoint().isBlank()
+                || containsAny(controlType, "select", "autocomplete", "radio");
+    }
+
+    private int filterInputSemanticMatchScore(
+            SchemaFieldDescriptor requestedField,
+            SchemaFieldDescriptor candidate) {
+        Set<String> requestedTokens = new LinkedHashSet<>();
+        requestedTokens.addAll(requestedField.fieldTokens());
+        requestedTokens.addAll(requestedField.labelTokens());
+        requestedTokens.addAll(requestedField.descriptionTokens());
+        int score = semanticMatchScore(requestedTokens, candidate);
+        if (candidate.multiple()) {
+            score += 2;
+        }
+        if (!candidate.endpoint().isBlank()) {
+            score += 2;
+        }
+        if (containsAny(normalize(candidate.controlType()), "select", "autocomplete")) {
+            score += 1;
+        }
+        return score;
     }
 
     private void alignKpiFields(
@@ -1917,12 +1980,16 @@ public class AgenticAuthoringPreviewService {
     }
 
     private SchemaFieldDescriptor schemaFieldDescriptor(String field, JsonNode property) {
+        JsonNode xUi = property.path("x-ui");
+        if ((xUi.isMissingNode() || xUi.isNull()) && property.path("items").path("x-ui").isObject()) {
+            xUi = property.path("items").path("x-ui");
+        }
         String label = firstNonBlank(
-                property.path("x-ui").path("label").asText(""),
+                xUi.path("label").asText(""),
                 property.path("title").asText(""));
         String description = firstNonBlank(
                 property.path("description").asText(""),
-                property.path("x-ui").path("helpText").asText(""));
+                xUi.path("helpText").asText(""));
         return new SchemaFieldDescriptor(
                 field,
                 label,
@@ -1930,6 +1997,9 @@ public class AgenticAuthoringPreviewService {
                 property.path("type").asText(""),
                 property.path("format").asText(""),
                 property.path("enum").isArray() && !property.path("enum").isEmpty(),
+                xUi.path("controlType").asText(""),
+                xUi.path("multiple").asBoolean(false),
+                xUi.path("endpoint").asText(""),
                 tokens(field),
                 tokens(label),
                 tokens(description));
@@ -2708,6 +2778,9 @@ public class AgenticAuthoringPreviewService {
             String type,
             String format,
             boolean hasEnum,
+            String controlType,
+            boolean multiple,
+            String endpoint,
             Set<String> fieldTokens,
             Set<String> labelTokens,
             Set<String> descriptionTokens) {
