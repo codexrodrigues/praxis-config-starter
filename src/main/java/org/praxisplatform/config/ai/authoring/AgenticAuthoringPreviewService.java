@@ -295,6 +295,9 @@ public class AgenticAuthoringPreviewService {
                     uiCompositionPlan,
                     warnings,
                     schemaBaseUrl);
+            if (uiCompositionPlan instanceof ObjectNode uiCompositionPlanObject) {
+                normalizeFilterQueryContextBindings(uiCompositionPlanObject, warnings);
+            }
             JsonNode semanticMaterialization = semanticMaterialization(planResult, uiCompositionPlan);
             if (containsUnverifiedSemanticAxes(semanticMaterialization)) {
                 warnings.add("semantic-axis-schema-verification-pending");
@@ -777,9 +780,73 @@ public class AgenticAuthoringPreviewService {
             if (!containsUnsupportedSemanticAxes(uiCompositionPlan)) {
                 warnings.remove("semantic-axis-schema-verification-unsupported-axis");
             }
+            normalizeFilterQueryContextBindings(uiCompositionPlan, widgetArray, warnings);
             Set<String> widgetKeys = widgetKeys(widgetArray);
             pruneOrphanWidgetBindings(uiCompositionPlan, widgetKeys, warnings);
             pruneOrphanCanvasItems(uiCompositionPlan, widgetKeys, warnings);
+        }
+    }
+
+    private void normalizeFilterQueryContextBindings(
+            ObjectNode uiCompositionPlan,
+            List<String> warnings) {
+        JsonNode widgets = uiCompositionPlan.path("widgets");
+        if (widgets instanceof ArrayNode widgetArray) {
+            normalizeFilterQueryContextBindings(uiCompositionPlan, widgetArray, warnings);
+        }
+    }
+
+    private void normalizeFilterQueryContextBindings(
+            ObjectNode uiCompositionPlan,
+            ArrayNode widgetArray,
+            List<String> warnings) {
+        Set<String> filterKeys = new LinkedHashSet<>();
+        if (widgetArray != null) {
+            for (JsonNode widget : widgetArray) {
+                if (!"praxis-filter".equals(widget.path("componentId").asText(""))) {
+                    continue;
+                }
+                String key = firstNonBlank(widget.path("key").asText(""), widget.path("id").asText(""));
+                if (key.isBlank()) {
+                    continue;
+                }
+                filterKeys.add(key);
+                if (widget instanceof ObjectNode widgetObject) {
+                    ObjectNode outputs = widgetObject.path("outputs") instanceof ObjectNode existing
+                            ? existing
+                            : widgetObject.putObject("outputs");
+                    outputs.put("change", "emit");
+                    outputs.put("requestSearch", "emit");
+                    outputs.put("clear", "emit");
+                }
+            }
+        }
+        if (filterKeys.isEmpty()) {
+            return;
+        }
+        JsonNode bindings = uiCompositionPlan.path("bindings");
+        if (!(bindings instanceof ArrayNode bindingsArray)) {
+            return;
+        }
+        for (JsonNode binding : bindingsArray) {
+            if (!(binding instanceof ObjectNode bindingObject)) {
+                continue;
+            }
+            JsonNode from = binding.path("from");
+            JsonNode to = binding.path("to");
+            String fromWidget = bindingWidgetKey(from);
+            String fromPort = bindingPort(from);
+            String toPort = bindingPort(to);
+            if (!filterKeys.contains(fromWidget)
+                    || !Set.of("change", "requestSearch", "submit").contains(fromPort)
+                    || !"queryContext".equals(toPort)) {
+                continue;
+            }
+            ObjectNode transform = bindingObject.putObject("transform");
+            transform.put("kind", "template");
+            ObjectNode template = transform.putObject("template");
+            template.put("filters", "${payload}");
+            addWarningOnce(warnings, "ui-composition-plan-filter-query-context-normalized");
         }
     }
 
@@ -1197,7 +1264,15 @@ public class AgenticAuthoringPreviewService {
     private String bindingWidgetKey(JsonNode endpoint) {
         return firstNonBlank(
                 endpoint.path("widgetKey").asText(""),
-                endpoint.path("widget").asText(""));
+                firstNonBlank(
+                        endpoint.path("widget").asText(""),
+                        endpoint.path("ref").path("widget").asText("")));
+    }
+
+    private String bindingPort(JsonNode endpoint) {
+        return firstNonBlank(
+                endpoint.path("port").asText(""),
+                endpoint.path("ref").path("port").asText(""));
     }
 
     private void alignAuxiliaryWidgetBindings(

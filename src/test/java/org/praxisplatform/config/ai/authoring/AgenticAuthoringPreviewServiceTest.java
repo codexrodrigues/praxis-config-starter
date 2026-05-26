@@ -1137,12 +1137,15 @@ class AgenticAuthoringPreviewServiceTest {
         String bindings = result.uiCompositionPlan().path("bindings").toString();
         assertThat(bindings)
                 .contains("incidentes-filter.requestSearch->incidentes-chart-gravidade.queryContext")
+                .contains("incidentes-filter.change->incidentes-table.queryContext")
+                .contains("\"template\":{\"filters\":\"${payload}\"}")
                 .contains("incidentes-chart-gravidade.pointClick->incidentes-table.queryContext")
                 .contains("incidentes-chart-gravidade.crossFilter->incidentes-table.queryContext")
                 .doesNotContain("incidentes-chart-andamento")
                 .doesNotContain("incidentes-chart-responsavel")
                 .doesNotContain("andamento")
                 .doesNotContain("responsavel");
+        assertThat(result.warnings()).contains("ui-composition-plan-filter-query-context-normalized");
         assertThat(result.warnings()).contains("ui-composition-plan-orphan-binding-removed");
         String canvasItems = result.uiCompositionPlan().path("canvas").path("items").toString();
         assertThat(canvasItems)

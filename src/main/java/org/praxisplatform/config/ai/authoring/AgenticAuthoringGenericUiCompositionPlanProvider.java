@@ -641,6 +641,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         widget.put("key", key);
         widget.put("componentId", "praxis-filter");
         widget.put("role", "filter");
+        ObjectNode outputs = widget.putObject("outputs");
+        outputs.put("change", "emit");
+        outputs.put("requestSearch", "emit");
+        outputs.put("clear", "emit");
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
         inputs.put("filterId", key);
@@ -698,20 +702,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         String tableKey = widgetKey(candidate, "table");
         ArrayNode bindings = plan.putArray("bindings");
         if (includeFilters && includeDetailTable) {
-            ObjectNode tableBinding = bindings.addObject();
-            tableBinding.put("id", filterKey + ".requestSearch->" + tableKey + ".queryContext");
-            addComponentPortEndpoint(tableBinding.putObject("from"), filterKey, "requestSearch", "output");
-            addComponentPortEndpoint(tableBinding.putObject("to"), tableKey, "queryContext", "input");
-            tableBinding.putObject("transform").put("kind", "identity");
+            addFilterQueryContextBindings(bindings, filterKey, tableKey);
         }
         for (DashboardDimension dimension : dimensions) {
             String chartKey = widgetKey(candidate, "chart-" + dimension.field());
             if (includeFilters) {
-                ObjectNode filterBinding = bindings.addObject();
-                filterBinding.put("id", filterKey + ".requestSearch->" + chartKey + ".queryContext");
-                addComponentPortEndpoint(filterBinding.putObject("from"), filterKey, "requestSearch", "output");
-                addComponentPortEndpoint(filterBinding.putObject("to"), chartKey, "queryContext", "input");
-                filterBinding.putObject("transform").put("kind", "identity");
+                addFilterQueryContextBindings(bindings, filterKey, chartKey);
             }
 
             if (includeDetailTable) {
@@ -734,6 +730,19 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 ObjectNode template = crossFilterTransform.putObject("template");
                 template.put("filters", "${payload.filters}");
             }
+        }
+    }
+
+    private void addFilterQueryContextBindings(ArrayNode bindings, String filterKey, String targetKey) {
+        for (String eventPort : List.of("change", "requestSearch")) {
+            ObjectNode binding = bindings.addObject();
+            binding.put("id", filterKey + "." + eventPort + "->" + targetKey + ".queryContext");
+            addComponentPortEndpoint(binding.putObject("from"), filterKey, eventPort, "output");
+            addComponentPortEndpoint(binding.putObject("to"), targetKey, "queryContext", "input");
+            ObjectNode transform = binding.putObject("transform");
+            transform.put("kind", "template");
+            ObjectNode template = transform.putObject("template");
+            template.put("filters", "${payload}");
         }
     }
 

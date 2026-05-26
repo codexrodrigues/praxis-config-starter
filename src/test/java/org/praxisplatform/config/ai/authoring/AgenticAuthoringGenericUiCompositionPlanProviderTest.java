@@ -82,6 +82,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode filterInputs = findWidgetInputs(plan, "praxis-filter");
         assertThat(filterInputs.has("schemaUrl")).isFalse();
         assertThat(filterInputs.has("schemaVerification")).isFalse();
+        JsonNode filterWidget = findWidget(plan, "praxis-filter", "");
+        assertThat(filterWidget.path("outputs").path("change").asText()).isEqualTo("emit");
+        assertThat(filterWidget.path("outputs").path("requestSearch").asText()).isEqualTo("emit");
+        assertThat(filterWidget.path("outputs").path("clear").asText()).isEqualTo("emit");
         JsonNode chartWidget = findWidget(plan, "praxis-chart", "main");
         assertThat(chartWidget.path("outputs").path("pointClick").asText()).isEqualTo("emit");
         assertThat(chartWidget.path("outputs").path("selectionChange").asText()).isEqualTo("emit");
@@ -90,7 +94,13 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(chartWidget.path("inputs").path("config").path("interactions").path("selection").asBoolean()).isTrue();
         assertThat(plan.path("bindings").toString())
                 .contains("orders-filter.requestSearch->orders-chart-status.queryContext")
+                .contains("orders-filter.change->orders-table.queryContext")
                 .contains("orders-chart-status.pointClick->orders-table.queryContext");
+        JsonNode filterToTable = findBinding(plan.path("bindings"),
+                "orders-filter.change->orders-table.queryContext");
+        assertThat(filterToTable.path("transform").path("kind").asText()).isEqualTo("template");
+        assertThat(filterToTable.path("transform").path("template").path("filters").asText())
+                .isEqualTo("${payload}");
         JsonNode filterToChart = findBinding(plan.path("bindings"),
                 "orders-filter.requestSearch->orders-chart-status.queryContext");
         assertThat(filterToChart.path("from").path("kind").asText()).isEqualTo("component-port");
@@ -101,6 +111,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(filterToChart.path("to").path("widget").asText()).isEqualTo("orders-chart-status");
         assertThat(filterToChart.path("to").path("direction").asText()).isEqualTo("input");
         assertThat(filterToChart.path("to").has("widgetKey")).isFalse();
+        assertThat(filterToChart.path("transform").path("kind").asText()).isEqualTo("template");
+        assertThat(filterToChart.path("transform").path("template").path("filters").asText())
+                .isEqualTo("${payload}");
         JsonNode chartToTable = findBinding(plan.path("bindings"),
                 "orders-chart-status.pointClick->orders-table.queryContext");
         assertThat(chartToTable.path("transform").path("kind").asText()).isEqualTo("query-context");
