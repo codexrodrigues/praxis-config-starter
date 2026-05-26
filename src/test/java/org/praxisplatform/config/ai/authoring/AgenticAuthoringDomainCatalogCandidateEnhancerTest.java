@@ -272,6 +272,58 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
     }
 
     @Test
+    void carriesHostFieldNameFromDomainCatalogBindingEvidence() {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("procurement.suppliers"),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.eq("status fornecedores"),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "status fornecedores",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(itemWithTargetField(
+                                "binding",
+                                "binding:procurement.suppliers.field.status:dto-field",
+                                "Status do fornecedor",
+                                "supplierStatus"))));
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        AgenticAuthoringCandidate lexicalCandidate = new AgenticAuthoringCandidate(
+                "/api/procurement/suppliers",
+                "get",
+                "",
+                "/api/procurement/suppliers/filter",
+                "post",
+                0.48d,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"));
+
+        AgenticAuthoringCandidate enhanced = enhancer.enhance(
+                        "status fornecedores",
+                        List.of(lexicalCandidate),
+                        "default",
+                        "dev")
+                .get(0);
+
+        assertThat(enhanced.evidenceBundle().evidence())
+                .anySatisfy(evidence -> {
+                    assertThat(evidence.summary()).contains("field=supplierStatus");
+                    assertThat(evidence.matchedTerms()).contains("supplierstatus");
+                });
+    }
+
+    @Test
     void doesNotPromoteWeakCandidateUsingOnlyItsOwnResourceKeyFallback() {
         DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
         Mockito.when(domainCatalogIngestionService.contextLatest(
@@ -396,5 +448,25 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 null,
                 null,
                 objectMapper.createObjectNode().put("label", label));
+    }
+
+    private DomainCatalogItemResponse itemWithTargetField(
+            String itemType,
+            String itemKey,
+            String label,
+            String fieldName) {
+        var payload = objectMapper.createObjectNode();
+        payload.put("label", label);
+        payload.putObject("target").put("fieldName", fieldName);
+        return new DomainCatalogItemResponse(
+                UUID.randomUUID(),
+                "praxis-service:procurement.suppliers:test",
+                itemType,
+                itemKey,
+                "procurement",
+                null,
+                "dto_field",
+                null,
+                payload);
     }
 }

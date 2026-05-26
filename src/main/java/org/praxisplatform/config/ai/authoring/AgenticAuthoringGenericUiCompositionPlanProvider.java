@@ -9,8 +9,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Host-neutral page composition planner for resource-backed authoring.
@@ -23,6 +26,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog =
             AgenticAuthoringChartCapabilityCatalog.INSTANCE;
+    private static final Pattern FIELD_DECLARATION_PATTERN = Pattern.compile(
+            "(?:field|fieldName|name|id|property|path|column|campo|coluna)\\s*[:=]\\s*['\\\"]?([A-Za-z_][A-Za-z0-9_.-]{1,80})",
+            Pattern.CASE_INSENSITIVE);
 
     public AgenticAuthoringGenericUiCompositionPlanProvider(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -659,6 +665,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 visualizationDecision == null
                         ? "generic-dashboard-field-inference"
                         : safe(visualizationDecision.provenance()));
+        ObjectNode blueprint = diagnostics.putObject("dashboardBlueprint");
+        blueprint.put("schemaVersion", "praxis-dashboard-blueprint.v1");
+        blueprint.put("planner", "generic-ui-composition-plan-provider");
+        blueprint.put("domainSpecific", false);
+        blueprint.put("fieldSelectionPolicy", "semantic-field-candidates-from-host-context");
+        blueprint.put("requiresResolvedCategoricalAxes", true);
         ArrayNode axes = diagnostics.putArray("semanticAxes");
         for (DashboardDimension dimension : dimensions) {
             ObjectNode axis = axes.addObject();
@@ -1385,47 +1397,267 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     private List<DashboardDimension> inferredDashboardDimensions(
             AgenticAuthoringCandidate candidate,
             AgenticAuthoringPlanRequest request) {
-        String prompt = normalize(request == null ? "" : request.userPrompt());
-        String resource = normalize(candidate == null ? "" : candidate.resourcePath());
-        boolean employeeResource = containsAny(resource, "funcionario", "funcionarios", "employee", "employees");
-        if (!employeeResource) {
+        String prompt = request == null ? "" : request.userPrompt();
+        List<FieldCandidate> fields = dashboardFieldCandidates(candidate, request == null ? null : request.contextHints());
+        if (fields.isEmpty()) {
             return List.of();
         }
-        List<DashboardDimension> inferred = new ArrayList<>();
-        if (containsAny(prompt, "departamento", "departamentos", "department", "departments", "area", "areas")
-                || prompt.isBlank()) {
-            inferred.add(inferredDashboardDimension(
-                    "department",
-                    "departamentoNome",
-                    "Departamento",
-                    "Registros por Departamento"));
+        String normalizedPrompt = normalize(prompt).replaceAll("[^a-z0-9]+", " ").trim();
+        List<ScoredFieldCandidate> scored = new ArrayList<>();
+        for (int index = 0; index < fields.size(); index++) {
+            FieldCandidate field = fields.get(index);
+            int score = scoreFieldCandidateForDashboard(field, normalizedPrompt);
+            if (score > 0) {
+                scored.add(new ScoredFieldCandidate(field, score, index));
+            }
         }
-        if (containsAny(prompt, "cargo", "cargos", "funcao", "funcoes", "role", "roles", "job", "jobs")
-                || prompt.isBlank()) {
-            inferred.add(inferredDashboardDimension(
-                    "role",
-                    "cargoNome",
-                    "Cargo",
-                    "Registros por Cargo"));
+        scored.sort((left, right) -> {
+            int score = Integer.compare(right.score(), left.score());
+            return score != 0 ? score : Integer.compare(left.index(), right.index());
+        });
+        int strongestScore = scored.stream()
+                .mapToInt(ScoredFieldCandidate::score)
+                .max()
+                .orElse(0);
+        if (strongestScore >= 5) {
+            scored = scored.stream()
+                    .filter(field -> field.score() >= 5)
+                    .toList();
         }
-        if (containsAny(prompt, "ativo", "ativos", "status", "situacao", "situacao")) {
-            inferred.add(inferredDashboardDimension(
-                    "status",
-                    "ativo",
-                    "Status",
-                    "Registros por Status"));
-        }
-        if (containsAny(prompt, "estado civil", "civil", "marital")) {
-            inferred.add(inferredDashboardDimension(
-                    "marital-status",
-                    "estadoCivil",
-                    "Estado Civil",
-                    "Registros por Estado Civil"));
-        }
-        return inferred;
+        return scored.stream()
+                .map(ScoredFieldCandidate::field)
+                .map(field -> inferredDashboardDimension(
+                        field.concept(),
+                        field.field(),
+                        field.label(),
+                        "Registros por " + field.label(),
+                        field.provenance()))
+                .toList();
     }
 
-    private DashboardDimension inferredDashboardDimension(String concept, String field, String label, String title) {
+    private int scoreFieldCandidateForDashboard(FieldCandidate field, String normalizedPrompt) {
+        if (field == null || field.field().isBlank()) {
+            return 0;
+        }
+        String normalizedField = searchableText(field.field());
+        String normalizedLabel = searchableText(field.label());
+        String compactPrompt = normalizedPrompt.replace(" ", "");
+        String compactField = normalizedField.replace(" ", "");
+        String compactLabel = normalizedLabel.replace(" ", "");
+        int score = 0;
+        if (!normalizedPrompt.isBlank()) {
+            if (!normalizedLabel.isBlank() && phrasePresent(normalizedPrompt, normalizedLabel)) {
+                score += 8;
+            }
+            if (!normalizedField.isBlank() && phrasePresent(normalizedPrompt, normalizedField)) {
+                score += 7;
+            }
+            if (!compactLabel.isBlank() && compactPrompt.contains(compactLabel)) {
+                score += 4;
+            }
+            if (!compactField.isBlank() && compactPrompt.contains(compactField)) {
+                score += 3;
+            }
+            score += fieldTokenMatchScore(normalizedPrompt, normalizedLabel, 5);
+            score += fieldTokenMatchScore(normalizedPrompt, normalizedField, 4);
+        }
+        if (field.categoricalHint()) {
+            score += 2;
+        }
+        if (isLikelyTechnicalOrMeasureField(field.field(), field.label())) {
+            score -= 4;
+        }
+        return Math.max(score, 0);
+    }
+
+    private int fieldTokenMatchScore(String normalizedPrompt, String normalizedValue, int weight) {
+        if (normalizedPrompt.isBlank() || normalizedValue.isBlank()) {
+            return 0;
+        }
+        int score = 0;
+        for (String token : normalizedValue.split("\\s+")) {
+            if (isMeaningfulFieldToken(token) && phrasePresent(normalizedPrompt, token)) {
+                score += weight;
+            }
+        }
+        return Math.min(score, weight * 2);
+    }
+
+    private boolean isMeaningfulFieldToken(String token) {
+        String normalized = safe(token);
+        return normalized.length() > 2
+                && !Set.of("nome", "name", "label", "text", "type", "field", "data").contains(normalized);
+    }
+
+    private boolean phrasePresent(String normalizedText, String normalizedPhrase) {
+        if (normalizedText.isBlank() || normalizedPhrase.isBlank()) {
+            return false;
+        }
+        String text = " " + normalizedText + " ";
+        String phrase = " " + normalizedPhrase + " ";
+        return text.contains(phrase);
+    }
+
+    private boolean isLikelyTechnicalOrMeasureField(String field, String label) {
+        String combined = searchableText(field + " " + label);
+        for (String token : List.of(
+                "id", "uuid", "codigo", "code", "created", "updated", "deleted", "data", "date",
+                "time", "timestamp", "valor", "value", "amount", "total", "saldo", "preco", "price",
+                "salario", "salary", "count", "quantidade", "qtd")) {
+            if (phrasePresent(combined, token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String searchableText(String value) {
+        return normalize(safe(value).replaceAll("([a-z])([A-Z])", "$1 $2"))
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+    }
+
+    private List<FieldCandidate> dashboardFieldCandidates(
+            AgenticAuthoringCandidate candidate,
+            JsonNode contextHints) {
+        Map<String, FieldCandidate> fields = new LinkedHashMap<>();
+        collectFieldCandidatesFromJson(contextHints, "context-hints", fields);
+        if (candidate != null) {
+            for (String evidence : candidate.evidence() == null ? List.<String>of() : candidate.evidence()) {
+                collectFieldCandidatesFromText(evidence, "candidate-evidence", fields);
+            }
+            AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+            if (bundle != null) {
+                for (AgenticAuthoringEvidenceBundle.Evidence evidence : bundle.evidence()) {
+                    collectFieldCandidatesFromText(evidence.summary(), "evidence-summary:" + evidence.kind(), fields);
+                    collectFieldCandidatesFromText(evidence.ref(), "evidence-ref:" + evidence.kind(), fields);
+                    for (String term : evidence.matchedTerms()) {
+                        collectFieldCandidatesFromText(term, "evidence-term:" + evidence.kind(), fields);
+                    }
+                }
+            }
+        }
+        return fields.values().stream()
+                .filter(field -> isUsableFieldCandidate(field.field()))
+                .toList();
+    }
+
+    private void collectFieldCandidatesFromJson(
+            JsonNode node,
+            String provenance,
+            Map<String, FieldCandidate> fields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                collectFieldCandidatesFromJson(child, provenance, fields);
+            }
+            return;
+        }
+        if (!node.isObject()) {
+            if (node.isTextual()) {
+                collectFieldCandidatesFromText(node.asText(), provenance, fields);
+            }
+            return;
+        }
+        String field = firstNonBlank(
+                jsonText(node, "field"),
+                jsonText(node, "fieldName"),
+                jsonText(node, "name"),
+                jsonText(node, "property"),
+                jsonText(node, "path"),
+                jsonText(node, "id"),
+                jsonText(node, "key"));
+        String label = firstNonBlank(
+                jsonText(node, "label"),
+                jsonText(node, "header"),
+                jsonText(node, "title"),
+                jsonText(node, "displayName"),
+                jsonText(node, "description"));
+        String typeText = String.join(" ",
+                jsonText(node, "type"),
+                jsonText(node, "dataType"),
+                jsonText(node, "controlType"),
+                jsonText(node, "optionSourceType"),
+                jsonText(node, "sourceKind"),
+                jsonText(node, "semanticKind"));
+        boolean categoricalHint = containsAny(typeText,
+                "enum", "select", "option", "categorical", "category", "dimension", "string", "text");
+        if (!safe(field).isBlank()) {
+            addFieldCandidate(fields, field, label, categoricalHint, provenance);
+        }
+        node.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            JsonNode value = entry.getValue();
+            if (List.of("fields", "columns", "properties", "schemaFields", "filterableFields",
+                    "resourceFields", "fieldCatalog", "fieldMetadata").contains(key)) {
+                collectFieldCandidatesFromJson(value, provenance + ":" + key, fields);
+            } else if (value.isObject() || value.isArray()) {
+                collectFieldCandidatesFromJson(value, provenance, fields);
+            }
+        });
+    }
+
+    private void collectFieldCandidatesFromText(
+            String text,
+            String provenance,
+            Map<String, FieldCandidate> fields) {
+        String safeText = safe(text);
+        if (safeText.isBlank()) {
+            return;
+        }
+        Matcher matcher = FIELD_DECLARATION_PATTERN.matcher(safeText);
+        while (matcher.find()) {
+            addFieldCandidate(fields, matcher.group(1), "", containsAny(safeText,
+                    "enum", "select", "option", "categorical", "category", "dimension", "filterable", "group-by"), provenance);
+        }
+    }
+
+    private void addFieldCandidate(
+            Map<String, FieldCandidate> fields,
+            String rawField,
+            String rawLabel,
+            boolean categoricalHint,
+            String provenance) {
+        String field = canonicalFieldName(rawField);
+        if (!isUsableFieldCandidate(field)) {
+            return;
+        }
+        String key = normalize(field);
+        FieldCandidate existing = fields.get(key);
+        String label = valueOrDefault(rawLabel, titleFromResourcePath(field));
+        FieldCandidate next = new FieldCandidate(
+                field,
+                label,
+                normalize(label).replaceAll("[^a-z0-9]+", "-").replaceAll("(^-|-$)", ""),
+                categoricalHint || existing != null && existing.categoricalHint(),
+                existing == null ? provenance : existing.provenance() + "," + provenance);
+        fields.put(key, existing == null ? next : new FieldCandidate(
+                existing.field(),
+                valueOrDefault(existing.label(), next.label()),
+                valueOrDefault(existing.concept(), next.concept()),
+                existing.categoricalHint() || next.categoricalHint(),
+                next.provenance()));
+    }
+
+    private boolean isUsableFieldCandidate(String field) {
+        String normalized = normalize(field).replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalized.isBlank() || normalized.length() < 2 || normalized.length() > 80) {
+            return false;
+        }
+        if (normalized.split("\\s+").length > 3) {
+            return false;
+        }
+        return !Set.of("resource", "schema", "fields", "columns", "properties", "filter", "filters").contains(normalized);
+    }
+
+    private DashboardDimension inferredDashboardDimension(
+            String concept,
+            String field,
+            String label,
+            String title,
+            String provenance) {
         return new DashboardDimension(
                 concept,
                 field,
@@ -1436,7 +1668,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 "count",
                 "",
                 "Total",
-                "dashboard-prompt-resource-inference");
+                valueOrDefault(provenance, "dashboard-host-field-inference"));
     }
 
     private AgenticAuthoringVisualizationAxisDecision sharedMetricAxis(
@@ -1783,5 +2015,19 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             String metricField,
             String metricLabel,
             String provenance) {
+    }
+
+    private record FieldCandidate(
+            String field,
+            String label,
+            String concept,
+            boolean categoricalHint,
+            String provenance) {
+    }
+
+    private record ScoredFieldCandidate(
+            FieldCandidate field,
+            int score,
+            int index) {
     }
 }

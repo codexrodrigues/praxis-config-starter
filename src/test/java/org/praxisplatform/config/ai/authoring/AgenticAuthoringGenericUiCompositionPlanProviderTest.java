@@ -208,6 +208,12 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 true,
                 true,
                 "llm-authored-semantic-decision");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putArray("schemaFields")
+                .add(fieldHint("id", "ID", "number"))
+                .add(fieldHint("nomeCompleto", "Nome completo", "string"))
+                .add(fieldHint("departamentoNome", "Departamento", "select"))
+                .add(fieldHint("cargoNome", "Cargo", "select"));
 
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "ficou só tabela. transforme em um dashboard 360 completo: mantenha a tabela de funcionarios, "
@@ -216,7 +222,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 "openai",
                 "gpt-5.4-mini",
                 "test-key",
-                intent("create", "table", "create_artifact", "/api/rh/funcionarios", tableBiasedDecision)))
+                null,
+                intent("create", "table", "create_artifact", "/api/rh/funcionarios", tableBiasedDecision),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints))
                 .orElseThrow();
 
         JsonNode plan = result.uiCompositionPlan();
@@ -234,6 +247,134 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("bindings").toString())
                 .contains("\"field\":\"departamentoNome\"")
                 .contains("\"field\":\"cargoNome\"");
+    }
+
+    @Test
+    void infersDashboardChartsFromHostFieldCatalogWithoutDomainKeywords() {
+        AgenticAuthoringVisualizationDecision tableBiasedDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "dashboard with table",
+                "dashboard",
+                "praxis-table",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putArray("fieldCatalog")
+                .add(fieldHint("supplierStatus", "Status", "select"))
+                .add(fieldHint("categoryName", "Categoria", "option"))
+                .add(fieldHint("createdAt", "Criado em", "date"))
+                .add(fieldHint("totalSpend", "Gasto total", "number"));
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma visao geral dos fornecedores por status e categoria, com graficos conectados aos detalhes",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent("create", "table", "create_artifact", "/api/procurement/suppliers", tableBiasedDecision),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .contains(
+                        "suppliers-chart-supplierStatus",
+                        "suppliers-chart-categoryName",
+                        "suppliers-table");
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .doesNotContain("suppliers-chart-createdAt", "suppliers-chart-totalSpend");
+        assertThat(plan.path("bindings").toString())
+                .contains("suppliers-chart-supplierStatus.pointClick->suppliers-table.queryContext")
+                .contains("suppliers-chart-categoryName.pointClick->suppliers-table.queryContext")
+                .contains("\"field\":\"supplierStatus\"")
+                .contains("\"field\":\"categoryName\"");
+        assertThat(plan.path("diagnostics").path("dashboardBlueprint").path("domainSpecific").asBoolean())
+                .isFalse();
+        assertThat(plan.path("diagnostics").path("dashboardBlueprint").path("fieldSelectionPolicy").asText())
+                .isEqualTo("semantic-field-candidates-from-host-context");
+        assertThat(plan.toString()).doesNotContain("human-resources").doesNotContain("funcionarios");
+    }
+
+    @Test
+    void keepsDashboardFieldInferenceFocusedWhenPromptNamesOneAxis() {
+        AgenticAuthoringVisualizationDecision tableBiasedDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "dashboard with table",
+                "dashboard",
+                "praxis-table",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putArray("schemaFields")
+                .add(fieldHint("supplierStatus", "Status", "select"))
+                .add(fieldHint("categoryName", "Categoria", "option"))
+                .add(fieldHint("regionName", "Regiao", "select"));
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "monte um painel de fornecedores por status com detalhes conectados",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent("create", "table", "create_artifact", "/api/procurement/suppliers", tableBiasedDecision),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints))
+                .orElseThrow();
+
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains("suppliers-chart-supplierStatus")
+                .doesNotContain("suppliers-chart-categoryName", "suppliers-chart-regionName");
+    }
+
+    @Test
+    void infersDashboardAxisFromGenericFieldNameHint() {
+        AgenticAuthoringVisualizationDecision tableBiasedDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "dashboard with table",
+                "dashboard",
+                "praxis-table",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putArray("fieldCatalog")
+                .add(objectMapper.createObjectNode()
+                        .put("fieldName", "incidentSeverity")
+                        .put("controlType", "select"));
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "preciso de uma visao geral dos incidentes por severidade",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent("create", "table", "create_artifact", "/api/risk/incidents", tableBiasedDecision),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints))
+                .orElseThrow();
+
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains("incidents-chart-incidentSeverity");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .contains("\"field\":\"incidentSeverity\"");
     }
 
     @Test
@@ -1272,6 +1413,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 null,
                 "Total",
                 "llm-authored-semantic-axis");
+    }
+
+    private ObjectNode fieldHint(String field, String label, String type) {
+        ObjectNode hint = objectMapper.createObjectNode();
+        hint.put("field", field);
+        hint.put("label", label);
+        hint.put("type", type);
+        return hint;
     }
 
     private JsonNode findWidgetInputs(JsonNode plan, String componentId) {

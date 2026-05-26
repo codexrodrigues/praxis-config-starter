@@ -330,11 +330,16 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         if (item == null) {
             return "";
         }
-        String label = text(item.payload(), "label", "name", "title", "summary", "description");
+        JsonNode payload = item.payload();
+        String label = text(payload, "label", "name", "title", "summary", "description");
         if (label.isBlank()) {
             label = valueOrEmpty(item.itemKey());
         }
-        return compact(valueOrEmpty(item.itemType()) + " " + valueOrEmpty(item.itemKey()) + " " + label);
+        String fieldName = firstNonBlank(
+                text(path(payload, "target"), "fieldName"),
+                text(path(payload, "metadata"), "fieldName"));
+        String fieldSummary = fieldName.isBlank() ? "" : " field=" + fieldName;
+        return compact(valueOrEmpty(item.itemType()) + " " + valueOrEmpty(item.itemKey()) + " " + label + fieldSummary);
     }
 
     private List<String> matchedTerms(String resourceKey, List<DomainCatalogItemResponse> items) {
@@ -348,12 +353,37 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
                 .limit(5)
                 .flatMap(item -> Stream.concat(
                         Stream.of(valueOrEmpty(item.itemKey())),
-                        Stream.of("label", "name", "title", "summary", "description", "aliases", "synonyms")
-                                .map(field -> text(item.payload(), field))))
+                        Stream.of(
+                                text(path(item.payload(), "target"), "fieldName"),
+                                text(path(item.payload(), "metadata"), "fieldName"),
+                                text(item.payload(), "label"),
+                                text(item.payload(), "name"),
+                                text(item.payload(), "title"),
+                                text(item.payload(), "summary"),
+                                text(item.payload(), "description"),
+                                text(item.payload(), "aliases"),
+                                text(item.payload(), "synonyms"))))
                 .flatMap(itemText -> List.of(normalizePrompt(itemText.replace('.', ' ')).split("\\s+")).stream())
                 .filter(token -> token.length() > 2)
                 .forEach(terms::add);
         return List.copyOf(terms);
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            String safe = valueOrEmpty(value);
+            if (!safe.isBlank()) {
+                return safe;
+            }
+        }
+        return "";
+    }
+
+    private JsonNode path(JsonNode node, String field) {
+        return node == null || field == null ? null : node.path(field);
     }
 
     private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {
