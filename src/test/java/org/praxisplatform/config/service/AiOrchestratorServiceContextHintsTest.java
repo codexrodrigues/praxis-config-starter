@@ -732,6 +732,7 @@ class AiOrchestratorServiceContextHintsTest {
                 service,
                 "answerQuestion",
                 "filtre pelo departamento dos registros selecionados",
+                "",
                 objectMapper.createObjectNode(),
                 AiOrchestratorRequest.builder()
                         .userPrompt("filtre pelo departamento dos registros selecionados")

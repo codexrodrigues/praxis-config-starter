@@ -26680,6 +26680,10 @@ public class AiOrchestratorService {
                 augmentedOperations,
                 request,
                 warnings) || changed;
+        changed = normalizeCategoricalConditionalRendererOperations(
+                augmentedOperations,
+                request != null ? request.getUserPrompt() : null,
+                warnings) || changed;
 
         Map<String, String> rendererTypeByField = new LinkedHashMap<>();
         Map<String, Set<String>> renderedValuesByField = new LinkedHashMap<>();
@@ -26760,7 +26764,7 @@ public class AiOrchestratorService {
                         field,
                         rendererType,
                         value,
-                        null,
+                        inferCategoricalRendererColor(field, value),
                         quoteValues,
                         ++index);
                 if (operation != null) {
@@ -26775,6 +26779,102 @@ public class AiOrchestratorService {
             warnings.add("table-categorical-renderer-values-grounded-from-data-profile");
         }
         return changed ? augmented : componentEditPlan;
+    }
+
+    private boolean normalizeCategoricalConditionalRendererOperations(
+            ArrayNode operations,
+            String prompt,
+            List<String> warnings) {
+        if (operations == null || operations.isEmpty()) {
+            return false;
+        }
+        boolean changed = false;
+        boolean semanticGroundingApplied = false;
+        String normalizedPrompt = normalizeText(prompt);
+        String explicitColor = explicitRendererColorFromPrompt(normalizedPrompt);
+        String explicitVariant = explicitRendererVariantFromPrompt(normalizedPrompt);
+        String tooltipText = extractCategoricalRendererTooltipText(prompt);
+        for (JsonNode operation : operations) {
+            if (operation == null
+                    || !operation.isObject()
+                    || !"column.conditionalRenderer.add".equals(componentEditPlanOperationId(operation))) {
+                continue;
+            }
+            ObjectNode operationObject = (ObjectNode) operation;
+            String field = textOrNull(operation.at("/target/field"));
+            if (isBlank(field)) {
+                field = textOrNull(operation.at("/target/id"));
+            }
+            JsonNode input = operationObject.get("input");
+            if (input == null || !input.isObject()) {
+                continue;
+            }
+            ObjectNode inputObject = (ObjectNode) input;
+            String value = extractEqualityConditionLiteral(inputObject.get("condition"), field);
+            JsonNode renderer = inputObject.get("renderer");
+            String rendererType = normalizeBadgeLikeRendererType(textOrNull(renderer != null ? renderer.get("type") : null));
+            if (rendererType == null || renderer == null || !renderer.isObject()) {
+                continue;
+            }
+            ObjectNode rendererObject = (ObjectNode) renderer;
+            JsonNode rendererConfigNode = rendererObject.get(rendererType);
+            ObjectNode rendererConfig = rendererConfigNode != null && rendererConfigNode.isObject()
+                    ? (ObjectNode) rendererConfigNode
+                    : rendererObject.putObject(rendererType);
+            ensureBadgeLikeRendererDefaults(rendererObject, rendererType, field);
+
+            String semanticColor = inferCategoricalRendererColor(field, value);
+            String color = !isBlank(explicitColor) && mentionsCategoricalValue(normalizedPrompt, value)
+                    ? explicitColor
+                    : semanticColor;
+            if (!isBlank(color) && !color.equals(textOrNull(rendererConfig.get("color")))) {
+                rendererConfig.put("color", color);
+                changed = true;
+                if (color.equals(semanticColor)) {
+                    semanticGroundingApplied = true;
+                }
+            }
+
+            if (!isBlank(explicitVariant) && mentionsCategoricalValue(normalizedPrompt, value)) {
+                String sanitizedVariant = sanitizeTableRendererVariant(rendererType, explicitVariant);
+                if (!isBlank(sanitizedVariant)
+                        && !sanitizedVariant.equals(textOrNull(rendererConfig.get("variant")))) {
+                    rendererConfig.put("variant", sanitizedVariant);
+                    changed = true;
+                }
+            }
+
+            if (!isBlank(tooltipText) && mentionsCategoricalValue(normalizedPrompt, value)) {
+                ObjectNode tooltip = inputObject.with("tooltip");
+                if (!tooltipText.equals(textOrNull(tooltip.get("text")))) {
+                    tooltip.put("text", tooltipText);
+                    changed = true;
+                }
+                if (isBlank(textOrNull(tooltip.get("position")))) {
+                    tooltip.put("position", "top");
+                    changed = true;
+                }
+            }
+        }
+        if (semanticGroundingApplied && warnings != null
+                && !warnings.contains("table-categorical-renderer-values-grounded-from-data-profile")) {
+            warnings.add("table-categorical-renderer-values-grounded-from-data-profile");
+        }
+        return changed;
+    }
+
+    private String explicitRendererColorFromPrompt(String normalizedPrompt) {
+        if (isBlank(normalizedPrompt)) {
+            return null;
+        }
+        return inferRendererColor(normalizedPrompt, null, null);
+    }
+
+    private String explicitRendererVariantFromPrompt(String normalizedPrompt) {
+        if (isBlank(normalizedPrompt)) {
+            return null;
+        }
+        return inferRendererVariant(normalizedPrompt, null, null);
     }
 
     private boolean collapseUngovernedDataProfileCategoricalRenderersToNeutralColumnRenderer(
@@ -27316,6 +27416,45 @@ public class AiOrchestratorService {
                 || normalized.contains("orange")
                 || normalized.contains("255, 165, 0")) {
             return "laranja suave";
+        }
+        return null;
+    }
+
+    private String inferCategoricalRendererColor(String field, String value) {
+        String normalizedField = normalizeText(field);
+        String normalizedValue = normalizeText(value);
+        if (isBlank(normalizedValue)) {
+            return null;
+        }
+        boolean severityField = !isBlank(normalizedField)
+                && (normalizedField.contains("severidade")
+                || normalizedField.contains("severity")
+                || normalizedField.contains("prioridade")
+                || normalizedField.contains("priority")
+                || normalizedField.contains("risco")
+                || normalizedField.contains("risk"));
+        if (!severityField
+                && !(normalizedValue.contains("crit")
+                || normalizedValue.contains("alta")
+                || normalizedValue.contains("high")
+                || normalizedValue.contains("media")
+                || normalizedValue.contains("medium")
+                || normalizedValue.contains("baixa")
+                || normalizedValue.contains("low"))) {
+            return null;
+        }
+        if (normalizedValue.contains("crit")
+                || normalizedValue.contains("alta")
+                || normalizedValue.contains("high")) {
+            return "warn";
+        }
+        if (normalizedValue.contains("media")
+                || normalizedValue.contains("medium")) {
+            return "accent";
+        }
+        if (normalizedValue.contains("baixa")
+                || normalizedValue.contains("low")) {
+            return "success";
         }
         return null;
     }

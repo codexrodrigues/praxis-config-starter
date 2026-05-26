@@ -63,6 +63,7 @@ class AiOrchestratorServicePromptBudgetTest {
                 service,
                 "answerQuestion",
                 "como posso formatar datas?",
+                "",
                 currentState,
                 AiOrchestratorRequest.builder().build(),
                 AiCallConfig.builder().provider("openai").build(),
