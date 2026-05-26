@@ -180,10 +180,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 .filter(this::isResolvedDimension)
                 .toList();
         boolean forceDashboardFilters = chartDashboard && !renderableDimensions.isEmpty();
+        boolean includeKpis = !surfaceOpenModal && includeKpis(visualizationDecision);
         if (includeSummary(visualizationDecision)) {
             addSummary(widgets, candidate, widgetKey(candidate, "summary"));
         }
-        if (includeKpis(visualizationDecision)) {
+        if (includeKpis) {
             addKpis(widgets, candidate, widgetKey(candidate, "kpis"), renderableDimensions);
         }
         if (includeFilters(visualizationDecision) || forceDashboardFilters) {
@@ -201,9 +202,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
         }
         if (!surfaceOpenModal || !chartDashboard) {
-            addDashboardBindings(plan, candidate, renderableDimensions, visualizationDecision, forceDashboardFilters);
+            addDashboardBindings(plan, candidate, renderableDimensions, visualizationDecision, forceDashboardFilters, includeKpis);
         }
-        addDashboardCanvas(plan, candidate, renderableDimensions, visualizationDecision, surfaceOpenModal, forceDashboardFilters);
+        addDashboardCanvas(
+                plan,
+                candidate,
+                renderableDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
         return plan;
     }
 
@@ -616,7 +624,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         total.put("id", key + "-total");
         total.put("label", "Total de registros");
         total.put("value", "-");
-        total.put("caption", "Aguardando contagem");
+        total.put("valueExpr", "${table.totalItems}");
+        total.put("caption", "Aguardando dados");
+        total.put("captionExpr", "${table.caption}");
         total.put("icon", "monitoring");
         total.put("tone", "info");
         for (DashboardDimension dimension : dimensions.stream().filter(this::isResolvedDimension).limit(2).toList()) {
@@ -692,7 +702,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringCandidate candidate,
             List<DashboardDimension> dimensions,
             AgenticAuthoringVisualizationDecision visualizationDecision,
-            boolean forceIncludeFilters) {
+            boolean forceIncludeFilters,
+            boolean includeKpis) {
         boolean includeFilters = forceIncludeFilters || includeFilters(visualizationDecision);
         boolean includeDetailTable = includeDetailTable(visualizationDecision);
         if (!includeFilters && !includeDetailTable) {
@@ -703,6 +714,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ArrayNode bindings = plan.putArray("bindings");
         if (includeFilters && includeDetailTable) {
             addFilterQueryContextBindings(bindings, filterKey, tableKey);
+        }
+        if (includeKpis && includeDetailTable) {
+            addTableKpiContextBinding(bindings, tableKey, widgetKey(candidate, "kpis"));
         }
         for (DashboardDimension dimension : dimensions) {
             String chartKey = widgetKey(candidate, "chart-" + dimension.field());
@@ -744,6 +758,23 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             ObjectNode template = transform.putObject("template");
             template.put("filters", "${payload}");
         }
+    }
+
+    private void addTableKpiContextBinding(ArrayNode bindings, String tableKey, String kpiKey) {
+        ObjectNode binding = bindings.addObject();
+        binding.put("id", tableKey + ".loadingStateChange->" + kpiKey + ".context");
+        addComponentPortEndpoint(binding.putObject("from"), tableKey, "loadingStateChange", "output");
+        addComponentPortEndpoint(binding.putObject("to"), kpiKey, "context", "input");
+        ObjectNode transform = binding.putObject("transform");
+        transform.put("kind", "template");
+        transform.put("id", tableKey + "-loading-state-kpi-context");
+        ObjectNode template = transform.putObject("template");
+        ObjectNode table = template.putObject("table");
+        table.put("totalItems", "${payload.context.totalItems}");
+        table.put("loadedItemsCount", "${payload.context.loadedItemsCount}");
+        table.put("caption", "${payload.context.loadedItemsCount} itens carregados nesta pagina");
+        table.put("status", "${payload.status}");
+        table.put("resourcePath", "${payload.context.resourcePath}");
     }
 
     private void addSurfaceOpenDrilldownComposition(
@@ -867,7 +898,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringCandidate candidate,
             List<DashboardDimension> dimensions,
             AgenticAuthoringVisualizationDecision visualizationDecision) {
-        addDashboardCanvas(plan, candidate, dimensions, visualizationDecision, false, false);
+        addDashboardCanvas(plan, candidate, dimensions, visualizationDecision, false, false, includeKpis(visualizationDecision));
     }
 
     private void addDashboardCanvas(
@@ -876,7 +907,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             List<DashboardDimension> dimensions,
             AgenticAuthoringVisualizationDecision visualizationDecision,
             boolean surfaceOpenModal,
-            boolean forceIncludeFilters) {
+            boolean forceIncludeFilters,
+            boolean includeKpis) {
         ObjectNode canvas = plan.putObject("canvas");
         canvas.put("mode", "grid");
         canvas.put("columns", 12);
@@ -889,7 +921,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             putCanvasItem(items, widgetKey(candidate, "summary"), 1, nextRow, 12, 2);
             nextRow += 2;
         }
-        if (includeKpis(visualizationDecision)) {
+        if (includeKpis) {
             putCanvasItem(items, widgetKey(candidate, "kpis"), 1, nextRow, 12, 2);
             nextRow += 2;
         }
@@ -1787,7 +1819,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private boolean includeKpis(AgenticAuthoringVisualizationDecision visualizationDecision) {
-        return false;
+        return visualizationDecision == null
+                || (visualizationDecision.includeKpis()
+                && !excludesComponent(visualizationDecision, "praxis-rich-content"));
     }
 
     private boolean excludesComponent(

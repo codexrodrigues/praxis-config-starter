@@ -819,7 +819,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("praxis-rich-content", "praxis-table")
                 .doesNotContain("praxis-chart");
         assertThat(result.uiCompositionPlan().path("canvas").path("items").path("funcionarios-table").path("row").asInt())
-                .isEqualTo(3);
+                .isEqualTo(5);
         assertThat(result.uiCompositionPlan().path("diagnostics").path("visualizationDecisionIntent").asText())
                 .isEqualTo("generic-dashboard");
     }
@@ -1121,6 +1121,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
                         "praxis-rich-content",
+                        "praxis-rich-content",
                         "praxis-filter",
                         "praxis-chart",
                         "praxis-table");
@@ -1382,7 +1383,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"schemaVerified\":true")
                 .contains("\"schemaProbeStatus\":\"verified\"")
                 .contains("\"selectedFieldIds\":[\"mes\"]")
-                .doesNotContain("\"dimensionField\":\"mes\"")
+                .contains("\"dimensionField\":\"mes\"")
                 .contains("\"statsPath\":\"/api/human-resources/folhas-pagamento/stats/group-by\"");
     }
 
@@ -1536,6 +1537,71 @@ class AgenticAuthoringPreviewServiceTest {
                 .doesNotContain("praxis-table")
                 .doesNotContain("praxis-filter")
                 .doesNotContain("kpi-band");
+    }
+
+    @Test
+    void previewAlignsDashboardFiltersWithRequestDtoSelectableFields() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = funcionariosCargoDashboardIntent();
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "quero um painel geral dos funcionarios",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        ObjectNode responseProperties = responseSchema.putObject("properties");
+        responseProperties.putObject("cargoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Cargo");
+        responseProperties.putObject("nomeCompleto")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Nome completo");
+        ObjectNode requestSchema = objectMapper.createObjectNode();
+        ObjectNode requestProperties = requestSchema.putObject("properties");
+        requestProperties.putObject("cargoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Cargo");
+        ObjectNode cargoIdsIn = requestProperties.putObject("cargoIdsIn");
+        cargoIdsIn.put("type", "array");
+        ObjectNode cargoUi = cargoIdsIn.putObject("x-ui");
+        cargoUi.put("label", "Cargo");
+        cargoUi.put("controlType", "async-select");
+        cargoUi.put("multiple", true);
+        cargoUi.put("endpoint", "/api/human-resources/cargos/options/filter");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    JsonNode schema = "request".equals(context.getSchemaType()) ? requestSchema : responseSchema;
+                    return SchemaFetchResult.success(schema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        JsonNode filterInputs = result.uiCompositionPlan()
+                .path("widgets")
+                .findValues("inputs")
+                .stream()
+                .filter(inputs -> inputs.path("filterId").asText("").endsWith("-filter"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(result.valid()).isTrue();
+        assertThat(filterInputs.path("selectedFieldIds").toString())
+                .contains("cargoIdsIn")
+                .doesNotContain("cargoNome");
+        assertThat(result.warnings())
+                .contains("semantic-filter-schema-field-replaced-with-selectable-field");
+        assertThat(result.uiCompositionPlan().toString()).contains("kpi-band");
     }
 
     @Test
@@ -1769,7 +1835,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"schemaVerified\":true")
                 .contains("\"statsPath\":\"/api/human-resources/funcionarios/stats/group-by\"")
                 .contains("\"selectedFieldIds\":[\"departamentoNome\"]")
-                .doesNotContain("\"dimensionField\":\"departamentoNome\"");
+                .contains("\"dimensionField\":\"departamentoNome\"");
     }
 
     @Test

@@ -42,16 +42,18 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("rowUnit").asText()).isEqualTo("72px");
         assertThat(plan.path("canvas").path("items").path("orders-summary").path("rowSpan").asInt()).isEqualTo(2);
-        assertThat(plan.path("canvas").path("items").has("orders-kpis")).isFalse();
-        assertThat(plan.path("canvas").path("items").path("orders-filter").path("row").asInt()).isEqualTo(3);
+        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("row").asInt()).isEqualTo(3);
+        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("rowSpan").asInt()).isEqualTo(2);
+        assertThat(plan.path("canvas").path("items").path("orders-filter").path("row").asInt()).isEqualTo(5);
         assertThat(plan.path("canvas").path("items").path("orders-filter").path("rowSpan").asInt()).isEqualTo(1);
-        assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("row").asInt()).isEqualTo(4);
+        assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("row").asInt()).isEqualTo(6);
         assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("colSpan").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("rowSpan").asInt()).isEqualTo(4);
-        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(8);
-        assertThat(plan.path("widgets")).hasSize(4);
+        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(10);
+        assertThat(plan.path("widgets")).hasSize(5);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
+                        "praxis-rich-content",
                         "praxis-rich-content",
                         "praxis-filter",
                         "praxis-chart",
@@ -62,7 +64,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("praxis-table")
                 .contains("/api/acme/orders")
                 .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"")
-                .doesNotContain("kpi-band")
+                .contains("kpi-band")
                 .doesNotContain("human-resources")
                 .doesNotContain("payroll")
                 .doesNotContain("quickstart");
@@ -134,7 +136,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         axis("owner", "responsavel", "Responsavel", "horizontal-bar", "horizontal"))))).orElseThrow();
 
         JsonNode plan = result.uiCompositionPlan();
-        assertThat(plan.path("widgets")).hasSize(6);
+        assertThat(plan.path("widgets")).hasSize(7);
         assertThat(plan.path("canvas").path("items").path("incidentes-chart-gravidade").path("col").asInt())
                 .isEqualTo(1);
         assertThat(plan.path("canvas").path("items").path("incidentes-chart-andamento").path("col").asInt())
@@ -144,9 +146,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("items").path("incidentes-chart-responsavel").path("colSpan").asInt())
                 .isEqualTo(4);
         assertThat(plan.path("canvas").path("items").path("incidentes-table").path("row").asInt())
-                .isEqualTo(8);
+                .isEqualTo(10);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
+                        "praxis-rich-content",
                         "praxis-rich-content",
                         "praxis-filter",
                         "praxis-chart",
@@ -594,7 +597,12 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         String widgets = result.uiCompositionPlan().path("widgets").toString();
         assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
-                .containsExactly("praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-table");
+                .containsExactly(
+                        "praxis-rich-content",
+                        "praxis-rich-content",
+                        "praxis-filter",
+                        "praxis-chart",
+                        "praxis-table");
         assertThat(widgets)
                 .contains("\"field\":\"departamento\"")
                 .contains("\"metric\":{\"field\":\"salarioLiquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
@@ -623,9 +631,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         JsonNode plan = result.uiCompositionPlan();
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
-                .containsExactly("praxis-rich-content", "praxis-filter", "praxis-table");
+                .containsExactly("praxis-rich-content", "praxis-rich-content", "praxis-filter", "praxis-table");
         assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt())
-                .isEqualTo(4);
+                .isEqualTo(6);
         assertThat(plan.path("widgets").toString()).doesNotContain("\"field\":\"unresolved\"");
         assertThat(plan.path("diagnostics").path("semanticAxes").toString())
                 .contains("\"field\":\"unresolved\"")
@@ -654,7 +662,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"provenance\":\"schema-grounding-required\"")
                 .doesNotContain("Tabela Crie Dashboard De Incidentes")
                 .doesNotContain("tabela_crie_dashboard_de_incidentes");
-        assertThat(result.uiCompositionPlan().toString()).doesNotContain("kpi-band");
+        assertThat(result.uiCompositionPlan().toString()).contains("kpi-band");
         JsonNode filterInputs = findWidgetInputs(result.uiCompositionPlan(), "praxis-filter");
         assertThat(filterInputs.path("selectedFieldIds")).isEmpty();
     }

@@ -2547,9 +2547,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.changeKind()).isEqualTo("recommend_dashboard_visualization");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.assistantMessage())
                 .doesNotContain("Posso ajudar a escolher antes de criar");
         assertThat(result.clarificationQuestions())
@@ -4719,16 +4719,15 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "turn-1",
                         null)));
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.changeKind()).isEqualTo("recommend_dashboard_visualization");
-        assertThat(result.assistantMessage()).isNull();
-        assertThat(result.clarificationQuestions())
-                .containsExactly("Posso criar um dashboard usando o recurso de negocio selecionado?");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.assistantMessage()).isNotBlank();
+        assertThat(result.clarificationQuestions()).isEmpty();
         assertThat(result.quickReplies())
                 .extracting(AgenticAuthoringQuickReply::id)
-                .containsExactly("confirm-dashboard", "revise", "cancel");
+                .isEmpty();
     }
 
     @Test
@@ -7592,6 +7591,57 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void humanDashboardPromptOverridesLlmTableClassification() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "table",
+                        "create_table",
+                        null,
+                        null,
+                        "new_instruction",
+                        "Vou criar uma lista de funcionarios.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero um painel geral dos funcionarios",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).contains("/api/human-resources/funcionarios");
+    }
+
+    @Test
     void explicitLocalTabbedAdjustmentKeepsPageCompositionWhenLlmClassifiesApiCatalog() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -7877,7 +7927,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(planResult.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
                 .contains("praxis-chart", "praxis-filter", "praxis-table");
         assertThat(planResult.uiCompositionPlan().path("bindings").toString())
-                .contains("selectionChange")
+                .contains("pointClick")
+                .contains("crossFilter")
                 .contains(".queryContext");
     }
 
@@ -7995,7 +8046,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(planResult.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
                 .contains("praxis-chart", "praxis-filter", "praxis-table");
         assertThat(planResult.uiCompositionPlan().path("bindings").toString())
-                .contains("selectionChange")
+                .contains("pointClick")
+                .contains("crossFilter")
                 .contains(".queryContext");
     }
 

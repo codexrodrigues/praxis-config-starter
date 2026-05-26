@@ -290,6 +290,58 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
     }
 
     @Test
+    void humanDashboardRequestOverridesTableClassification() {
+        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "quero um painel geral dos funcionarios",
+                "create",
+                "table",
+                "create_table",
+                employees,
+                List.of(employees),
+                employees,
+                null,
+                false,
+                false,
+                false,
+                null,
+                null,
+                null));
+
+        assertThat(decision.operationKind()).isEqualTo("create");
+        assertThat(decision.artifactKind()).isEqualTo("dashboard");
+        assertThat(decision.changeKind()).isEqualTo("create_artifact");
+        assertThat(decision.selectedCandidate()).isSameAs(employees);
+    }
+
+    @Test
+    void humanDashboardRequestUsesDiscoveredCandidateBeforeFinalSelection() {
+        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "quero um painel geral dos funcionarios",
+                "create",
+                "table",
+                "create_table",
+                null,
+                List.of(employees),
+                null,
+                llm("create", "table"),
+                false,
+                false,
+                false,
+                null,
+                null,
+                null));
+
+        assertThat(decision.operationKind()).isEqualTo("create");
+        assertThat(decision.artifactKind()).isEqualTo("dashboard");
+        assertThat(decision.changeKind()).isEqualTo("create_artifact");
+        assertThat(decision.selectedCandidate()).isNull();
+    }
+
+    @Test
     void exploratoryDashboardQuestionDoesNotMaterializeImplicitly() {
         AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
 

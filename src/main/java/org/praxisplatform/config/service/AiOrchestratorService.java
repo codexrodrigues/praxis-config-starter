@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringCandidate;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
@@ -358,6 +359,18 @@ public class AiOrchestratorService {
                 environment);
         if (createFlowResponse != null) {
             return finalizeResponse(createFlowResponse, memoryContext);
+        }
+
+        AiOrchestratorResponse pageBuilderAnalyticalResponse = tryHandlePageBuilderAnalyticalAuthoring(
+                request,
+                context,
+                embeddingConfig,
+                requestBaseUrl,
+                tenantId,
+                userId,
+                environment);
+        if (pageBuilderAnalyticalResponse != null) {
+            return finalizeResponse(pageBuilderAnalyticalResponse, memoryContext);
         }
 
         AiOrchestratorResponse templateIntentResponse =
@@ -14466,6 +14479,453 @@ public class AiOrchestratorService {
                 && containsAny(normalized, "formulario", "form")
                 && containsAny(normalized, "crud", "registros", "lista", "cards", "relacionamento", "relacionamentos");
         return localEditorial && pageComposition;
+    }
+
+    private AiOrchestratorResponse tryHandlePageBuilderAnalyticalAuthoring(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String requestBaseUrl,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (agenticAuthoringPreviewService == null
+                || request == null
+                || !isPageBuilder(firstNonBlank(request.getComponentId(), context == null ? null : context.getComponentId()))
+                || !isPageBuilderAuthoringTargetEmpty(request, context)
+                || !shouldRoutePageBuilderAnalyticalPrompt(request)) {
+            return null;
+        }
+        JsonNode currentPage = pageBuilderAuthoringCurrentState(request, context);
+        AgenticAuthoringCandidate candidate = resolvePageBuilderAuthoringCandidate(
+                request,
+                context,
+                embeddingConfig,
+                requestBaseUrl,
+                tenantId,
+                environment);
+        if (candidate == null) {
+            AiOrchestratorResponse clarification = resolveTemplateResourceClarification(
+                    request,
+                    embeddingConfig,
+                    tenantId,
+                    environment);
+            if (clarification != null) {
+                return clarification;
+            }
+            return clarification(
+                    "Nao encontrei um recurso de dados confiavel para montar este painel. Informe o resourcePath base.",
+                    null,
+                    null);
+        }
+        String artifactKind = inferPageBuilderArtifactKind(request.getUserPrompt());
+        try {
+            AgenticAuthoringIntentResolutionResult intentResolution =
+                    new AgenticAuthoringIntentResolutionResult(
+                            true,
+                            "create",
+                            artifactKind,
+                            "create",
+                            "page-builder",
+                            "praxis-ui-angular",
+                            firstNonBlank(request.getComponentId(), "praxis-dynamic-page"),
+                            null,
+                            candidate,
+                            List.of(candidate),
+                            new AgenticAuthoringGateResult("page-builder-analytical-authoring", "eligible", List.of()),
+                            request.getUserPrompt(),
+                            null,
+                            null,
+                            List.of(),
+                            null,
+                            List.of(),
+                            List.of("ai-patch-routed-to-agentic-authoring-preview", "llm-intent-classification-skipped"),
+                            List.of(),
+                            currentPage,
+                            null,
+                            null,
+                            null);
+            AgenticAuthoringPreviewResult preview = agenticAuthoringPreviewService.preview(
+                    new AgenticAuthoringPlanRequest(
+                            request.getUserPrompt(),
+                            null,
+                            null,
+                            null,
+                            currentPage,
+                            intentResolution,
+                            request.getSessionId() == null ? null : request.getSessionId().toString(),
+                            request.getClientTurnId() == null ? null : request.getClientTurnId().toString(),
+                            null,
+                            null,
+                            null,
+                            request.getContextHints()),
+                    tenantId,
+                    userId,
+                    environment);
+            if (preview == null || !preview.valid() || preview.uiCompositionPlan() == null
+                    || preview.uiCompositionPlan().isMissingNode()) {
+                List<String> previewWarnings = preview == null || preview.warnings() == null
+                        ? List.of()
+                        : preview.warnings();
+                log.warn(
+                        "[AiOrchestratorService] page-builder analytical preview did not produce a valid plan resourcePath={} warnings={}",
+                        candidate.resourcePath(),
+                        previewWarnings);
+                return AiOrchestratorResponse.builder()
+                        .type("clarification")
+                        .message("Encontrei o recurso de dados, mas ainda nao consegui montar um plano valido. Informe outro resourcePath ou refine o pedido.")
+                        .explanation("A rota analitica do Page Builder foi reconhecida, mas o preview agentico nao retornou um uiCompositionPlan valido.")
+                        .warnings(previewWarnings)
+                        .build();
+            }
+            ObjectNode componentEditPlan = objectMapper.createObjectNode();
+            componentEditPlan.put("schemaVersion", "praxis-component-edit-plan.v1");
+            componentEditPlan.put("componentId", firstNonBlank(request.getComponentId(), "praxis-dynamic-page"));
+            componentEditPlan.set("uiCompositionPlan", preview.uiCompositionPlan());
+            List<String> warnings = new ArrayList<>(
+                    preview.warnings() == null ? List.of() : preview.warnings());
+            warnings.add("ai-patch-routed-to-agentic-authoring-preview");
+            warnings.add("llm-intent-classification-skipped");
+            String message = firstNonBlank(
+                    preview.assistantMessage(),
+                    "Plano de composição pronto para revisão.");
+            return AiOrchestratorResponse.builder()
+                    .type("patch")
+                    .componentEditPlan(componentEditPlan)
+                    .message(message)
+                    .explanation(message)
+                    .warnings(List.copyOf(new LinkedHashSet<>(warnings)))
+                    .build();
+        } catch (Exception ex) {
+            log.warn("[AiOrchestratorService] page-builder analytical preview fallback failed", ex);
+            return null;
+        }
+    }
+
+    private boolean shouldRoutePageBuilderAnalyticalPrompt(AiOrchestratorRequest request) {
+        String normalized = normalizeLoose(request == null ? null : request.getUserPrompt());
+        if (normalized.isBlank() || isConsultativePrompt(normalized)) {
+            return false;
+        }
+        if (hasTemplateFlowContinuationHints(request.getContextHints())) {
+            return true;
+        }
+        if (isCreateTemplatePrompt(request.getUserPrompt())) {
+            return true;
+        }
+        return containsAny(normalized,
+                "quero", "preciso", "gostaria", "necessito", "faca", "monte", "construa",
+                "painel", "dashboard", "visao geral", "visao 360", "overview", "indicador", "indicadores");
+    }
+
+    private boolean isPageBuilderAuthoringTargetEmpty(AiOrchestratorRequest request, AiContextDTO context) {
+        JsonNode requestState = request == null ? null : request.getCurrentState();
+        if (requestState != null && !requestState.isMissingNode() && !requestState.isNull()) {
+            return isEmptyTemplateTarget(requestState);
+        }
+        return context == null || isEmptyTemplateTarget(context.getCurrentState());
+    }
+
+    private JsonNode pageBuilderAuthoringCurrentState(AiOrchestratorRequest request, AiContextDTO context) {
+        JsonNode requestState = request == null ? null : request.getCurrentState();
+        if (requestState != null && !requestState.isMissingNode() && !requestState.isNull()) {
+            return requestState;
+        }
+        return context == null || context.getCurrentState() == null
+                ? MissingNode.getInstance()
+                : context.getCurrentState();
+    }
+
+    private boolean isConsultativePrompt(String normalizedPrompt) {
+        if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
+            return false;
+        }
+        return normalizedPrompt.startsWith("como ")
+                || normalizedPrompt.startsWith("por que ")
+                || normalizedPrompt.startsWith("porque ")
+                || normalizedPrompt.startsWith("qual ")
+                || normalizedPrompt.startsWith("quais ")
+                || normalizedPrompt.startsWith("onde ")
+                || normalizedPrompt.startsWith("quando ")
+                || normalizedPrompt.startsWith("explique ")
+                || normalizedPrompt.startsWith("me explique ");
+    }
+
+    private String inferPageBuilderArtifactKind(String prompt) {
+        String normalized = normalizeLoose(prompt);
+        if (containsAny(normalized,
+                "painel", "dashboard", "visao geral", "visao 360", "overview", "360",
+                "indicador", "indicadores", "kpi", "kpis", "grafico", "graficos", "chart", "charts")) {
+            return "dashboard";
+        }
+        if (containsAny(normalized, "tabela", "table", "lista", "listagem")) {
+            return "table";
+        }
+        return "page";
+    }
+
+    private AgenticAuthoringCandidate resolvePageBuilderAuthoringCandidate(
+            AiOrchestratorRequest request,
+            AiContextDTO context,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String requestBaseUrl,
+            String tenantId,
+            String environment) {
+        String explicitPath = firstNonBlank(
+                request.getResourcePath(),
+                context == null ? null : context.getResourcePath(),
+                extractTemplateResourcePath(request));
+        if (!isBlank(explicitPath)) {
+            String normalizedPath = normalizeResourceBasePath(explicitPath);
+            return new AgenticAuthoringCandidate(
+                    normalizedPath,
+                    "post",
+                    "/schemas/filtered?path=" + normalizedPath + "/filter/cursor&operation=post&schemaType=response",
+                    normalizedPath + "/filter/cursor",
+                    "POST",
+                    1.0d,
+                    "resourcePath informado pelo contexto de autoria",
+                    List.of("resourcePath: " + normalizedPath));
+        }
+        List<ApiSearchResult> results = searchPageBuilderAuthoringEndpoints(
+                request,
+                embeddingConfig,
+                tenantId,
+                environment);
+        if (results.isEmpty()) {
+            return null;
+        }
+        AgenticAuthoringCandidate probedCandidate = resolveCandidateBySchemaProbe(
+                request,
+                results,
+                requestBaseUrl);
+        if (probedCandidate != null) {
+            return probedCandidate;
+        }
+        List<ApiSearchResult> tableCandidates = filterTableEndpoints(results);
+        if (!tableCandidates.isEmpty()) {
+            results = tableCandidates;
+        }
+        results = filterEndpointsByPromptTokens(request.getUserPrompt(), results);
+        results = preferPrimaryTokenMatches(request.getUserPrompt(), results);
+        ApiSearchResult picked = results.isEmpty() ? null : results.get(0);
+        if (picked == null || isBlank(picked.getPath())) {
+            return null;
+        }
+        String method = firstNonBlank(picked.getMethod(), "POST").toUpperCase(Locale.ROOT);
+        String resourcePath = normalizeResourceBasePath(picked.getPath());
+        String businessPath = normalizeResourceBasePath(resourcePath)
+                .replaceAll("/filter/cursor$", "")
+                .replaceAll("/filter$", "")
+                .replaceAll("/all$", "");
+        String submitUrl = "GET".equals(method) ? businessPath : resourcePath;
+        if (!submitUrl.endsWith("/filter") && !submitUrl.endsWith("/filter/cursor") && !"GET".equals(method)) {
+            submitUrl = businessPath + "/filter/cursor";
+        }
+        String schemaUrl = "/schemas/filtered?path=" + submitUrl + "&operation="
+                + method.toLowerCase(Locale.ROOT) + "&schemaType=response";
+        return new AgenticAuthoringCandidate(
+                businessPath,
+                method.toLowerCase(Locale.ROOT),
+                schemaUrl,
+                submitUrl,
+                method,
+                picked.getSimilarityScore(),
+                firstNonBlank(picked.getSummary(), "recurso selecionado pelo catalogo de API"),
+                List.of(
+                        "path: " + picked.getPath(),
+                        "method: " + method,
+                        "summary: " + firstNonBlank(picked.getSummary(), ""),
+                        "tags: " + firstNonBlank(picked.getTags(), "")));
+    }
+
+    private AgenticAuthoringCandidate resolveCandidateBySchemaProbe(
+            AiOrchestratorRequest request,
+            List<ApiSearchResult> results,
+            String requestBaseUrl) {
+        if (schemaRetrievalService == null || request == null || results == null || results.isEmpty()) {
+            return null;
+        }
+        LinkedHashSet<String> resourceTokens = extractResourcePathTokens(request.getUserPrompt());
+        if (resourceTokens.isEmpty()) {
+            return null;
+        }
+        LinkedHashSet<String> prefixes = extractApiResourcePrefixes(results);
+        for (String prefix : prefixes) {
+            for (String token : resourceTokens) {
+                String basePath = normalizeResourceBasePath(prefix + "/" + token);
+                String submitUrl = basePath + "/filter/cursor";
+                SchemaFetchResult result = schemaRetrievalService.fetchSchemaResult(
+                        AiSchemaContext.builder()
+                                .path(submitUrl)
+                                .operation("post")
+                                .schemaType("response")
+                                .build(),
+                        requestBaseUrl);
+                if (result != null && result.isSuccess()) {
+                    return new AgenticAuthoringCandidate(
+                            basePath,
+                            "post",
+                            "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response",
+                            submitUrl,
+                            "POST",
+                            1.0d,
+                            "recurso resolvido por prova de schema canonico",
+                            List.of(
+                                    "schema-probe: " + submitUrl,
+                                    "schema-probe-status: success"));
+                }
+            }
+        }
+        return null;
+    }
+
+    private LinkedHashSet<String> extractResourcePathTokens(String prompt) {
+        LinkedHashSet<String> tokens = new LinkedHashSet<>();
+        for (String token : extractPromptTokens(prompt)) {
+            String normalized = normalizeSearchToken(token);
+            if (normalized.length() < 4 || PROMPT_STOPWORDS.contains(normalized)) {
+                continue;
+            }
+            tokens.add(normalized);
+            if (normalized.endsWith("s") && normalized.length() > 5) {
+                tokens.add(normalized.substring(0, normalized.length() - 1));
+            }
+        }
+        return tokens;
+    }
+
+    private LinkedHashSet<String> extractApiResourcePrefixes(List<ApiSearchResult> results) {
+        LinkedHashSet<String> prefixes = new LinkedHashSet<>();
+        for (ApiSearchResult result : results) {
+            if (result == null || isBlank(result.getPath())) {
+                continue;
+            }
+            String path = normalizeResourceBasePath(result.getPath());
+            if (!path.startsWith("/api/")) {
+                continue;
+            }
+            String[] parts = path.split("/");
+            if (parts.length >= 3) {
+                prefixes.add("/api/" + parts[2]);
+            }
+            if (parts.length >= 4) {
+                prefixes.add("/api/" + parts[2] + "/" + parts[3]);
+            }
+            if (prefixes.size() >= 6) {
+                break;
+            }
+        }
+        return prefixes;
+    }
+
+    private List<ApiSearchResult> searchPageBuilderAuthoringEndpoints(
+            AiOrchestratorRequest request,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
+        List<ApiSearchResult> results = searchExpandedAuthoringEndpoints(request, embeddingConfig, tenantId, environment);
+        if (results.isEmpty() && (!isBlank(tenantId) || !isBlank(environment))) {
+            results = searchExpandedAuthoringEndpoints(request, embeddingConfig, null, null);
+        }
+        return prioritizeAnalyticalResourceEndpoints(results);
+    }
+
+    private List<ApiSearchResult> searchExpandedAuthoringEndpoints(
+            AiOrchestratorRequest request,
+            EmbeddingService.EmbeddingCallConfig embeddingConfig,
+            String tenantId,
+            String environment) {
+        if (request == null) {
+            return List.of();
+        }
+        LinkedHashMap<String, ApiSearchResult> byEndpoint = new LinkedHashMap<>();
+        for (String query : buildAuthoringDiscoveryQueries(request.getUserPrompt())) {
+            List<ApiSearchResult> matches = retrievalService.searchApiMetadata(
+                    query,
+                    request.getApiMethod(),
+                    request.getApiTags(),
+                    request.getApiSearchLimit() != null ? request.getApiSearchLimit() : DEFAULT_API_SEARCH_LIMIT,
+                    embeddingConfig,
+                    trimToNull(tenantId),
+                    trimToNull(environment),
+                    trimToNull(request.getRagReleaseId()));
+            for (ApiSearchResult match : matches) {
+                if (match == null || isBlank(match.getPath())) {
+                    continue;
+                }
+                String key = firstNonBlank(match.getMethod(), "") + " " + normalizeResourceBasePath(match.getPath());
+                ApiSearchResult existing = byEndpoint.get(key);
+                if (existing == null || match.getSimilarityScore() > existing.getSimilarityScore()) {
+                    byEndpoint.put(key, match);
+                }
+            }
+        }
+        return new ArrayList<>(byEndpoint.values());
+    }
+
+    private List<String> buildAuthoringDiscoveryQueries(String prompt) {
+        LinkedHashSet<String> queries = new LinkedHashSet<>();
+        String original = firstNonBlank(prompt, "").trim();
+        if (!original.isBlank()) {
+            queries.add(original);
+        }
+        String normalized = normalizeLoose(original);
+        if (containsAny(normalized, "funcionario", "funcionarios", "colaborador", "colaboradores")) {
+            queries.add(original + " employees");
+            queries.add("employees search");
+        }
+        return queries.isEmpty() ? List.of(original) : new ArrayList<>(queries);
+    }
+
+    private List<ApiSearchResult> prioritizeAnalyticalResourceEndpoints(List<ApiSearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return List.of();
+        }
+        List<ApiSearchResult> sorted = new ArrayList<>(results);
+        sorted.sort((left, right) -> Integer.compare(
+                analyticalResourceScore(right),
+                analyticalResourceScore(left)));
+        return sorted;
+    }
+
+    private int analyticalResourceScore(ApiSearchResult result) {
+        if (result == null) {
+            return Integer.MIN_VALUE;
+        }
+        String path = normalizeResourceBasePath(result.getPath());
+        String method = firstNonBlank(result.getMethod(), "").toUpperCase(Locale.ROOT);
+        String summary = normalizeLoose(result.getSummary());
+        String tags = normalizeLoose(result.getTags());
+        int score = 0;
+        if ("POST".equals(method)) {
+            score += 20;
+        }
+        if (path.endsWith("/filter/cursor")) {
+            score += 80;
+        } else if (path.endsWith("/filter")) {
+            score += 60;
+        } else if (path.endsWith("/search")) {
+            score += 40;
+        } else if (path.endsWith("/all")) {
+            score += 20;
+        }
+        if (path.contains("/options/") || path.endsWith("/options/filter") || path.endsWith("/options/by-ids")) {
+            score -= 35;
+        }
+        if (path.contains("/actions/") || path.endsWith("/bulk") || path.contains("{")) {
+            score -= 45;
+        }
+        if (path.startsWith("/api/praxis/config")) {
+            score -= 60;
+        }
+        if (summary.contains("filtrar") || summary.contains("search") || summary.contains("consultar")) {
+            score += 15;
+        }
+        if (tags.contains("controller")) {
+            score += 5;
+        }
+        return score;
     }
 
     private String normalizeLoose(String value) {

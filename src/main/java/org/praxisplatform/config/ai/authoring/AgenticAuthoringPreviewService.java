@@ -522,12 +522,15 @@ public class AgenticAuthoringPreviewService {
             addWarningOnce(warnings, "semantic-axis-schema-verification-no-fields");
             return uiCompositionPlan;
         }
+        Map<String, SchemaFieldDescriptor> filterSchemaFields =
+                filterSchemaFields(request, schemaBaseUrl).orElse(schemaFields);
         JsonNode copy = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.deepCopy();
         if (copy instanceof ObjectNode objectNode) {
             reconcileSemanticAxesWithSchema(
                     request,
                     objectNode,
                     schemaFields,
+                    filterSchemaFields,
                     schemaResult,
                     warnings,
                     allowsSchemaSafeAxisRepair(request));
@@ -575,6 +578,34 @@ public class AgenticAuthoringPreviewService {
                 .operation(operation)
                 .schemaType(schemaType)
                 .build();
+    }
+
+    private Optional<Map<String, SchemaFieldDescriptor>> filterSchemaFields(
+            AgenticAuthoringPlanRequest request,
+            String schemaBaseUrl) {
+        if (schemaRetrievalService == null) {
+            return Optional.empty();
+        }
+        AgenticAuthoringCandidate candidate = request == null || request.intentResolution() == null
+                ? null
+                : request.intentResolution().selectedCandidate();
+        String businessPath = businessResourcePath(firstNonBlank(
+                candidate == null ? "" : candidate.resourcePath(),
+                candidate == null ? "" : candidate.submitUrl()));
+        if (businessPath.isBlank()) {
+            return Optional.empty();
+        }
+        AiSchemaContext filterContext = AiSchemaContext.builder()
+                .path(businessPath + "/filter")
+                .operation("post")
+                .schemaType("request")
+                .build();
+        SchemaFetchResult filterSchemaResult = schemaRetrievalService.fetchSchemaResult(filterContext, schemaBaseUrl);
+        if (filterSchemaResult == null || !filterSchemaResult.isSuccess()) {
+            return Optional.empty();
+        }
+        Map<String, SchemaFieldDescriptor> fields = schemaFields(filterSchemaResult.getSchema());
+        return fields.isEmpty() ? Optional.empty() : Optional.of(fields);
     }
 
     private String materializationReadSchemaPath(
@@ -669,6 +700,7 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPlanRequest request,
             ObjectNode uiCompositionPlan,
             Map<String, SchemaFieldDescriptor> schemaFields,
+            Map<String, SchemaFieldDescriptor> filterSchemaFields,
             SchemaFetchResult schemaResult,
             List<String> warnings,
             boolean allowSchemaSafeAxisRepair) {
@@ -695,7 +727,7 @@ public class AgenticAuthoringPreviewService {
             Set<String> assignedChartFields = exactSafeChartFields(widgetArray, schemaFields);
             for (int i = widgetArray.size() - 1; i >= 0; i--) {
                 JsonNode widget = widgetArray.get(i);
-                alignAuxiliaryWidgetBindings(widget, schemaFields, schemaResult, warnings);
+                alignAuxiliaryWidgetBindings(widget, schemaFields, filterSchemaFields, schemaResult, warnings);
                 JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
                 if (!(axis instanceof ObjectNode axisObject)) {
                     continue;
@@ -1278,6 +1310,7 @@ public class AgenticAuthoringPreviewService {
     private void alignAuxiliaryWidgetBindings(
             JsonNode widget,
             Map<String, SchemaFieldDescriptor> schemaFields,
+            Map<String, SchemaFieldDescriptor> filterSchemaFields,
             SchemaFetchResult schemaResult,
             List<String> warnings) {
         if (widget == null || !widget.isObject()) {
@@ -1285,7 +1318,7 @@ public class AgenticAuthoringPreviewService {
         }
         String componentId = widget.path("componentId").asText("");
         if ("praxis-filter".equals(componentId)) {
-            alignFilterFields(widget, schemaFields, schemaResult, warnings);
+            alignFilterFields(widget, filterSchemaFields, schemaResult, warnings);
         }
         if ("praxis-rich-content".equals(componentId) && "kpi-band".equals(widget.path("role").asText(""))) {
             alignKpiFields(widget, schemaFields, schemaResult, warnings);
