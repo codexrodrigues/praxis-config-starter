@@ -503,7 +503,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).contains("semantic-decision-review-required:keyword-fallback-fail-safe");
         assertThat(result.assistantMessage())
-                .contains("Montei uma primeira pre-visualizacao de tabela")
+                .contains("Montei uma primeira pre-visualizacao de dashboard")
                 .contains("Como prosseguir")
                 .doesNotContain("propriedades incompativeis")
                 .doesNotContain("componente de tabela");
@@ -825,6 +825,48 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewFeedsSchemaFieldsIntoGenericDashboardPlanner() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel com a visao geral sobre funcionarios, com graficos e detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                operationalMonitoringDashboardIntentWithoutVisualizationDecision());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("id").put("type", "integer");
+        properties.putObject("nomeCompleto").put("type", "string")
+                .putObject("x-ui").put("label", "Nome completo");
+        properties.putObject("departamentoNome").put("type", "string")
+                .putObject("x-ui").put("label", "Departamento");
+        properties.putObject("cargoNome").put("type", "string")
+                .putObject("x-ui").put("label", "Cargo");
+        properties.putObject("dataAdmissao").put("type", "string").put("format", "date");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains("funcionarios-chart-departamentoNome", "funcionarios-chart-cargoNome")
+                .doesNotContain("funcionarios-chart-nomeCompleto", "funcionarios-chart-dataAdmissao");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .contains("funcionarios-chart-departamentoNome.pointClick->funcionarios-table.queryContext")
+                .contains("funcionarios-chart-cargoNome.pointClick->funcionarios-table.queryContext");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("dashboardBlueprint").path("domainSpecific").asBoolean())
+                .isFalse();
+    }
+
+    @Test
     void previewPromotesSemanticAxesWhenSchemaContainsTheFields() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Preciso monitorar chamados e ocorrencias em atendimento, gravidade, andamento e responsavel.",
@@ -1095,7 +1137,8 @@ class AgenticAuthoringPreviewServiceTest {
         String bindings = result.uiCompositionPlan().path("bindings").toString();
         assertThat(bindings)
                 .contains("incidentes-filter.requestSearch->incidentes-chart-gravidade.queryContext")
-                .contains("incidentes-chart-gravidade.selectionChange->incidentes-table.queryContext")
+                .contains("incidentes-chart-gravidade.pointClick->incidentes-table.queryContext")
+                .contains("incidentes-chart-gravidade.crossFilter->incidentes-table.queryContext")
                 .doesNotContain("incidentes-chart-andamento")
                 .doesNotContain("incidentes-chart-responsavel")
                 .doesNotContain("andamento")

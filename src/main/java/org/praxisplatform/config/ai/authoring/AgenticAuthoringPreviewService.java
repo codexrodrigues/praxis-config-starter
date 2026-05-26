@@ -272,6 +272,7 @@ public class AgenticAuthoringPreviewService {
         if (request == null) {
             return Optional.empty();
         }
+        request = withSchemaFieldContext(request, schemaBaseUrl);
         for (AgenticAuthoringUiCompositionPlanProvider provider : uiCompositionPlanProviders) {
             Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(request);
             if (result.isEmpty()) {
@@ -344,6 +345,92 @@ public class AgenticAuthoringPreviewService {
             ));
         }
         return Optional.empty();
+    }
+
+    private AgenticAuthoringPlanRequest withSchemaFieldContext(
+            AgenticAuthoringPlanRequest request,
+            String schemaBaseUrl) {
+        if (request == null
+                || schemaRetrievalService == null
+                || !shouldEnrichSchemaFieldsForGenericDashboard(request)
+                || hasHostFieldCandidates(request.contextHints())) {
+            return request;
+        }
+        AgenticAuthoringCandidate candidate = request.intentResolution() == null
+                ? null
+                : request.intentResolution().selectedCandidate();
+        AiSchemaContext schemaContext = schemaContext(candidate, MissingNode.getInstance());
+        if (schemaContext == null) {
+            return request;
+        }
+        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(schemaContext, schemaBaseUrl);
+        if (schemaResult == null || !schemaResult.isSuccess()) {
+            return request;
+        }
+        Map<String, SchemaFieldDescriptor> fields = schemaFields(schemaResult.getSchema());
+        if (fields.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ArrayNode schemaFields = contextHints.putArray("schemaFields");
+        for (SchemaFieldDescriptor field : fields.values()) {
+            ObjectNode node = schemaFields.addObject();
+            node.put("fieldName", field.name());
+            node.put("label", firstNonBlank(field.label(), field.name()));
+            node.put("type", field.type());
+            node.put("format", field.format());
+            node.put("source", "schemas.filtered");
+            if (field.hasEnum()) {
+                node.put("semanticKind", "categorical");
+            }
+        }
+        ObjectNode provenance = contextHints.putObject("schemaFieldContext");
+        provenance.put("source", "schemas.filtered");
+        provenance.put("endpointUrl", value(schemaResult.getEndpointUrl()));
+        provenance.put("fieldCount", fields.size());
+        return new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                request.intentResolution(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                attachmentSummaries(request),
+                contextHints);
+    }
+
+    private boolean shouldEnrichSchemaFieldsForGenericDashboard(AgenticAuthoringPlanRequest request) {
+        AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
+        if (intent == null || intent.visualizationDecision() != null) {
+            return false;
+        }
+        String artifactKind = value(intent.artifactKind());
+        if (!List.of("dashboard", "page", "table").contains(artifactKind)) {
+            return false;
+        }
+        String prompt = value(request.userPrompt());
+        return containsAny(prompt,
+                "dashboard", "painel", "visao geral", "visao 360", "overview", "360", "grafico", "graficos",
+                "chart", "charts", "indicador", "indicadores", "kpi", "kpis");
+    }
+
+    private boolean hasHostFieldCandidates(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return false;
+        }
+        for (String field : List.of("schemaFields", "fieldCatalog", "fieldMetadata", "filterableFields", "columns", "properties")) {
+            JsonNode value = contextHints.path(field);
+            if ((value.isArray() || value.isObject()) && !value.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JsonNode semanticMaterialization(

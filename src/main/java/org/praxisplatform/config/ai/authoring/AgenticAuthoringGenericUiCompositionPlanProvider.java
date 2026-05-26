@@ -1499,12 +1499,19 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private boolean isLikelyTechnicalOrMeasureField(String field, String label) {
+        String normalizedField = searchableText(field);
+        String normalizedLabel = searchableText(label);
         String combined = searchableText(field + " " + label);
         for (String token : List.of(
                 "id", "uuid", "codigo", "code", "created", "updated", "deleted", "data", "date",
                 "time", "timestamp", "valor", "value", "amount", "total", "saldo", "preco", "price",
                 "salario", "salary", "count", "quantidade", "qtd")) {
             if (phrasePresent(combined, token)) {
+                return true;
+            }
+        }
+        for (String token : List.of("nome", "name", "email", "cpf", "telefone", "phone", "avatar", "foto")) {
+            if (phrasePresent(normalizedLabel, token) || token.equals(normalizedField)) {
                 return true;
             }
         }
@@ -1583,7 +1590,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 jsonText(node, "sourceKind"),
                 jsonText(node, "semanticKind"));
         boolean categoricalHint = containsAny(typeText,
-                "enum", "select", "option", "categorical", "category", "dimension", "string", "text");
+                "enum", "select", "option", "categorical", "category", "dimension", "string", "text", "boolean");
         if (!safe(field).isBlank()) {
             addFieldCandidate(fields, field, label, categoricalHint, provenance);
         }
