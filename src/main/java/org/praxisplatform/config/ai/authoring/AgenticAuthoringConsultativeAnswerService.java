@@ -18,6 +18,9 @@ import org.springframework.util.StringUtils;
 
 @Slf4j
 public class AgenticAuthoringConsultativeAnswerService {
+    private static final int MAX_CONVERSATION_REFERENCE_MESSAGES = 8;
+    private static final int MAX_CONVERSATION_REFERENCE_CHARS = 4_000;
+    private static final int MAX_CONVERSATION_REFERENCE_MESSAGE_CHARS = 900;
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
@@ -75,7 +78,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                 }
                 String generated = providerManagementService.generateText(
                         directAnswerPrompt(
-                                request.userPrompt(),
+                                request,
                                 evidenceBundle(request, "domain_api", componentCapabilities, projection)),
                         AiCallConfig.builder()
                                 .provider(request.provider())
@@ -118,7 +121,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                     }
                 }
                 String generated = providerManagementService.generateText(
-                        directAnswerPrompt(request.userPrompt(), evidenceBundle(request, "auto", componentCapabilities, null)),
+                        directAnswerPrompt(request, evidenceBundle(request, "auto", componentCapabilities, null)),
                         AiCallConfig.builder()
                                 .provider(request.provider())
                                 .model(request.model())
@@ -139,7 +142,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                     if (projection != null && projection.hasResources()) {
                         generated = providerManagementService.generateText(
                                 directAnswerPrompt(
-                                        request.userPrompt(),
+                                        request,
                                         evidenceBundle(request, category, componentCapabilities, projection)),
                                 AiCallConfig.builder()
                                         .provider(request.provider())
@@ -172,7 +175,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                         warnings(category, projection)));
             }
             String generated = providerManagementService.generateText(
-                    answerPrompt(request.userPrompt(), evidenceBundle(request, "auto", componentCapabilities, null)),
+                    answerPrompt(request, evidenceBundle(request, "auto", componentCapabilities, null)),
                     AiCallConfig.builder()
                             .provider(request.provider())
                             .model(request.model())
@@ -196,7 +199,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                 if (projection != null && projection.hasResources()) {
                     generated = providerManagementService.generateText(
                             answerPrompt(
-                                    request.userPrompt(),
+                                    request,
                                     evidenceBundle(request, category, componentCapabilities, projection)),
                             AiCallConfig.builder()
                                     .provider(request.provider())
@@ -301,11 +304,12 @@ public class AgenticAuthoringConsultativeAnswerService {
                 environment);
     }
 
-    private String directAnswerPrompt(String userPrompt, JsonNode evidence) {
+    private String directAnswerPrompt(AgenticAuthoringTurnStreamRequest request, JsonNode evidence) {
+        String userPrompt = request == null ? "" : request.userPrompt();
         return """
                 You are Praxis, a governed AI authoring assistant.
                 The user explicitly asked not to create, preview, apply, save or materialize anything yet.
-                Answer as a consultative conversation using the grounded evidence below.
+                Answer as a consultative conversation using the recent conversation and grounded evidence below.
 
                 Return:
 
@@ -316,6 +320,9 @@ public class AgenticAuthoringConsultativeAnswerService {
                 Style:
                 - Same language as the user; default to pt-BR.
                 - Answer the question now; do not ask whether the user wants a brief or detailed answer.
+                - Use the current user question as the only new instruction.
+                - Use recent assistant messages only to resolve continuations, pronouns, omitted targets and references to choices the assistant just offered.
+                - If the current user question is a terse reference such as a number or "first option", resolve it semantically against the latest relevant assistant choice/list before considering generic table meanings such as page, row, filter value or page size.
                 - Be specific and useful. For component catalog questions, list the relevant component families and when to use each.
                 - Prefer plain business/product language over implementation/config names.
                 - Do not claim that anything was created, saved or previewed.
@@ -338,16 +345,23 @@ public class AgenticAuthoringConsultativeAnswerService {
                 User question:
                 %s
 
+                Recent conversation:
+                %s
+
                 Grounded evidence:
                 %s
-                """.formatted(value(userPrompt), evidence == null ? "{}" : evidence.toPrettyString());
+                """.formatted(
+                        value(userPrompt),
+                        conversationTranscript(request),
+                        evidence == null ? "{}" : evidence.toPrettyString());
     }
 
-    private String answerPrompt(String userPrompt, JsonNode evidence) {
+    private String answerPrompt(AgenticAuthoringTurnStreamRequest request, JsonNode evidence) {
+        String userPrompt = request == null ? "" : request.userPrompt();
         return """
                 You are Praxis, a governed AI authoring assistant.
                 Decide from the user's full intent whether this should be answered conversationally without creating,
-                changing, previewing, applying or saving UI. Use the grounded evidence below for the answer.
+                changing, previewing, applying or saving UI. Use the recent conversation and grounded evidence below for the answer.
 
                 Return exactly one of these formats:
 
@@ -370,6 +384,9 @@ public class AgenticAuthoringConsultativeAnswerService {
                 Style:
                 - Same language as the user; default to pt-BR.
                 - Be direct and detailed enough to be useful.
+                - Use the current user question as the only new instruction.
+                - Use recent assistant messages only to resolve continuations, pronouns, omitted targets and references to choices the assistant just offered.
+                - If the current user question is a terse reference such as a number or "first option", resolve it semantically against the latest relevant assistant choice/list before considering generic table meanings such as page, row, filter value or page size.
                 - Prefer plain business language over implementation/config names.
                 - Do not claim that anything was created, saved or previewed.
                 - Answer the question now; do not ask whether the user wants a brief or detailed answer.
@@ -388,6 +405,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                   If the requested domain is not confirmed in this host, explicitly say that you did not find confirmed governed data for that domain
                   before mentioning any alternative confirmed resources.
                 - If fields, operations or metrics are not present in evidence, do not propose concrete metrics or business facts.
+                - If resolving a short reference to a previous suggestion, answer or continue that referenced suggestion directly; do not ask the user what the number means unless the prior assistant message does not contain any plausible choice/list.
                   Recommend screen types at a product level and state that columns, filters and metrics depend on confirmed fields.
                 - End with a complete, concrete next step. Do not leave a dangling sentence or end with a question.
                 - When discussing component capability, explain the user-facing options first; put technical config names only if truly necessary and label them as implementation details.
@@ -397,9 +415,15 @@ public class AgenticAuthoringConsultativeAnswerService {
                 User question:
                 %s
 
+                Recent conversation:
+                %s
+
                 Grounded evidence:
                 %s
-                """.formatted(value(userPrompt), evidence == null ? "{}" : evidence.toPrettyString());
+                """.formatted(
+                        value(userPrompt),
+                        conversationTranscript(request),
+                        evidence == null ? "{}" : evidence.toPrettyString());
     }
 
     private AgenticAuthoringConsultativeApiCatalogProjection apiCatalogProjection(
@@ -912,7 +936,56 @@ public class AgenticAuthoringConsultativeAnswerService {
                 "update ",
                 "configure ",
                 "enable ")
-                || isArtifactSpecification(text);
+                || isArtifactSpecification(text)
+                || isImplicitMaterializationRequest(text);
+    }
+
+    private boolean isImplicitMaterializationRequest(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        boolean exploratory = text.contains("quero saber ")
+                || text.contains("gostaria de saber ")
+                || text.contains("preciso saber ")
+                || text.contains("como criar ")
+                || text.contains("como crio ")
+                || text.contains("como montar ")
+                || text.contains("como faco ")
+                || text.contains("como fazer ")
+                || text.contains("posso criar ")
+                || text.contains("da para criar ")
+                || text.contains("daria para criar ")
+                || text.contains("quais dashboards ")
+                || text.contains("quais paineis ")
+                || text.contains("quais opcoes ")
+                || text.contains("what can i create ")
+                || text.contains("how to create ");
+        if (exploratory) {
+            return false;
+        }
+        boolean asksForOutcome = containsAnyToken(text,
+                "quero",
+                "preciso",
+                "gostaria",
+                "necessito",
+                "acompanhar",
+                "monitorar",
+                "controlar",
+                "visualizar",
+                "want",
+                "need");
+        boolean dashboardLike = containsAnyToken(text,
+                "dashboard",
+                "painel",
+                "overview",
+                "kpi",
+                "indicador",
+                "indicadores",
+                "resumo",
+                "sumario")
+                || text.contains("visao geral")
+                || text.contains("visao 360");
+        return asksForOutcome && dashboardLike;
     }
 
     private boolean isDomainAvailabilityQuestion(String prompt) {
@@ -1181,6 +1254,55 @@ public class AgenticAuthoringConsultativeAnswerService {
 
     private String value(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String conversationTranscript(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.conversationMessages() == null || request.conversationMessages().isEmpty()) {
+            return "(none)";
+        }
+        String current = value(request.userPrompt());
+        List<String> lines = request.conversationMessages().stream()
+                .filter(Objects::nonNull)
+                .filter(message -> StringUtils.hasText(message.text()))
+                .map(message -> {
+                    String role = value(message.role()).toLowerCase(Locale.ROOT);
+                    if (!Set.of("user", "assistant").contains(role)) {
+                        return "";
+                    }
+                    String text = truncateConversationReferenceText(value(message.text()));
+                    if ("user".equals(role) && !current.isBlank() && current.equals(text)) {
+                        return "";
+                    }
+                    return role + ": " + text;
+                })
+                .filter(StringUtils::hasText)
+                .toList();
+        if (lines.isEmpty()) {
+            return "(none)";
+        }
+        int start = Math.max(0, lines.size() - MAX_CONVERSATION_REFERENCE_MESSAGES);
+        return truncateConversationReferenceBlock(String.join("\n", lines.subList(start, lines.size())));
+    }
+
+    private String truncateConversationReferenceText(String text) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= MAX_CONVERSATION_REFERENCE_MESSAGE_CHARS) {
+            return normalized;
+        }
+        return normalized.substring(0, MAX_CONVERSATION_REFERENCE_MESSAGE_CHARS).trim() + "...";
+    }
+
+    private String truncateConversationReferenceBlock(String text) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= MAX_CONVERSATION_REFERENCE_CHARS) {
+            return text;
+        }
+        return text.substring(0, MAX_CONVERSATION_REFERENCE_CHARS).trim() + "...";
     }
 
     private record ParsedConsultativeAnswer(boolean consultative, String category, String answer) {

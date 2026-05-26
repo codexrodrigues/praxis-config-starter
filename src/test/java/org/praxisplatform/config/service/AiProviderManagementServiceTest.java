@@ -13,6 +13,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.AiProviderCatalogResponse;
@@ -89,6 +90,28 @@ class AiProviderManagementServiceTest {
         assertEquals("open-ai", response.getProvider());
         assertEquals("gpt-4o-mini", response.getModel());
         verify(openai).generateText(any(), any());
+    }
+
+    @Test
+    void generateJsonPreservesRequestTimeoutOverride() {
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(openai.generateJson(any(), any(), any()))
+                .thenReturn(new ObjectMapper().createObjectNode());
+
+        service.generateJson(
+                "prompt",
+                AiJsonSchema.ofSchema("{}"),
+                AiCallConfig.builder()
+                        .provider("openai")
+                        .model("gpt-4o-mini")
+                        .timeoutSeconds(15)
+                        .build(),
+                "tenant",
+                "user",
+                "local");
+
+        verify(openai).generateJson(any(), any(), configCaptor.capture());
+        assertEquals(15, configCaptor.getValue().getTimeoutSeconds());
     }
 
     @Test

@@ -210,6 +210,7 @@ public class SpringAiOpenAiService implements AiProvider {
         String resolvedModel = resolveModel(config);
         double resolvedTemp = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
+        int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
         boolean explicitMaxTokens = config != null && config.getMaxTokens() != null;
         if (jsonMode && requiresMaxCompletionTokens(resolvedModel) && !explicitMaxTokens) {
             resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinCompletionTokens));
@@ -234,17 +235,37 @@ public class SpringAiOpenAiService implements AiProvider {
             String requestBody = objectMapper.writeValueAsString(root);
 
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .connectTimeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
                     .build();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(resolvedUrl))
-                    .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .timeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
                     .header("Authorization", "Bearer " + resolvedKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            CompletableFuture<HttpResponse<String>> responseFuture =
+                    client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response;
+            try {
+                response = responseFuture.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS);
+            } catch (TimeoutException timeoutException) {
+                responseFuture.cancel(true);
+                throw AiProviderCallException.timeout("openai", timeoutException);
+            } catch (ExecutionException executionException) {
+                Throwable cause = executionException.getCause();
+                if (cause instanceof AiProviderCallException callException) {
+                    throw callException;
+                }
+                if (cause instanceof java.net.http.HttpTimeoutException timeoutException) {
+                    throw AiProviderCallException.timeout("openai", timeoutException);
+                }
+                if (cause instanceof Exception exception) {
+                    throw exception;
+                }
+                throw new IllegalStateException(cause);
+            }
 
             if (response.statusCode() >= 400) {
                 throw AiProviderCallException.fromHttpStatus(
@@ -293,6 +314,7 @@ public class SpringAiOpenAiService implements AiProvider {
         String resolvedModel = resolveModel(config);
         double resolvedTemp = resolveTemperature(config);
         int resolvedMaxTokens = resolveMaxTokens(config);
+        int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
         String resolvedUrl = resolveBaseUrl(baseUrl) + "/v1/chat/completions";
 
         CompletableFuture<HttpResponse<InputStream>> responseFuture = null;
@@ -313,11 +335,11 @@ public class SpringAiOpenAiService implements AiProvider {
             msg.put("content", prompt);
 
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .connectTimeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
                     .build();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(resolvedUrl))
-                    .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .timeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
                     .header("Authorization", "Bearer " + resolvedKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(root)))
@@ -552,6 +574,13 @@ public class SpringAiOpenAiService implements AiProvider {
             return config.getMaxTokens();
         }
         return maxTokens;
+    }
+
+    private int resolveTimeoutSeconds(AiCallConfig config) {
+        if (config != null && config.getTimeoutSeconds() != null && config.getTimeoutSeconds() > 0) {
+            return config.getTimeoutSeconds();
+        }
+        return timeoutSeconds;
     }
 
     private JsonSchemaResult prepareSchema(String prompt, AiJsonSchema schema) {

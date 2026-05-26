@@ -154,7 +154,7 @@ class AiOrchestratorServiceDeterministicFallbackTest {
     }
 
     @Test
-    void shouldApplyDeterministicStatusHighlightFallback() throws Exception {
+    void shouldApplyNeutralStatusRendererFallbackWithoutLocalValueColors() throws Exception {
         AiOrchestratorRequest request = baseRequest(
                 "Com base no status ATIVO/INATIVO/PENDENTE, destaque visualmente PENDENTE e normalize ordenação por prioridade.");
         request.setDataProfile(baseDataProfile());
@@ -173,8 +173,9 @@ class AiOrchestratorServiceDeterministicFallbackTest {
         assertThat(response).isNotNull();
         JsonNode statusColumn = findColumn(response.getPatch().path("columns"), "status");
         assertThat(statusColumn).isNotNull();
-        assertThat(statusColumn.path("conditionalRenderers").isArray()).isTrue();
-        assertThat(response.getPatch().toString()).contains("PENDENTE");
+        assertThat(statusColumn.path("conditionalRenderers").isMissingNode()).isTrue();
+        assertThat(statusColumn.path("renderer").path("type").asText()).isEqualTo("badge");
+        assertThat(statusColumn.path("renderer").path("badge").path("variant").asText()).isEqualTo("soft");
     }
 
     @Test

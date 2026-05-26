@@ -148,8 +148,9 @@ class AiOrchestratorServiceActionPlanTest {
     assertThat(prompt).contains("CONVERSATION_CONTEXT_FOR_REFERENCE_ONLY:");
     assertThat(prompt).contains("Use o pedido atual como unica instrucao nova.");
     assertThat(prompt).contains("Ative filtros avançados e deixe CPF e Ativo sempre visíveis.");
-    assertThat(prompt).doesNotContain("Vou ativar os filtros avançados");
+    assertThat(prompt).contains("Vou ativar os filtros avançados");
     assertThat(prompt).contains("previous-user: Ative filtros avançados");
+    assertThat(prompt).contains("previous-assistant: Vou ativar os filtros avançados");
   }
 
   @Test
@@ -757,6 +758,88 @@ class AiOrchestratorServiceActionPlanTest {
             tableRendererManifest());
 
     assertThat(failures).isEmpty();
+  }
+
+  @Test
+  void shouldRequestGovernedCategoricalSemanticsBeforeApplyingUngovernedValueRenderers()
+      throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "status", "field": "status" },
+                    "input": {
+                      "id": "state-chip-status-true",
+                      "condition": { "==": [ { "var": "status" }, true ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "text": "Ativo", "variant": "filled", "color": "primary" }
+                      }
+                    }
+                  },
+                  {
+                    "operationId": "column.conditionalRenderer.add",
+                    "target": { "kind": "conditionalRenderer", "id": "status", "field": "status" },
+                    "input": {
+                      "id": "renderer-status-confronto",
+                      "condition": { "==": [ { "var": "status" }, "Confronto" ] },
+                      "renderer": {
+                        "type": "chip",
+                        "chip": { "textField": "status", "variant": "filled" }
+                      }
+                    }
+                  }
+                ]
+              },
+              "explanation": "Vou aplicar chips na coluna Status."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Aplique chips na coluna status usando os valores existentes da tabela.")
+            .dataProfile(
+                objectMapper.readTree(
+                    """
+                    {
+                      "rowCount": 16,
+                      "columns": {
+                        "status": {
+                          "inferredType": "string",
+                          "cardinality": 4,
+                          "topValues": ["Em observacao", "Capturado", "Livre", "Confronto"]
+                        }
+                      }
+                    }
+                    """))
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            new ArrayList<String>(),
+            tableRendererManifest());
+
+    assertThat(response.getType()).isEqualTo("clarification");
+    assertThat(response.getComponentEditPlan()).isNull();
+    assertThat(response.getMessage()).contains("decisão governada").contains("Status");
+    assertThat(response.getOptions())
+        .contains("Definir semântica visual governada", "Aplicar chips neutros por enquanto");
+    assertThat(response.getOptionPayloads()).hasSize(2);
+    assertThat(response.getOptionPayloads().get(0).getContextHints().at("/categoricalFieldSemantics/field").asText())
+        .isEqualTo("status");
+    assertThat(response.getWarnings())
+        .contains("table-categorical-renderer-ungoverned-policy-collapsed-to-neutral");
   }
 
   @Test

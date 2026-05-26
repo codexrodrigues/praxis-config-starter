@@ -171,7 +171,14 @@ public class AgenticAuthoringIntentResolverService {
         if (contextHintCandidate != null) {
             candidates = withPriorityCandidate(candidates, contextHintCandidate);
         }
-        boolean preLlmGovernedResourceChoiceApplied = shouldApplyPreLlmGovernedResourceChoice(
+        AgenticAuthoringCandidate preLlmGovernedResourceChoiceCandidate = preLlmGovernedResourceChoiceCandidate(
+                prompt,
+                operationKind,
+                artifactKind,
+                candidates,
+                contextHintCandidate);
+        boolean preLlmGovernedResourceChoiceApplied = preLlmGovernedResourceChoiceCandidate != null
+                || shouldApplyPreLlmGovernedResourceChoice(
                 prompt,
                 operationKind,
                 artifactKind,
@@ -179,6 +186,9 @@ public class AgenticAuthoringIntentResolverService {
                 contextHintCandidate);
         if (preLlmGovernedResourceChoiceApplied) {
             shouldResolveLlmIntent = false;
+            if (preLlmGovernedResourceChoiceCandidate != null) {
+                candidates = withPriorityCandidate(candidates, preLlmGovernedResourceChoiceCandidate);
+            }
         }
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilities();
         List<AgenticAuthoringCandidate> llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
@@ -464,6 +474,9 @@ public class AgenticAuthoringIntentResolverService {
                 : selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
         selectedCandidate = explicitLocalUiComposition
                 ? null
+                : selectContextHintCandidate(preLlmGovernedResourceChoiceCandidate, candidates, selectedCandidate);
+        selectedCandidate = explicitLocalUiComposition
+                ? null
                 : selectLlmCandidate(llmIntent, candidates, selectedCandidate, artifactKind, prompt);
         boolean llmResourceSelectionOverriddenByPromptAlignment = !explicitLocalUiComposition
                 && llmResourceSelectionOverriddenByPromptAlignment(
@@ -475,6 +488,9 @@ public class AgenticAuthoringIntentResolverService {
         selectedCandidate = explicitLocalUiComposition
                 ? null
                 : selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
+        selectedCandidate = explicitLocalUiComposition
+                ? null
+                : selectContextHintCandidate(preLlmGovernedResourceChoiceCandidate, candidates, selectedCandidate);
         selectedCandidate = explicitLocalUiComposition
                 ? null
                 : selectFormWriteCandidate(artifactKind, candidates, selectedCandidate, prompt);
@@ -1319,11 +1335,102 @@ public class AgenticAuthoringIntentResolverService {
         if (!explicitResourcePath(prompt).isBlank() || isConfirmedDataSourceSelection(prompt)) {
             return false;
         }
+        if ("dashboard".equals(artifactKind)
+                && isConcreteDashboardMaterializationPrompt(prompt)
+                && candidates.stream().anyMatch(candidate -> promptMentionsSpecificCandidateToken(prompt, candidate))) {
+            return true;
+        }
         return "dashboard".equals(artifactKind)
                 && isAnalyticalComparisonPrompt(prompt)
                 && isBroadAnalyticalCanvasPrompt(prompt)
                 && candidates.size() > 1
                 && candidates.stream().noneMatch(candidate -> promptMentionsSpecificCandidateToken(prompt, candidate));
+    }
+
+    private AgenticAuthoringCandidate preLlmGovernedResourceChoiceCandidate(
+            String prompt,
+            String operationKind,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringCandidate contextHintCandidate) {
+        if (contextHintCandidate != null || candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        if (!"dashboard".equals(artifactKind) || !"create".equals(operationKind)) {
+            return null;
+        }
+        if (!isConcreteDashboardMaterializationPrompt(prompt)) {
+            return null;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .map(candidate -> new CandidatePromptAlignment(
+                        candidate,
+                        candidatePathDomainTokenScore(prompt, candidate)))
+                .filter(alignment -> alignment.score() > 0)
+                .max(Comparator
+                        .comparingInt(CandidatePromptAlignment::score)
+                        .thenComparingDouble(alignment -> alignment.candidate().score()))
+                .map(CandidatePromptAlignment::candidate)
+                .orElse(null);
+    }
+
+    private int candidatePathDomainTokenScore(String prompt, AgenticAuthoringCandidate candidate) {
+        String normalizedPrompt = normalize(prompt);
+        String normalizedPath = normalizePath(candidate == null ? "" : candidate.resourcePath());
+        if (normalizedPrompt.isBlank() || normalizedPath.isBlank()) {
+            return 0;
+        }
+        int score = 0;
+        for (String token : normalizedPath.replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
+            if (isGenericAnalyticalCandidateToken(token)) {
+                continue;
+            }
+            if (tokenMatchesCandidateText(token, normalizedPrompt)) {
+                score += 4;
+            }
+        }
+        return score;
+    }
+
+    private boolean isConcreteDashboardMaterializationPrompt(String prompt) {
+        String normalized = normalize(prompt);
+        if (!containsAny(normalized,
+                "dashboard",
+                "painel",
+                "visao geral",
+                "visão geral",
+                "360",
+                "indicador",
+                "indicadores",
+                "grafico",
+                "graficos",
+                "gráfico",
+                "gráficos")) {
+            return false;
+        }
+        if (containsAny(normalized,
+                "apenas",
+                "somente",
+                "so ",
+                "só ",
+                "nao crie tabela",
+                "não crie tabela",
+                "nao sei",
+                "não sei",
+                "quais informacoes",
+                "quais informações",
+                "devo usar",
+                "melhor",
+                "recomenda",
+                "recomende")) {
+            return false;
+        }
+        boolean hasChart = containsAny(normalized, "grafico", "graficos", "gráfico", "gráficos", "chart", "charts");
+        boolean hasFilter = containsAny(normalized, "filtro", "filtros");
+        boolean hasDetails = containsAny(normalized, "tabela", "detalhe", "detalhes", "detalhada", "detalhado");
+        return containsAny(normalized, "360", "visao 360", "visão 360")
+                || (hasChart && hasFilter && hasDetails);
     }
 
     private AgenticAuthoringLlmIntentResolution resolveLlmIntent(

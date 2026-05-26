@@ -17,6 +17,7 @@ public class AiCallConfig {
     private String model;
     private Double temperature;
     private Integer maxTokens;
+    private Integer timeoutSeconds;
     private String apiKey;
     private String tenantId;
     private String environment;

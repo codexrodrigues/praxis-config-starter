@@ -26,7 +26,10 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 || (input.contextHintCandidate() != null && explicitDataSourceChoice);
         boolean materializationRequest = isDirectMaterializationRequest(prompt)
                 || isDirectMaterializationRequest(currentPrompt)
-                || isDirectMaterializationRequest(rawPrompt);
+                || isDirectMaterializationRequest(rawPrompt)
+                || isImplicitAuthoringRequest(prompt)
+                || isImplicitAuthoringRequest(currentPrompt)
+                || isImplicitAuthoringRequest(rawPrompt);
 
         if (optionalDataSourceHint) {
             selectedCandidate = null;
@@ -94,7 +97,9 @@ final class AgenticAuthoringSemanticDecisionPolicy {
         }
         if (containsAny(normalized,
                 "como criar", "como crio", "como montar", "como faco", "como fazer",
-                "posso criar", "da para criar", "daria para criar", "o que posso criar")) {
+                "posso criar", "da para criar", "daria para criar", "o que posso criar",
+                "quais dashboards", "quais paineis", "quais opcoes", "quais opções",
+                "quero saber", "gostaria de saber")) {
             return false;
         }
         String padded = " " + normalized + " ";
@@ -113,6 +118,23 @@ final class AgenticAuthoringSemanticDecisionPolicy {
                 || padded.contains(" build an ")
                 || padded.contains(" generate a ")
                 || padded.contains(" generate an ");
+    }
+
+    private boolean isImplicitAuthoringRequest(String prompt) {
+        String normalized = normalize(prompt).replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        if (containsAny(normalized,
+                "como criar", "como crio", "como montar", "como faco", "como fazer",
+                "posso criar", "da para criar", "daria para criar", "o que posso criar")) {
+            return false;
+        }
+        boolean authoringVerb = containsAny(normalized,
+                "quero", "preciso", "gostaria", "necessito", "acompanhar", "monitorar", "controlar");
+        boolean pageOrDashboardSurface = containsAny(normalized,
+                "dashboard", "painel", "visao geral", "visao 360", "overview", "kpi", "indicador");
+        return authoringVerb && pageOrDashboardSurface;
     }
 
     private String materializableArtifactKind(

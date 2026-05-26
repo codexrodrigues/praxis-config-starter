@@ -797,6 +797,34 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewBuildsStarterDashboardWhenVisualizationDecisionIsMissing() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel com a visao geral sobre funcionarios.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                operationalMonitoringDashboardIntentWithoutVisualizationDecision());
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-dashboard");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-rich-content", "praxis-table")
+                .doesNotContain("praxis-chart");
+        assertThat(result.uiCompositionPlan().path("canvas").path("items").path("funcionarios-table").path("row").asInt())
+                .isEqualTo(3);
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("visualizationDecisionIntent").asText())
+                .isEqualTo("generic-dashboard");
+    }
+
+    @Test
     void previewPromotesSemanticAxesWhenSchemaContainsTheFields() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Preciso monitorar chamados e ocorrencias em atendimento, gravidade, andamento e responsavel.",
@@ -1051,7 +1079,6 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
                         "praxis-rich-content",
-                        "praxis-rich-content",
                         "praxis-filter",
                         "praxis-chart",
                         "praxis-table");
@@ -1061,7 +1088,6 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"requestedField\":\"gravidade\"")
                 .contains("\"statsPath\":\"/api/operations/incidentes/stats/group-by\"")
                 .contains("\"selectedFieldIds\":[\"severidade\"]")
-                .contains("\"dimensionField\":\"severidade\"")
                 .doesNotContain("\"field\":\"andamento\"")
                 .doesNotContain("\"field\":\"responsavel\"")
                 .doesNotContain("\"dimensionField\":\"andamento\"")
@@ -1258,7 +1284,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"schemaVerified\":true")
                 .contains("\"schemaProbeStatus\":\"verified\"")
                 .contains("\"selectedFieldIds\":[\"mes\"]")
-                .contains("\"dimensionField\":\"mes\"")
+                .doesNotContain("\"dimensionField\":\"mes\"")
                 .contains("\"statsPath\":\"/api/human-resources/folhas-pagamento/stats/group-by\"");
     }
 
@@ -1645,7 +1671,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"schemaVerified\":true")
                 .contains("\"statsPath\":\"/api/human-resources/funcionarios/stats/group-by\"")
                 .contains("\"selectedFieldIds\":[\"departamentoNome\"]")
-                .contains("\"dimensionField\":\"departamentoNome\"");
+                .doesNotContain("\"dimensionField\":\"departamentoNome\"");
     }
 
     @Test
@@ -2781,6 +2807,40 @@ class AgenticAuthoringPreviewServiceTest {
                 objectMapper.createObjectNode(),
                 null,
                 operationalMonitoringVisualizationDecision());
+    }
+
+    private AgenticAuthoringIntentResolutionResult operationalMonitoringDashboardIntentWithoutVisualizationDecision() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "POST",
+                        0.94d,
+                        "matched employees",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Quero um painel com a visao geral sobre funcionarios.",
+                "Vou criar um dashboard inicial.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 
     private AgenticAuthoringIntentResolutionResult chartTypeModificationIntent() {

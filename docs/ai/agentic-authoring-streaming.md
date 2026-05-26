@@ -68,6 +68,13 @@ O endpoint `start` recebe um request de turno agentic que contenha, no minimo:
 - `contextHints`
 - `provider`, `model` e `apiKey` quando aplicavel
 
+`conversationMessages` e usado apenas como evidencia de continuidade
+conversacional: referencias curtas como "1" ou "primeira opcao" podem ser
+resolvidas semanticamente contra a ultima resposta do assistente. O historico
+nao e tratado como instrucao privilegiada; somente papeis `user` e `assistant`
+sao considerados, com limite de janela/tamanho, e qualquer escolha executavel
+deve continuar sendo validada pelos contratos canonicos de authoring.
+
 Quando o turno for sensivel a dominio, privacidade, compliance, validacao ou
 terminologia de negocio, `contextHints.domainCatalog` deve seguir o envelope em
 [`agentic-domain-task-envelope.md`](agentic-domain-task-envelope.md). Em especial,

@@ -42,13 +42,6 @@ public class AiSuggestionsService {
     private static final int MAX_COLUMN_SUGGESTIONS = 3;
     private static final int BADGE_CARDINALITY_MAX = 6;
     private static final int DEFAULT_MAX_PAGE_WIDGET_SUGGESTIONS = 4;
-    private static final List<String> DEFAULT_BADGE_PALETTE = List.of(
-            "primary",
-            "accent",
-            "warn",
-            "success",
-            "info"
-    );
 
     private static final Set<String> SELECTION_CONTROL_TYPES = Set.of(
             "select",
@@ -1005,8 +998,7 @@ public class AiSuggestionsService {
                     && shouldSuggestBadge(inferredType, explicitType, cardinality, isLongText, hasValueMapping)
                     && hasCapability(allowedPaths, "columns[].renderer.type")
                     && hasCapability(allowedPaths, "columns[].renderer.badge")) {
-                boolean supportsConditional = hasCapabilityPrefix(allowedPaths, "columns[].conditionalRenderers");
-                addSuggestion(out, buildBadgeSuggestion(field, display, stats, explicitType, supportsConditional, schemaHint));
+                addSuggestion(out, buildBadgeSuggestion(field, display, stats, explicitType, schemaHint));
                 columnSuggestions++;
             }
 
@@ -1465,32 +1457,25 @@ public class AiSuggestionsService {
             String display,
             JsonNode stats,
             String explicitType,
-            boolean supportsConditional,
             SchemaFieldHint schemaHint) {
         List<String> values = extractBadgeValues(stats, schemaHint);
         ObjectNode contextHints = buildBadgeContextHints(values);
         String inferredType = stats != null ? textOrNull(stats.get("inferredType")) : null;
-        boolean isBoolean = isBooleanType(inferredType, explicitType) || looksLikeBooleanValues(values);
-        boolean quoteValues = !isBoolean;
-        JsonNode patch = (supportsConditional && !values.isEmpty())
-                ? buildConditionalBadgePatch(field, values, quoteValues)
-                : null;
-        List<String> missingContext = patch == null
-                ? List.of("values_and_colors")
-                : List.of();
+        JsonNode patch = buildNeutralBadgePatch(field);
+        List<String> missingContext = values.isEmpty()
+                ? List.of("categorical_values", "governed_categorical_field_semantics")
+                : List.of("governed_categorical_field_semantics");
 
         AiSuggestion.AiSuggestionBuilder builder = AiSuggestion.builder()
                 .id("table.renderer.badge." + field)
                 .label("Badges para " + display)
-                .description("Destacar valores com badges coloridos.")
+                .description("Representar valores categoricos como badges neutros enquanto a semantica governada define cor, severidade e icone.")
                 .icon("verified")
                 .group("Visual")
-                .intent("Usar badges coloridos na coluna " + field + " por valor")
+                .intent("Usar badges neutros na coluna " + field + " e solicitar semantica categorica governada para cor e icone")
                 .score(0.68);
 
-        if (patch != null) {
-            builder.patch(patch);
-        }
+        builder.patch(patch);
         if (contextHints != null && contextHints.size() > 0) {
             contextHints.put("field", field);
             if (!isBlank(inferredType)) {
@@ -1559,28 +1544,29 @@ public class AiSuggestionsService {
     }
 
     private ObjectNode buildBadgeContextHints(List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return null;
-        }
         ObjectNode hints = objectMapper.createObjectNode();
+        hints.put("decisionKind", "categorical_field_semantics");
+        hints.put("schemaVersion", "praxis-categorical-field-semantics.v1");
+        hints.put("authoringMode", "governed");
+        hints.put("materializationModel", "derived_projection");
+        hints.put("runtimeSurfacesAreDerived", true);
+        ObjectNode fallback = hints.putObject("fallback");
+        fallback.put("labelPolicy", "humanize_raw_value");
+        fallback.put("tone", "neutral");
+        fallback.put("icon", "help");
+        fallback.put("renderer", "badge");
+        fallback.put("variant", "soft");
+        fallback.put("governanceStatus", "ungoverned");
         ArrayNode valuesNode = hints.putArray("values");
-        for (String value : values) {
-            valuesNode.add(value);
-        }
-        ArrayNode paletteNode = hints.putArray("palette");
-        for (String color : DEFAULT_BADGE_PALETTE) {
-            paletteNode.add(color);
-        }
-        ObjectNode mapNode = hints.putObject("valueColorMap");
-        Map<String, String> map = assignColors(values, DEFAULT_BADGE_PALETTE);
-        for (Map.Entry<String, String> entry : map.entrySet()) {
-            mapNode.put(entry.getKey(), entry.getValue());
+        if (values != null) {
+            for (String value : values) {
+                valuesNode.add(value);
+            }
         }
         return hints;
     }
 
-    private JsonNode buildConditionalBadgePatch(String field, List<String> values, boolean quoteValues) {
-        Map<String, String> colorMap = assignColors(values, DEFAULT_BADGE_PALETTE);
+    private JsonNode buildNeutralBadgePatch(String field) {
         ObjectNode patch = objectMapper.createObjectNode();
         ArrayNode columns = patch.putArray("columns");
         ObjectNode column = columns.addObject();
@@ -1589,68 +1575,8 @@ public class AiSuggestionsService {
         renderer.put("type", "badge");
         ObjectNode badge = renderer.putObject("badge");
         badge.put("textField", field);
-        badge.put("variant", "filled");
-
-        ArrayNode conditional = column.putArray("conditionalRenderers");
-        for (Map.Entry<String, String> entry : colorMap.entrySet()) {
-            ObjectNode rule = conditional.addObject();
-            rule.put("condition", buildEqualityCondition(field, entry.getKey(), quoteValues));
-            ObjectNode ruleRenderer = rule.putObject("renderer");
-            ruleRenderer.put("type", "badge");
-            ObjectNode ruleBadge = ruleRenderer.putObject("badge");
-            ruleBadge.put("textField", field);
-            ruleBadge.put("variant", "filled");
-            ruleBadge.put("color", entry.getValue());
-        }
+        badge.put("variant", "soft");
         return patch;
-    }
-
-    private Map<String, String> assignColors(List<String> values, List<String> palette) {
-        if (values == null || values.isEmpty() || palette == null || palette.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, String> out = new LinkedHashMap<>();
-        int paletteSize = palette.size();
-        for (int i = 0; i < values.size(); i += 1) {
-            String value = values.get(i);
-            if (value == null || value.isBlank()) {
-                continue;
-            }
-            String color = palette.get(i % paletteSize);
-            out.put(value, color);
-        }
-        return out;
-    }
-
-    private String buildEqualityCondition(String field, String value, boolean quoteValue) {
-        String safeValue = escapeDslString(value);
-        if (!quoteValue) {
-            return field + " == " + safeValue;
-        }
-        return field + " == '" + safeValue + "'";
-    }
-
-    private String escapeDslString(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("'", "\\'");
-    }
-
-    private boolean looksLikeBooleanValues(List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return false;
-        }
-        for (String value : values) {
-            if (value == null) {
-                return false;
-            }
-            String normalized = value.trim().toLowerCase(Locale.ROOT);
-            if (!"true".equals(normalized) && !"false".equals(normalized)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private void addSuggestion(Map<String, AiSuggestion> out, AiSuggestion suggestion) {

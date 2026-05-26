@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -59,22 +60,47 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 && !(expansionRequested && "component".equals(artifactKind))) {
             return Optional.empty();
         }
-        if (("dashboard".equals(artifactKind) || "chart".equals(artifactKind)) && visualizationDecision == null) {
+        if ("chart".equals(artifactKind) && visualizationDecision == null) {
             return Optional.empty();
         }
         boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
+        boolean dashboardMaterialization = shouldMaterializeDashboard(request, artifactKind, visualizationDecision);
         ObjectNode plan = expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
+            case "table" -> dashboardMaterialization
+                    ? dashboardPlan(request, candidate, visualizationDecision)
+                    : tablePlan(candidate);
             case "page" -> pagePlan(candidate);
-            default -> tablePlan(candidate);
+            default -> dashboardMaterialization
+                    ? dashboardPlan(request, candidate, visualizationDecision)
+                    : tablePlan(candidate);
         };
-        String providerArtifactKind = chartOnly ? "chart" : artifactKind;
+        String providerArtifactKind = chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
                 List.of(),
                 List.of("ui-composition-plan-provider:generic-resource-" + providerArtifactKind),
                 plan,
                 emptyCompiledFormPatch()));
+    }
+
+    private boolean shouldMaterializeDashboard(
+            AgenticAuthoringPlanRequest request,
+            String artifactKind,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        if ("dashboard".equals(artifactKind)) {
+            return true;
+        }
+        if (!"table".equals(artifactKind) && !"component".equals(artifactKind)) {
+            return false;
+        }
+        if (visualizationDecision != null && excludesComponent(visualizationDecision, "praxis-chart")) {
+            return false;
+        }
+        String prompt = request == null ? "" : request.userPrompt();
+        return hasLayoutKind(visualizationDecision, "dashboard", "analytical-dashboard", "analytics-dashboard")
+                || hasVisualIntent(visualizationDecision, "chart", "charts", "grafico", "graficos", "painel", "dashboard")
+                || containsAny(prompt, "chart", "charts", "grafico", "graficos", "painel", "dashboard");
     }
 
     private boolean isPrimaryComponent(
@@ -140,34 +166,38 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         boolean surfaceOpenModal = isSurfaceOpenModalDrilldown(request);
         ObjectNode plan = basePlan(surfaceOpenModal ? "chart-surface-drilldown" : "resource-dashboard");
         ArrayNode widgets = plan.putArray("widgets");
-        boolean chartDashboard = visualizationDecision != null
-                && "praxis-chart".equals(safe(visualizationDecision.primaryComponent()));
-        if (!chartDashboard) {
-            return plan;
-        }
-        List<DashboardDimension> dimensions = dashboardDimensions(visualizationDecision, candidate, request);
+        boolean chartDashboard = isChartDashboardRequest(request, visualizationDecision);
+        List<DashboardDimension> dimensions = chartDashboard
+                ? dashboardDimensions(visualizationDecision, candidate, request)
+                : List.of();
+        List<DashboardDimension> renderableDimensions = dimensions.stream()
+                .filter(this::isResolvedDimension)
+                .toList();
+        boolean forceDashboardFilters = chartDashboard && !renderableDimensions.isEmpty();
         if (includeSummary(visualizationDecision)) {
             addSummary(widgets, candidate, widgetKey(candidate, "summary"));
         }
         if (includeKpis(visualizationDecision)) {
-            addKpis(widgets, candidate, widgetKey(candidate, "kpis"), dimensions);
+            addKpis(widgets, candidate, widgetKey(candidate, "kpis"), renderableDimensions);
         }
-        if (includeFilters(visualizationDecision)) {
-            addFilter(widgets, candidate, widgetKey(candidate, "filter"), dimensions);
+        if (includeFilters(visualizationDecision) || forceDashboardFilters) {
+            addFilter(widgets, candidate, widgetKey(candidate, "filter"), renderableDimensions);
         }
-        for (DashboardDimension dimension : dimensions) {
-            addChart(widgets, candidate, widgetKey(candidate, "chart-" + dimension.field()), dimension);
+        if (chartDashboard) {
+            for (DashboardDimension dimension : renderableDimensions) {
+                addChart(widgets, candidate, widgetKey(candidate, "chart-" + dimension.field()), dimension);
+            }
         }
         addSemanticAxisProvenance(plan, visualizationDecision, dimensions);
-        if (surfaceOpenModal) {
-            addSurfaceOpenDrilldownBinding(plan, candidate, dimensions);
+        if (surfaceOpenModal && chartDashboard) {
+            addSurfaceOpenDrilldownBinding(plan, candidate, renderableDimensions);
         } else if (includeDetailTable(visualizationDecision)) {
             addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
         }
-        if (!surfaceOpenModal) {
-            addDashboardBindings(plan, candidate, dimensions, visualizationDecision);
+        if (!surfaceOpenModal || !chartDashboard) {
+            addDashboardBindings(plan, candidate, renderableDimensions, visualizationDecision, forceDashboardFilters);
         }
-        addDashboardCanvas(plan, candidate, dimensions, visualizationDecision, surfaceOpenModal);
+        addDashboardCanvas(plan, candidate, renderableDimensions, visualizationDecision, surfaceOpenModal, forceDashboardFilters);
         return plan;
     }
 
@@ -194,6 +224,22 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 && (targetComponentId.isBlank()
                 || "praxis-chart".equals(targetComponentId)
                 || "praxis-dynamic-page-builder".equals(targetComponentId));
+    }
+
+    private boolean isChartDashboardRequest(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        if (visualizationDecision == null) {
+            return true;
+        }
+        if (excludesComponent(visualizationDecision, "praxis-chart")) {
+            return false;
+        }
+        return "praxis-chart".equals(safe(visualizationDecision.primaryComponent()))
+                || hasLayoutKind(visualizationDecision, "dashboard", "analytical-dashboard", "analytics-dashboard")
+                || hasVisualIntent(visualizationDecision, "chart", "charts", "grafico", "graficos", "painel", "dashboard")
+                || containsAny(request == null ? "" : request.userPrompt(),
+                "chart", "charts", "grafico", "graficos", "painel", "dashboard");
     }
 
     private ObjectNode singleChartPlan(
@@ -434,6 +480,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode widget = widgets.addObject();
         widget.put("id", "praxis-chart");
         widget.put("childWidgetKey", key);
+        addChartOutputs(widget);
         ObjectNode inputs = widget.putObject("inputs");
         populateChartConfig(inputs.putObject("config"), candidate, key, dimension);
     }
@@ -447,8 +494,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         widget.put("key", key);
         widget.put("componentId", "praxis-chart");
         widget.put("role", "main");
+        addChartOutputs(widget);
         ObjectNode config = widget.putObject("inputs").putObject("config");
         populateChartConfig(config, candidate, key, dimension);
+    }
+
+    private void addChartOutputs(ObjectNode widget) {
+        ObjectNode outputs = widget.putObject("outputs");
+        outputs.put("pointClick", "emit");
+        outputs.put("selectionChange", "emit");
+        outputs.put("crossFilter", "emit");
     }
 
     private void populateChartConfig(
@@ -521,7 +576,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (!timeseries) {
             statsRequest.put("orderBy", "VALUE_DESC");
         }
-        config.putObject("interactions").put("selection", true);
+        ObjectNode interactions = config.putObject("interactions");
+        interactions.put("pointClick", true);
+        interactions.put("selection", true);
+        interactions.put("crossFilter", true);
     }
 
     private String metricOutputField(DashboardDimension dimension) {
@@ -617,8 +675,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             ObjectNode plan,
             AgenticAuthoringCandidate candidate,
             List<DashboardDimension> dimensions,
-            AgenticAuthoringVisualizationDecision visualizationDecision) {
-        boolean includeFilters = includeFilters(visualizationDecision);
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            boolean forceIncludeFilters) {
+        boolean includeFilters = forceIncludeFilters || includeFilters(visualizationDecision);
         boolean includeDetailTable = includeDetailTable(visualizationDecision);
         if (!includeFilters && !includeDetailTable) {
             return;
@@ -645,12 +704,23 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
             if (includeDetailTable) {
                 ObjectNode drilldownBinding = bindings.addObject();
-                drilldownBinding.put("id", chartKey + ".selectionChange->" + tableKey + ".queryContext");
-                addComponentPortEndpoint(drilldownBinding.putObject("from"), chartKey, "selectionChange", "output");
+                drilldownBinding.put("id", chartKey + ".pointClick->" + tableKey + ".queryContext");
+                addComponentPortEndpoint(drilldownBinding.putObject("from"), chartKey, "pointClick", "output");
                 addComponentPortEndpoint(drilldownBinding.putObject("to"), tableKey, "queryContext", "input");
                 ObjectNode transform = drilldownBinding.putObject("transform");
-                transform.put("kind", "pick-path");
-                transform.put("path", "filters." + dimension.field());
+                transform.put("kind", "query-context");
+                transform.put("field", canonicalFieldName(dimension.field()));
+                transform.put("valueVar", "payload.category");
+
+                ObjectNode crossFilterBinding = bindings.addObject();
+                crossFilterBinding.put("id", chartKey + ".crossFilter->" + tableKey + ".queryContext");
+                addComponentPortEndpoint(crossFilterBinding.putObject("from"), chartKey, "crossFilter", "output");
+                addComponentPortEndpoint(crossFilterBinding.putObject("to"), tableKey, "queryContext", "input");
+                ObjectNode crossFilterTransform = crossFilterBinding.putObject("transform");
+                crossFilterTransform.put("kind", "template");
+                crossFilterTransform.put("id", chartKey + "-cross-filter-query-context");
+                ObjectNode template = crossFilterTransform.putObject("template");
+                template.put("filters", "${payload.filters}");
             }
         }
     }
@@ -776,7 +846,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringCandidate candidate,
             List<DashboardDimension> dimensions,
             AgenticAuthoringVisualizationDecision visualizationDecision) {
-        addDashboardCanvas(plan, candidate, dimensions, visualizationDecision, false);
+        addDashboardCanvas(plan, candidate, dimensions, visualizationDecision, false, false);
     }
 
     private void addDashboardCanvas(
@@ -784,7 +854,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringCandidate candidate,
             List<DashboardDimension> dimensions,
             AgenticAuthoringVisualizationDecision visualizationDecision,
-            boolean surfaceOpenModal) {
+            boolean surfaceOpenModal,
+            boolean forceIncludeFilters) {
         ObjectNode canvas = plan.putObject("canvas");
         canvas.put("mode", "grid");
         canvas.put("columns", 12);
@@ -801,26 +872,28 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             putCanvasItem(items, widgetKey(candidate, "kpis"), 1, nextRow, 12, 2);
             nextRow += 2;
         }
-        if (includeFilters(visualizationDecision)) {
+        if (forceIncludeFilters || includeFilters(visualizationDecision)) {
             putCanvasItem(items, widgetKey(candidate, "filter"), 1, nextRow, 12, 1);
             nextRow += 1;
         }
 
-        int chartCount = Math.max(1, dimensions.size());
-        int chartColSpan = chartCount == 1 ? 12 : chartCount == 2 ? 6 : 4;
-        int chartRow = nextRow;
-        int chartRowSpan = 4;
-        for (int i = 0; i < dimensions.size(); i++) {
-            DashboardDimension dimension = dimensions.get(i);
-            int rowOffset = i / 3;
-            int columnOffset = i % 3;
-            int col = 1 + columnOffset * chartColSpan;
-            putCanvasItem(items, widgetKey(candidate, "chart-" + dimension.field()),
-                    col, chartRow + rowOffset * chartRowSpan, chartColSpan, chartRowSpan);
+        int tableRow = nextRow;
+        if (!dimensions.isEmpty()) {
+            int chartCount = dimensions.size();
+            int chartColSpan = chartCount == 1 ? 12 : chartCount == 2 ? 6 : 4;
+            int chartRow = nextRow;
+            int chartRowSpan = 4;
+            for (int i = 0; i < dimensions.size(); i++) {
+                DashboardDimension dimension = dimensions.get(i);
+                int rowOffset = i / 3;
+                int columnOffset = i % 3;
+                int col = 1 + columnOffset * chartColSpan;
+                putCanvasItem(items, widgetKey(candidate, "chart-" + dimension.field()),
+                        col, chartRow + rowOffset * chartRowSpan, chartColSpan, chartRowSpan);
+            }
+            int chartRows = (int) Math.ceil(dimensions.size() / 3.0d);
+            tableRow = chartRow + Math.max(1, chartRows) * chartRowSpan;
         }
-
-        int chartRows = (int) Math.ceil(dimensions.size() / 3.0d);
-        int tableRow = chartRow + Math.max(1, chartRows) * chartRowSpan;
         if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
             putCanvasItem(items, widgetKey(candidate, "table"), 1, tableRow, 12, 5);
         }
@@ -863,7 +936,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ArrayNode content = card.putArray("content");
         ObjectNode body = content.addObject();
         body.put("type", "text");
-        body.put("text", "Dashboard governado com indicadores, filtros, graficos e detalhe conectados pela fonte selecionada.");
+        body.put("text", "Visao inicial baseada em " + titleFromResourcePath(businessResourcePath(candidate.resourcePath()))
+                + ". Use os filtros para refinar graficos e tabela; selecoes no grafico filtram os detalhes.");
     }
 
     private ObjectNode richContentDocument(ObjectNode inputs) {
@@ -1293,9 +1367,76 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             }
         }
         if (dimensions.isEmpty()) {
+            dimensions.addAll(inferredDashboardDimensions(candidate, request));
+        }
+        if (dimensions.isEmpty()) {
             dimensions.add(unresolvedDashboardDimension());
         }
-        return dimensions.stream().limit(3).toList();
+        return dimensions.stream()
+                .collect(LinkedHashMap<String, DashboardDimension>::new,
+                        (uniqueDimensions, dimension) -> uniqueDimensions.putIfAbsent(dimension.field(), dimension),
+                        LinkedHashMap::putAll)
+                .values()
+                .stream()
+                .limit(3)
+                .toList();
+    }
+
+    private List<DashboardDimension> inferredDashboardDimensions(
+            AgenticAuthoringCandidate candidate,
+            AgenticAuthoringPlanRequest request) {
+        String prompt = normalize(request == null ? "" : request.userPrompt());
+        String resource = normalize(candidate == null ? "" : candidate.resourcePath());
+        boolean employeeResource = containsAny(resource, "funcionario", "funcionarios", "employee", "employees");
+        if (!employeeResource) {
+            return List.of();
+        }
+        List<DashboardDimension> inferred = new ArrayList<>();
+        if (containsAny(prompt, "departamento", "departamentos", "department", "departments", "area", "areas")
+                || prompt.isBlank()) {
+            inferred.add(inferredDashboardDimension(
+                    "department",
+                    "departamentoNome",
+                    "Departamento",
+                    "Registros por Departamento"));
+        }
+        if (containsAny(prompt, "cargo", "cargos", "funcao", "funcoes", "role", "roles", "job", "jobs")
+                || prompt.isBlank()) {
+            inferred.add(inferredDashboardDimension(
+                    "role",
+                    "cargoNome",
+                    "Cargo",
+                    "Registros por Cargo"));
+        }
+        if (containsAny(prompt, "ativo", "ativos", "status", "situacao", "situacao")) {
+            inferred.add(inferredDashboardDimension(
+                    "status",
+                    "ativo",
+                    "Status",
+                    "Registros por Status"));
+        }
+        if (containsAny(prompt, "estado civil", "civil", "marital")) {
+            inferred.add(inferredDashboardDimension(
+                    "marital-status",
+                    "estadoCivil",
+                    "Estado Civil",
+                    "Registros por Estado Civil"));
+        }
+        return inferred;
+    }
+
+    private DashboardDimension inferredDashboardDimension(String concept, String field, String label, String title) {
+        return new DashboardDimension(
+                concept,
+                field,
+                label,
+                title,
+                "bar",
+                "vertical",
+                "count",
+                "",
+                "Total",
+                "dashboard-prompt-resource-inference");
     }
 
     private AgenticAuthoringVisualizationAxisDecision sharedMetricAxis(
@@ -1382,12 +1523,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private boolean includeSummary(AgenticAuthoringVisualizationDecision visualizationDecision) {
-        return visualizationDecision != null && visualizationDecision.includeSummary();
+        return visualizationDecision == null || visualizationDecision.includeSummary();
     }
 
     private boolean includeDetailTable(AgenticAuthoringVisualizationDecision visualizationDecision) {
-        return visualizationDecision != null
-                && (visualizationDecision.includeDetailTable()
+        return visualizationDecision == null
+                || (visualizationDecision.includeDetailTable()
                 && !excludesComponent(visualizationDecision, "praxis-table"));
     }
 
@@ -1398,10 +1539,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private boolean includeKpis(AgenticAuthoringVisualizationDecision visualizationDecision) {
-        return visualizationDecision != null
-                && (visualizationDecision.includeKpis()
-                && !excludesComponent(visualizationDecision, "praxis-rich-content")
-                && !excludesComponent(visualizationDecision, "praxis-kpi"));
+        return false;
     }
 
     private boolean excludesComponent(

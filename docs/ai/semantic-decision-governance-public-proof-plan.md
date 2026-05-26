@@ -145,6 +145,10 @@ The run confirmed simulation explainability, definition lifecycle, publication, 
 - Keep write examples for intake, definition, approval and publication as protected contract evidence; do not promote them to safe-first LLM execution.
 - Keep the buyer-facing page linked to read-only operational ids and the published-runtime runbook without implying safe default write execution.
 - Keep broader claims about backend validation and workflow-action materializations as `architectural_direction` until their command probes are authenticated and repeatable in the public environment.
+- Keep categorical field visuals, such as status badges/chips, tied to governed
+  field-value semantics instead of local color/icon inference. The planning
+  contract is documented in
+  [`categorical-field-semantics-v1.md`](categorical-field-semantics-v1.md).
 
 ## Next Implementation Backlog
 
@@ -153,6 +157,9 @@ The run confirmed simulation explainability, definition lifecycle, publication, 
 3. Keep the read-only ids `domain-rules-supplier-eligibility-materializations-confirmed` and `procurement-suppliers-governed-domain-rules-lookup` green in `smoke:llm-surface` and `smoke:corpus-promises`.
 4. Create a derived landing proof section that links to the HTTP ids and keeps write flows clearly governed.
 5. Promote the claim from `architectural_direction` to `publicly_proved` only after the public examples pass validation.
+6. Add a categorical field semantics proof slice that discovers dynamic values,
+   proposes governed meaning/tone/icon semantics, publishes a runtime
+   materialization and verifies that unknown values use neutral fallback.
 
 ## Derived HTTP Evidence Packaged
 

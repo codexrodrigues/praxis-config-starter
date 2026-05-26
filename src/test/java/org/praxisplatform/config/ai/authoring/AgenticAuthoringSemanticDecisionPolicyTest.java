@@ -263,6 +263,57 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
         assertThat(decision.selectedCandidate()).isSameAs(incidents);
     }
 
+    @Test
+    void humanDashboardRequestMaterializesWithoutImperativeVerb() {
+        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "quero um painel com a visao geral sobre um funcionario",
+                "explore",
+                "api_catalog",
+                "answer_api_catalog_question",
+                employees,
+                List.of(employees),
+                employees,
+                null,
+                false,
+                false,
+                false,
+                null,
+                null,
+                null));
+
+        assertThat(decision.operationKind()).isEqualTo("create");
+        assertThat(decision.artifactKind()).isEqualTo("dashboard");
+        assertThat(decision.changeKind()).isEqualTo("create_artifact");
+        assertThat(decision.selectedCandidate()).isSameAs(employees);
+    }
+
+    @Test
+    void exploratoryDashboardQuestionDoesNotMaterializeImplicitly() {
+        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "quero saber quais dashboards posso criar para funcionarios",
+                "explore",
+                "api_catalog",
+                "answer_api_catalog_question",
+                employees,
+                List.of(employees),
+                employees,
+                null,
+                false,
+                false,
+                false,
+                null,
+                null,
+                null));
+
+        assertThat(decision.operationKind()).isEqualTo("explore");
+        assertThat(decision.artifactKind()).isEqualTo("api_catalog");
+        assertThat(decision.changeKind()).isEqualTo("answer_api_catalog_question");
+    }
+
     private AgenticAuthoringSemanticDecisionPolicy.Input input(
             String prompt,
             String operationKind,

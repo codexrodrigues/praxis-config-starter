@@ -503,10 +503,13 @@ public class AgenticAuthoringTurnEngine {
         if (isContextualPreviewAction(request.contextHints())) {
             return "contextual-preview-action";
         }
+        String prompt = normalizeText(request.userPrompt());
+        if (isImplicitMaterializationRequest(prompt)) {
+            return "implicit-materialization-request";
+        }
         JsonNode currentPageSummary = currentPageAnalyzer.summarize(
                 request.currentPage(),
                 request.selectedWidgetKey());
-        String prompt = normalizeText(request.userPrompt());
         if (prompt.isBlank()
                 || !currentPageHasArtifact(currentPageSummary, "dashboard")) {
             return "";
@@ -535,6 +538,29 @@ public class AgenticAuthoringTurnEngine {
         return referencesCurrentChart && requestsPageChange && asksForMaterializedDetail
                 ? "current-page-materialization-refinement"
                 : "";
+    }
+
+    private boolean isImplicitMaterializationRequest(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return false;
+        }
+        boolean exploratory = containsAny(prompt,
+                "quero saber", "gostaria de saber", "preciso saber",
+                "como criar", "como crio", "como montar", "como faco", "como fazer",
+                "posso criar", "da para criar", "daria para criar",
+                "quais dashboards", "quais paineis", "quais opções", "quais opcoes",
+                "o que posso criar", "what can i create", "how to create");
+        if (exploratory) {
+            return false;
+        }
+        boolean asksForOutcome = containsAny(prompt,
+                "quero", "preciso", "gostaria", "necessito", "deveria ter",
+                "acompanhar", "monitorar", "controlar", "visualizar",
+                "i want", "i need", "i would like");
+        boolean dashboardLike = containsAny(prompt,
+                "dashboard", "painel", "visao geral", "visao 360", "overview",
+                "kpi", "indicador", "indicadores", "resumo", "sumario", "sumário");
+        return asksForOutcome && dashboardLike;
     }
 
     private boolean isContextualPreviewAction(JsonNode contextHints) {

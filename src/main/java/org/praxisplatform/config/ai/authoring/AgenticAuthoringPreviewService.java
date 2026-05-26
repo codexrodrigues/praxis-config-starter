@@ -2028,13 +2028,6 @@ public class AgenticAuthoringPreviewService {
         String resourceLabel = candidate == null || value(candidate.resourcePath()).isBlank()
                 ? "a fonte encontrada"
                 : titleFromResourcePath(candidate.resourcePath());
-        if (containsComponent(uiCompositionPlan, "praxis-table")) {
-            return "Montei uma primeira pre-visualizacao de tabela para " + resourceLabel + ".\n\n"
-                    + "- Fonte usada: \"" + resourceLabel + "\".\n"
-                    + "- O que ja foi criado: uma tabela conectada, com colunas vindas do schema da fonte.\n"
-                    + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
-                    + "- Como prosseguir: confirme que esta fonte esta correta, peca ajustes nas colunas ou diga \"salvar esta tabela\".";
-        }
         if (containsComponent(uiCompositionPlan, "praxis-chart")) {
             if (isSingleChartPlan(uiCompositionPlan)) {
                 return "Montei uma primeira pre-visualizacao de grafico para " + resourceLabel + ".\n\n"
@@ -2048,6 +2041,13 @@ public class AgenticAuthoringPreviewService {
                     + "- O que ja foi criado: componentes analiticos conectados ao schema da fonte.\n"
                     + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
                     + "- Como prosseguir: confirme a fonte, peca outro recorte ou diga \"salvar este dashboard\".";
+        }
+        if (containsComponent(uiCompositionPlan, "praxis-table")) {
+            return "Montei uma primeira pre-visualizacao de tabela para " + resourceLabel + ".\n\n"
+                    + "- Fonte usada: \"" + resourceLabel + "\".\n"
+                    + "- O que ja foi criado: uma tabela conectada, com colunas vindas do schema da fonte.\n"
+                    + "- Por que ficou em revisao: a escolha da fonte ainda veio de evidencia semantica fraca, entao nao vou salvar automaticamente.\n"
+                    + "- Como prosseguir: confirme que esta fonte esta correta, peca ajustes nas colunas ou diga \"salvar esta tabela\".";
         }
         return "Montei uma primeira pre-visualizacao usando \"" + resourceLabel + "\".\n\n"
                 + "- Por que ficou em revisao: a decisao semantica ainda precisa de confirmacao antes de salvar.\n"

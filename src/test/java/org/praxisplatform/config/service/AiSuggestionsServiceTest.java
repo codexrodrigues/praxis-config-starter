@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -237,11 +238,25 @@ class AiSuggestionsServiceTest {
         assertNotNull(suggestion.getPatch(), "Badge suggestion should include patch");
         assertNotNull(suggestion.getContextHints(), "Badge suggestion should include context hints");
         assertEquals("classe", suggestion.getPatch().at("/columns/0/field").asText());
+        assertEquals("badge", suggestion.getPatch().at("/columns/0/renderer/type").asText());
+        assertEquals("soft", suggestion.getPatch().at("/columns/0/renderer/badge/variant").asText());
+        assertFalse(suggestion.getPatch().at("/columns/0").has("conditionalRenderers"),
+                "Badge suggestion must not derive per-value colors locally");
+        assertEquals("categorical_field_semantics",
+                suggestion.getContextHints().at("/decisionKind").asText());
+        assertEquals("praxis-categorical-field-semantics.v1",
+                suggestion.getContextHints().at("/schemaVersion").asText());
         assertTrue(suggestion.getContextHints().has("values"), "Context hints should include values");
+        assertFalse(suggestion.getContextHints().has("palette"),
+                "Context hints must not expose local color palette decisions");
+        assertFalse(suggestion.getContextHints().has("valueColorMap"),
+                "Context hints must not expose local value-to-color decisions");
+        assertTrue(suggestion.getMissingContext().contains("governed_categorical_field_semantics"),
+                "Badge suggestion should request governed categorical semantics");
     }
 
     @Test
-    void shouldAvoidQuotingBooleanBadgeValuesWhenExplicitTypeIsBoolean() {
+    void shouldUseNeutralBadgeProjectionForBooleanValuesUntilSemanticsAreGoverned() {
         ObjectNode config = objectMapper.createObjectNode();
         ArrayNode columns = config.putArray("columns");
         ObjectNode activeCol = columns.addObject();
@@ -280,10 +295,12 @@ class AiSuggestionsServiceTest {
 
         assertNotNull(suggestion, "Badge suggestion should be present");
         assertNotNull(suggestion.getPatch(), "Badge suggestion should include patch");
-        String condition = suggestion.getPatch()
-                .at("/columns/0/conditionalRenderers/0/condition")
-                .asText();
-        assertEquals("active == true", condition);
+        assertEquals("badge", suggestion.getPatch().at("/columns/0/renderer/type").asText());
+        assertEquals("soft", suggestion.getPatch().at("/columns/0/renderer/badge/variant").asText());
+        assertFalse(suggestion.getPatch().at("/columns/0").has("conditionalRenderers"),
+                "Boolean categorical values should not receive local conditional color rules");
+        assertFalse(suggestion.getContextHints().has("valueColorMap"),
+                "Boolean categorical values also need governed semantics before visual policy");
     }
 
     private ObjectNode wrapConfig(ObjectNode config) {

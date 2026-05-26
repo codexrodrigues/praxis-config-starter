@@ -42,18 +42,16 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("rowUnit").asText()).isEqualTo("72px");
         assertThat(plan.path("canvas").path("items").path("orders-summary").path("rowSpan").asInt()).isEqualTo(2);
-        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("row").asInt()).isEqualTo(3);
-        assertThat(plan.path("canvas").path("items").path("orders-kpis").path("rowSpan").asInt()).isEqualTo(2);
-        assertThat(plan.path("canvas").path("items").path("orders-filter").path("row").asInt()).isEqualTo(5);
+        assertThat(plan.path("canvas").path("items").has("orders-kpis")).isFalse();
+        assertThat(plan.path("canvas").path("items").path("orders-filter").path("row").asInt()).isEqualTo(3);
         assertThat(plan.path("canvas").path("items").path("orders-filter").path("rowSpan").asInt()).isEqualTo(1);
-        assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("row").asInt()).isEqualTo(6);
+        assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("row").asInt()).isEqualTo(4);
         assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("colSpan").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("rowSpan").asInt()).isEqualTo(4);
-        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(10);
-        assertThat(plan.path("widgets")).hasSize(5);
+        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(8);
+        assertThat(plan.path("widgets")).hasSize(4);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
-                        "praxis-rich-content",
                         "praxis-rich-content",
                         "praxis-filter",
                         "praxis-chart",
@@ -61,25 +59,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("widgets").toString())
                 .contains("praxis-chart")
                 .contains("praxis-filter")
-                .contains("kpi-band")
                 .contains("praxis-table")
                 .contains("/api/acme/orders")
                 .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"")
+                .doesNotContain("kpi-band")
                 .doesNotContain("human-resources")
                 .doesNotContain("payroll")
                 .doesNotContain("quickstart");
         assertRuntimeInputsDoNotContainGovernanceEvidence(plan);
-        JsonNode kpiInputs = findWidgetInputs(plan, "praxis-rich-content", "kpi-band");
-        assertThat(kpiInputs.has("resourcePath")).isFalse();
-        assertThat(kpiInputs.has("schemaUrl")).isFalse();
-        assertThat(kpiInputs.has("kpis")).isFalse();
-        assertThat(kpiInputs.path("document").path("kind").asText()).isEqualTo("praxis.rich-content");
-        assertThat(kpiInputs.path("document").path("nodes").path(0).path("type").asText()).isEqualTo("statGroup");
-        assertThat(kpiInputs.path("document").path("nodes").path(0).path("items")).hasSize(2);
-        assertThat(kpiInputs.path("document").path("nodes").toString())
-                .contains("Total de registros")
-                .contains("Aguardando contagem")
-                .contains("Agrupado por Status");
         JsonNode summaryInputs = findWidgetInputs(plan, "praxis-rich-content", "supporting");
         assertThat(summaryInputs.path("document").path("kind").asText()).isEqualTo("praxis.rich-content");
         assertThat(summaryInputs.path("document").path("nodes").path(0).path("type").asText()).isEqualTo("card");
@@ -89,13 +76,21 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isEqualTo("horizontal");
         assertThat(summaryInputs.path("document").path("nodes").toString())
                 .contains("Pre-visualizacao analitica")
+                .contains("Visao inicial baseada em Orders")
+                .contains("selecoes no grafico filtram os detalhes")
                 .doesNotContain("Preview for");
         JsonNode filterInputs = findWidgetInputs(plan, "praxis-filter");
         assertThat(filterInputs.has("schemaUrl")).isFalse();
         assertThat(filterInputs.has("schemaVerification")).isFalse();
+        JsonNode chartWidget = findWidget(plan, "praxis-chart", "main");
+        assertThat(chartWidget.path("outputs").path("pointClick").asText()).isEqualTo("emit");
+        assertThat(chartWidget.path("outputs").path("selectionChange").asText()).isEqualTo("emit");
+        assertThat(chartWidget.path("outputs").path("crossFilter").asText()).isEqualTo("emit");
+        assertThat(chartWidget.path("inputs").path("config").path("interactions").path("pointClick").asBoolean()).isTrue();
+        assertThat(chartWidget.path("inputs").path("config").path("interactions").path("selection").asBoolean()).isTrue();
         assertThat(plan.path("bindings").toString())
                 .contains("orders-filter.requestSearch->orders-chart-status.queryContext")
-                .contains("orders-chart-status.selectionChange->orders-table.queryContext");
+                .contains("orders-chart-status.pointClick->orders-table.queryContext");
         JsonNode filterToChart = findBinding(plan.path("bindings"),
                 "orders-filter.requestSearch->orders-chart-status.queryContext");
         assertThat(filterToChart.path("from").path("kind").asText()).isEqualTo("component-port");
@@ -106,6 +101,11 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(filterToChart.path("to").path("widget").asText()).isEqualTo("orders-chart-status");
         assertThat(filterToChart.path("to").path("direction").asText()).isEqualTo("input");
         assertThat(filterToChart.path("to").has("widgetKey")).isFalse();
+        JsonNode chartToTable = findBinding(plan.path("bindings"),
+                "orders-chart-status.pointClick->orders-table.queryContext");
+        assertThat(chartToTable.path("transform").path("kind").asText()).isEqualTo("query-context");
+        assertThat(chartToTable.path("transform").path("field").asText()).isEqualTo("status");
+        assertThat(chartToTable.path("transform").path("valueVar").asText()).isEqualTo("payload.category");
     }
 
     @Test
@@ -121,7 +121,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         axis("owner", "responsavel", "Responsavel", "horizontal-bar", "horizontal"))))).orElseThrow();
 
         JsonNode plan = result.uiCompositionPlan();
-        assertThat(plan.path("widgets")).hasSize(7);
+        assertThat(plan.path("widgets")).hasSize(6);
         assertThat(plan.path("canvas").path("items").path("incidentes-chart-gravidade").path("col").asInt())
                 .isEqualTo(1);
         assertThat(plan.path("canvas").path("items").path("incidentes-chart-andamento").path("col").asInt())
@@ -131,10 +131,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("items").path("incidentes-chart-responsavel").path("colSpan").asInt())
                 .isEqualTo(4);
         assertThat(plan.path("canvas").path("items").path("incidentes-table").path("row").asInt())
-                .isEqualTo(10);
+                .isEqualTo(8);
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
-                        "praxis-rich-content",
                         "praxis-rich-content",
                         "praxis-filter",
                         "praxis-chart",
@@ -165,7 +164,76 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"schemaProbeStatus\":\"pending\"");
         assertThat(plan.path("bindings").toString())
                 .contains("incidentes-filter.requestSearch->incidentes-chart-gravidade.queryContext")
-                .contains("incidentes-chart-gravidade.selectionChange->incidentes-table.queryContext");
+                .contains("incidentes-chart-gravidade.pointClick->incidentes-table.queryContext");
+        JsonNode chartToTable = findBinding(plan.path("bindings"),
+                "incidentes-chart-gravidade.pointClick->incidentes-table.queryContext");
+        assertThat(chartToTable.path("transform").path("kind").asText()).isEqualTo("query-context");
+        assertThat(chartToTable.path("transform").path("field").asText()).isEqualTo("gravidade");
+        assertThat(chartToTable.path("transform").path("valueVar").asText()).isEqualTo("payload.category");
+    }
+
+    @Test
+    void deduplicatesDashboardAxesByCanonicalField() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Quero um painel 360 de funcionarios por departamento e departamento.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                dashboardIntent("/api/rh/funcionarios", List.of(
+                        axis("departamento", "departamento", "Departamento", "bar", "vertical"),
+                        axis("department", "departamento", "Departamento", "bar", "vertical"),
+                        axis("cargo", "cargo", "Cargo", "bar", "vertical"))))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .contains("funcionarios-chart-departamento", "funcionarios-chart-cargo");
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .filteredOn("funcionarios-chart-departamento"::equals)
+                .hasSize(1);
+        assertThat(plan.path("canvas").path("items").has("funcionarios-chart-departamento")).isTrue();
+        assertThat(plan.path("canvas").path("items").has("funcionarios-chart-cargo")).isTrue();
+        assertThat(plan.path("bindings").toString())
+                .contains("funcionarios-chart-departamento.pointClick->funcionarios-table.queryContext")
+                .contains("funcionarios-chart-cargo.pointClick->funcionarios-table.queryContext");
+    }
+
+    @Test
+    void infersEmployeeDashboardChartsWhenLlmReturnsTableBiasedDashboardDecision() {
+        AgenticAuthoringVisualizationDecision tableBiasedDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "dashboard with table",
+                "dashboard",
+                "praxis-table",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "ficou só tabela. transforme em um dashboard 360 completo: mantenha a tabela de funcionarios, "
+                        + "adicione filtros, grafico por departamento e grafico por cargo, "
+                        + "e conecte clique nos graficos para filtrar a tabela",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "table", "create_artifact", "/api/rh/funcionarios", tableBiasedDecision)))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-table");
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .contains(
+                        "funcionarios-filter",
+                        "funcionarios-chart-departamentoNome",
+                        "funcionarios-chart-cargoNome",
+                        "funcionarios-table");
+        assertThat(plan.path("bindings").toString())
+                .contains("funcionarios-chart-departamentoNome.pointClick->funcionarios-table.queryContext")
+                .contains("funcionarios-chart-cargoNome.pointClick->funcionarios-table.queryContext");
+        assertThat(plan.path("bindings").toString())
+                .contains("\"field\":\"departamentoNome\"")
+                .contains("\"field\":\"cargoNome\"");
     }
 
     @Test
@@ -194,7 +262,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode plan = result.uiCompositionPlan();
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("chart-surface-drilldown");
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
-                .containsExactly("praxis-rich-content", "praxis-rich-content", "praxis-filter", "praxis-chart");
+                .containsExactly("praxis-rich-content", "praxis-filter", "praxis-chart");
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .doesNotContain("praxis-table");
         assertThat(plan.has("composition")).isFalse();
@@ -372,7 +440,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         String widgets = result.uiCompositionPlan().path("widgets").toString();
         assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
-                .containsExactly("praxis-rich-content", "praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-table");
+                .containsExactly("praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-table");
         assertThat(widgets)
                 .contains("\"field\":\"departamento\"")
                 .contains("\"metric\":{\"field\":\"salarioLiquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
@@ -400,15 +468,16 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                                 "llm-authored-semantic-decision")))).orElseThrow();
 
         JsonNode plan = result.uiCompositionPlan();
-        assertThat(plan.path("widgets").findValuesAsText("componentId")).contains("praxis-chart");
-        assertThat(plan.path("widgets").toString())
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-rich-content", "praxis-filter", "praxis-table");
+        assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt())
+                .isEqualTo(4);
+        assertThat(plan.path("widgets").toString()).doesNotContain("\"field\":\"unresolved\"");
+        assertThat(plan.path("diagnostics").path("semanticAxes").toString())
                 .contains("\"field\":\"unresolved\"")
                 .contains("\"schemaVerified\":false")
                 .contains("\"schemaProbeStatus\":\"pending\"")
                 .contains("\"provenance\":\"schema-grounding-required\"");
-        assertThat(plan.path("diagnostics").path("semanticAxes").toString())
-                .contains("\"field\":\"unresolved\"")
-                .contains("\"schemaVerified\":false");
     }
 
     @Test
@@ -431,9 +500,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"provenance\":\"schema-grounding-required\"")
                 .doesNotContain("Tabela Crie Dashboard De Incidentes")
                 .doesNotContain("tabela_crie_dashboard_de_incidentes");
-        JsonNode kpiInputs = findWidgetInputs(result.uiCompositionPlan(), "praxis-rich-content", "kpi-band");
-        assertThat(kpiInputs.path("document").path("nodes").path(0).path("items")).hasSize(1);
-        assertThat(kpiInputs.path("document").path("nodes").toString()).doesNotContain("Unresolved");
+        assertThat(result.uiCompositionPlan().toString()).doesNotContain("kpi-band");
         JsonNode filterInputs = findWidgetInputs(result.uiCompositionPlan(), "praxis-filter");
         assertThat(filterInputs.path("selectedFieldIds")).isEmpty();
     }
@@ -1212,10 +1279,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     private JsonNode findWidgetInputs(JsonNode plan, String componentId, String role) {
+        return findWidget(plan, componentId, role).path("inputs");
+    }
+
+    private JsonNode findWidget(JsonNode plan, String componentId, String role) {
         for (JsonNode widget : plan.path("widgets")) {
             if (componentId.equals(widget.path("componentId").asText())
                     && (role == null || role.isBlank() || role.equals(widget.path("role").asText()))) {
-                return widget.path("inputs");
+                return widget;
             }
         }
         throw new AssertionError("Widget not found: " + componentId);
