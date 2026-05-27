@@ -107,7 +107,10 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         AgenticAuthoringTurnStreamService service = service();
         ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 1L);
-        service.start(request, "http://localhost", principalContext);
+        AgenticAuthoringTurnStreamService.StartResult startResult =
+                service.start(request, "http://localhost", principalContext);
+        org.assertj.core.api.Assertions.assertThat(startResult.response().getFallbackAuthoringUrl())
+                .isEqualTo("http://localhost/api/praxis/config/ai/authoring/page-preview");
 
         intentStarted.await(2, TimeUnit.SECONDS);
         ArgumentCaptor<String> eventTypes = ArgumentCaptor.forClass(String.class);

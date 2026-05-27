@@ -196,9 +196,18 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             }
         }
         addSemanticAxisProvenance(plan, visualizationDecision, dimensions);
+        addDashboardPresetMetadata(
+                plan,
+                candidate,
+                renderableDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
         if (surfaceOpenModal && chartDashboard) {
             addSurfaceOpenDrilldownBinding(plan, candidate, renderableDimensions);
         } else if (includeDetailTable(visualizationDecision)) {
+            addList(widgets, candidate, widgetKey(candidate, "list"), "insight-list", renderableDimensions);
             addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
         }
         if (!surfaceOpenModal || !chartDashboard) {
@@ -212,7 +221,65 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 surfaceOpenModal,
                 forceDashboardFilters,
                 includeKpis);
+        addDashboardGrouping(
+                plan,
+                candidate,
+                renderableDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        addDashboardDeviceLayouts(
+                plan,
+                candidate,
+                renderableDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
         return plan;
+    }
+
+    private void addDashboardPresetMetadata(
+            ObjectNode plan,
+            AgenticAuthoringCandidate candidate,
+            List<DashboardDimension> dimensions,
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            boolean surfaceOpenModal,
+            boolean forceIncludeFilters,
+            boolean includeKpis) {
+        if (surfaceOpenModal) {
+            plan.put("themePreset", "workspace-balanced");
+            return;
+        }
+        plan.put("themePreset", "analytics-calm");
+        ObjectNode options = plan.putObject("layoutPresetOptions");
+        options.put("presetFamily", "analytics-overview");
+        options.put("sourceResource", businessResourcePath(candidate.resourcePath()));
+        options.put("density", "comfortable");
+        options.put("responsiveStrategy", "canvas-device-layouts");
+        options.put("detailStrategy", "rich-list-table-surface");
+
+        ObjectNode slotAssignments = plan.putObject("slotAssignments");
+        if (includeSummary(visualizationDecision)) {
+            slotAssignments.put(widgetKey(candidate, "summary"), "hero");
+        }
+        if (includeKpis) {
+            slotAssignments.put(widgetKey(candidate, "kpis"), "kpis");
+        }
+        if (forceIncludeFilters || includeFilters(visualizationDecision)) {
+            slotAssignments.put(widgetKey(candidate, "filter"), "filters");
+        }
+        for (int i = 0; i < dimensions.size(); i++) {
+            DashboardDimension dimension = dimensions.get(i);
+            slotAssignments.put(
+                    widgetKey(candidate, "chart-" + dimension.field()),
+                    i == 0 ? "primary-chart" : "secondary-chart-" + i);
+        }
+        if (includeDetailTable(visualizationDecision)) {
+            slotAssignments.put(widgetKey(candidate, "list"), "insight-list");
+            slotAssignments.put(widgetKey(candidate, "table"), "detail-table");
+        }
     }
 
     private boolean isSurfaceOpenModalDrilldown(AgenticAuthoringPlanRequest request) {
@@ -340,6 +407,67 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode config = inputs.putObject("config");
         config.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
         config.putArray("columns");
+    }
+
+    private void addList(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            String role,
+            List<DashboardDimension> dimensions) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-list");
+        widget.put("role", role);
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("listId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("configPersistenceStrategy", "input-first");
+        inputs.put("enableCustomization", true);
+        inputs.putObject("queryContext").putObject("filters");
+        ObjectNode config = inputs.putObject("config");
+        String resourcePath = businessResourcePath(candidate.resourcePath());
+        config.put("title", "Destaques de " + titleFromResourcePath(resourcePath));
+        ObjectNode dataSource = config.putObject("dataSource");
+        dataSource.put("resourcePath", resourcePath);
+        dataSource.putObject("query");
+        ObjectNode layout = config.putObject("layout");
+        layout.put("variant", "cards");
+        layout.put("density", "comfortable");
+        layout.put("itemSpacing", "default");
+        layout.put("lines", 3);
+        layout.put("pageSize", 6);
+        ObjectNode templating = config.putObject("templating");
+        DashboardDimension primary = dimensions == null || dimensions.isEmpty() ? null : dimensions.get(0);
+        String primaryField = primary == null ? "id" : canonicalFieldName(primary.field());
+        templating.putObject("leading")
+                .put("type", "icon")
+                .put("expr", "subject");
+        templating.putObject("primary")
+                .put("type", "text")
+                .put("expr", recordTitleExpression());
+        putRecordSecondaryTemplate(templating, dimensions);
+        templating.putObject("meta")
+                .put("type", "text")
+                .put("expr", recordMetaExpression());
+        if (primary != null) {
+            templating.putObject("trailing")
+                    .put("type", "chip")
+                    .put("expr", recordChipExpression(primaryField));
+            templating.put("statusPosition", "top-right");
+        }
+        ObjectNode emptyState = templating.putObject("emptyState");
+        emptyState.put("type", "text");
+        emptyState.put("text", "Nenhum registro encontrado para os filtros atuais.");
+        ObjectNode selection = config.putObject("selection");
+        selection.put("mode", "single");
+        ArrayNode itemActions = config.putArray("actions");
+        ObjectNode detailsAction = itemActions.addObject();
+        detailsAction.put("id", "open-details");
+        detailsAction.put("label", "Ver detalhes");
+        detailsAction.put("icon", "open_in_new");
+        detailsAction.put("placement", "trailing");
+        configureOpenDetailsAction(detailsAction, candidate, key);
     }
 
     private void addTabs(
@@ -594,6 +722,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         interactions.put("pointClick", true);
         interactions.put("selection", true);
         interactions.put("crossFilter", true);
+        ObjectNode eventActions = interactions.putObject("eventActions");
+        ObjectNode crossFilter = eventActions.putObject("crossFilter");
+        crossFilter.put("action", "filter-widget");
+        crossFilter.putObject("mapping").put("key", canonicalFieldName(dimension.field()));
     }
 
     private String metricOutputField(DashboardDimension dimension) {
@@ -616,16 +748,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode statGroup = document.putArray("nodes").addObject();
         statGroup.put("type", "statGroup");
         statGroup.put("id", key + "-stats");
-        statGroup.put("title", "Indicadores");
+        statGroup.put("title", "Leitura executiva");
         statGroup.put("subtitle", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
         statGroup.put("layout", "grid");
         ArrayNode items = statGroup.putArray("items");
         ObjectNode total = items.addObject();
         total.put("id", key + "-total");
-        total.put("label", "Total de registros");
+        total.put("label", "Total filtrado");
         total.put("value", "-");
         total.put("valueExpr", "${table.totalItems}");
-        total.put("caption", "Aguardando dados");
+        total.put("caption", "Sincronizado com os filtros");
         total.put("captionExpr", "${table.caption}");
         total.put("icon", "monitoring");
         total.put("tone", "info");
@@ -634,7 +766,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             kpi.put("id", key + "-" + dimension.field());
             kpi.put("label", dimension.label());
             kpi.put("value", "-");
-            kpi.put("caption", metricCaption(dimension));
+            kpi.put("caption", metricCaption(dimension) + " no recorte atual");
             kpi.put("icon", "query_stats");
             kpi.put("tone", "neutral");
             kpi.put("dimensionField", dimension.field());
@@ -685,6 +817,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         blueprint.put("domainSpecific", false);
         blueprint.put("fieldSelectionPolicy", "semantic-field-candidates-from-host-context");
         blueprint.put("requiresResolvedCategoricalAxes", true);
+        blueprint.put("compositionStrategy", "executive-summary-kpis-filters-charts-rich-list-table-surface");
+        blueprint.put("detailSurface", "chart-point-opens-filtered-rich-list-modal");
         ArrayNode axes = diagnostics.putArray("semanticAxes");
         for (DashboardDimension dimension : dimensions) {
             ObjectNode axis = axes.addObject();
@@ -711,9 +845,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         String filterKey = widgetKey(candidate, "filter");
         String tableKey = widgetKey(candidate, "table");
+        String listKey = widgetKey(candidate, "list");
         ArrayNode bindings = plan.putArray("bindings");
         if (includeFilters && includeDetailTable) {
             addFilterQueryContextBindings(bindings, filterKey, tableKey);
+            addFilterQueryContextBindings(bindings, filterKey, listKey);
         }
         if (includeKpis && includeDetailTable) {
             addTableKpiContextBinding(bindings, tableKey, widgetKey(candidate, "kpis"));
@@ -725,26 +861,49 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             }
 
             if (includeDetailTable) {
-                ObjectNode drilldownBinding = bindings.addObject();
-                drilldownBinding.put("id", chartKey + ".pointClick->" + tableKey + ".queryContext");
-                addComponentPortEndpoint(drilldownBinding.putObject("from"), chartKey, "pointClick", "output");
-                addComponentPortEndpoint(drilldownBinding.putObject("to"), tableKey, "queryContext", "input");
-                ObjectNode transform = drilldownBinding.putObject("transform");
-                transform.put("kind", "query-context");
-                transform.put("field", canonicalFieldName(dimension.field()));
-                transform.put("valueVar", "payload.category");
+                ObjectNode modalBinding = bindings.addObject();
+                modalBinding.put("id", chartKey + ".pointClick->surface.open");
+                modalBinding.put("intent", "command-dispatch");
+                addComponentPortEndpoint(modalBinding.putObject("from"), chartKey, "pointClick", "output");
+                ObjectNode to = modalBinding.putObject("to");
+                to.put("kind", "global-action");
+                to.put("actionId", "surface.open");
+                to.set("payload", surfaceOpenListPayload(candidate, dimension, dimensions));
+                ObjectNode policy = modalBinding.putObject("policy");
+                policy.put("distinct", true);
+                policy.put("distinctBy", chartPointRawValuePath());
+                policy.put("debounceMs", 250);
 
                 ObjectNode crossFilterBinding = bindings.addObject();
                 crossFilterBinding.put("id", chartKey + ".crossFilter->" + tableKey + ".queryContext");
                 addComponentPortEndpoint(crossFilterBinding.putObject("from"), chartKey, "crossFilter", "output");
                 addComponentPortEndpoint(crossFilterBinding.putObject("to"), tableKey, "queryContext", "input");
+                addChartQueryContextPolicy(crossFilterBinding, dimension);
                 ObjectNode crossFilterTransform = crossFilterBinding.putObject("transform");
                 crossFilterTransform.put("kind", "template");
                 crossFilterTransform.put("id", chartKey + "-cross-filter-query-context");
                 ObjectNode template = crossFilterTransform.putObject("template");
                 template.put("filters", "${payload.filters}");
+
+                ObjectNode listDrilldownBinding = bindings.addObject();
+                listDrilldownBinding.put("id", chartKey + ".crossFilter->" + listKey + ".queryContext");
+                addComponentPortEndpoint(listDrilldownBinding.putObject("from"), chartKey, "crossFilter", "output");
+                addComponentPortEndpoint(listDrilldownBinding.putObject("to"), listKey, "queryContext", "input");
+                addChartQueryContextPolicy(listDrilldownBinding, dimension);
+                ObjectNode listTransform = listDrilldownBinding.putObject("transform");
+                listTransform.put("kind", "template");
+                listTransform.put("id", chartKey + "-cross-filter-list-query-context");
+                ObjectNode listTemplate = listTransform.putObject("template");
+                listTemplate.put("filters", "${payload.filters}");
             }
         }
+    }
+
+    private void addChartQueryContextPolicy(ObjectNode binding, DashboardDimension dimension) {
+        ObjectNode policy = binding.putObject("policy");
+        policy.put("distinct", true);
+        policy.put("distinctBy", "payload.filters." + canonicalFieldName(dimension.field()));
+        policy.put("debounceMs", 250);
     }
 
     private void addFilterQueryContextBindings(ArrayNode bindings, String filterKey, String targetKey) {
@@ -807,7 +966,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         to.set("payload", surfaceOpenTablePayload(candidate, dimension));
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", "payload.category");
+        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("debounceMs", 250);
     }
 
     private void addSurfaceOpenDrilldownComposition(
@@ -833,7 +993,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         toRef.set("payload", surfaceOpenTablePayload(candidate, dimension));
         ObjectNode policy = link.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", "payload.category");
+        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("debounceMs", 250);
     }
 
     private ObjectNode surfaceOpenTablePayload(
@@ -865,13 +1026,220 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("componentInstanceId", key);
         inputs.putObject("queryContext").putObject("filters");
         ObjectNode config = inputs.putObject("config");
-        config.put("title", titleFromResourcePath(resourcePath));
+        config.put("title", "Registros de " + titleFromResourcePath(resourcePath));
         addSurfaceOpenTableColumns(config.putArray("columns"), dimension);
         ArrayNode bindings = payload.putArray("bindings");
         ObjectNode binding = bindings.addObject();
-        binding.put("from", "payload.category");
+        binding.put("from", chartPointRawValuePath());
         binding.put("to", "widget.inputs.queryContext.filters." + canonicalFieldName(dimension.field()));
         return payload;
+    }
+
+    private ObjectNode surfaceOpenListPayload(
+            AgenticAuthoringCandidate candidate,
+            DashboardDimension dimension,
+            List<DashboardDimension> dimensions) {
+        String resourcePath = businessResourcePath(candidate.resourcePath());
+        String key = widgetKey(candidate, "modal-list-" + dimension.field());
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("presentation", "modal");
+        payload.put("title", "Explorar " + dimension.label());
+        payload.put("icon", "view_agenda");
+        payload.put("subtitle", "Lista filtrada pela categoria selecionada no grafico.");
+        ObjectNode size = payload.putObject("size");
+        size.put("width", "860px");
+        size.put("maxWidth", "94vw");
+        size.put("height", "680px");
+        size.put("maxHeight", "86vh");
+        ObjectNode widget = payload.putObject("widget");
+        widget.put("id", "praxis-list");
+        ArrayNode bindingOrder = widget.putArray("bindingOrder");
+        bindingOrder.add("listId");
+        bindingOrder.add("componentInstanceId");
+        bindingOrder.add("config");
+        bindingOrder.add("configPersistenceStrategy");
+        bindingOrder.add("enableCustomization");
+        bindingOrder.add("queryContext");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("listId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("configPersistenceStrategy", "input-first");
+        inputs.put("enableCustomization", true);
+        inputs.putObject("queryContext").putObject("filters");
+        ObjectNode config = inputs.putObject("config");
+        config.put("title", "Registros de " + titleFromResourcePath(resourcePath));
+        ObjectNode dataSource = config.putObject("dataSource");
+        dataSource.put("resourcePath", resourcePath);
+        dataSource.putObject("query");
+        ObjectNode layout = config.putObject("layout");
+        layout.put("variant", "cards");
+        layout.put("density", "comfortable");
+        layout.put("lines", 3);
+        layout.put("pageSize", 8);
+        ObjectNode templating = config.putObject("templating");
+        templating.putObject("leading")
+                .put("type", "icon")
+                .put("expr", "subject");
+        templating.putObject("primary")
+                .put("type", "text")
+                .put("expr", recordTitleExpression());
+        putRecordSecondaryTemplate(templating, dimensions);
+        templating.putObject("meta")
+                .put("type", "text")
+                .put("expr", recordMetaExpression());
+        templating.putObject("trailing")
+                .put("type", "chip")
+                .put("expr", recordChipExpression(canonicalFieldName(dimension.field())));
+        templating.put("statusPosition", "top-right");
+        ObjectNode emptyState = templating.putObject("emptyState");
+        emptyState.put("type", "text");
+        emptyState.put("text", "Nenhum registro encontrado para esta selecao.");
+        ObjectNode selection = config.putObject("selection");
+        selection.put("mode", "single");
+        ArrayNode itemActions = config.putArray("actions");
+        ObjectNode detailsAction = itemActions.addObject();
+        detailsAction.put("id", "open-details");
+        detailsAction.put("label", "Ver detalhes");
+        detailsAction.put("icon", "open_in_new");
+        detailsAction.put("placement", "trailing");
+        configureOpenDetailsAction(detailsAction, candidate, key);
+        ArrayNode bindings = payload.putArray("bindings");
+        ObjectNode binding = bindings.addObject();
+        binding.put("from", chartPointRawValuePath());
+        binding.put("to", "widget.inputs.queryContext.filters." + canonicalFieldName(dimension.field()));
+        return payload;
+    }
+
+    private String chartPointRawValuePath() {
+        return "payload.data.key";
+    }
+
+    private void configureOpenDetailsAction(
+            ObjectNode action,
+            AgenticAuthoringCandidate candidate,
+            String sourceKey) {
+        action.put("kind", "icon");
+        action.put("showLoading", true);
+        action.put("emitLocal", false);
+        ObjectNode globalAction = action.putObject("globalAction");
+        globalAction.put("actionId", "surface.open");
+        globalAction.set("payload", surfaceOpenFormPayload(candidate, sourceKey));
+    }
+
+    private ObjectNode surfaceOpenFormPayload(
+            AgenticAuthoringCandidate candidate,
+            String sourceKey) {
+        String resourcePath = businessResourcePath(candidate.resourcePath());
+        String key = valueOrDefault(sourceKey, widgetKey(candidate, "detail")) + "-detail-surface";
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("presentation", "modal");
+        payload.put("title", "Detalhes do registro");
+        payload.put("icon", "badge");
+        payload.put("subtitle", "Formulario rico em modo leitura para o item selecionado.");
+        ObjectNode size = payload.putObject("size");
+        size.put("width", "760px");
+        size.put("maxWidth", "94vw");
+        size.put("height", "680px");
+        size.put("maxHeight", "86vh");
+        ObjectNode widget = payload.putObject("widget");
+        widget.put("id", "praxis-dynamic-form");
+        ArrayNode bindingOrder = widget.putArray("bindingOrder");
+        bindingOrder.add("formId");
+        bindingOrder.add("componentInstanceId");
+        bindingOrder.add("resourcePath");
+        bindingOrder.add("mode");
+        bindingOrder.add("schemaSource");
+        bindingOrder.add("resourceId");
+        bindingOrder.add("config");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", resourcePath);
+        inputs.put("formId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("mode", "view");
+        inputs.put("schemaSource", "resource");
+        inputs.put("resourceId", "${item.id}");
+        ObjectNode config = inputs.putObject("config");
+        config.put("title", "Detalhes de " + titleFromResourcePath(resourcePath));
+        config.put("density", "comfortable");
+        config.put("layout", "responsive");
+        return payload;
+    }
+
+    private String recordTitleExpression() {
+        return "${item.displayName ?? item.fullName ?? item.nomeCompleto ?? item.nome ?? item.name ?? item.title ?? item.label ?? item.descricao ?? item.description ?? item.id}";
+    }
+
+    private void putRecordSecondaryTemplate(ObjectNode templating, List<DashboardDimension> dimensions) {
+        ObjectNode secondary = templating.putObject("secondary");
+        secondary.put("type", "compose");
+        ObjectNode compose = secondary.putObject("props").putObject("compose");
+        compose.put("direction", "row");
+        compose.put("wrap", true);
+        compose.put("separator", " • ");
+        ArrayNode items = compose.putArray("items");
+        for (DashboardDimension dimension : dimensions == null ? List.<DashboardDimension>of() : dimensions) {
+            if (!isResolvedDimension(dimension) || shouldRenderDimensionAsRecordChip(dimension.field())) {
+                continue;
+            }
+            items.addObject()
+                    .put("type", "text")
+                    .put("expr", "${item." + canonicalFieldName(dimension.field()) + "}");
+            if (items.size() >= 2) {
+                break;
+            }
+        }
+        items.addObject()
+                .put("type", "text")
+                .put("expr", "${item.description ?? item.descricao ?? item.category ?? item.categoria ?? item.type ?? item.tipo ?? item.group ?? item.grupo ?? item.segment ?? item.segmento}");
+        items.addObject()
+                .put("type", "text")
+                .put("expr", "${item.email ?? item.contact ?? item.contato ?? item.phone ?? item.telefone}");
+    }
+
+    private String recordMetaExpression() {
+        return "${item.createdAt ?? item.updatedAt ?? item.dataCriacao ?? item.dataAtualizacao ?? item.codigo ?? item.code ?? item.uuid}";
+    }
+
+    private String recordChipExpression(String field) {
+        String canonical = canonicalFieldName(field);
+        if (isBooleanLikeField(canonical)) {
+            return "${item." + canonical + "}|bool:Ativo:Inativo";
+        }
+        if (isStatusLikeField(canonical)) {
+            return "${item." + canonical + "}|map:true=Ativo,false=Inativo,ACTIVE=Ativo,INACTIVE=Inativo,active=Ativo,inactive=Inativo,enabled=Ativo,disabled=Inativo";
+        }
+        return "${item." + canonical + "}";
+    }
+
+    private boolean shouldRenderDimensionAsRecordChip(String field) {
+        String canonical = canonicalFieldName(field);
+        return isBooleanLikeField(canonical) || isStatusLikeField(canonical);
+    }
+
+    private boolean isBooleanLikeField(String field) {
+        String normalized = normalizeForSearch(field);
+        return normalized.equals("ativo")
+                || normalized.equals("active")
+                || normalized.equals("enabled")
+                || normalized.equals("isactive")
+                || normalized.equals("statusativo")
+                || normalized.endsWith("ativo")
+                || normalized.endsWith("active");
+    }
+
+    private boolean isStatusLikeField(String field) {
+        String normalized = normalizeForSearch(field);
+        return normalized.equals("status")
+                || normalized.equals("state")
+                || normalized.equals("situacao")
+                || normalized.equals("enabled")
+                || normalized.endsWith("status")
+                || normalized.endsWith("state")
+                || normalized.endsWith("situacao");
+    }
+
+    private String normalizeForSearch(String value) {
+        return normalize(value).replaceAll("[^a-z0-9]+", "");
     }
 
     private void addSurfaceOpenTableColumns(ArrayNode columns, DashboardDimension dimension) {
@@ -948,7 +1316,185 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             tableRow = chartRow + Math.max(1, chartRows) * chartRowSpan;
         }
         if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
-            putCanvasItem(items, widgetKey(candidate, "table"), 1, tableRow, 12, 5);
+            putCanvasItem(items, widgetKey(candidate, "list"), 1, tableRow, 5, 5);
+            putCanvasItem(items, widgetKey(candidate, "table"), 6, tableRow, 7, 5);
+        }
+    }
+
+    private void addDashboardGrouping(
+            ObjectNode plan,
+            AgenticAuthoringCandidate candidate,
+            List<DashboardDimension> dimensions,
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            boolean surfaceOpenModal,
+            boolean forceIncludeFilters,
+            boolean includeKpis) {
+        ArrayNode grouping = plan.putArray("grouping");
+        ArrayNode overviewKeys = objectMapper.createArrayNode();
+        if (includeSummary(visualizationDecision)) {
+            overviewKeys.add(widgetKey(candidate, "summary"));
+        }
+        if (includeKpis) {
+            overviewKeys.add(widgetKey(candidate, "kpis"));
+        }
+        if (!overviewKeys.isEmpty()) {
+            ObjectNode overview = grouping.addObject();
+            overview.put("kind", "hero");
+            overview.put("id", widgetKey(candidate, "overview-group"));
+            overview.put("emphasis", "medium");
+            overview.set("widgetKeys", overviewKeys);
+        }
+
+        if (forceIncludeFilters || includeFilters(visualizationDecision)) {
+            ObjectNode filters = grouping.addObject();
+            filters.put("kind", "section");
+            filters.put("id", widgetKey(candidate, "filters-group"));
+            filters.put("label", "Filtros");
+            filters.put("layout", "stack");
+            filters.putArray("widgetKeys").add(widgetKey(candidate, "filter"));
+        }
+
+        if (dimensions != null && !dimensions.isEmpty()) {
+            ObjectNode analysis = grouping.addObject();
+            analysis.put("kind", "section");
+            analysis.put("id", widgetKey(candidate, "analysis-group"));
+            analysis.put("label", "Analise");
+            analysis.put("layout", dimensions.size() == 1 ? "stack" : "grid");
+            ArrayNode chartKeys = analysis.putArray("widgetKeys");
+            for (DashboardDimension dimension : dimensions) {
+                chartKeys.add(widgetKey(candidate, "chart-" + dimension.field()));
+            }
+        }
+
+        if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
+            ObjectNode details = grouping.addObject();
+            details.put("kind", "section");
+            details.put("id", widgetKey(candidate, "details-group"));
+            details.put("label", "Detalhes");
+            details.put("layout", "row");
+            ArrayNode detailKeys = details.putArray("widgetKeys");
+            detailKeys.add(widgetKey(candidate, "list"));
+            detailKeys.add(widgetKey(candidate, "table"));
+        }
+
+        if (grouping.isEmpty()) {
+            plan.remove("grouping");
+        }
+    }
+
+    private void addDashboardDeviceLayouts(
+            ObjectNode plan,
+            AgenticAuthoringCandidate candidate,
+            List<DashboardDimension> dimensions,
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            boolean surfaceOpenModal,
+            boolean forceIncludeFilters,
+            boolean includeKpis) {
+        ObjectNode deviceLayouts = plan.putObject("deviceLayouts");
+        addDashboardMobileLayout(
+                deviceLayouts.putObject("mobile"),
+                candidate,
+                dimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceIncludeFilters,
+                includeKpis);
+        addDashboardTabletLayout(
+                deviceLayouts.putObject("tablet"),
+                candidate,
+                dimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceIncludeFilters,
+                includeKpis);
+    }
+
+    private void addDashboardMobileLayout(
+            ObjectNode variant,
+            AgenticAuthoringCandidate candidate,
+            List<DashboardDimension> dimensions,
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            boolean surfaceOpenModal,
+            boolean forceIncludeFilters,
+            boolean includeKpis) {
+        ObjectNode canvas = variant.putObject("canvas");
+        canvas.put("columns", 1);
+        canvas.put("rowUnit", "88px");
+        canvas.put("gap", "12px");
+        canvas.put("autoRows", "fixed");
+        ObjectNode items = canvas.putObject("items");
+        int nextRow = 1;
+        if (includeSummary(visualizationDecision)) {
+            putCanvasItem(items, widgetKey(candidate, "summary"), 1, nextRow, 1, 2);
+            nextRow += 2;
+        }
+        if (includeKpis) {
+            putCanvasItem(items, widgetKey(candidate, "kpis"), 1, nextRow, 1, 3);
+            nextRow += 3;
+        }
+        if (forceIncludeFilters || includeFilters(visualizationDecision)) {
+            putCanvasItem(items, widgetKey(candidate, "filter"), 1, nextRow, 1, 3);
+            nextRow += 3;
+        }
+        for (DashboardDimension dimension : dimensions) {
+            putCanvasItem(items, widgetKey(candidate, "chart-" + dimension.field()), 1, nextRow, 1, 4);
+            nextRow += 4;
+        }
+        if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
+            putCanvasItem(items, widgetKey(candidate, "list"), 1, nextRow, 1, 4);
+            nextRow += 4;
+            putCanvasItem(items, widgetKey(candidate, "table"), 1, nextRow, 1, 6);
+        }
+    }
+
+    private void addDashboardTabletLayout(
+            ObjectNode variant,
+            AgenticAuthoringCandidate candidate,
+            List<DashboardDimension> dimensions,
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            boolean surfaceOpenModal,
+            boolean forceIncludeFilters,
+            boolean includeKpis) {
+        ObjectNode canvas = variant.putObject("canvas");
+        canvas.put("columns", 6);
+        canvas.put("rowUnit", "80px");
+        canvas.put("gap", "14px");
+        canvas.put("autoRows", "fixed");
+        ObjectNode items = canvas.putObject("items");
+        int nextRow = 1;
+        if (includeSummary(visualizationDecision)) {
+            putCanvasItem(items, widgetKey(candidate, "summary"), 1, nextRow, 6, 2);
+            nextRow += 2;
+        }
+        if (includeKpis) {
+            putCanvasItem(items, widgetKey(candidate, "kpis"), 1, nextRow, 6, 2);
+            nextRow += 2;
+        }
+        if (forceIncludeFilters || includeFilters(visualizationDecision)) {
+            putCanvasItem(items, widgetKey(candidate, "filter"), 1, nextRow, 6, 2);
+            nextRow += 2;
+        }
+        int chartColSpan = dimensions.size() == 1 ? 6 : 3;
+        int chartRowSpan = 4;
+        for (int i = 0; i < dimensions.size(); i++) {
+            DashboardDimension dimension = dimensions.get(i);
+            int columnOffset = i % 2;
+            int rowOffset = i / 2;
+            putCanvasItem(
+                    items,
+                    widgetKey(candidate, "chart-" + dimension.field()),
+                    1 + columnOffset * chartColSpan,
+                    nextRow + rowOffset * chartRowSpan,
+                    chartColSpan,
+                    chartRowSpan);
+        }
+        if (!dimensions.isEmpty()) {
+            nextRow += ((int) Math.ceil(dimensions.size() / 2.0d)) * chartRowSpan;
+        }
+        if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
+            putCanvasItem(items, widgetKey(candidate, "list"), 1, nextRow, 6, 4);
+            nextRow += 4;
+            putCanvasItem(items, widgetKey(candidate, "table"), 1, nextRow, 6, 5);
         }
     }
 
@@ -976,7 +1522,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode card = document.putArray("nodes").addObject();
         card.put("type", "card");
         card.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
-        card.put("subtitle", "Pre-visualizacao analitica");
+        card.put("subtitle", "Visao executiva");
         card.put("variant", "filled");
         card.put("tone", "info");
         card.put("size", "sm");
@@ -990,7 +1536,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode body = content.addObject();
         body.put("type", "text");
         body.put("text", "Visao inicial baseada em " + titleFromResourcePath(businessResourcePath(candidate.resourcePath()))
-                + ". Use os filtros para refinar graficos e tabela; selecoes no grafico filtram os detalhes.");
+                + ". Use os filtros para refinar indicadores, graficos, lista e tabela. Selecione pontos do grafico para abrir uma exploracao contextual em modal e sincronizar os detalhes.");
     }
 
     private ObjectNode richContentDocument(ObjectNode inputs) {

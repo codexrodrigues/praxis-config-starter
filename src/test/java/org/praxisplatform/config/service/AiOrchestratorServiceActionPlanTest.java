@@ -3618,6 +3618,122 @@ class AiOrchestratorServiceActionPlanTest {
   }
 
   @Test
+  void shouldPruneUngroundedAdvancedFilterFieldsWhenPromptOnlyEnablesAdvancedFilters()
+      throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "cpf", "header": "CPF" },
+                { "field": "ativo", "header": "Ativo" },
+                { "field": "salario", "header": "Salário" }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("filter.advanced.configure")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "enabled": true,
+                                  "settings": {
+                                    "showAdvanced": true,
+                                    "alwaysVisibleFields": ["ativo"],
+                                    "selectedFieldIds": ["ativo"]
+                                  }
+                                }
+                                """))
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Ative filtros avançados.")
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            request,
+            objectMapper.createArrayNode(),
+            currentState,
+            tableManifest(),
+            warnings);
+
+    JsonNode settings = completed.getActions().get(0).getParams().path("settings");
+    assertThat(settings.path("showAdvanced").asBoolean()).isTrue();
+    assertThat(settings.has("alwaysVisibleFields")).isFalse();
+    assertThat(settings.has("selectedFieldIds")).isFalse();
+    assertThat(warnings)
+        .contains("filter.advanced.configure removeu campos nao aterrados no pedido humano ou contexto governado.");
+  }
+
+  @Test
+  void shouldNotGroundAdvancedFilterFieldFromActivationVerb() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "ativo", "header": "Status" }
+              ]
+            }
+            """);
+    AiActionPlan actionPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("filter.advanced.configure")
+                        .params(
+                            objectMapper.readTree(
+                                """
+                                {
+                                  "enabled": true,
+                                  "settings": {
+                                    "showAdvanced": true,
+                                    "alwaysVisibleFields": ["ativo"],
+                                    "selectedFieldIds": ["ativo"]
+                                  }
+                                }
+                                """))
+                        .build()))
+            .build();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("Sim, ative")
+            .contextHints(filterFieldCatalogHints())
+            .build();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "completeManifestBackedActionPlanInputs",
+            actionPlan,
+            request,
+            objectMapper.createArrayNode(),
+            currentState,
+            tableManifest(),
+            new ArrayList<String>());
+
+    JsonNode settings = completed.getActions().get(0).getParams().path("settings");
+    assertThat(settings.has("alwaysVisibleFields")).isFalse();
+    assertThat(settings.has("selectedFieldIds")).isFalse();
+  }
+
+  @Test
   void shouldMergeAdvancedFilterFieldsWithCurrentStateWhenConfiguringIncrementally()
       throws Exception {
     JsonNode currentState =
@@ -4300,6 +4416,99 @@ class AiOrchestratorServiceActionPlanTest {
     assertThat(patch).isNotNull();
     assertThat(patch.at("/columns/0/field").asText()).isEqualTo("cpf");
     assertThat(patch.at("/columns/0/visible").asBoolean()).isTrue();
+  }
+
+  @Test
+  void shouldHideMultipleExplicitColumnsFromSingleVisibilityDirective() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "email", "header": "Email" },
+                { "field": "salario", "header": "Salario" },
+                { "field": "cargoNome", "header": "Cargo" }
+              ]
+            }
+            """);
+    List<?> columns =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("oculta email e salario para mostrar em publico")
+            .build();
+
+    JsonNode patch =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "buildDeterministicColumnVisibilityPatch",
+            "oculta email e salario para mostrar em publico",
+            columns,
+            currentState,
+            request);
+
+    assertThat(patch).isNotNull();
+    assertThat(patch.at("/columns/0/field").asText()).isEqualTo("email");
+    assertThat(patch.at("/columns/0/visible").asBoolean()).isFalse();
+    assertThat(patch.at("/columns/1/field").asText()).isEqualTo("salario");
+    assertThat(patch.at("/columns/1/visible").asBoolean()).isFalse();
+  }
+
+  @Test
+  void shouldPrioritizeColumnVisibilityBeforeRendererFallbackForPublicViewPrompt() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "email", "header": "Email" },
+                { "field": "salario", "header": "Salario" },
+                { "field": "cargoNome", "header": "Cargo" }
+              ]
+            }
+            """);
+    JsonNode manifest =
+        objectMapper.readTree(
+            """
+            {
+              "componentId": "praxis-table",
+              "operations": [
+                { "operationId": "column.visibility.set" },
+                { "operationId": "column.renderer.set" }
+              ]
+            }
+            """);
+    List<String> warnings = new ArrayList<>();
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("oculta email e salario para mostrar em publico")
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "tryResolveTableDeterministicDirectFallback",
+            request,
+            currentState,
+            warnings,
+            List.of(),
+            List.of(),
+            objectMapper.createObjectNode(),
+            manifest);
+
+    assertThat(response).isNotNull();
+    JsonNode plan = response.getComponentEditPlan();
+    assertThat(plan.at("/operations/0/operationId").asText()).isEqualTo("column.visibility.set");
+    assertThat(plan.at("/operations/0/target/field").asText()).isEqualTo("email");
+    assertThat(plan.at("/operations/0/input/visible").asBoolean()).isFalse();
+    assertThat(plan.at("/operations/1/operationId").asText()).isEqualTo("column.visibility.set");
+    assertThat(plan.at("/operations/1/target/field").asText()).isEqualTo("salario");
+    assertThat(plan.at("/operations/1/input/visible").asBoolean()).isFalse();
+    assertThat(warnings).contains("componentEditPlan deterministico gerado para visibilidade de colunas.");
   }
 
   @Test

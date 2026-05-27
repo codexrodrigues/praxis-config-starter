@@ -812,10 +812,53 @@ public class AgenticAuthoringPreviewService {
             if (!containsUnsupportedSemanticAxes(uiCompositionPlan)) {
                 warnings.remove("semantic-axis-schema-verification-unsupported-axis");
             }
+            alignDashboardFilterFieldsWithResolvedChartAxes(widgetArray, filterSchemaFields, schemaResult, warnings);
             normalizeFilterQueryContextBindings(uiCompositionPlan, widgetArray, warnings);
             Set<String> widgetKeys = widgetKeys(widgetArray);
             pruneOrphanWidgetBindings(uiCompositionPlan, widgetKeys, warnings);
             pruneOrphanCanvasItems(uiCompositionPlan, widgetKeys, warnings);
+        }
+    }
+
+    private void alignDashboardFilterFieldsWithResolvedChartAxes(
+            ArrayNode widgetArray,
+            Map<String, SchemaFieldDescriptor> filterSchemaFields,
+            SchemaFetchResult schemaResult,
+            List<String> warnings) {
+        LinkedHashSet<String> resolvedAxisFields = new LinkedHashSet<>();
+        for (JsonNode widget : widgetArray) {
+            if (!"praxis-chart".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
+            String field = axis.path("field").asText("");
+            if (field.isBlank()
+                    || "unsupported".equals(axis.path("schemaProbeStatus").asText(""))
+                    || axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
+            resolvedAxisFields.add(field);
+        }
+        if (resolvedAxisFields.isEmpty()) {
+            return;
+        }
+        for (JsonNode widget : widgetArray) {
+            if (!"praxis-filter".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            JsonNode inputs = widget.path("inputs");
+            if (!(inputs instanceof ObjectNode inputsObject)) {
+                continue;
+            }
+            JsonNode selectedFields = inputsObject.path("selectedFieldIds");
+            ArrayNode fieldsArray = selectedFields instanceof ArrayNode existing
+                    ? existing
+                    : inputsObject.putArray("selectedFieldIds");
+            if (!fieldsArray.isEmpty()) {
+                continue;
+            }
+            resolvedAxisFields.forEach(fieldsArray::add);
+            alignFilterFields(widget, filterSchemaFields, schemaResult, warnings);
         }
     }
 
@@ -1336,7 +1379,8 @@ public class AgenticAuthoringPreviewService {
         }
         for (int i = fieldsArray.size() - 1; i >= 0; i--) {
             String requestedField = fieldsArray.get(i).asText("");
-            Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisProbe(requestedField), schemaFields);
+            Optional<SchemaFieldDescriptor> schemaField = Optional.ofNullable(
+                    schemaFields.get(normalize(requestedField)));
             if (schemaField.isPresent()) {
                 SchemaFieldDescriptor selectedField = preferredFilterInputField(schemaField.get(), schemaFields)
                         .orElse(schemaField.get());
@@ -1345,10 +1389,49 @@ public class AgenticAuthoringPreviewService {
                     addWarningOnce(warnings, "semantic-filter-schema-field-replaced-with-selectable-field");
                 }
             } else {
-                fieldsArray.remove(i);
-                addWarningOnce(warnings, "semantic-filter-schema-verification-unsupported-field");
+                Optional<SchemaFieldDescriptor> selectedField = preferredFilterInputField(
+                        syntheticRequestedFilterField(requestedField),
+                        schemaFields);
+                if (selectedField.isPresent()) {
+                    fieldsArray.set(i, objectMapper.getNodeFactory().textNode(selectedField.get().name()));
+                    addWarningOnce(warnings, "semantic-filter-schema-field-replaced-with-selectable-field");
+                } else {
+                    fieldsArray.remove(i);
+                    addWarningOnce(warnings, "semantic-filter-schema-verification-unsupported-field");
+                }
             }
         }
+        LinkedHashSet<String> uniqueFields = new LinkedHashSet<>();
+        boolean removedDuplicate = false;
+        for (JsonNode field : fieldsArray) {
+            String name = field.asText("");
+            if (name.isBlank()) {
+                continue;
+            }
+            removedDuplicate = !uniqueFields.add(name) || removedDuplicate;
+        }
+        if (removedDuplicate) {
+            fieldsArray.removeAll();
+            uniqueFields.forEach(fieldsArray::add);
+            addWarningOnce(warnings, "semantic-filter-schema-field-deduplicated");
+        }
+    }
+
+    private SchemaFieldDescriptor syntheticRequestedFilterField(String requestedField) {
+        String field = value(requestedField);
+        return new SchemaFieldDescriptor(
+                field,
+                field,
+                "",
+                "",
+                "",
+                false,
+                "",
+                false,
+                "",
+                tokens(field),
+                tokens(field),
+                Set.of());
     }
 
     private Optional<SchemaFieldDescriptor> preferredFilterInputField(
@@ -1397,6 +1480,9 @@ public class AgenticAuthoringPreviewService {
         requestedTokens.addAll(requestedField.labelTokens());
         requestedTokens.addAll(requestedField.descriptionTokens());
         int score = semanticMatchScore(requestedTokens, candidate);
+        if (score <= 0) {
+            return 0;
+        }
         if (candidate.multiple()) {
             score += 2;
         }
@@ -2359,11 +2445,14 @@ public class AgenticAuthoringPreviewService {
     }
 
     private String detailSupportAssistantLine(JsonNode uiCompositionPlan) {
-        if (containsComponent(uiCompositionPlan, "praxis-table")) {
-            return "tabela de detalhe conectada ao recurso para validar os dados antes de salvar";
+        if (containsComponent(uiCompositionPlan, "praxis-list") && containsComponent(uiCompositionPlan, "praxis-table")) {
+            return "lista de detalhe em cards ricos, tabela de detalhe e exploracao em modal pelos graficos para validar os dados antes de salvar";
         }
         if (containsComponent(uiCompositionPlan, "praxis-list")) {
             return "lista de detalhe em cards ricos para validar os dados antes de salvar";
+        }
+        if (containsComponent(uiCompositionPlan, "praxis-table")) {
+            return "tabela de detalhe conectada ao recurso para validar os dados antes de salvar";
         }
         return "componentes de apoio para validar os dados antes de salvar";
     }

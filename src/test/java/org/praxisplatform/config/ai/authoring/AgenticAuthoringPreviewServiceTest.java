@@ -860,8 +860,8 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("funcionarios-chart-departamentoNome", "funcionarios-chart-cargoNome")
                 .doesNotContain("funcionarios-chart-nomeCompleto", "funcionarios-chart-dataAdmissao");
         assertThat(result.uiCompositionPlan().path("bindings").toString())
-                .contains("funcionarios-chart-departamentoNome.pointClick->funcionarios-table.queryContext")
-                .contains("funcionarios-chart-cargoNome.pointClick->funcionarios-table.queryContext");
+                .contains("funcionarios-chart-departamentoNome.crossFilter->funcionarios-table.queryContext")
+                .contains("funcionarios-chart-cargoNome.crossFilter->funcionarios-table.queryContext");
         assertThat(result.uiCompositionPlan().path("diagnostics").path("dashboardBlueprint").path("domainSpecific").asBoolean())
                 .isFalse();
     }
@@ -1124,6 +1124,7 @@ class AgenticAuthoringPreviewServiceTest {
                         "praxis-rich-content",
                         "praxis-filter",
                         "praxis-chart",
+                        "praxis-list",
                         "praxis-table");
         String widgets = result.uiCompositionPlan().path("widgets").toString();
         assertThat(widgets)
@@ -1139,13 +1140,15 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(bindings)
                 .contains("incidentes-filter.requestSearch->incidentes-chart-gravidade.queryContext")
                 .contains("incidentes-filter.change->incidentes-table.queryContext")
+                .contains("incidentes-filter.change->incidentes-list.queryContext")
                 .contains("\"template\":{\"filters\":\"${payload}\"}")
-                .contains("incidentes-chart-gravidade.pointClick->incidentes-table.queryContext")
+                .contains("incidentes-chart-gravidade.pointClick->surface.open")
+                .contains("incidentes-chart-gravidade.crossFilter->incidentes-list.queryContext")
                 .contains("incidentes-chart-gravidade.crossFilter->incidentes-table.queryContext")
                 .doesNotContain("incidentes-chart-andamento")
                 .doesNotContain("incidentes-chart-responsavel")
-                .doesNotContain("andamento")
-                .doesNotContain("responsavel");
+                .doesNotContain("payload.filters.andamento")
+                .doesNotContain("payload.filters.responsavel");
         assertThat(result.warnings()).contains("ui-composition-plan-filter-query-context-normalized");
         assertThat(result.warnings()).contains("ui-composition-plan-orphan-binding-removed");
         String canvasItems = result.uiCompositionPlan().path("canvas").path("items").toString();
@@ -1217,6 +1220,64 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"selectedFieldIds\":[\"cargoIdsIn\"]")
                 .doesNotContain("\"selectedFieldIds\":[\"cargoNome\"]");
         assertThat(result.warnings()).contains("semantic-filter-schema-field-replaced-with-selectable-field");
+    }
+
+    @Test
+    void previewDeduplicatesFilterFieldsAfterSelectableDtoReplacement() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel geral de funcionarios por cargo e descricao do cargo.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                funcionariosDuplicateCargoDashboardIntent());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("cargoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Cargo")
+                .put("controlType", "input")
+                .put("name", "cargoNome");
+        properties.putObject("cargoDescricao")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Descricao do cargo")
+                .put("controlType", "input")
+                .put("name", "cargoDescricao");
+        ObjectNode cargoIdsIn = properties.putObject("cargoIdsIn");
+        cargoIdsIn.put("type", "array");
+        cargoIdsIn.put("description", "Conjunto de cargos aceitos para a busca por nome e descricao.");
+        cargoIdsIn.putObject("items").put("type", "integer");
+        cargoIdsIn.putObject("x-ui")
+                .put("label", "Cargos")
+                .put("controlType", "async-select")
+                .put("multiple", true)
+                .put("endpoint", "/api/human-resources/cargos/options/filter")
+                .put("name", "cargoIdsIn");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        JsonNode selectedFields = result.uiCompositionPlan().path("widgets")
+                .findValues("inputs")
+                .stream()
+                .filter(inputs -> inputs.path("filterId").asText("").endsWith("-filter"))
+                .findFirst()
+                .orElseThrow()
+                .path("selectedFieldIds");
+        assertThat(selectedFields.toString()).isEqualTo("[\"cargoIdsIn\"]");
+        assertThat(result.warnings()).contains(
+                "semantic-filter-schema-field-replaced-with-selectable-field",
+                "semantic-filter-schema-field-deduplicated");
     }
 
     @Test
@@ -1602,6 +1663,103 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.warnings())
                 .contains("semantic-filter-schema-field-replaced-with-selectable-field");
         assertThat(result.uiCompositionPlan().toString()).contains("kpi-band");
+    }
+
+    @Test
+    void previewBuildsGenericDashboardForOrdersWithoutFuncionarioAssumptions() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = ordersDashboardIntent();
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "quero um painel geral de pedidos",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        ObjectNode responseProperties = responseSchema.putObject("properties");
+        responseProperties.putObject("numeroPedido")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Pedido");
+        responseProperties.putObject("clienteNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Cliente");
+        responseProperties.putObject("statusNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Status");
+        responseProperties.putObject("canalNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Canal");
+        responseProperties.putObject("criadoEm")
+                .put("type", "string")
+                .put("format", "date-time")
+                .putObject("x-ui")
+                .put("label", "Criado em");
+        ObjectNode requestSchema = objectMapper.createObjectNode();
+        ObjectNode requestProperties = requestSchema.putObject("properties");
+        requestProperties.putObject("statusNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Status");
+        ObjectNode statusIdsIn = requestProperties.putObject("statusIdsIn");
+        statusIdsIn.put("type", "array");
+        ObjectNode statusUi = statusIdsIn.putObject("x-ui");
+        statusUi.put("label", "Status");
+        statusUi.put("controlType", "async-select");
+        statusUi.put("multiple", true);
+        statusUi.put("endpoint", "/api/sales/status/options/filter");
+        ObjectNode canalIdsIn = requestProperties.putObject("canalIdsIn");
+        canalIdsIn.put("type", "array");
+        ObjectNode canalUi = canalIdsIn.putObject("x-ui");
+        canalUi.put("label", "Canal");
+        canalUi.put("controlType", "async-select");
+        canalUi.put("multiple", true);
+        canalUi.put("endpoint", "/api/sales/canais/options/filter");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    JsonNode schema = "request".equals(context.getSchemaType()) ? requestSchema : responseSchema;
+                    return SchemaFetchResult.success(schema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        JsonNode widgets = result.uiCompositionPlan().path("widgets");
+        JsonNode filterInputs = widgets
+                .findValues("inputs")
+                .stream()
+                .filter(inputs -> inputs.path("filterId").asText("").endsWith("-filter"))
+                .findFirst()
+                .orElseThrow();
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(result.valid()).isTrue();
+        assertThat(widgets.findValuesAsText("componentId"))
+                .contains("praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-list", "praxis-table");
+        assertThat(filterInputs.path("selectedFieldIds").toString())
+                .contains("statusIdsIn", "canalIdsIn")
+                .doesNotContain("statusNome", "canalNome");
+        assertThat(plan)
+                .contains("pedidos-chart-statusNome")
+                .contains("pedidos-chart-canalNome")
+                .contains("Destaques de Pedidos")
+                .contains("surface.open")
+                .doesNotContain("funcionarios")
+                .doesNotContain("cargoIdsIn")
+                .doesNotContain("departamentoIdsIn");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("dashboardBlueprint").path("domainSpecific").asBoolean())
+                .isFalse();
+        assertThat(result.warnings())
+                .contains("semantic-filter-schema-field-replaced-with-selectable-field");
     }
 
     @Test
@@ -3044,6 +3202,94 @@ class AgenticAuthoringPreviewServiceTest {
                         "dashboard",
                         "praxis-chart",
                         List.of(visualizationAxis("role", "cargoNome", "Cargo", "bar", "vertical")),
+                        true,
+                        true,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionariosDuplicateCargoDashboardIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        0.94d,
+                        "matched employees",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Quero um painel geral de funcionarios por cargo e descricao do cargo.",
+                "Vou criar um dashboard inicial.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "employee-dashboard",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(
+                                visualizationAxis("role", "cargoNome", "Cargo", "bar", "vertical"),
+                                visualizationAxis("role-description", "cargoDescricao", "Descricao do cargo", "bar", "vertical")),
+                        true,
+                        true,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult ordersDashboardIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/sales/pedidos",
+                        "post",
+                        "/schemas/filtered?path=/api/sales/pedidos/filter&operation=post&schemaType=response",
+                        "/api/sales/pedidos/filter",
+                        "POST",
+                        0.94d,
+                        "matched orders",
+                        List.of("semantic-retrieval", "schema-probe-pending")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Quero um painel geral de pedidos por status e canal.",
+                "Vou criar um dashboard inicial.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "orders-dashboard",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(
+                                visualizationAxis("status", "statusNome", "Status", "bar", "vertical"),
+                                visualizationAxis("channel", "canalNome", "Canal", "doughnut", "vertical")),
                         true,
                         true,
                         "llm-authored-semantic-decision"));

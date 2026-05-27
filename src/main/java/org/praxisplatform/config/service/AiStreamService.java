@@ -314,7 +314,7 @@ public class AiStreamService {
             AiOrchestratorRequest streamRequest = copyRequest(request);
             streamRequest.setObservationId(observationId);
             streamRequest.setStreamTransport(Boolean.TRUE);
-            streamRequest.setStreamTurnPreclaimed(Boolean.FALSE);
+            streamRequest.setStreamTurnPreclaimed(Boolean.TRUE);
             startProcessing(
                     requestId,
                     streamId,

@@ -168,7 +168,7 @@ class AgenticAuthoringControllerTest {
                 .eventSchemaVersion("v1")
                 .streamAuthMode("cookie")
                 .expiresAt(Instant.parse("2026-04-15T23:59:00Z"))
-                .fallbackAuthoringUrl("http://localhost/api/praxis/config/ai/authoring/turn")
+                .fallbackAuthoringUrl("http://localhost/api/praxis/config/ai/authoring/page-preview")
                 .build();
         when(principalContextResolver.resolve(isNull(), eq("tenant"), eq("user"), eq("local"))).thenReturn(principalContext);
         when(turnStreamService.start(same(request), eq("http://localhost"), same(principalContext)))

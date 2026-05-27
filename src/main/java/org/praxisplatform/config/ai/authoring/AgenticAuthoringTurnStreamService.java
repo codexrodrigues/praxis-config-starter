@@ -571,7 +571,7 @@ public class AgenticAuthoringTurnStreamService {
                 .streamAuthMode(streamAccessTokenService.resolveAuthMode())
                 .streamAccessToken(streamAccessTokenService.issueToken(streamId, principalContext, expiresAt))
                 .expiresAt(expiresAt)
-                .fallbackAuthoringUrl(baseUrl + "/api/praxis/config/ai/authoring/turn")
+                .fallbackAuthoringUrl(baseUrl + "/api/praxis/config/ai/authoring/page-preview")
                 .build();
     }
 

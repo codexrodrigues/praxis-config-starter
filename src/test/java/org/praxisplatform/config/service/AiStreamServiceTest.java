@@ -194,6 +194,64 @@ class AiStreamServiceTest {
     }
 
     @Test
+    void shouldMarkNewStreamRequestAsPreclaimedAfterReservation() {
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Atualizar tabela")
+                .clientTurnId(turnId)
+                .currentState(new ObjectMapper().createObjectNode())
+                .build();
+        AiThread thread = AiThread.builder()
+                .threadId(threadId)
+                .tenantId("tenant-a")
+                .userId("user-a")
+                .environment("prod")
+                .componentId("praxis-table")
+                .componentType("praxis-table")
+                .build();
+        AiTurnEventEnvelope startEnvelope = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .threadId(threadId)
+                .turnId(turnId)
+                .seq(1L)
+                .eventSchemaVersion("v1")
+                .timestamp(Instant.now())
+                .type("status")
+                .payload(new ObjectMapper().valueToTree(Map.of("state", "started")))
+                .build();
+
+        when(threadService.resolveThread(request, "tenant-a", "user-a", "prod", "Atualizar tabela"))
+                .thenReturn(thread);
+        when(turnEventService.findStartMetadata(threadId, turnId)).thenReturn(Optional.empty());
+        when(turnEventService.appendEvent(any(), any(), any(), any(), anyString(), any())).thenReturn(startEnvelope);
+        when(orchestratorService.generatePatch(any(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(org.praxisplatform.config.dto.AiOrchestratorResponse.builder()
+                        .type("patch")
+                        .build());
+
+        streamService.startStream(request, "http://localhost:8088", new AiPrincipalContext("tenant-a", "user-a", "prod", true));
+
+        ArgumentCaptor<AiOrchestratorRequest> captor = ArgumentCaptor.forClass(AiOrchestratorRequest.class);
+        verify(orchestratorService, timeout(1000)).generatePatch(
+                captor.capture(),
+                eq("http://localhost:8088"),
+                eq("tenant-a"),
+                eq("user-a"),
+                eq("prod"));
+        AiOrchestratorRequest started = captor.getValue();
+        assertThat(started.getSessionId()).isEqualTo(threadId);
+        assertThat(started.getClientTurnId()).isEqualTo(turnId);
+        assertThat(started.getStreamTransport()).isEqualTo(Boolean.TRUE);
+        assertThat(started.getStreamTurnPreclaimed()).isEqualTo(Boolean.TRUE);
+        verify(turnService).reserveTurnForStreaming(threadId, turnId);
+        verify(turnService, never()).beginTurn(any(), any());
+    }
+
+    @Test
     void shouldReturnConflictWhenStartIdempotencyHashDiverges() {
         UUID threadId = UUID.randomUUID();
         UUID turnId = UUID.randomUUID();

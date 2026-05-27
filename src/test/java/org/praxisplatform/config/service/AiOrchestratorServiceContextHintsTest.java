@@ -295,6 +295,38 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void booleanStateRendererPreservesExplicitGreenAndRedSemanticTokens() throws Exception {
+        JsonNode currentState = objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "ativo", "header": "Status", "type": "boolean" }
+                  ]
+                }
+                """);
+        @SuppressWarnings("unchecked")
+        List<Object> columns = ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+        Object targetColumn = columns.get(0);
+
+        AiActionPlan plan = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildBooleanStateRendererActionPlan",
+                "transforma o status em badge verde para ativo e vermelho para inativo",
+                targetColumn,
+                currentState);
+
+        assertThat(plan).isNotNull();
+        assertThat(plan.getActions()).hasSize(2);
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/badge/color").asText())
+                .isEqualTo("success");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/color").asText())
+                .isEqualTo("danger");
+        assertThat(plan.getActions().get(0).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("Ativo");
+        assertThat(plan.getActions().get(1).getParams().at("/renderer/badge/text").asText())
+                .isEqualTo("Inativo");
+    }
+
+    @Test
     void resolveTemplateVariantFallsBackToBaseTemplateWhenEmbeddingSearchIsUnavailable() throws Exception {
         AiRegistryTemplateRecord baseTemplate = AiRegistryTemplateRecord.builder()
                 .componentId("praxis-table")
@@ -1160,6 +1192,73 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void exportPromptMaterializesSelectedRecordsRuntimePatchBeforeFilterCandidateClarification() throws Exception {
+        JsonNode authoringManifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [
+                    {
+                      "operationId": "table.export.run",
+                      "submissionImpact": "runtime",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["format"],
+                        "properties": {
+                          "format": { "type": "string", "enum": ["excel", "pdf", "csv", "json", "print"] },
+                          "scope": { "type": "string", "enum": ["auto", "selected", "filtered", "currentPage", "all"] }
+                        }
+                      }
+                    },
+                    { "operationId": "table.filter.apply", "submissionImpact": "runtime" }
+                  ]
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("exporta os marcados em csv por favor")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "authoringContract": {
+                            "consultativeContext": {
+                              "selectedRecordsContext": {
+                                "selectedCount": 3,
+                                "selectedIds": ["194", "193", "192"],
+                                "sampleRows": [
+                                  { "departamentoId": 21 },
+                                  { "departamentoId": 22 }
+                                ],
+                                "filterCandidates": [
+                                  {
+                                    "field": "departamentoIdsIn",
+                                    "label": "Departamento",
+                                    "criteria": { "departamentoIdsIn": [21, 22] },
+                                    "displayValues": ["Black Mesa - Segurança", "Black Mesa - Pesquisa"]
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                        """))
+                .build();
+
+        JsonNode patch = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildTableRuntimeExportPatchFromPrompt",
+                request,
+                authoringManifest);
+
+        assertThat(patch).isNotNull();
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/operationId").asText())
+                .isEqualTo("table.export.run");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/format").asText())
+                .isEqualTo("csv");
+        assertThat(patch.at("/tableRuntimeOperations/operations/0/input/scope").asText())
+                .isEqualTo("selected");
+    }
+
+    @Test
     void selectedRecordsFilterMaterializesRuntimePatchWhenActionPlanTargetsAdvancedFilterField() throws Exception {
         JsonNode authoringManifest = objectMapper.readTree("""
                 {
@@ -1913,24 +2012,73 @@ class AiOrchestratorServiceContextHintsTest {
         Boolean legacyWithoutResponseModes = ReflectionTestUtils.invokeMethod(
                 service,
                 "shouldResolveSelectedRecordFilterCandidateDecision",
-                (String) null);
+                null,
+                null);
         Boolean runtimeMode = ReflectionTestUtils.invokeMethod(
                 service,
                 "shouldResolveSelectedRecordFilterCandidateDecision",
-                "runtime");
+                "runtime",
+                null);
         Boolean editMode = ReflectionTestUtils.invokeMethod(
                 service,
                 "shouldResolveSelectedRecordFilterCandidateDecision",
-                "edit");
+                "edit",
+                null);
         Boolean consultMode = ReflectionTestUtils.invokeMethod(
                 service,
                 "shouldResolveSelectedRecordFilterCandidateDecision",
-                "consult");
+                "consult",
+                null);
 
         assertThat(legacyWithoutResponseModes).isTrue();
         assertThat(runtimeMode).isTrue();
         assertThat(editMode).isFalse();
         assertThat(consultMode).isFalse();
+    }
+
+    @Test
+    void selectedRecordsFilterCandidateResolverHonorsGuidedRuntimeOptionEvenWhenGlobalModeIsEdit() throws Exception {
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("Departamento")
+                .contextHints(objectMapper.readTree("""
+                        {
+                          "runtimeOperationId": "table.filter.apply",
+                          "optionSelected": {
+                            "targetField": "departamentoIdsIn",
+                            "selection": { "value": "departamentoIdsIn" }
+                          },
+                          "authoringContract": {
+                            "consultativeContext": {
+                              "selectedRecordsContext": {
+                                "selectedCount": 3,
+                                "sampleRows": [
+                                  { "departamentoId": 21 },
+                                  { "departamentoId": 22 }
+                                ],
+                                "filterCandidates": [
+                                  {
+                                    "field": "departamentoIdsIn",
+                                    "label": "Departamento",
+                                    "criteria": { "departamentoIdsIn": [21, 22] },
+                                    "displayValues": ["Black Mesa - Segurança", "Black Mesa - Pesquisa"]
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                        """))
+                .build();
+
+        Boolean editMode = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldResolveSelectedRecordFilterCandidateDecision",
+                "edit",
+                request);
+
+        assertThat(editMode).isTrue();
     }
 
     @Test

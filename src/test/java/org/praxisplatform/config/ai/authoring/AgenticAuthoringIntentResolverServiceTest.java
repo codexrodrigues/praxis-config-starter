@@ -7642,6 +7642,59 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void humanDashboardPromptFallsBackToMaterializableDashboardWhenLlmIntentTimesOut() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "unknown",
+                        null,
+                        null,
+                        "provider_error",
+                        "Tive um problema para concluir essa leitura agora.",
+                        List.of(),
+                        List.of("Qual recurso de negocio deve orientar esta decisao?"),
+                        List.of("llm-intent-resolution-failed", "llm-provider-timeout"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero um painel geral dos funcionarios",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).contains("/api/human-resources/funcionarios");
+        assertThat(result.warnings()).contains("llm-intent-resolution-failed", "keyword-fallback-applied");
+    }
+
+    @Test
     void explicitLocalTabbedAdjustmentKeepsPageCompositionWhenLlmClassifiesApiCatalog() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);

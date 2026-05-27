@@ -548,7 +548,21 @@ public class AiOrchestratorService {
                 authoringContract,
                 request,
                 frontendConfig);
-        if (shouldResolveSelectedRecordFilterCandidateDecision(selectedResponseMode)) {
+        if (shouldResolveSelectedRecordFilterCandidateDecision(selectedResponseMode, request)) {
+            JsonNode tableRuntimeExportPatchFromPrompt = buildTableRuntimeExportPatchFromPrompt(
+                    request,
+                    authoringManifest);
+            if (tableRuntimeExportPatchFromPrompt != null
+                    && tableRuntimeExportPatchFromPrompt.isObject()) {
+                warnings.add("table-runtime-export gerado a partir de pedido runtime explicito.");
+                return finalizeResponse(
+                        tableRuntimeOperationResponse(
+                                tableRuntimeExportPatchFromPrompt,
+                                request,
+                                warnings,
+                                "Vou exportar os dados solicitados da tabela."),
+                        memoryContext);
+            }
             JsonNode selectedRecordsRuntimeFilterPatchFromSemanticHints =
                     buildSelectedRecordsRuntimeFilterPatchFromSemanticContextHints(request, authoringManifest);
             if (selectedRecordsRuntimeFilterPatchFromSemanticHints != null
@@ -618,13 +632,6 @@ public class AiOrchestratorService {
             if (governedCategoricalRendererConsultation != null) {
                 return finalizeResponse(governedCategoricalRendererConsultation, memoryContext);
             }
-            AiOrchestratorResponse response = info(answerQuestion(
-                    resolvedUserPrompt,
-                    buildConversationReferenceBlock(memoryContext, resolvedUserPrompt),
-                    currentState,
-                    request,
-                    frontendConfig,
-                    authoringContract));
             JsonNode selectedRecordsRuntimeFilterPatchFromConsultIntent =
                     buildSelectedRecordsRuntimeFilterPatchFromIntent(
                             consultIntent,
@@ -661,6 +668,13 @@ public class AiOrchestratorService {
                                 "Vou exportar os dados solicitados da tabela."),
                         memoryContext);
             }
+            AiOrchestratorResponse response = info(answerQuestion(
+                    resolvedUserPrompt,
+                    buildConversationReferenceBlock(memoryContext, resolvedUserPrompt),
+                    currentState,
+                    request,
+                    frontendConfig,
+                    authoringContract));
             String governedFormatAnswer = answerTableFormatCapabilityQuestion(
                     request != null ? request.getUserPrompt() : null,
                     currentState,
@@ -1044,6 +1058,21 @@ public class AiOrchestratorService {
                 }
             }
         }
+        JsonNode earlyVisibilityPlanFromPrompt = buildDeterministicColumnVisibilityEditPlan(
+                request,
+                currentState,
+                columnDescriptors,
+                authoringManifest,
+                warnings);
+        if (earlyVisibilityPlanFromPrompt != null && earlyVisibilityPlanFromPrompt.isObject()) {
+            ObjectNode planResult = objectMapper.createObjectNode();
+            planResult.put("message", "Vou ajustar a visibilidade das colunas usando o contrato governado do componente.");
+            planResult.set("componentEditPlan", earlyVisibilityPlanFromPrompt);
+            return finalizeResponse(
+                    componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                    memoryContext);
+        }
+
         if ("ask_about_config".equalsIgnoreCase(intent.getIntent())) {
             String tableFormatAnswer = answerTableFormatCapabilityQuestion(
                     request != null ? request.getUserPrompt() : null,
@@ -1173,6 +1202,21 @@ public class AiOrchestratorService {
                     formatOptions,
                     warnings);
             expectedActions = dropEmptyActionsShadowedByClear(expectedActions);
+
+            JsonNode visibilityPlanFromPrompt = buildDeterministicColumnVisibilityEditPlan(
+                    request,
+                    currentState,
+                    columnDescriptors,
+                    authoringManifest,
+                    warnings);
+            if (visibilityPlanFromPrompt != null && visibilityPlanFromPrompt.isObject()) {
+                ObjectNode planResult = objectMapper.createObjectNode();
+                planResult.put("message", "Vou ajustar a visibilidade das colunas usando o contrato governado do componente.");
+                planResult.set("componentEditPlan", visibilityPlanFromPrompt);
+                return finalizeResponse(
+                        componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                        memoryContext);
+            }
 
             List<String> ambiguityOptions = collectAmbiguityOptions(actionPlan);
             boolean hasAmbiguity = actionPlan != null
@@ -2353,8 +2397,22 @@ public class AiOrchestratorService {
         return AiJsonSchema.of(schema.toString(), null);
     }
 
-    private boolean shouldResolveSelectedRecordFilterCandidateDecision(String selectedResponseMode) {
-        return selectedResponseMode == null || "runtime".equals(selectedResponseMode);
+    private boolean shouldResolveSelectedRecordFilterCandidateDecision(
+            String selectedResponseMode,
+            AiOrchestratorRequest request) {
+        return selectedResponseMode == null
+                || "runtime".equals(selectedResponseMode)
+                || hasSelectedRecordFilterApplyOptionSelection(request);
+    }
+
+    private boolean hasSelectedRecordFilterApplyOptionSelection(AiOrchestratorRequest request) {
+        if (request == null) {
+            return false;
+        }
+        JsonNode contextHints = request.getContextHints();
+        return hasOptionSelection(contextHints)
+                && isTableRuntimeFilterApplyHint(contextHints)
+                && hasSelectedRecordFilterCandidates(request);
     }
 
     private boolean hasAuthoringResponseModes(JsonNode authoringContract) {
@@ -2853,6 +2911,44 @@ public class AiOrchestratorService {
                     || "column.valueMapping.set".equals(type)) {
                 return action.getTarget();
             }
+        }
+        return null;
+    }
+
+    private JsonNode buildDeterministicColumnVisibilityEditPlan(
+            AiOrchestratorRequest request,
+            JsonNode currentState,
+            List<ColumnDescriptor> columns,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        if (request == null
+                || !COMPONENT_ID_TABLE.equals(request.getComponentId())
+                || columns == null
+                || columns.isEmpty()
+                || authoringManifest == null
+                || !authoringManifest.isObject()) {
+            return null;
+        }
+        String prompt = request.getUserPrompt();
+        if (isBlank(prompt)) {
+            return null;
+        }
+        JsonNode visibilityPatch = buildDeterministicColumnVisibilityPatch(
+                prompt.toLowerCase(Locale.ROOT),
+                columns,
+                currentState,
+                request);
+        if (visibilityPatch == null || !visibilityPatch.isObject()) {
+            return null;
+        }
+        JsonNode componentEditPlan = buildDeterministicTableComponentEditPlan(
+                visibilityPatch,
+                authoringManifest);
+        if (componentEditPlan != null && componentEditPlan.isObject()) {
+            if (warnings != null) {
+                warnings.add("componentEditPlan deterministico gerado para visibilidade de colunas.");
+            }
+            return componentEditPlan;
         }
         return null;
     }
@@ -5438,23 +5534,43 @@ public class AiOrchestratorService {
         String positiveScopeAlt = expected ? "ativo" : "inativo";
         String positiveScopeRaw = expected ? "true" : "false";
         boolean scopedGreen = containsNear(normalized, positiveScope, "verde")
+                || containsNear(normalized, "verde", positiveScope)
                 || containsNear(normalized, positiveScopeAlt, "verde")
-                || containsNear(normalized, positiveScopeRaw, "verde");
+                || containsNear(normalized, "verde", positiveScopeAlt)
+                || containsNear(normalized, positiveScopeRaw, "verde")
+                || containsNear(normalized, "verde", positiveScopeRaw);
         boolean scopedGray = containsNear(normalized, positiveScope, "cinza")
+                || containsNear(normalized, "cinza", positiveScope)
                 || containsNear(normalized, positiveScopeAlt, "cinza")
+                || containsNear(normalized, "cinza", positiveScopeAlt)
                 || containsNear(normalized, positiveScopeRaw, "cinza")
+                || containsNear(normalized, "cinza", positiveScopeRaw)
                 || containsNear(normalized, positiveScope, "discreto")
                 || containsNear(normalized, positiveScopeAlt, "discreto");
-        boolean scopedWarn = containsNear(normalized, positiveScope, "vermelh")
+        boolean scopedRed = containsNear(normalized, positiveScope, "vermelh")
+                || containsNear(normalized, "vermelh", positiveScope)
                 || containsNear(normalized, positiveScopeAlt, "vermelh")
+                || containsNear(normalized, "vermelh", positiveScopeAlt)
                 || containsNear(normalized, positiveScopeRaw, "vermelh")
-                || containsNear(normalized, positiveScope, "laranja")
-                || containsNear(normalized, positiveScopeAlt, "laranja");
-        if (scopedGreen) {
+                || containsNear(normalized, "vermelh", positiveScopeRaw);
+        boolean scopedWarn = containsNear(normalized, positiveScope, "laranja")
+                || containsNear(normalized, "laranja", positiveScope)
+                || containsNear(normalized, positiveScopeAlt, "laranja")
+                || containsNear(normalized, "laranja", positiveScopeAlt);
+        if (!expected && scopedRed) {
+            return "danger";
+        }
+        if (expected && scopedGreen) {
             return "success";
         }
         if (scopedGray) {
             return "basic";
+        }
+        if (scopedRed) {
+            return "danger";
+        }
+        if (scopedGreen) {
+            return "success";
         }
         if (scopedWarn) {
             return "warn";
@@ -7809,10 +7925,10 @@ public class AiOrchestratorService {
                 request.getDataProfile(),
                 request.getContextHints());
         }
+        boolean changed = pruneUngroundedAdvancedFilterConfigureFields(params, fields, warnings);
         if (fields == null || fields.isEmpty()) {
-            return false;
+            return changed;
         }
-        boolean changed = false;
         if (!params.has("enabled")) {
             params.put("enabled", true);
             changed = true;
@@ -7848,6 +7964,31 @@ public class AiOrchestratorService {
         mergeAdvancedFilterSettingArray(settings, currentState, "selectedFieldIds");
         if (changed && warnings != null) {
             warnings.add("filter.advanced.configure preservou campos citados no pedido humano.");
+        }
+        return changed;
+    }
+
+    private boolean pruneUngroundedAdvancedFilterConfigureFields(
+            ObjectNode params,
+            List<String> groundedFields,
+            List<String> warnings) {
+        if (params == null || !(params.get("settings") instanceof ObjectNode settings)) {
+            return false;
+        }
+        if (groundedFields != null && !groundedFields.isEmpty()) {
+            return false;
+        }
+        boolean changed = false;
+        if (settings.has("alwaysVisibleFields")) {
+            settings.remove("alwaysVisibleFields");
+            changed = true;
+        }
+        if (settings.has("selectedFieldIds")) {
+            settings.remove("selectedFieldIds");
+            changed = true;
+        }
+        if (changed && warnings != null) {
+            warnings.add("filter.advanced.configure removeu campos nao aterrados no pedido humano ou contexto governado.");
         }
         return changed;
     }
@@ -9203,6 +9344,36 @@ public class AiOrchestratorService {
         return patch;
     }
 
+    private JsonNode buildTableRuntimeExportPatchFromPrompt(
+            AiOrchestratorRequest request,
+            JsonNode authoringManifest) {
+        if (request == null
+                || !isTableRuntimeOperationAllowed(request, authoringManifest, "table.export.run")) {
+            return null;
+        }
+        String normalizedPrompt = normalizeSearchToken(request.getUserPrompt());
+        String format = resolveExportFormatValue(normalizedPrompt);
+        if (isBlank(format) || !tableRuntimeExportFormats(authoringManifest).contains(format)) {
+            return null;
+        }
+        String scope = resolveTableRuntimeExportScope(null, request, normalizedPrompt, authoringManifest);
+        if (isBlank(scope)) {
+            return null;
+        }
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("format", format);
+        input.put("scope", scope);
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("operationId", "table.export.run");
+        operation.set("input", input);
+        ObjectNode batch = objectMapper.createObjectNode();
+        batch.put("kind", "praxis.table.runtime-operation.batch");
+        batch.putArray("operations").add(operation);
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.set("tableRuntimeOperations", batch);
+        return patch;
+    }
+
     private JsonNode appendTableRuntimeExportIfRequested(
             JsonNode runtimePatch,
             AiOrchestratorRequest request,
@@ -9296,6 +9467,8 @@ public class AiOrchestratorService {
         return normalizedPrompt.contains("selecionad")
                 || normalizedPrompt.contains("selection")
                 || normalizedPrompt.contains("selected")
+                || normalizedPrompt.contains("marcad")
+                || normalizedPrompt.contains("checked")
                 || normalizedPrompt.contains("esses")
                 || normalizedPrompt.contains("estes")
                 || normalizedPrompt.contains("essas")
@@ -9312,6 +9485,16 @@ public class AiOrchestratorService {
         return selectedRecordsContext != null
                 && selectedRecordsContext.isObject()
                 && selectedRecordsContext.path("selectedCount").asInt(0) > 0;
+    }
+
+    private boolean hasSelectedRecordFilterCandidates(AiOrchestratorRequest request) {
+        if (request == null) {
+            return false;
+        }
+        JsonNode selectedRecordsContext = resolveSelectedRecordsContextWithFilterCandidates(
+                request.getRuntimeState(),
+                request.getContextHints());
+        return !selectedRecordFilterCandidates(selectedRecordsContext).isEmpty();
     }
 
     private String normalizeTableRuntimeExportScope(String value) {
@@ -22120,11 +22303,26 @@ public class AiOrchestratorService {
                 .toLowerCase(Locale.ROOT);
         for (String token : tokenSource.split("[^a-z0-9]+")) {
             if (token != null && token.length() >= 4) {
+                if (isFilterCatalogGroundingStopword(token)) {
+                    continue;
+                }
                 tokens.add(token);
                 tokens.add(collapseRepeatedCharacters(token));
             }
         }
         return tokens;
+    }
+
+    private boolean isFilterCatalogGroundingStopword(String token) {
+        if (isBlank(token)) {
+            return false;
+        }
+        return switch (token) {
+            case "ative", "ativar", "ativa", "ativo", "ativos", "ativado", "ativados",
+                    "habilite", "habilitar", "habilita", "habilitado", "habilitados",
+                    "filtro", "filtros", "avancado", "avancados", "advanced", "filter", "filters" -> true;
+            default -> false;
+        };
     }
 
     private boolean filterCatalogCandidateMatchesPromptTokens(String normalizedCandidate, Set<String> promptTokens) {
@@ -22816,6 +23014,29 @@ public class AiOrchestratorService {
                             componentContext);
                 }
             }
+        }
+
+        JsonNode earlyVisibilityPatch = buildDeterministicColumnVisibilityPatch(promptLower, columns, currentState, request);
+        if (earlyVisibilityPatch != null) {
+            warnings.add("Patch deterministico aplicado para visibilidade de colunas.");
+            JsonNode componentEditPlan = buildDeterministicTableComponentEditPlan(
+                    earlyVisibilityPatch,
+                    authoringManifest);
+            if (componentEditPlan != null && componentEditPlan.isObject()) {
+                ObjectNode result = objectMapper.createObjectNode();
+                result.put("message", "Vou ajustar a visibilidade das colunas usando o contrato governado do componente.");
+                result.set("componentEditPlan", componentEditPlan);
+                warnings.add("componentEditPlan deterministico gerado para visibilidade de colunas.");
+                return componentEditPlanResponse(result, request, warnings, authoringManifest);
+            }
+            return applySuggestedPatch(
+                    earlyVisibilityPatch,
+                    currentState,
+                    request.getComponentId(),
+                    warnings,
+                    configCapabilities,
+                    componentCapabilities,
+                    componentContext);
         }
 
         List<ComponentAction> actionCatalog = extractComponentActions(componentContext);
@@ -23792,8 +24013,12 @@ public class AiOrchestratorService {
         }
         LinkedHashMap<String, Boolean> visibilityByField = new LinkedHashMap<>();
         List<String> clauses = splitPromptClausesDeterministic(promptLower);
+        Boolean promptVisibility = resolveVisibilityDirective(promptLower);
         for (String clause : clauses) {
             Boolean visible = resolveVisibilityDirective(clause);
+            if (visible == null && promptVisibility != null) {
+                visible = promptVisibility;
+            }
             if (visible == null) {
                 continue;
             }
@@ -24023,11 +24248,15 @@ public class AiOrchestratorService {
             return null;
         }
         String normalized = normalizeSearchToken(promptLower);
+        String phrase = normalizeSearchPhrase(promptLower);
         if (normalized.contains("ocult")
                 || normalized.contains("escond")
                 || normalized.contains("hide")
                 || normalized.contains("invis")) {
             return Boolean.FALSE;
+        }
+        if (isPurposeOnlyVisibilityPhrase(phrase)) {
+            return null;
         }
         if (normalized.contains("mostrar")
                 || normalized.contains("mostre")
@@ -24038,6 +24267,27 @@ public class AiOrchestratorService {
             return Boolean.TRUE;
         }
         return null;
+    }
+
+    private boolean isPurposeOnlyVisibilityPhrase(String normalizedPhrase) {
+        if (isBlank(normalizedPhrase)) {
+            return false;
+        }
+        boolean hasPurposeShow = normalizedPhrase.contains("para mostrar")
+                || normalizedPhrase.contains("para exibir")
+                || normalizedPhrase.contains("pra mostrar")
+                || normalizedPhrase.contains("pra exibir")
+                || normalizedPhrase.contains("for public")
+                || normalizedPhrase.contains("to show");
+        if (!hasPurposeShow) {
+            return false;
+        }
+        return !(normalizedPhrase.startsWith("mostrar")
+                || normalizedPhrase.startsWith("mostre")
+                || normalizedPhrase.startsWith("exibir")
+                || normalizedPhrase.startsWith("show")
+                || normalizedPhrase.startsWith("reativ")
+                || normalizedPhrase.startsWith("visivel"));
     }
 
     private Boolean resolveSortableDirective(String promptLower) {
@@ -27402,6 +27652,9 @@ public class AiOrchestratorService {
         }
         if ("success".equals(normalized)) {
             return "verde";
+        }
+        if ("danger".equals(normalized) || "error".equals(normalized)) {
+            return "vermelha";
         }
         if ("primary".equals(normalized)) {
             return "azul";
