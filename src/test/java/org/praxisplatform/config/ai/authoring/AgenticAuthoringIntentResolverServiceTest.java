@@ -9024,6 +9024,78 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void consultativeRuleQuestionsDoNotTriggerSharedRuleAuthoringGate() {
+        ObjectNode page = funcionariosTablePage();
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "existe alguma regra atribuida a tabela que esta fazendo com que as linhas estejam com fundo vermelho?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.gate().status()).isNotEqualTo("route_required");
+        assertThat(result.failureCodes()).doesNotContain("shared-rule-authoring-required");
+    }
+
+    @Test
+    void exploratoryRuleQuestionsDoNotTriggerSharedRuleAuthoringGate() {
+        ObjectNode page = funcionariosTablePage();
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "como a regra de validacao de cpf funciona?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.gate().status()).isNotEqualTo("route_required");
+        assertThat(result.failureCodes()).doesNotContain("shared-rule-authoring-required");
+    }
+
+    @Test
+    void queriesStartingWithQueroSaberSeDoNotTriggerSharedRuleAuthoringGate() {
+        ObjectNode page = funcionariosTablePage();
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero saber se existe alguma regra que impede a exclusao na tabela de funcionarios",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.gate().status()).isNotEqualTo("route_required");
+        assertThat(result.failureCodes()).doesNotContain("shared-rule-authoring-required");
+    }
+
+    @Test
+    void visualStylingRulesDoNotTriggerSharedRuleAuthoringGate() {
+        ObjectNode page = funcionariosTablePage();
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero criar uma regra visual para destacar a linha selecionada em vermelho",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.gate().status()).isNotEqualTo("route_required");
+        assertThat(result.failureCodes()).doesNotContain("shared-rule-authoring-required");
+    }
+
+    @Test
     void rejectsBlankPrompt() {
         assertThatThrownBy(() -> service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 " ",

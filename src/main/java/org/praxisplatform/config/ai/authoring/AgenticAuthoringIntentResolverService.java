@@ -625,8 +625,11 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
+        boolean isGoverned = deterministicFallbackApplied
+                ? isExplicitGovernedBusinessRulePrompt(prompt)
+                : llmRequiresGovernedAuthoring;
         if (!explicitLocalUiComposition
-                && isExplicitGovernedBusinessRulePrompt(prompt)
+                && isGoverned
                 && candidates != null
                 && !candidates.isEmpty()) {
             AgenticAuthoringCandidate promptAlignedGovernedRuleCandidate =
@@ -659,7 +662,7 @@ public class AgenticAuthoringIntentResolverService {
                 selectedCandidate,
                 candidates);
         gate = withPromptSpecificGateMessages(gate, rawPrompt, prompt, operationKind, artifactKind, selectedCandidate, turn);
-        gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring);
+        gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied);
         gate = withExplicitLocalUiCompositionGate(gate, explicitLocalUiComposition, explicitLocalTargetedComposition);
         List<String> questions = clarificationQuestions(gate, operationKind, artifactKind, selectedCandidate, candidates);
         questions = llmClarificationQuestions(llmIntent, gate, questions);
@@ -3722,11 +3725,13 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             String prompt,
             AgenticAuthoringCandidate selectedCandidate,
-            boolean llmRequiresGovernedAuthoring) {
+            boolean llmRequiresGovernedAuthoring,
+            String operationKind,
+            boolean deterministicFallbackApplied) {
         if (gate == null) {
             return null;
         }
-        if (!requiresSharedRuleAuthoring(request, prompt, selectedCandidate, llmRequiresGovernedAuthoring)) {
+        if (!requiresSharedRuleAuthoring(request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied)) {
             return gate;
         }
         List<String> messages = new ArrayList<>(gate.messages());
@@ -3812,13 +3817,25 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             String prompt,
             AgenticAuthoringCandidate selectedCandidate,
-            boolean llmRequiresGovernedAuthoring) {
+            boolean llmRequiresGovernedAuthoring,
+            String operationKind,
+            boolean deterministicFallbackApplied) {
+        if ("explore".equals(operationKind) || "explain".equals(operationKind) || "unknown".equals(operationKind)) {
+            return false;
+        }
         String requestedFlow = requestedAuthoringFlow(request);
         if ("shared_rule_authoring".equals(requestedFlow) && !isExplicitLocalUiCompositionPrompt(prompt)) {
             return selectedCandidate != null;
         }
-        return selectedCandidate != null
-                && (llmRequiresGovernedAuthoring || isExplicitGovernedBusinessRulePrompt(prompt));
+        
+        // Se a classificação do LLM resolveu o turno, confiamos estritamente na sua semântica.
+        // O override determinístico baseado em palavras-chave é usado apenas como fail-safe quando
+        // não há intenção do LLM disponível (fallback determinístico).
+        boolean requiresAuthoring = deterministicFallbackApplied
+                ? (llmRequiresGovernedAuthoring || isExplicitGovernedBusinessRulePrompt(prompt))
+                : llmRequiresGovernedAuthoring;
+                
+        return selectedCandidate != null && requiresAuthoring;
     }
 
     private boolean requiresGovernedAuthoring(AgenticAuthoringLlmIntentResolution llmIntent) {
@@ -3828,6 +3845,22 @@ public class AgenticAuthoringIntentResolverService {
     private boolean isExplicitGovernedBusinessRulePrompt(String prompt) {
         String normalized = normalize(prompt);
         if (normalized.isBlank() || isExplicitLocalUiCompositionPrompt(prompt)) {
+            return false;
+        }
+        boolean isQuestion = normalized.endsWith("?")
+                || normalized.matches("^(por\\s+favor\\s*,?\\s*|gostaria\\s+de\\s+(saber|entender|verificar)\\s+(se\\s+)?|(quero|preciso)\\s+saber\\s+(se\\s+)?|me\\s+diga\\s+(se\\s+)?|(voce\\s+)?sabe\\s+se\\s+|saber\\s+se\\s+)?(como|por\\s+que|porque|existe|existem|ha|há|tem|quais|qual|o\\s+que)\\b.*");
+        if (isQuestion) {
+            return false;
+        }
+        boolean isVisualRequest = containsAny(normalized,
+                "regra visual", "regras visuais",
+                "formatacao visual", "destaque visual",
+                "estilo visual", "estilos visuais",
+                "cor de fundo", "cor da linha", "cores das linhas",
+                "pintar a linha", "pintar as linhas", "pintar de",
+                "destacar a linha", "destacar as linhas",
+                "estilo", "estilos", "css");
+        if (isVisualRequest) {
             return false;
         }
         boolean ruleAuthoring = containsAny(normalized,

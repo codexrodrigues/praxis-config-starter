@@ -98,7 +98,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
                             .maxTokens(MAX_INTENT_RESOLUTION_TOKENS)
-                            .timeoutSeconds(15)
+                            .timeoutSeconds(45)
                             .build(),
                     tenantId,
                     userId,
@@ -169,7 +169,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
                             .maxTokens(MAX_FAST_INTENT_RESOLUTION_TOKENS)
-                            .timeoutSeconds(15)
+                            .timeoutSeconds(45)
                             .build(),
                     tenantId,
                     userId,
