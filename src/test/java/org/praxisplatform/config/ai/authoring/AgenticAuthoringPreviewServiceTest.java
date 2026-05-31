@@ -867,6 +867,154 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewMaterializesDashboardQualityRepairActionsThroughGenericPlanner() throws Exception {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "dashboard-quality-gate");
+        contextHints.put("kind", "dashboard-repair-action");
+        contextHints.put("artifactKind", "dashboard");
+        contextHints.put("resourcePath", "/api/procurement/suppliers");
+        contextHints.putArray("warnings")
+                .add("dashboard-without-chart-widget")
+                .add("dashboard-filter-not-connected")
+                .add("dashboard-without-surface-actions");
+        contextHints.putArray("schemaFields")
+                .add(fieldHint("supplierStatus", "Status", "select"))
+                .add(fieldHint("categoryName", "Categoria", "select"))
+                .add(fieldHint("createdAt", "Criado em", "date"));
+        contextHints.putObject("dashboardQuality")
+                .put("schemaVersion", "praxis-dashboard-quality-repair-context.v1")
+                .putObject("validation")
+                .put("status", "degraded");
+        ObjectNode materializedPage = contextHints.putObject("materializedPage");
+        materializedPage.put("kind", "praxis.materialized-page");
+        materializedPage.put("layoutPreset", "resource-dashboard");
+        materializedPage.putArray("widgets")
+                .addObject()
+                .put("key", "suppliers-filter")
+                .put("componentId", "praxis-filter")
+                .put("role", "filters");
+        materializedPage.putArray("bindings")
+                .addObject()
+                .put("from", "suppliers-filter.requestSearch")
+                .put("to", "suppliers-table.queryContext");
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
+                .preview(new AgenticAuthoringPlanRequest(
+                        "Connect widgets",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        dashboardQualityRepairIntent(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        contextHints), "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings())
+                .contains("ui-composition-plan-provider:generic-dashboard-quality-repair");
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-chart-required");
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-dashboard");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-list", "praxis-table");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains(
+                        "suppliers-filter",
+                        "suppliers-chart-supplierStatus",
+                        "suppliers-chart-categoryName",
+                        "suppliers-list",
+                        "suppliers-table")
+                .doesNotContain("suppliers-chart-createdAt");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .contains("suppliers-filter.requestSearch->suppliers-chart-supplierStatus.queryContext")
+                .contains("suppliers-chart-supplierStatus.crossFilter->suppliers-table.queryContext")
+                .contains("suppliers-chart-supplierStatus.pointClick->surface.open");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("dashboardQualityRepair")
+                .path("requestedWarnings").toString())
+                .contains("dashboard-filter-not-connected")
+                .contains("dashboard-without-surface-actions");
+        JsonNode inputSnapshot = result.uiCompositionPlan().path("diagnostics").path("dashboardQualityRepair")
+                .path("inputSnapshot");
+        assertThat(inputSnapshot.path("widgetCount").asInt()).isEqualTo(1);
+        assertThat(inputSnapshot.path("bindingCount").asInt()).isEqualTo(1);
+        assertThat(inputSnapshot.path("widgets").path(0).path("key").asText()).isEqualTo("suppliers-filter");
+        assertThat(inputSnapshot.path("widgets").path(0).path("componentId").asText()).isEqualTo("praxis-filter");
+        assertThat(result.compiledFormPatch().path("compatibility").path("publicResponseKind").asText())
+                .isEqualTo("ui-composition-plan");
+    }
+
+    @Test
+    void previewEnrichesSchemaFieldsForDashboardQualityRepairEvenWhenPromptIsGeneric() throws Exception {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "dashboard-quality-gate");
+        contextHints.put("kind", "dashboard-repair-action");
+        contextHints.put("artifactKind", "dashboard");
+        contextHints.put("resourcePath", "/api/procurement/suppliers");
+        contextHints.putArray("warnings")
+                .add("dashboard-without-chart-widget")
+                .add("dashboard-filter-not-connected");
+        contextHints.putObject("dashboardQuality")
+                .put("schemaVersion", "praxis-dashboard-quality-repair-context.v1")
+                .putObject("validation")
+                .put("status", "degraded");
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("id").put("type", "integer");
+        properties.putObject("supplierName").put("type", "string")
+                .putObject("x-ui").put("label", "Fornecedor");
+        properties.putObject("supplierStatus").put("type", "string")
+                .putObject("x-ui").put("label", "Status");
+        properties.putObject("categoryName").put("type", "string")
+                .putObject("x-ui").put("label", "Categoria");
+        properties.putObject("createdAt").put("type", "string").put("format", "date");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(new AgenticAuthoringPlanRequest(
+                        "Connect widgets",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        dashboardQualityRepairIntent(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        contextHints), "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains(
+                        "suppliers-chart-supplierStatus",
+                        "suppliers-chart-categoryName",
+                        "suppliers-filter",
+                        "suppliers-table")
+                .doesNotContain("suppliers-chart-createdAt", "suppliers-chart-supplierName");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .contains("suppliers-filter.requestSearch->suppliers-chart-supplierStatus.queryContext")
+                .contains("suppliers-chart-categoryName.crossFilter->suppliers-table.queryContext");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("dashboardQualityRepair")
+                .path("requestedWarnings").toString())
+                .contains("dashboard-filter-not-connected");
+    }
+
+    @Test
     void previewPromotesSemanticAxesWhenSchemaContainsTheFields() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Preciso monitorar chamados e ocorrencias em atendimento, gravidade, andamento e responsavel.",
@@ -1159,6 +1307,24 @@ class AgenticAuthoringPreviewServiceTest {
                 .doesNotContain("andamento")
                 .doesNotContain("responsavel");
         assertThat(result.warnings()).contains("ui-composition-plan-orphan-canvas-item-removed");
+        String grouping = result.uiCompositionPlan().path("grouping").toString();
+        assertThat(grouping)
+                .contains("incidentes-chart-gravidade")
+                .doesNotContain("incidentes-chart-andamento")
+                .doesNotContain("incidentes-chart-responsavel");
+        String deviceLayouts = result.uiCompositionPlan().path("deviceLayouts").toString();
+        assertThat(deviceLayouts)
+                .contains("incidentes-chart-gravidade")
+                .doesNotContain("incidentes-chart-andamento")
+                .doesNotContain("incidentes-chart-responsavel");
+        String slotAssignments = result.uiCompositionPlan().path("slotAssignments").toString();
+        assertThat(slotAssignments)
+                .contains("incidentes-chart-gravidade")
+                .doesNotContain("incidentes-chart-andamento")
+                .doesNotContain("incidentes-chart-responsavel");
+        assertThat(result.warnings()).contains("ui-composition-plan-orphan-grouping-item-removed");
+        assertThat(result.warnings()).contains("ui-composition-plan-orphan-device-layout-item-removed");
+        assertThat(result.warnings()).contains("ui-composition-plan-orphan-slot-assignment-removed");
         assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
                 .contains("\"field\":\"severidade\"")
                 .contains("\"schemaProbeStatus\":\"unsupported\"");
@@ -3165,6 +3331,40 @@ class AgenticAuthoringPreviewServiceTest {
                 null);
     }
 
+    private AgenticAuthoringIntentResolutionResult dashboardQualityRepairIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "dashboard",
+                "connect_dashboard_widgets",
+                "dashboard-quality-gate",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/procurement/suppliers",
+                        "post",
+                        "/schemas/filtered?path=/api/procurement/suppliers/filter/cursor&operation=post&schemaType=response",
+                        "/api/procurement/suppliers/filter/cursor",
+                        "POST",
+                        0.94d,
+                        "matched suppliers",
+                        List.of("dashboard-quality-gate", "schema-fields")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Connect widgets",
+                "Vou reparar o dashboard.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+    }
+
     private AgenticAuthoringIntentResolutionResult funcionariosCargoDashboardIntent() {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -3366,6 +3566,14 @@ class AgenticAuthoringPreviewServiceTest {
                 null,
                 "Total",
                 "llm-authored-semantic-axis");
+    }
+
+    private ObjectNode fieldHint(String field, String label, String type) {
+        ObjectNode hint = objectMapper.createObjectNode();
+        hint.put("field", field);
+        hint.put("label", label);
+        hint.put("type", type);
+        return hint;
     }
 
     private AgenticAuthoringIntentResolutionResult removeFieldIntent() {

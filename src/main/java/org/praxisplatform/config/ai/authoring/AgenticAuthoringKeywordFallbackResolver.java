@@ -348,6 +348,7 @@ final class AgenticAuthoringKeywordFallbackResolver {
         return containsAny(prompt,
                 "painel bonito", "painel executivo", "painel gerencial", "painel analitico",
                 "painel analítico", "painel de controle", "painel de indicadores",
+                "painel geral",
                 "visualizar", "ver", "visao", "visão", "acompanhar", "monitorar",
                 "analise", "analisar", "comparar", "comparativo");
     }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
@@ -189,7 +190,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(chartWidget.path("inputs").path("config").path("interactions").path("pointClick").asBoolean()).isTrue();
         assertThat(chartWidget.path("inputs").path("config").path("interactions").path("selection").asBoolean()).isTrue();
         assertThat(chartWidget.path("inputs").path("config").path("interactions")
-                .path("eventActions").path("crossFilter").path("mapping").path("key").asText())
+                .path("eventActions").path("crossFilter").path("mapping").path("status").asText())
                 .isEqualTo("status");
         assertThat(plan.path("bindings").toString())
                 .contains("orders-filter.requestSearch->orders-chart-status.queryContext")
@@ -395,6 +396,85 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void repairsDashboardQualityGateActionsWithAnalyticalDashboardBlueprint() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "dashboard-quality-gate");
+        contextHints.put("kind", "dashboard-repair-action");
+        contextHints.put("artifactKind", "dashboard");
+        contextHints.put("resourcePath", "/api/procurement/suppliers");
+        contextHints.putArray("warnings")
+                .add("dashboard-without-chart-widget")
+                .add("dashboard-without-filter-widget")
+                .add("dashboard-without-surface-actions");
+        contextHints.putArray("schemaFields")
+                .add(fieldHint("supplierStatus", "Status", "select"))
+                .add(fieldHint("categoryName", "Categoria", "select"))
+                .add(fieldHint("createdAt", "Criado em", "date"));
+        ObjectNode dashboardQuality = contextHints.putObject("dashboardQuality");
+        dashboardQuality.put("schemaVersion", "praxis-dashboard-quality-repair-context.v1");
+        dashboardQuality.putObject("validation")
+                .put("status", "degraded")
+                .putObject("counts")
+                .put("widgets", 1)
+                .put("connections", 0);
+        ObjectNode inputPlan = contextHints.putObject("uiCompositionPlan");
+        inputPlan.put("kind", "praxis.ui-composition-plan");
+        inputPlan.put("layoutPreset", "resource-dashboard");
+        inputPlan.putArray("widgets")
+                .addObject()
+                .put("key", "suppliers-table")
+                .put("componentId", "praxis-table")
+                .put("role", "details");
+        inputPlan.putArray("bindings");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Connect widgets",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent("modify", "dashboard", "connect_dashboard_widgets", "/api/procurement/suppliers"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings())
+                .contains("ui-composition-plan-provider:generic-dashboard-quality-repair");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-dashboard");
+        assertThat(plan.path("diagnostics").path("dashboardQualityRepair").path("source").asText())
+                .isEqualTo("dashboard-quality-gate");
+        assertThat(plan.path("diagnostics").path("dashboardQualityRepair").path("requestedWarnings").toString())
+                .contains("dashboard-without-chart-widget")
+                .contains("dashboard-without-filter-widget");
+        JsonNode inputSnapshot = plan.path("diagnostics").path("dashboardQualityRepair").path("inputSnapshot");
+        assertThat(inputSnapshot.path("schemaVersion").asText())
+                .isEqualTo("praxis-dashboard-repair-input-snapshot.v1");
+        assertThat(inputSnapshot.path("widgetCount").asInt()).isEqualTo(1);
+        assertThat(inputSnapshot.path("widgets").path(0).path("key").asText()).isEqualTo("suppliers-table");
+        assertThat(inputSnapshot.path("widgets").path(0).path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-rich-content", "praxis-filter", "praxis-chart", "praxis-list", "praxis-table");
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .contains(
+                        "suppliers-filter",
+                        "suppliers-chart-supplierStatus",
+                        "suppliers-chart-categoryName",
+                        "suppliers-list",
+                        "suppliers-table");
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .doesNotContain("suppliers-chart-createdAt");
+        assertThat(plan.path("bindings").toString())
+                .contains("suppliers-filter.requestSearch->suppliers-chart-supplierStatus.queryContext")
+                .contains("suppliers-chart-supplierStatus.crossFilter->suppliers-table.queryContext")
+                .contains("suppliers-chart-supplierStatus.pointClick->surface.open");
+    }
+
+    @Test
     void infersDashboardChartsFromHostFieldCatalogWithoutDomainKeywords() {
         AgenticAuthoringVisualizationDecision tableBiasedDecision = new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",
@@ -571,10 +651,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(payload.path("widget").path("inputs").path("config").path("columns").get(0).path("field").asText())
                 .isEqualTo("severidade");
         assertThat(payload.path("bindings").get(0).path("from").asText())
-                .isEqualTo("payload.data.key");
+                .isEqualTo("payload.category");
         assertThat(payload.path("bindings").get(0).path("to").asText())
                 .isEqualTo("widget.inputs.queryContext.filters.severidade");
-        assertThat(link.path("policy").path("distinctBy").asText()).isEqualTo("payload.data.key");
+        assertThat(link.path("policy").path("distinctBy").asText()).isEqualTo("payload.category");
         assertThat(link.path("policy").path("debounceMs").asInt()).isEqualTo(250);
         assertThat(plan.path("canvas").path("items").has("vw-indicadores-incidentes-table")).isFalse();
     }
@@ -912,6 +992,56 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"statsPath\":\"/api/human-resources/funcionarios/stats/group-by\"")
                 .contains("\"field\":\"departamento\"")
                 .doesNotContain("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void usesDtoOptionSourceFieldForDashboardFiltersWhenAxisUsesDisplayField() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ArrayNode fields = contextHints.putArray("fieldMetadata");
+        fields.addObject()
+                .put("field", "cargoIdsIn")
+                .put("label", "Cargos")
+                .put("controlType", "select")
+                .put("optionSourceType", "remote")
+                .put("optionResourcePath", "/api/human-resources/cargos");
+        fields.addObject()
+                .put("field", "cargoNome")
+                .put("label", "Cargo")
+                .put("type", "string");
+        fields.addObject()
+                .put("field", "departamentoIdsIn")
+                .put("label", "Departamentos")
+                .put("controlType", "select")
+                .put("optionSourceType", "remote")
+                .put("optionResourcePath", "/api/human-resources/departamentos");
+        fields.addObject()
+                .put("field", "departamentoNome")
+                .put("label", "Departamento")
+                .put("type", "string");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero um painel geral dos funcionarios",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                dashboardIntent("/api/human-resources/funcionarios", List.of(
+                        axis("cargo", "cargoNome", "Cargo", "bar", "vertical"),
+                        axis("departamento", "departamentoNome", "Departamento", "bar", "vertical"))),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        JsonNode selectedFieldIds = findWidgetInputs(result.uiCompositionPlan(), "praxis-filter")
+                .path("selectedFieldIds");
+        assertThat(stringArray(selectedFieldIds))
+                .containsExactly("cargoIdsIn", "departamentoIdsIn");
+        assertThat(result.uiCompositionPlan().toString())
+                .contains("funcionarios-chart-cargoNome")
+                .contains("funcionarios-chart-departamentoNome");
     }
 
 

@@ -155,9 +155,22 @@ public class AgenticAuthoringIntentResolverService {
         boolean shouldResolveLlmIntent = hasLlmIntentResolver
                 && !governedResourceConfirmation
                 && !contextualPreviewAction;
+        boolean deterministicDashboardMaterialization = "dashboard".equals(artifactKind)
+                && ("create".equals(operationKind) || "explore".equals(operationKind))
+                && isConcreteDashboardMaterializationPrompt(prompt)
+                && explicitResourcePath(prompt).isBlank()
+                && !isConfirmedDataSourceSelection(prompt);
+        if (deterministicDashboardMaterialization) {
+            shouldResolveLlmIntent = false;
+        }
         List<AgenticAuthoringCandidate> candidates = shouldResolveLlmIntent
                 ? discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
                 : discoverCandidates(discoveryPrompt, artifactKind, target, tenantId, environment);
+        if (deterministicDashboardMaterialization) {
+            List<AgenticAuthoringCandidate> dashboardCandidates = new ArrayList<>(candidates);
+            dashboardCandidates.addAll(discoverCandidates(discoveryPrompt, "table", target, tenantId, environment));
+            candidates = deduplicateCandidates(dashboardCandidates);
+        }
         candidates = withContextHintCandidates(request, candidates);
         AgenticAuthoringCandidate contextHintCandidate = contextHintCandidate(
                 request,
@@ -1340,7 +1353,8 @@ public class AgenticAuthoringIntentResolverService {
         }
         if ("dashboard".equals(artifactKind)
                 && isConcreteDashboardMaterializationPrompt(prompt)
-                && candidates.stream().anyMatch(candidate -> promptMentionsSpecificCandidateToken(prompt, candidate))) {
+                && (candidates.stream().anyMatch(candidate -> promptMentionsSpecificCandidateToken(prompt, candidate))
+                || promptAlignedBusinessCandidate(prompt, candidates) != null)) {
             return true;
         }
         return "dashboard".equals(artifactKind)
@@ -1369,7 +1383,9 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(Objects::nonNull)
                 .map(candidate -> new CandidatePromptAlignment(
                         candidate,
-                        candidatePathDomainTokenScore(prompt, candidate)))
+                        Math.max(
+                                candidatePathDomainTokenScore(prompt, candidate),
+                                promptCandidateAlignmentScore(prompt, candidate))))
                 .filter(alignment -> alignment.score() > 0)
                 .max(Comparator
                         .comparingInt(CandidatePromptAlignment::score)
@@ -1432,7 +1448,14 @@ public class AgenticAuthoringIntentResolverService {
         boolean hasChart = containsAny(normalized, "grafico", "graficos", "gráfico", "gráficos", "chart", "charts");
         boolean hasFilter = containsAny(normalized, "filtro", "filtros");
         boolean hasDetails = containsAny(normalized, "tabela", "detalhe", "detalhes", "detalhada", "detalhado");
+        boolean hasOverviewDashboard = containsAny(normalized,
+                "painel geral",
+                "dashboard geral",
+                "visao geral",
+                "visão geral",
+                "overview");
         return containsAny(normalized, "360", "visao 360", "visão 360")
+                || hasOverviewDashboard
                 || (hasChart && hasFilter && hasDetails);
     }
 

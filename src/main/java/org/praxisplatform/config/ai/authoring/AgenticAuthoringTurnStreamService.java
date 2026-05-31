@@ -60,6 +60,8 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, ScheduledFuture<?>> replayTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> heartbeatTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> processingTimeoutTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledFuture<?>> processingProgressTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, Instant> streamStartedAtByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
@@ -81,6 +83,9 @@ public class AgenticAuthoringTurnStreamService {
 
     @Value("${praxis.ai.stream.processing-timeout-seconds:180}")
     private long processingTimeoutSeconds;
+
+    @Value("${praxis.ai.authoring.stream.processing-progress-seconds:20}")
+    private long processingProgressSeconds;
 
     public StartResult start(
             AgenticAuthoringTurnStreamRequest request,
@@ -130,6 +135,7 @@ public class AgenticAuthoringTurnStreamService {
         }
 
         UUID streamId = UUID.randomUUID();
+        streamStartedAtByStream.put(streamId, Instant.now());
         UUID observationId = captureObservation(
                 threadRequest,
                 principalContext,
@@ -147,6 +153,7 @@ public class AgenticAuthoringTurnStreamService {
                 "activeSemanticDecisionId", activeSemanticDecision == null ? "" : activeSemanticDecision.decisionId(),
                 "expiresAt", expiresAt.toString()));
         scheduleProcessingTimeout(principalContext, streamId, threadId, turnId);
+        scheduleProcessingProgress(principalContext, streamId, threadId, turnId);
         executor.submit(() -> process(principalContext, streamId, threadId, turnId, effectiveRequest, baseUrl));
         return new StartResult(startResponse(streamId, observationId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
     }
@@ -325,6 +332,43 @@ public class AgenticAuthoringTurnStreamService {
         processingTimeoutTasks.put(streamId, task);
     }
 
+    private void scheduleProcessingProgress(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId) {
+        long progressSeconds = Math.max(0, processingProgressSeconds);
+        if (progressSeconds <= 0) {
+            return;
+        }
+        ScheduledFuture<?> task = scheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (terminalReached(streamId)) {
+                    complete(streamId);
+                    return;
+                }
+                AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+                String phase = heartbeatPhase(tail);
+                appendAndEmit(principalContext, streamId, threadId, turnId, "status", Map.of(
+                        "state", "in_progress",
+                        "phase", phase,
+                        "message", heartbeatSummary(tail),
+                        "summary", heartbeatSummary(tail),
+                        "diagnostics", Map.of(
+                                "source", "backend-processing-progress-watchdog",
+                                "intervalSeconds", progressSeconds,
+                                "elapsedSeconds", streamElapsedSeconds(streamId),
+                                "lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""),
+                                "lastPhase", phase)));
+            } catch (Exception ex) {
+                log.debug("[AgenticAuthoringTurnStreamService] Processing progress skipped for stream {}: {}",
+                        streamId,
+                        ex.getMessage());
+            }
+        }, progressSeconds, progressSeconds, TimeUnit.SECONDS);
+        processingProgressTasks.put(streamId, task);
+    }
+
     private void ensureReplay(UUID streamId, AiPrincipalContext principalContext) {
         replayTasks.computeIfAbsent(streamId, ignored -> scheduler.scheduleAtFixedRate(() -> {
             try {
@@ -474,6 +518,10 @@ public class AgenticAuthoringTurnStreamService {
         if (processingTimeoutTask != null) {
             processingTimeoutTask.cancel(false);
         }
+        ScheduledFuture<?> processingProgressTask = processingProgressTasks.remove(streamId);
+        if (processingProgressTask != null) {
+            processingProgressTask.cancel(false);
+        }
         stopHeartbeat(streamId);
         ScheduledFuture<?> replayTask = replayTasks.remove(streamId);
         if (replayTask != null) {
@@ -484,7 +532,16 @@ public class AgenticAuthoringTurnStreamService {
             emitters.forEach(SseEmitter::complete);
         }
         replayCursorByStream.remove(streamId);
+        streamStartedAtByStream.remove(streamId);
         terminalByStream.remove(streamId);
+    }
+
+    private long streamElapsedSeconds(UUID streamId) {
+        Instant startedAt = streamStartedAtByStream.get(streamId);
+        if (startedAt == null) {
+            return 0L;
+        }
+        return Math.max(0L, Instant.now().getEpochSecond() - startedAt.getEpochSecond());
     }
 
     private void stopHeartbeat(UUID streamId) {

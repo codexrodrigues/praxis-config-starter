@@ -140,6 +140,67 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void startEmitsPersistedProcessingProgressWhileBackendIsStillWorking() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = request();
+        CountDownLatch intentStarted = new CountDownLatch(1);
+        CountDownLatch releaseIntent = new CountDownLatch(1);
+        List<Object> statusPayloads = new CopyOnWriteArrayList<>();
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        when(turnEventService.findLastEvent(any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    String type = invocation.getArgument(4, String.class);
+                    Object payload = invocation.getArgument(5);
+                    if ("status".equals(type)) {
+                        statusPayloads.add(payload);
+                    }
+                    return AiTurnEventEnvelope.builder()
+                            .eventId(UUID.randomUUID())
+                            .streamId(invocation.getArgument(1, UUID.class))
+                            .threadId(invocation.getArgument(2, UUID.class))
+                            .turnId(invocation.getArgument(3, UUID.class))
+                            .type(type)
+                            .timestamp(Instant.now())
+                            .payload(objectMapper.valueToTree(payload))
+                            .build();
+                });
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenAnswer(invocation -> {
+                    intentStarted.countDown();
+                    releaseIntent.await(5, TimeUnit.SECONDS);
+                    return validIntent();
+                });
+
+        AgenticAuthoringTurnStreamService service = service();
+        ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 5L);
+        ReflectionTestUtils.setField(service, "processingProgressSeconds", 1L);
+        service.start(request, "http://localhost", principalContext);
+
+        org.assertj.core.api.Assertions.assertThat(intentStarted.await(2, TimeUnit.SECONDS)).isTrue();
+        Thread.sleep(1300L);
+        releaseIntent.countDown();
+        service.shutdown();
+
+        org.assertj.core.api.Assertions.assertThat(statusPayloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("source").asText())
+                            .isEqualTo("backend-processing-progress-watchdog");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("elapsedSeconds").asLong())
+                            .isGreaterThanOrEqualTo(1L);
+                    org.assertj.core.api.Assertions.assertThat(node.path("state").asText()).isEqualTo("in_progress");
+                });
+    }
+
+    @Test
     void timeoutTerminalPreventsLateCompletionAndPreview() throws Exception {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);

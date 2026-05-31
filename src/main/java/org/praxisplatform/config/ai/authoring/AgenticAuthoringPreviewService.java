@@ -417,10 +417,24 @@ public class AgenticAuthoringPreviewService {
         if (!List.of("dashboard", "page", "table").contains(artifactKind)) {
             return false;
         }
+        if (isDashboardQualityRepairRequest(request.contextHints())) {
+            return true;
+        }
         String prompt = value(request.userPrompt());
         return containsAny(prompt,
                 "dashboard", "painel", "visao geral", "visao 360", "overview", "360", "grafico", "graficos",
                 "chart", "charts", "indicador", "indicadores", "kpi", "kpis");
+    }
+
+    private boolean isDashboardQualityRepairRequest(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return false;
+        }
+        String source = value(contextHints.path("source").asText());
+        String kind = value(contextHints.path("kind").asText());
+        return "dashboard-quality-gate".equals(source)
+                || "dashboard-repair-action".equals(kind)
+                || contextHints.path("dashboardQuality").isObject();
     }
 
     private boolean hasHostFieldCandidates(JsonNode contextHints) {
@@ -817,6 +831,9 @@ public class AgenticAuthoringPreviewService {
             Set<String> widgetKeys = widgetKeys(widgetArray);
             pruneOrphanWidgetBindings(uiCompositionPlan, widgetKeys, warnings);
             pruneOrphanCanvasItems(uiCompositionPlan, widgetKeys, warnings);
+            pruneOrphanGroupingItems(uiCompositionPlan, widgetKeys, warnings);
+            pruneOrphanDeviceLayoutItems(uiCompositionPlan, widgetKeys, warnings);
+            pruneOrphanSlotAssignments(uiCompositionPlan, widgetKeys, warnings);
         }
     }
 
@@ -1333,6 +1350,86 @@ public class AgenticAuthoringPreviewService {
         for (String orphanKey : orphanKeys) {
             itemsObject.remove(orphanKey);
             addWarningOnce(warnings, "ui-composition-plan-orphan-canvas-item-removed");
+        }
+    }
+
+    private void pruneOrphanGroupingItems(
+            ObjectNode uiCompositionPlan,
+            Set<String> widgetKeys,
+            List<String> warnings) {
+        JsonNode grouping = uiCompositionPlan.path("grouping");
+        if (!(grouping instanceof ArrayNode groupingArray)) {
+            return;
+        }
+        for (int i = groupingArray.size() - 1; i >= 0; i--) {
+            JsonNode group = groupingArray.get(i);
+            JsonNode widgetKeysNode = group.path("widgetKeys");
+            if (!(widgetKeysNode instanceof ArrayNode groupWidgetKeys)) {
+                continue;
+            }
+            for (int keyIndex = groupWidgetKeys.size() - 1; keyIndex >= 0; keyIndex--) {
+                String key = groupWidgetKeys.path(keyIndex).asText("");
+                if (!key.isBlank() && !widgetKeys.contains(key)) {
+                    groupWidgetKeys.remove(keyIndex);
+                    addWarningOnce(warnings, "ui-composition-plan-orphan-grouping-item-removed");
+                }
+            }
+            if (groupWidgetKeys.isEmpty()) {
+                groupingArray.remove(i);
+                addWarningOnce(warnings, "ui-composition-plan-empty-grouping-removed");
+            }
+        }
+        if (groupingArray.isEmpty()) {
+            uiCompositionPlan.remove("grouping");
+        }
+    }
+
+    private void pruneOrphanDeviceLayoutItems(
+            ObjectNode uiCompositionPlan,
+            Set<String> widgetKeys,
+            List<String> warnings) {
+        JsonNode deviceLayouts = uiCompositionPlan.path("deviceLayouts");
+        if (!(deviceLayouts instanceof ObjectNode deviceLayoutsObject)) {
+            return;
+        }
+        deviceLayoutsObject.fields().forEachRemaining(entry -> {
+            JsonNode items = entry.getValue().path("canvas").path("items");
+            if (!(items instanceof ObjectNode itemsObject)) {
+                return;
+            }
+            List<String> orphanKeys = new ArrayList<>();
+            itemsObject.fieldNames().forEachRemaining(key -> {
+                if (!widgetKeys.contains(key)) {
+                    orphanKeys.add(key);
+                }
+            });
+            for (String orphanKey : orphanKeys) {
+                itemsObject.remove(orphanKey);
+                addWarningOnce(warnings, "ui-composition-plan-orphan-device-layout-item-removed");
+            }
+        });
+    }
+
+    private void pruneOrphanSlotAssignments(
+            ObjectNode uiCompositionPlan,
+            Set<String> widgetKeys,
+            List<String> warnings) {
+        JsonNode slotAssignments = uiCompositionPlan.path("slotAssignments");
+        if (!(slotAssignments instanceof ObjectNode slotAssignmentsObject)) {
+            return;
+        }
+        List<String> orphanKeys = new ArrayList<>();
+        slotAssignmentsObject.fieldNames().forEachRemaining(key -> {
+            if (!widgetKeys.contains(key)) {
+                orphanKeys.add(key);
+            }
+        });
+        for (String orphanKey : orphanKeys) {
+            slotAssignmentsObject.remove(orphanKey);
+            addWarningOnce(warnings, "ui-composition-plan-orphan-slot-assignment-removed");
+        }
+        if (slotAssignmentsObject.isEmpty()) {
+            uiCompositionPlan.remove("slotAssignments");
         }
     }
 

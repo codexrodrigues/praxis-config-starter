@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -39,6 +40,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         Optional<AgenticAuthoringUiCompositionPlanResult> chartModification = chartModification(request);
         if (chartModification.isPresent()) {
             return chartModification;
+        }
+        Optional<AgenticAuthoringUiCompositionPlanResult> dashboardQualityRepair = dashboardQualityRepair(request);
+        if (dashboardQualityRepair.isPresent()) {
+            return dashboardQualityRepair;
         }
         AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
         AgenticAuthoringCandidate candidate = selectedCandidate(intent);
@@ -88,6 +93,64 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 List.of("ui-composition-plan-provider:generic-resource-" + providerArtifactKind),
                 plan,
                 emptyCompiledFormPatch()));
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> dashboardQualityRepair(
+            AgenticAuthoringPlanRequest request) {
+        if (!supportsDashboardQualityRepair(request)) {
+            return Optional.empty();
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = selectedCandidate(intent);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+        ObjectNode plan = dashboardPlan(request, candidate, intent.visualizationDecision());
+        ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode existingDiagnostics
+                ? existingDiagnostics
+                : plan.putObject("diagnostics");
+        ObjectNode repair = diagnostics.putObject("dashboardQualityRepair");
+        repair.put("schemaVersion", "praxis-dashboard-quality-repair.v1");
+        repair.put("source", safe(request.contextHints().path("source").asText()));
+        repair.put("kind", safe(request.contextHints().path("kind").asText()));
+        repair.put("changeKind", safe(intent.changeKind()));
+        repair.set("requestedWarnings", request.contextHints().path("warnings").isMissingNode()
+                ? objectMapper.createArrayNode()
+                : request.contextHints().path("warnings"));
+        JsonNode dashboardQuality = request.contextHints().path("dashboardQuality");
+        if (dashboardQuality.isObject()) {
+            repair.set("qualityContext", dashboardQuality);
+        }
+        JsonNode repairSnapshot = dashboardRepairSnapshot(request);
+        if (repairSnapshot != null && !repairSnapshot.isMissingNode() && !repairSnapshot.isNull()) {
+            repair.set("inputSnapshot", dashboardRepairSnapshotSummary(repairSnapshot));
+        }
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of(
+                        "ui-composition-plan-provider:generic-resource-dashboard",
+                        "ui-composition-plan-provider:generic-dashboard-quality-repair"),
+                plan,
+                emptyCompiledFormPatch()));
+    }
+
+    private boolean supportsDashboardQualityRepair(AgenticAuthoringPlanRequest request) {
+        if (request == null
+                || request.intentResolution() == null
+                || request.contextHints() == null
+                || !request.contextHints().isObject()) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        JsonNode contextHints = request.contextHints();
+        String source = safe(contextHints.path("source").asText());
+        String kind = safe(contextHints.path("kind").asText());
+        return "modify".equals(safe(intent.operationKind()))
+                && "dashboard".equals(safe(intent.artifactKind()))
+                && ("dashboard-quality-gate".equals(source) || "dashboard-repair-action".equals(kind))
+                && (contextHints.path("dashboardQuality").isObject()
+                || contextHints.path("warnings").isArray());
     }
 
     private boolean shouldMaterializeDashboard(
@@ -725,7 +788,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode eventActions = interactions.putObject("eventActions");
         ObjectNode crossFilter = eventActions.putObject("crossFilter");
         crossFilter.put("action", "filter-widget");
-        crossFilter.putObject("mapping").put("key", canonicalFieldName(dimension.field()));
+        crossFilter.putObject("mapping").put(dimension.field(), canonicalFieldName(dimension.field()));
     }
 
     private String metricOutputField(DashboardDimension dimension) {
@@ -792,8 +855,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("filterId", key);
         inputs.put("showFilterSettings", true);
         ArrayNode selectedFields = inputs.putArray("selectedFieldIds");
+        Set<String> selectedFilterFields = new LinkedHashSet<>();
         for (DashboardDimension dimension : dimensions.stream().filter(this::isResolvedDimension).toList()) {
-            selectedFields.add(dimension.field());
+            String filterField = valueOrDefault(dimension.filterField(), dimension.field());
+            if (selectedFilterFields.add(filterField)) {
+                selectedFields.add(filterField);
+            }
         }
     }
 
@@ -874,6 +941,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 policy.put("distinctBy", chartPointRawValuePath());
                 policy.put("debounceMs", 250);
 
+                addChartPointQueryContextBinding(bindings, chartKey, tableKey, dimension);
+                addChartPointQueryContextBinding(bindings, chartKey, listKey, dimension);
+
                 ObjectNode crossFilterBinding = bindings.addObject();
                 crossFilterBinding.put("id", chartKey + ".crossFilter->" + tableKey + ".queryContext");
                 addComponentPortEndpoint(crossFilterBinding.putObject("from"), chartKey, "crossFilter", "output");
@@ -897,6 +967,27 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 listTemplate.put("filters", "${payload.filters}");
             }
         }
+    }
+
+    private void addChartPointQueryContextBinding(
+            ArrayNode bindings,
+            String chartKey,
+            String targetKey,
+            DashboardDimension dimension) {
+        ObjectNode binding = bindings.addObject();
+        binding.put("id", chartKey + ".pointClick->" + targetKey + ".queryContext");
+        addComponentPortEndpoint(binding.putObject("from"), chartKey, "pointClick", "output");
+        addComponentPortEndpoint(binding.putObject("to"), targetKey, "queryContext", "input");
+        ObjectNode policy = binding.putObject("policy");
+        policy.put("distinct", true);
+        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("debounceMs", 250);
+        ObjectNode transform = binding.putObject("transform");
+        transform.put("kind", "template");
+        transform.put("id", chartKey + "-point-query-context");
+        ObjectNode template = transform.putObject("template");
+        ObjectNode filters = template.putObject("filters");
+        filters.put(canonicalFieldName(dimension.field()), "${" + chartPointRawValuePath() + "}");
     }
 
     private void addChartQueryContextPolicy(ObjectNode binding, DashboardDimension dimension) {
@@ -1067,6 +1158,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("enableCustomization", true);
         inputs.putObject("queryContext").putObject("filters");
         ObjectNode config = inputs.putObject("config");
+        config.put("id", key);
         config.put("title", "Registros de " + titleFromResourcePath(resourcePath));
         ObjectNode dataSource = config.putObject("dataSource");
         dataSource.put("resourcePath", resourcePath);
@@ -1107,11 +1199,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode binding = bindings.addObject();
         binding.put("from", chartPointRawValuePath());
         binding.put("to", "widget.inputs.queryContext.filters." + canonicalFieldName(dimension.field()));
+        ObjectNode queryBinding = bindings.addObject();
+        queryBinding.put("from", chartPointRawValuePath());
+        queryBinding.put("to", "widget.inputs.config.dataSource.query." + canonicalFieldName(dimension.field()));
         return payload;
     }
 
     private String chartPointRawValuePath() {
-        return "payload.data.key";
+        return "payload.category";
     }
 
     private void configureOpenDetailsAction(
@@ -1710,6 +1805,55 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return contextHints.path("materializedPage");
     }
 
+    private JsonNode dashboardRepairSnapshot(AgenticAuthoringPlanRequest request) {
+        JsonNode previewPage = contextPreviewPage(request);
+        if (isMaterializedPage(previewPage)) {
+            return previewPage;
+        }
+        JsonNode contextHints = request == null ? null : request.contextHints();
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode uiCompositionPlan = contextHints.path("uiCompositionPlan");
+        if (uiCompositionPlan.isObject()
+                && uiCompositionPlan.path("widgets").isArray()
+                && !uiCompositionPlan.path("widgets").isEmpty()) {
+            return uiCompositionPlan;
+        }
+        return null;
+    }
+
+    private ObjectNode dashboardRepairSnapshotSummary(JsonNode snapshot) {
+        ObjectNode summary = objectMapper.createObjectNode();
+        summary.put("schemaVersion", "praxis-dashboard-repair-input-snapshot.v1");
+        summary.put("kind", safe(snapshot.path("kind").asText()));
+        summary.put("layoutPreset", safe(snapshot.path("layoutPreset").asText()));
+        JsonNode widgetsNode = snapshot.path("widgets");
+        int widgetCount = widgetsNode.isArray() ? widgetsNode.size() : 0;
+        summary.put("widgetCount", widgetCount);
+        ArrayNode widgets = summary.putArray("widgets");
+        if (widgetsNode.isArray()) {
+            for (int index = 0; index < Math.min(widgetCount, 16); index++) {
+                JsonNode widget = widgetsNode.path(index);
+                if (!widget.isObject()) {
+                    continue;
+                }
+                ObjectNode widgetSummary = widgets.addObject();
+                widgetSummary.put("key", safe(widget.path("key").asText()));
+                widgetSummary.put("componentId", firstNonBlank(
+                        widget.path("componentId").asText(),
+                        widget.path("definition").path("id").asText(),
+                        widget.path("definition").path("componentId").asText()));
+                widgetSummary.put("role", safe(widget.path("role").asText()));
+            }
+        }
+        JsonNode bindings = snapshot.path("bindings").isArray()
+                ? snapshot.path("bindings")
+                : snapshot.path("composition").path("links");
+        summary.put("bindingCount", bindings.isArray() ? bindings.size() : 0);
+        return summary;
+    }
+
     private JsonNode contextTargetWidgetSnapshot(AgenticAuthoringPlanRequest request) {
         JsonNode contextHints = request == null ? null : request.contextHints();
         if (contextHints == null || contextHints.isMissingNode() || contextHints.isNull()) {
@@ -1864,6 +2008,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return new DashboardDimension(
                 valueOrDefault(jsonText(semanticAxis, "concept"), field),
                 field,
+                field,
                 label,
                 "Registros por " + label,
                 chartType,
@@ -1929,6 +2074,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringCandidate candidate,
             AgenticAuthoringPlanRequest request) {
         List<DashboardDimension> dimensions = new ArrayList<>();
+        List<FieldCandidate> fieldCandidates = dashboardFieldCandidates(candidate,
+                request == null ? null : request.contextHints());
         if (visualizationDecision != null && visualizationDecision.axes() != null) {
             AgenticAuthoringVisualizationAxisDecision sharedMetricAxis = sharedMetricAxis(visualizationDecision.axes());
             for (AgenticAuthoringVisualizationAxisDecision axis : visualizationDecision.axes()) {
@@ -1951,10 +2098,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                             valueOrDefault(sharedMetricAxis.label(), metricLabel));
                 }
                 String field = canonicalFieldName(axis.field());
+                String filterField = canonicalDashboardFilterField(field,
+                        valueOrDefault(axis.label(), titleFromResourcePath(field)),
+                        fieldCandidates);
                 metricField = canonicalFieldName(metricField);
                 dimensions.add(new DashboardDimension(
                         safe(axis.concept()),
                         field,
+                        filterField,
                         valueOrDefault(axis.label(), titleFromResourcePath(field)),
                         "Registros por " + valueOrDefault(axis.label(), field),
                         valueOrDefault(axis.chartType(), "bar"),
@@ -1965,20 +2116,71 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                         valueOrDefault(axis.provenance(), "llm-authored-semantic-axis")));
             }
         }
+        List<DashboardDimension> inferredDimensions = inferredDashboardDimensions(candidate, request);
         if (dimensions.isEmpty()) {
-            dimensions.addAll(inferredDashboardDimensions(candidate, request));
+            dimensions.addAll(inferredDimensions);
+        } else {
+            dimensions.addAll(inferredDimensions);
         }
         if (dimensions.isEmpty()) {
             dimensions.add(unresolvedDashboardDimension());
         }
-        return dimensions.stream()
-                .collect(LinkedHashMap<String, DashboardDimension>::new,
-                        (uniqueDimensions, dimension) -> uniqueDimensions.putIfAbsent(dimension.field(), dimension),
-                        LinkedHashMap::putAll)
+        LinkedHashMap<String, DashboardDimension> uniqueDimensions = dimensions.stream()
+                .collect(LinkedHashMap::new,
+                        (unique, dimension) -> unique.putIfAbsent(dimension.field(), dimension),
+                        LinkedHashMap::putAll);
+        return uniqueDimensions
                 .values()
                 .stream()
+                .sorted((left, right) -> Integer.compare(
+                        dashboardDimensionPriority(right, fieldCandidates),
+                        dashboardDimensionPriority(left, fieldCandidates)))
                 .limit(3)
                 .toList();
+    }
+
+    private int dashboardDimensionPriority(DashboardDimension dimension, List<FieldCandidate> fieldCandidates) {
+        if (dimension == null || dimension.field().isBlank()) {
+            return -100;
+        }
+        FieldCandidate field = matchingDashboardFieldCandidate(dimension.field(), fieldCandidates);
+        FieldCandidate filterField = matchingDashboardFieldCandidate(dimension.filterField(), fieldCandidates);
+        int score = 0;
+        if (field != null && field.optionSourceHint()) {
+            score += 24;
+        }
+        if (filterField != null && filterField.optionSourceHint()) {
+            score += 24;
+        }
+        if (field != null && field.categoricalHint()) {
+            score += 8;
+        }
+        if (filterField != null && filterField.categoricalHint()) {
+            score += 8;
+        }
+        if (!safe(dimension.filterField()).isBlank()
+                && !normalize(dimension.filterField()).equals(normalize(dimension.field()))) {
+            score += 12;
+        }
+        if (isLikelyTechnicalOrMeasureField(dimension.field(), dimension.label())) {
+            score -= 24;
+        }
+        String searchable = searchableText(dimension.field() + " " + dimension.label());
+        if (containsAny(searchable, "competencia", "periodo", "mes", "ano", "year", "month", "period")) {
+            score -= 12;
+        }
+        return score;
+    }
+
+    private FieldCandidate matchingDashboardFieldCandidate(String field, List<FieldCandidate> fieldCandidates) {
+        String normalized = normalize(field);
+        if (normalized.isBlank() || fieldCandidates == null || fieldCandidates.isEmpty()) {
+            return null;
+        }
+        return fieldCandidates.stream()
+                .filter(candidate -> normalize(candidate.field()).equals(normalized))
+                .findFirst()
+                .orElse(null);
     }
 
     private List<DashboardDimension> inferredDashboardDimensions(
@@ -2015,11 +2217,37 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 .map(ScoredFieldCandidate::field)
                 .map(field -> inferredDashboardDimension(
                         field.concept(),
-                        field.field(),
+                        canonicalDashboardAnalyticalField(field, fields),
                         field.label(),
                         "Registros por " + field.label(),
                         field.provenance()))
                 .toList();
+    }
+
+    private String canonicalDashboardAnalyticalField(FieldCandidate field, List<FieldCandidate> fields) {
+        if (field == null) {
+            return "";
+        }
+        String canonicalField = canonicalFieldName(field.field());
+        if (!field.optionSourceHint() || fields == null || fields.isEmpty()) {
+            return canonicalField;
+        }
+        String stem = dashboardFieldStem(canonicalField);
+        String labelStem = dashboardFieldStem(field.label());
+        return fields.stream()
+                .filter(candidate -> !candidate.optionSourceHint())
+                .filter(candidate -> !normalize(candidate.field()).equals(normalize(canonicalField)))
+                .filter(candidate -> {
+                    String candidateStem = dashboardFieldStem(candidate.field());
+                    String candidateLabelStem = dashboardFieldStem(candidate.label());
+                    return !stem.isBlank() && (candidateStem.equals(stem) || candidateLabelStem.equals(stem))
+                            || !labelStem.isBlank()
+                                    && (candidateStem.equals(labelStem) || candidateLabelStem.equals(labelStem));
+                })
+                .filter(candidate -> !isLikelyTechnicalOrMeasureField(candidate.field(), candidate.label()))
+                .map(FieldCandidate::field)
+                .findFirst()
+                .orElse(canonicalField);
     }
 
     private int scoreFieldCandidateForDashboard(FieldCandidate field, String normalizedPrompt) {
@@ -2102,7 +2330,30 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 return true;
             }
         }
+        if (isLikelyRecordIdentityNameField(normalizedField, normalizedLabel, combined)) {
+            return true;
+        }
         return false;
+    }
+
+    private boolean isLikelyRecordIdentityNameField(
+            String normalizedField,
+            String normalizedLabel,
+            String combined) {
+        boolean nameLikeField = normalizedField.endsWith(" name")
+                || normalizedField.endsWith(" nome")
+                || normalizedField.endsWith(" title")
+                || normalizedField.endsWith(" titulo");
+        boolean nameLikeLabel = List.of("nome", "name", "titulo", "title", "descricao", "description")
+                .contains(normalizedLabel);
+        if (!nameLikeField && !nameLikeLabel) {
+            return false;
+        }
+        return !containsAny(combined,
+                "status", "situacao", "categoria", "category", "departamento", "department", "cargo", "role",
+                "funcao", "area", "segmento", "segment", "tipo", "type", "canal", "channel", "regiao", "region",
+                "grupo", "group", "classe", "class", "nivel", "level", "prioridade", "priority", "severidade",
+                "severity", "responsavel", "owner");
     }
 
     private String searchableText(String value) {
@@ -2178,8 +2429,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 jsonText(node, "semanticKind"));
         boolean categoricalHint = containsAny(typeText,
                 "enum", "select", "option", "categorical", "category", "dimension", "string", "text", "boolean");
+        boolean optionSourceHint = containsAny(typeText, "select", "option")
+                || node.has("optionSource")
+                || node.has("options")
+                || node.has("optionSourceUrl")
+                || node.has("optionResourcePath");
         if (!safe(field).isBlank()) {
-            addFieldCandidate(fields, field, label, categoricalHint, provenance);
+            addFieldCandidate(fields, field, label, categoricalHint, optionSourceHint, provenance);
         }
         node.fields().forEachRemaining(entry -> {
             String key = entry.getKey();
@@ -2204,7 +2460,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         Matcher matcher = FIELD_DECLARATION_PATTERN.matcher(safeText);
         while (matcher.find()) {
             addFieldCandidate(fields, matcher.group(1), "", containsAny(safeText,
-                    "enum", "select", "option", "categorical", "category", "dimension", "filterable", "group-by"), provenance);
+                    "enum", "select", "option", "categorical", "category", "dimension", "filterable", "group-by"),
+                    containsAny(safeText, "select", "option"), provenance);
         }
     }
 
@@ -2213,6 +2470,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             String rawField,
             String rawLabel,
             boolean categoricalHint,
+            boolean optionSourceHint,
             String provenance) {
         String field = canonicalFieldName(rawField);
         if (!isUsableFieldCandidate(field)) {
@@ -2226,12 +2484,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 label,
                 normalize(label).replaceAll("[^a-z0-9]+", "-").replaceAll("(^-|-$)", ""),
                 categoricalHint || existing != null && existing.categoricalHint(),
+                optionSourceHint || existing != null && existing.optionSourceHint(),
                 existing == null ? provenance : existing.provenance() + "," + provenance);
         fields.put(key, existing == null ? next : new FieldCandidate(
                 existing.field(),
                 valueOrDefault(existing.label(), next.label()),
                 valueOrDefault(existing.concept(), next.concept()),
                 existing.categoricalHint() || next.categoricalHint(),
+                existing.optionSourceHint() || next.optionSourceHint(),
                 next.provenance()));
     }
 
@@ -2246,15 +2506,64 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return !Set.of("resource", "schema", "fields", "columns", "properties", "filter", "filters").contains(normalized);
     }
 
+    private String canonicalDashboardFilterField(
+            String analyticalField,
+            String analyticalLabel,
+            List<FieldCandidate> fields) {
+        String field = canonicalFieldName(analyticalField);
+        if (field.isBlank() || fields == null || fields.isEmpty()) {
+            return field;
+        }
+        FieldCandidate exact = fields.stream()
+                .filter(candidate -> normalize(candidate.field()).equals(normalize(field)))
+                .findFirst()
+                .orElse(null);
+        if (exact != null && exact.optionSourceHint()) {
+            return exact.field();
+        }
+        String stem = dashboardFieldStem(field);
+        String labelStem = dashboardFieldStem(analyticalLabel);
+        return fields.stream()
+                .filter(FieldCandidate::optionSourceHint)
+                .filter(candidate -> !normalize(candidate.field()).equals(normalize(field)))
+                .filter(candidate -> {
+                    String candidateStem = dashboardFieldStem(candidate.field());
+                    String candidateLabelStem = dashboardFieldStem(candidate.label());
+                    return !stem.isBlank() && (candidateStem.equals(stem) || candidateLabelStem.equals(stem))
+                            || !labelStem.isBlank()
+                                    && (candidateStem.equals(labelStem) || candidateLabelStem.equals(labelStem));
+                })
+                .map(FieldCandidate::field)
+                .findFirst()
+                .orElse(field);
+    }
+
+    private String dashboardFieldStem(String value) {
+        String normalized = searchableText(value);
+        if (normalized.isBlank()) {
+            return "";
+        }
+        List<String> semanticTokens = new ArrayList<>();
+        for (String token : normalized.split("\\s+")) {
+            if (!Set.of("id", "ids", "in", "codigo", "code", "nome", "name", "label", "descricao", "description",
+                    "text", "titulo", "title", "value", "values", "selected", "selection", "list").contains(token)) {
+                semanticTokens.add(token);
+            }
+        }
+        return String.join(" ", semanticTokens);
+    }
+
     private DashboardDimension inferredDashboardDimension(
             String concept,
             String field,
             String label,
             String title,
             String provenance) {
+        List<FieldCandidate> fields = List.of(new FieldCandidate(field, label, concept, true, false, provenance));
         return new DashboardDimension(
                 concept,
                 field,
+                valueOrDefault(canonicalDashboardFilterField(field, label, fields), field),
                 label,
                 title,
                 "bar",
@@ -2330,6 +2639,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
     private DashboardDimension unresolvedDashboardDimension() {
         return new DashboardDimension(
+                "unresolved",
                 "unresolved",
                 "unresolved",
                 "Unresolved",
@@ -2603,6 +2913,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     private record DashboardDimension(
             String concept,
             String field,
+            String filterField,
             String label,
             String title,
             String chartType,
@@ -2618,6 +2929,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             String label,
             String concept,
             boolean categoricalHint,
+            boolean optionSourceHint,
             String provenance) {
     }
 
