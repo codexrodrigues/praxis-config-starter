@@ -421,6 +421,75 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void simpleDashboardOverviewPromptWorksAcrossOperationalDomainsWithoutLlmIntent() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "quero um painel geral dos incidentes",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null));
+
+        Mockito.verifyNoInteractions(llmIntentResolver);
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/incidentes");
+        assertThat(result.selectedCandidate().submitUrl()).isEqualTo("/api/operations/incidentes/filter/cursor");
+        assertThat(result.warnings())
+                .contains("keyword-fallback-applied")
+                .doesNotContain("llm-intent-resolution-used", "llm-provider-timeout");
+    }
+
+    @Test
+    void simpleDashboardOverviewPromptUsesListableResourceWhenNoAnalyticsEndpointExists() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "quero um painel geral dos fornecedores",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null));
+
+        Mockito.verifyNoInteractions(llmIntentResolver);
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.warnings())
+                .contains("keyword-fallback-applied")
+                .doesNotContain("llm-intent-resolution-used", "llm-provider-timeout");
+    }
+
+    @Test
     void semanticDecisionCarriesHostNeutralEvidenceBundleWithRetrievalSource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
