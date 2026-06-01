@@ -23016,7 +23016,9 @@ public class AiOrchestratorService {
             }
         }
 
-        JsonNode earlyVisibilityPatch = buildDeterministicColumnVisibilityPatch(promptLower, columns, currentState, request);
+        JsonNode earlyVisibilityPatch = hasNonVisibilityColumnPropertyDirective(promptLower)
+                ? null
+                : buildDeterministicColumnVisibilityPatch(promptLower, columns, currentState, request);
         if (earlyVisibilityPatch != null) {
             warnings.add("Patch deterministico aplicado para visibilidade de colunas.");
             JsonNode componentEditPlan = buildDeterministicTableComponentEditPlan(
@@ -24016,7 +24018,9 @@ public class AiOrchestratorService {
         Boolean promptVisibility = resolveVisibilityDirective(promptLower);
         for (String clause : clauses) {
             Boolean visible = resolveVisibilityDirective(clause);
-            if (visible == null && promptVisibility != null) {
+            if (visible == null
+                    && promptVisibility != null
+                    && !hasNonVisibilityColumnPropertyDirective(clause)) {
                 visible = promptVisibility;
             }
             if (visible == null) {
@@ -24047,6 +24051,17 @@ public class AiOrchestratorService {
         }
         addBooleanContinuationColumnIfNeeded(visibilityByField, resolveVisibilityDirective(promptLower), request, currentState, columns, promptLower);
         return buildBooleanColumnPropertyPatch(visibilityByField, "visible");
+    }
+
+    private boolean hasNonVisibilityColumnPropertyDirective(String promptLower) {
+        if (isBlank(promptLower)) {
+            return false;
+        }
+        return resolveSortableDirective(promptLower) != null
+                || resolveFilterableDirective(promptLower) != null
+                || resolveStickyDirective(promptLower) != null
+                || extractColumnWidthValue(promptLower) != null
+                || (promptLower.contains("alinh") || promptLower.contains("align"));
     }
 
     private JsonNode buildDeterministicColumnSortablePatch(
@@ -24442,10 +24457,14 @@ public class AiOrchestratorService {
         if (containsWord(promptLower, column.field.toLowerCase(Locale.ROOT))) {
             return true;
         }
+        String normalizedPrompt = normalizeText(promptLower);
+        String normalizedField = normalizeText(column.field);
+        if (normalizedColumnTokenMatches(normalizedPrompt, normalizedField)) {
+            return true;
+        }
         if (isBlank(column.header)) {
             return false;
         }
-        String normalizedPrompt = normalizeText(promptLower);
         String normalizedHeader = normalizeText(column.header);
         return !normalizedHeader.isBlank() && normalizedPrompt.contains(normalizedHeader);
     }

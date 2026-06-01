@@ -149,6 +149,8 @@ class AiOrchestratorServiceDeterministicFallbackTest {
         assertThat(statusColumn).isNotNull();
         assertThat(createdAtColumn).isNotNull();
         assertThat(statusColumn.path("visible").asBoolean()).isFalse();
+        assertThat(createdAtColumn.has("visible")).isFalse();
+        assertThat(createdAtColumn.has("sortable")).isTrue();
         assertThat(createdAtColumn.path("sortable").asBoolean()).isFalse();
         assertThat(warnings).anyMatch(item -> item.contains("Patch complementado"));
     }
@@ -328,6 +330,7 @@ class AiOrchestratorServiceDeterministicFallbackTest {
                 AiCapability.builder().path("behavior").valueKind("object").build(),
                 AiCapability.builder().path("columns[]").valueKind("object").build(),
                 AiCapability.builder().path("columns[].format").valueKind("string").build(),
+                AiCapability.builder().path("columns[].sortable").valueKind("boolean").build(),
                 AiCapability.builder().path("columns[].conditionalRenderers[]").valueKind("object").build());
     }
 
