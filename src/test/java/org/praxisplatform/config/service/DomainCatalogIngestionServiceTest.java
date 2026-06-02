@@ -55,7 +55,7 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
 
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
-        assertThat(response.itemCount()).isEqualTo(9);
+        assertThat(response.itemCount()).isEqualTo(13);
 
         ArgumentCaptor<DomainCatalogRelease> releaseCaptor = ArgumentCaptor.forClass(DomainCatalogRelease.class);
         verify(releaseRepository).save(releaseCaptor.capture());
@@ -92,6 +92,13 @@ class DomainCatalogIngestionServiceTest {
                     assertThat(item.getSearchableText()).contains("Supplier selecionavel");
                     assertThat(item.getPayload()).contains("ACTIVE", "BLOCKED");
                 });
+        assertThat(items).filteredOn(item -> "human-resources.folhas-pagamento.stats.group-by".equals(item.getItemKey()))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.getNodeType()).isEqualTo("stats");
+                    assertThat(item.getSearchableText()).contains("Group By", "stats.groupBy");
+                    assertThat(item.getPayload()).contains("/api/human-resources/folhas-pagamento/stats/group-by");
+                });
         assertThat(items).filteredOn(item -> "governance:human-resources.folhas-pagamento.field.valor-liquido:privacy".equals(item.getItemKey()))
                 .singleElement()
                 .satisfies(item -> {
@@ -123,12 +130,12 @@ class DomainCatalogIngestionServiceTest {
                 .environment("dev")
                 .build();
         when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.of(existingRelease));
-        when(itemRepository.countByRelease(existingRelease)).thenReturn(9L);
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(13L);
 
         DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
 
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
-        assertThat(response.itemCount()).isEqualTo(9);
+        assertThat(response.itemCount()).isEqualTo(13);
         verify(releaseRepository, never()).save(any(DomainCatalogRelease.class));
         verify(itemRepository, never()).deleteByRelease(any(DomainCatalogRelease.class));
         verify(itemRepository, never()).saveAll(any());
@@ -164,13 +171,13 @@ class DomainCatalogIngestionServiceTest {
 
         DomainCatalogIngestionResponse response = service.ingest(catalog, "tenant-a", "dev");
 
-        assertThat(response.itemCount()).isEqualTo(9);
+        assertThat(response.itemCount()).isEqualTo(13);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<DomainCatalogItem>> itemsCaptor = ArgumentCaptor.forClass(List.class);
         verify(itemRepository).saveAll(itemsCaptor.capture());
         assertThat(itemsCaptor.getValue())
                 .extracting(item -> item.getItemType() + "|" + item.getItemKey())
-                .hasSize(9)
+                .hasSize(13)
                 .doesNotHaveDuplicates();
     }
 
@@ -199,10 +206,10 @@ class DomainCatalogIngestionServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Document>> documentsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(ragVectorStoreService, times(3)).upsertDocuments(documentsCaptor.capture());
+        verify(ragVectorStoreService, times(4)).upsertDocuments(documentsCaptor.capture());
         assertThat(documentsCaptor.getAllValues())
                 .extracting(List::size)
-                .containsExactly(4, 4, 1);
+                .containsExactly(4, 4, 4, 1);
     }
 
     @Test
@@ -913,13 +920,13 @@ class DomainCatalogIngestionServiceTest {
 
         DomainCatalogIngestionResponse response = service.ingest(sampleCatalogWithDeniedGovernance(), "tenant-a", "dev");
 
-        assertThat(response.itemCount()).isEqualTo(10);
+        assertThat(response.itemCount()).isEqualTo(14);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Document>> documentsCaptor = ArgumentCaptor.forClass(List.class);
         verify(ragVectorStoreService).upsertDocuments(documentsCaptor.capture());
         List<Document> documents = documentsCaptor.getValue();
 
-        assertThat(documents).hasSize(9);
+        assertThat(documents).hasSize(13);
         assertThat(documents)
                 .noneSatisfy(document -> assertThat(document.getMetadata())
                         .containsEntry("resourceId", "governance:human-resources.folhas-pagamento.field.secret-token:privacy"));
@@ -952,7 +959,7 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
 
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
-        assertThat(response.itemCount()).isEqualTo(9);
+        assertThat(response.itemCount()).isEqualTo(13);
         verify(releaseRepository).save(any(DomainCatalogRelease.class));
         verify(itemRepository).saveAll(any());
         verify(ragVectorStoreService, never()).upsertDocuments(any());
@@ -1155,6 +1162,34 @@ class DomainCatalogIngestionServiceTest {
                     "ambiguityPolicy": "exact-key-or-alias"
                   },
                   "sourceEvidenceKeys": ["evidence:human-resources.folhas-pagamento.policy.supplier.selection:option-source"]
+                },
+                {
+                  "nodeKey": "human-resources.folhas-pagamento.stats.group-by",
+                  "contextKey": "human-resources",
+                  "nodeType": "stats",
+                  "label": "Group By",
+                  "description": "Capability analitica publicada pelo endpoint /api/human-resources/folhas-pagamento/stats/group-by.",
+                  "status": "active",
+                  "source": "openapi-stats",
+                  "metadata": {
+                    "capabilityKey": "stats.groupBy",
+                    "resourceKey": "human-resources.folhas-pagamento",
+                    "path": "/api/human-resources/folhas-pagamento/stats/group-by",
+                    "method": "POST"
+                  },
+                  "semanticOwner": "human-resources",
+                  "lifecycle": "active",
+                  "businessGlossary": {
+                    "preferredTerm": "Group By",
+                    "description": "Capability analitica publicada pelo endpoint /api/human-resources/folhas-pagamento/stats/group-by.",
+                    "examples": ["stats", "analytics"]
+                  },
+                  "resolution": {
+                    "canonicalKey": "human-resources.folhas-pagamento.stats.group-by",
+                    "matchKeys": ["groupBy", "stats", "/api/human-resources/folhas-pagamento/stats/group-by"],
+                    "ambiguityPolicy": "exact-key-or-alias"
+                  },
+                  "sourceEvidenceKeys": ["evidence:human-resources.folhas-pagamento.stats.group-by:openapi-stats"]
                 }
               ],
               "edges": [
@@ -1163,6 +1198,12 @@ class DomainCatalogIngestionServiceTest {
                   "sourceNodeKey": "human-resources.folhas-pagamento",
                   "targetNodeKey": "human-resources.folhas-pagamento.field.valor-liquido",
                   "edgeType": "has_field"
+                },
+                {
+                  "edgeKey": "human-resources.folhas-pagamento.has-stats.group-by",
+                  "sourceNodeKey": "human-resources.folhas-pagamento",
+                  "targetNodeKey": "human-resources.folhas-pagamento.stats.group-by",
+                  "edgeType": "has_stats"
                 }
               ],
               "bindings": [
@@ -1173,6 +1214,17 @@ class DomainCatalogIngestionServiceTest {
                   "target": {
                     "schemaId": "WorkflowResponse",
                     "fieldName": "valorLiquido"
+                  }
+                },
+                {
+                  "bindingKey": "binding:human-resources.folhas-pagamento.stats.group-by:openapi-stats",
+                  "nodeKey": "human-resources.folhas-pagamento.stats.group-by",
+                  "bindingType": "stats_endpoint",
+                  "target": {
+                    "capabilityKey": "stats.groupBy",
+                    "resourceKey": "human-resources.folhas-pagamento",
+                    "path": "/api/human-resources/folhas-pagamento/stats/group-by",
+                    "method": "POST"
                   }
                 }
               ],
@@ -1194,6 +1246,18 @@ class DomainCatalogIngestionServiceTest {
                     "fieldName": "valorLiquido"
                   },
                   "summary": "Campo derivado do schema OpenAPI WorkflowResponse."
+                },
+                {
+                  "evidenceKey": "evidence:human-resources.folhas-pagamento.stats.group-by:openapi-stats",
+                  "evidenceType": "openapi_stats",
+                  "sourceRef": {
+                    "kind": "openapi.operation",
+                    "capabilityKey": "stats.groupBy",
+                    "resourceKey": "human-resources.folhas-pagamento",
+                    "path": "/api/human-resources/folhas-pagamento/stats/group-by",
+                    "method": "POST"
+                  },
+                  "summary": "Capability stats derivada do endpoint OpenAPI /api/human-resources/folhas-pagamento/stats/group-by."
                 }
               ],
               "governance": [

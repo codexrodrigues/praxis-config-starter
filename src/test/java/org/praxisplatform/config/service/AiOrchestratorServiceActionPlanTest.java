@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -4774,6 +4775,725 @@ class AiOrchestratorServiceActionPlanTest {
   }
 
   @Test
+  void shouldMaterializeComputedColumnOperationFromRuntimeAuthoringContract() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "departamentoNome", "header": "Departamento Nome" },
+                { "field": "cargoNome", "header": "Cargo Nome" }
+              ]
+            }
+            """);
+    JsonNode authoringContract =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "allowedOperationIds": [
+                  "column.computed.add"
+                ]
+              }
+            }
+            """);
+    JsonNode runtimeManifest =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "augmentAuthoringManifestFromRuntimeContract",
+            "praxis-table",
+            objectMapper.readTree("{\"operations\":[]}"),
+            authoringContract);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .expression("{\"cat\":[{\"var\":\"departamentoNome\"},\" - \",{\"var\":\"cargoNome\"}]}")
+            .build();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "ensureComputedColumnActionFromSemanticIntent",
+            AiActionPlan.builder().actions(List.of()).build(),
+            intent,
+            currentState,
+            runtimeManifest,
+            new ArrayList<String>());
+
+    assertThat(runtimeManifest.at("/operations/0/operationId").asText()).isEqualTo("column.computed.add");
+    assertThat(runtimeManifest.at("/operations/0/inputSchema/required/0").asText()).isEqualTo("field");
+    assertThat(runtimeManifest.at("/operations/0/inputSchema/required/1").asText()).isEqualTo("header");
+    assertThat(runtimeManifest.at("/operations/0/inputSchema/required/2").asText()).isEqualTo("expression");
+    assertThat(completed).isNotNull();
+    assertThat(completed.getActions()).hasSize(1);
+    AiActionPlan.Action computed = completed.getActions().get(0);
+    assertThat(computed.getType()).isEqualTo("column.computed.add");
+    assertThat(computed.getTarget()).isEqualTo("posicaoOrganizacional");
+    assertThat(computed.getParams().at("/expression/cat/0/var").asText()).isEqualTo("departamentoNome");
+    assertThat(computed.getParams().at("/expression/cat/2/var").asText()).isEqualTo("cargoNome");
+  }
+
+  @Test
+  void shouldPreserveSemanticComputedIntentWhenActionPlanOnlyContainsAuxiliaryVisibility() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "departamentoNome", "header": "Departamento Nome" },
+                { "field": "cargoNome", "header": "Cargo Nome" }
+              ]
+            }
+            """);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .expression("{\"cat\":[{\"var\":\"departamentoNome\"},\" - \",{\"var\":\"cargoNome\"}]}")
+            .build();
+    ObjectNode hideDepartment = objectMapper.createObjectNode();
+    hideDepartment.put("visible", false);
+    ObjectNode hideRole = objectMapper.createObjectNode();
+    hideRole.put("visible", false);
+    ObjectNode wrongComputed = objectMapper.createObjectNode();
+    wrongComputed.put("field", "departamentoNome");
+    wrongComputed.set(
+        "expression",
+        objectMapper.readTree("{\"cat\":[{\"var\":\"departamentoNome\"}]}"));
+    AiActionPlan partialPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.computed.add")
+                        .target("departamentoNome")
+                        .params(wrongComputed)
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.visibility.set")
+                        .target("departamentoNome")
+                        .params(hideDepartment)
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.visibility.set")
+                        .target("cargoNome")
+                        .params(hideRole)
+                        .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "ensureComputedColumnActionFromSemanticIntent",
+            partialPlan,
+            intent,
+            currentState,
+            tableManifest(),
+            warnings);
+
+    assertThat(completed).isNotNull();
+    assertThat(completed.getActions()).hasSize(3);
+    AiActionPlan.Action computed = completed.getActions().get(0);
+    assertThat(computed.getType()).isEqualTo("column.computed.add");
+    assertThat(computed.getTarget()).isEqualTo("posicaoOrganizacional");
+    assertThat(computed.getParams().path("field").asText()).isEqualTo("posicaoOrganizacional");
+    assertThat(computed.getParams().path("outputType").asText()).isEqualTo("string");
+    assertThat(computed.getParams().at("/expression/cat/0/var").asText()).isEqualTo("departamentoNome");
+    assertThat(computed.getParams().at("/expression/cat/2/var").asText()).isEqualTo("cargoNome");
+    assertThat(computed.getParams().at("/dependencies/0").asText()).isEqualTo("departamentoNome");
+    assertThat(completed.getActions().get(1).getType()).isEqualTo("column.visibility.set");
+    assertThat(completed.getActions())
+        .noneMatch(action ->
+            "column.computed.add".equals(action.getType())
+                && "departamentoNome".equals(action.getTarget()));
+    assertThat(warnings)
+        .contains("column.computed.add preservado a partir da intencao semantica resolvida pela IA.");
+  }
+
+  @Test
+  void shouldNormalizeSemanticComputedConcatExpressionToCanonicalCat() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "departamentoNome", "header": "Departamento Nome" },
+                { "field": "cargoNome", "header": "Cargo Nome" }
+              ]
+            }
+            """);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .expression("{\"concat\":[{\"var\":\"departamentoNome\"},\" - \",{\"var\":\"cargoNome\"}]}")
+            .build();
+    ObjectNode hideDepartment = objectMapper.createObjectNode();
+    hideDepartment.put("visible", false);
+    ObjectNode hideRole = objectMapper.createObjectNode();
+    hideRole.put("visible", false);
+    AiActionPlan partialPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.visibility.set")
+                        .target("departamentoNome")
+                        .params(hideDepartment)
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.visibility.set")
+                        .target("cargoNome")
+                        .params(hideRole)
+                        .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "ensureComputedColumnActionFromSemanticIntent",
+            partialPlan,
+            intent,
+            currentState,
+            tableManifest(),
+            warnings);
+
+    assertThat(completed).isNotNull();
+    assertThat(completed.getActions()).hasSize(3);
+    AiActionPlan.Action computed = completed.getActions().get(0);
+    assertThat(computed.getType()).isEqualTo("column.computed.add");
+    assertThat(computed.getTarget()).isEqualTo("posicaoOrganizacional");
+    assertThat(computed.getParams().at("/expression/cat/0/var").asText()).isEqualTo("departamentoNome");
+    assertThat(computed.getParams().at("/expression/cat/1").asText()).isEqualTo(" - ");
+    assertThat(computed.getParams().at("/expression/cat/2/var").asText()).isEqualTo("cargoNome");
+    assertThat(computed.getParams().path("outputType").asText()).isEqualTo("string");
+    assertThat(warnings)
+        .contains("column.computed.add preservado a partir da intencao semantica resolvida pela IA.");
+  }
+
+  @Test
+  void shouldReplaceComputedActionWhenSameTargetHasDifferentExpression() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "departamentoNome", "header": "Departamento Nome" },
+                { "field": "cargoNome", "header": "Cargo Nome" }
+              ]
+            }
+            """);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .expression("{\"cat\":[{\"var\":\"departamentoNome\"},\" - \",{\"var\":\"cargoNome\"}]}")
+            .build();
+    ObjectNode wrongComputed = objectMapper.createObjectNode();
+    wrongComputed.put("field", "posicaoOrganizacional");
+    wrongComputed.put("header", "Posicao Organizacional");
+    wrongComputed.set(
+        "expression",
+        objectMapper.readTree("{\"cat\":[{\"var\":\"cargoNome\"},\"/\",{\"var\":\"departamentoNome\"}]}"));
+    wrongComputed.put("outputType", "string");
+    wrongComputed.set("dependencies", objectMapper.readTree("[\"cargoNome\",\"departamentoNome\"]"));
+    AiActionPlan partialPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.computed.add")
+                        .target("posicaoOrganizacional")
+                        .params(wrongComputed)
+                        .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "ensureComputedColumnActionFromSemanticIntent",
+            partialPlan,
+            intent,
+            currentState,
+            tableManifest(),
+            warnings);
+
+    assertThat(completed).isNotNull();
+    assertThat(completed.getActions()).hasSize(1);
+    AiActionPlan.Action computed = completed.getActions().get(0);
+    assertThat(computed.getType()).isEqualTo("column.computed.add");
+    assertThat(computed.getTarget()).isEqualTo("posicaoOrganizacional");
+    assertThat(computed.getParams().at("/expression/cat/0/var").asText()).isEqualTo("departamentoNome");
+    assertThat(computed.getParams().at("/expression/cat/1").asText()).isEqualTo(" - ");
+    assertThat(computed.getParams().at("/expression/cat/2/var").asText()).isEqualTo("cargoNome");
+    assertThat(computed.getParams().at("/dependencies/0").asText()).isEqualTo("departamentoNome");
+    assertThat(computed.getParams().at("/dependencies/1").asText()).isEqualTo("cargoNome");
+    assertThat(warnings)
+        .contains("column.computed.add preservado a partir da intencao semantica resolvida pela IA.");
+  }
+
+  @Test
+  void shouldDropRendererThatConflictsWithSemanticComputedColumn() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "departamentoNome", "header": "Departamento Nome" },
+                { "field": "cargoNome", "header": "Cargo Nome" }
+              ]
+            }
+            """);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .expression("{\"cat\":[{\"var\":\"departamentoNome\"},\" - \",{\"var\":\"cargoNome\"}]}")
+            .build();
+    ObjectNode rendererParams = objectMapper.createObjectNode();
+    rendererParams.put("field", "posicaoOrganizacional");
+    rendererParams.put("type", "compose");
+    rendererParams.set("fields", objectMapper.readTree("[\"cargoNome\",\"departamentoNome\"]"));
+    AiActionPlan partialPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.renderer.set")
+                        .target("posicaoOrganizacional")
+                        .params(rendererParams)
+                        .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "ensureComputedColumnActionFromSemanticIntent",
+            partialPlan,
+            intent,
+            currentState,
+            tableManifest(),
+            warnings);
+
+    assertThat(completed).isNotNull();
+    assertThat(completed.getActions()).hasSize(1);
+    assertThat(completed.getActions().get(0).getType()).isEqualTo("column.computed.add");
+    assertThat(completed.getActions())
+        .noneMatch(action -> "column.renderer.set".equals(action.getType())
+            && "posicaoOrganizacional".equals(action.getTarget()));
+  }
+
+  @Test
+  void shouldDropRendererEvenWhenComputedActionAlreadyMatchesSemanticIntent() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "departamentoNome", "header": "Departamento" },
+                { "field": "cargoNome", "header": "Cargo" }
+              ]
+            }
+            """);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .build();
+    ObjectNode computed = objectMapper.createObjectNode();
+    computed.put("field", "posicaoOrganizacional");
+    computed.put("header", "Posicao Organizacional");
+    computed.set("expression", objectMapper.readTree("""
+        { "cat": [ { "var": "departamentoNome" }, " - ", { "var": "cargoNome" } ] }
+        """));
+    computed.putArray("dependencies").add("departamentoNome").add("cargoNome");
+    computed.put("outputType", "string");
+    ObjectNode renderer = objectMapper.createObjectNode();
+    renderer.put("field", "posicaoOrganizacional");
+    renderer.put("type", "compose");
+    renderer.putArray("fields").add("cargoNome").add("departamentoNome");
+    AiActionPlan partialPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.computed.add")
+                        .target("posicaoOrganizacional")
+                        .params(computed)
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.renderer.set")
+                        .target("posicaoOrganizacional")
+                        .params(renderer)
+                        .build()))
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "ensureComputedColumnActionFromSemanticIntent",
+            partialPlan,
+            intent,
+            currentState,
+            tableManifest(),
+            warnings);
+
+    assertThat(completed).isNotNull();
+    assertThat(completed.getActions()).hasSize(1);
+    assertThat(completed.getActions().get(0).getType()).isEqualTo("column.computed.add");
+    assertThat(completed.getActions())
+        .noneMatch(action -> "column.renderer.set".equals(action.getType())
+            && "posicaoOrganizacional".equals(action.getTarget()));
+    assertThat(warnings)
+        .contains("column.renderer.set removido por conflitar com coluna calculada resolvida semanticamente.");
+  }
+
+  @Test
+  void shouldNormalizeSemanticComputedExpressionAndDropUnrelatedColumnAuxiliaries() throws Exception {
+    JsonNode currentState =
+        objectMapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "departamentoNome", "header": "Departamento" },
+                { "field": "cargoNome", "header": "Cargo" }
+              ]
+            }
+            """);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .expression("{\"cat\":[\"departamentoNome\",\" - \",\"cargoNome\"]}")
+            .build();
+    ObjectNode matchingComputed = objectMapper.createObjectNode();
+    matchingComputed.put("field", "posicaoOrganizacional");
+    matchingComputed.put("header", "Posicao Organizacional");
+    matchingComputed.set("expression", objectMapper.readTree("""
+        { "cat": [ { "var": "departamentoNome" }, " - ", { "var": "cargoNome" } ] }
+        """));
+    matchingComputed.putArray("dependencies").add("departamentoNome").add("cargoNome");
+    matchingComputed.put("outputType", "string");
+    ObjectNode addDepartment = objectMapper.createObjectNode();
+    addDepartment.put("field", "departamentoNome");
+    addDepartment.put("header", "Departamento");
+    ObjectNode renderDepartment = objectMapper.createObjectNode();
+    renderDepartment.put("field", "departamentoNome");
+    renderDepartment.put("type", "compose");
+    renderDepartment.putArray("fields").add("departamentoNome").add("cargoNome");
+    ObjectNode hideDepartment = objectMapper.createObjectNode();
+    hideDepartment.put("visible", false);
+    AiActionPlan partialPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("column.computed.add")
+                        .target("posicaoOrganizacional")
+                        .params(matchingComputed)
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.add")
+                        .target("departamentoNome")
+                        .params(addDepartment)
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.renderer.set")
+                        .target("departamentoNome")
+                        .params(renderDepartment)
+                        .build(),
+                    AiActionPlan.Action.builder()
+                        .type("column.visibility.set")
+                        .target("departamentoNome")
+                        .params(hideDepartment)
+                        .build()))
+            .build();
+
+    AiActionPlan completed =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "ensureComputedColumnActionFromSemanticIntent",
+            partialPlan,
+            intent,
+            currentState,
+            tableManifest(),
+            new ArrayList<String>());
+
+    assertThat(completed).isNotNull();
+    assertThat(completed.getActions()).hasSize(2);
+    assertThat(completed.getActions().get(0).getType()).isEqualTo("column.computed.add");
+    assertThat(completed.getActions().get(0).getParams().at("/expression/cat/0/var").asText())
+        .isEqualTo("departamentoNome");
+    assertThat(completed.getActions().get(0).getParams().at("/expression/cat/2/var").asText())
+        .isEqualTo("cargoNome");
+    assertThat(completed.getActions().get(1).getType()).isEqualTo("column.visibility.set");
+    assertThat(completed.getActions()).noneMatch(action -> "column.add".equals(action.getType()));
+    assertThat(completed.getActions()).noneMatch(action -> "column.renderer.set".equals(action.getType()));
+  }
+
+  @Test
+  void shouldNormalizeFinalComputedColumnComponentEditPlanBeforeValidation() throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "column.computed.add",
+                    "target": { "kind": "computedColumn", "id": "posicaoOrganizacional", "field": "posicaoOrganizacional" },
+                    "input": {
+                      "field": "posicaoOrganizacional",
+                      "header": "Posicao Organizacional",
+                      "expression": { "cat": [ "departamentoNome", " - ", "cargoNome" ] },
+                      "dependencies": [ "departamentoNome", "cargoNome" ],
+                      "outputType": "string"
+                    }
+                  },
+                  {
+                    "operationId": "addColumn",
+                    "target": { "kind": "column", "id": "departamentoNome", "field": "departamentoNome" },
+                    "input": { "field": "departamentoNome", "header": "Departamento" }
+                  },
+                  {
+                    "operationId": "setColumnRenderer",
+                    "target": { "kind": "renderer", "id": "departamentoNome", "field": "departamentoNome" },
+                    "input": {
+                      "type": "chip",
+                      "chip": { "textField": "departamentoNome" }
+                    }
+                  },
+                  {
+                    "operationId": "column.visibility.set",
+                    "target": { "kind": "column", "id": "departamentoNome", "field": "departamentoNome" },
+                    "input": { "visible": false }
+                  }
+                ]
+              },
+              "explanation": "Plano de coluna calculada."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("junte departamento e cargo em posicao organizacional")
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            new ArrayList<String>(),
+            tableManifest());
+
+    JsonNode operations = response.getComponentEditPlan().path("operations");
+    assertThat(response.getType()).isEqualTo("patch");
+    assertThat(operations).hasSize(2);
+    assertThat(operations.get(0).path("operationId").asText()).isEqualTo("column.computed.add");
+    assertThat(operations.get(0).at("/input/expression/cat/0/var").asText()).isEqualTo("departamentoNome");
+    assertThat(operations.get(0).at("/input/expression/cat/2/var").asText()).isEqualTo("cargoNome");
+    assertThat(operations.get(1).path("operationId").asText()).isEqualTo("column.visibility.set");
+    assertThat(response.getWarnings()).contains("component-edit-plan-computed-column-normalized");
+  }
+
+  @Test
+  void shouldNormalizeFinalComputedColumnAliasesBeforeValidation() throws Exception {
+    JsonNode result =
+        objectMapper.readTree(
+            """
+            {
+              "componentEditPlan": {
+                "schemaVersion": "praxis-component-edit-plan.v1",
+                "componentId": "praxis-table",
+                "operations": [
+                  {
+                    "operationId": "add_computed_column",
+                    "target": { "kind": "computedColumn", "id": "posicaoOrganizacional", "field": "posicaoOrganizacional" },
+                    "input": {
+                      "field": "posicaoOrganizacional",
+                      "header": "Posicao Organizacional",
+                      "expression": { "cat": [ "departamentoNome", " - ", "cargoNome" ] },
+                      "dependencies": [ "departamentoNome", "cargoNome" ],
+                      "outputType": "string"
+                    }
+                  },
+                  {
+                    "operationId": "column.add",
+                    "target": { "kind": "column", "id": "departamentoNome", "field": "departamentoNome" },
+                    "input": { "field": "departamentoNome", "header": "Departamento" }
+                  },
+                  {
+                    "operationId": "column.renderer.set",
+                    "target": { "kind": "renderer", "id": "departamentoNome", "field": "departamentoNome" },
+                    "input": {
+                      "type": "compose",
+                      "compose": { "items": [] }
+                    }
+                  },
+                  {
+                    "operationId": "column.visibility.set",
+                    "target": { "kind": "column", "id": "cargoNome", "field": "cargoNome" },
+                    "input": { "visible": false }
+                  }
+                ]
+              },
+              "explanation": "Plano de coluna calculada."
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt("junte departamento e cargo em posicao organizacional")
+            .build();
+
+    AiOrchestratorResponse response =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "componentEditPlanResponse",
+            result,
+            request,
+            new ArrayList<String>(),
+            tableManifest());
+
+    JsonNode operations = response.getComponentEditPlan().path("operations");
+    assertThat(response.getType()).isEqualTo("patch");
+    assertThat(operations).hasSize(2);
+    assertThat(operations.get(0).path("operationId").asText()).isEqualTo("column.computed.add");
+    assertThat(operations.get(0).at("/input/expression/cat/0/var").asText()).isEqualTo("departamentoNome");
+    assertThat(operations.get(0).at("/input/expression/cat/2/var").asText()).isEqualTo("cargoNome");
+    assertThat(operations.get(1).path("operationId").asText()).isEqualTo("column.visibility.set");
+    assertThat(response.getWarnings()).contains("component-edit-plan-computed-column-normalized");
+  }
+
+  @Test
+  void shouldMaterializeComputedColumnActionPlanAliasAgainstCanonicalManifestOperation()
+      throws Exception {
+    ObjectNode computed = objectMapper.createObjectNode();
+    computed.put("field", "posicaoOrganizacional");
+    computed.put("header", "Posicao Organizacional");
+    computed.set(
+        "expression",
+        objectMapper.readTree(
+            """
+            { "cat": [ { "var": "departamentoNome" }, " - ", { "var": "cargoNome" } ] }
+            """));
+    computed.putArray("dependencies").add("departamentoNome").add("cargoNome");
+    computed.put("outputType", "string");
+    AiActionPlan aliasedPlan =
+        AiActionPlan.builder()
+            .actions(
+                List.of(
+                    AiActionPlan.Action.builder()
+                        .type("add_column_computed")
+                        .target("posicaoOrganizacional")
+                        .params(computed)
+                        .build()))
+            .build();
+
+    JsonNode componentEditPlan =
+        ReflectionTestUtils.invokeMethod(
+            service, "buildComponentEditPlanFromActionPlan", aliasedPlan, tableManifest());
+
+    assertThat(componentEditPlan).isNotNull();
+    assertThat(componentEditPlan.at("/operations/0/operationId").asText())
+        .isEqualTo("column.computed.add");
+    assertThat(componentEditPlan.at("/operations/0/input/field").asText())
+        .isEqualTo("posicaoOrganizacional");
+    assertThat(componentEditPlan.at("/operations/0/input/expression/cat/0/var").asText())
+        .isEqualTo("departamentoNome");
+    assertThat(componentEditPlan.at("/operations/0/input/expression/cat/2/var").asText())
+        .isEqualTo("cargoNome");
+  }
+
+  @Test
+  void shouldPromoteConsultModeToAuthoringWhenSemanticIntentIsManifestBackedComputedColumn()
+      throws Exception {
+    JsonNode actionCatalog = tableActionCatalog();
+    List<?> componentActions =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", actionCatalog);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .build();
+
+    Boolean promoted =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "shouldPromoteConsultIntentToAuthoring",
+            intent,
+            true,
+            componentActions,
+            tableManifest());
+
+    assertThat(promoted).isTrue();
+  }
+
+  @Test
+  void shouldNotPromoteConsultModeWhenComputedOperationIsNotDeclaredInManifest()
+      throws Exception {
+    JsonNode actionCatalog = tableActionCatalog();
+    List<?> componentActions =
+        (List<?>) ReflectionTestUtils.invokeMethod(service, "extractComponentActions", actionCatalog);
+    JsonNode manifestWithoutComputed =
+        objectMapper.readTree(
+            """
+            {
+              "componentId": "praxis-table",
+              "operations": [
+                { "operationId": "column.visibility.set" }
+              ]
+            }
+            """);
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("add_column_computed")
+            .newField("posicaoOrganizacional")
+            .baseFields(List.of("departamentoNome", "cargoNome"))
+            .computedFormat("custom_expression")
+            .build();
+
+    Boolean promoted =
+        ReflectionTestUtils.invokeMethod(
+            service,
+            "shouldPromoteConsultIntentToAuthoring",
+            intent,
+            true,
+            componentActions,
+            manifestWithoutComputed);
+
+    assertThat(promoted).isFalse();
+  }
+
+  @Test
   void shouldInferManifestBackedRowAnimationPlanAndContinueIt() throws Exception {
     JsonNode currentState =
         objectMapper.readTree(
@@ -5587,6 +6307,17 @@ class AiOrchestratorServiceActionPlanTest {
                   "header": { "type": "string" },
                   "expression": { "type": "object" },
                   "outputType": { "type": "string" }
+                }
+              }
+            },
+            {
+              "operationId": "column.visibility.set",
+              "target": { "kind": "column", "resolver": "column-by-field", "required": true },
+              "inputSchema": {
+                "type": "object",
+                "required": ["visible"],
+                "properties": {
+                  "visible": { "type": "boolean" }
                 }
               }
             },

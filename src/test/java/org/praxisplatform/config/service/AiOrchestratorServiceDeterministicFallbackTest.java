@@ -152,7 +152,7 @@ class AiOrchestratorServiceDeterministicFallbackTest {
         assertThat(createdAtColumn.has("visible")).isFalse();
         assertThat(createdAtColumn.has("sortable")).isTrue();
         assertThat(createdAtColumn.path("sortable").asBoolean()).isFalse();
-        assertThat(warnings).anyMatch(item -> item.contains("Patch complementado"));
+        assertThat(warnings).anyMatch(item -> item.contains("visibilidade e ordenacao"));
     }
 
     @Test

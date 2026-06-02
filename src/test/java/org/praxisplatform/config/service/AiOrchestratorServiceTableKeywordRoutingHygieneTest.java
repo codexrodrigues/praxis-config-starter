@@ -51,14 +51,17 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
     void consultModeUsesGovernedTableFormatAnswerBeforeReturningLlmTechnicalText() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/org/praxisplatform/config/service/AiOrchestratorService.java"));
-        String consultBody = source.substring(
-                source.indexOf("if (\"consult\".equals(selectedResponseMode))"),
-                source.indexOf("AiIntentClassification intent = classifyIntent", source.indexOf("if (\"consult\".equals(selectedResponseMode))")));
+        int consultStart = source.indexOf("if (\"consult\".equals(selectedResponseMode))");
+        int governedAnswerIndex = source.indexOf("answerTableFormatCapabilityQuestion(", consultStart);
+        int warningIndex = source.indexOf("table-format-capability-consultative-answer-used", governedAnswerIndex);
+        int responseIndex = source.indexOf("response.setMessage(governedFormatAnswer)", governedAnswerIndex);
+        int fallbackIntentIndex = source.indexOf("AiIntentClassification intent = preclassifiedIntent != null", consultStart);
 
-        assertThat(consultBody)
-                .contains("answerTableFormatCapabilityQuestion(")
-                .contains("response.setMessage(governedFormatAnswer)")
-                .contains("table-format-capability-consultative-answer-used");
+        assertThat(consultStart).isGreaterThan(0);
+        assertThat(governedAnswerIndex).isGreaterThan(consultStart);
+        assertThat(warningIndex).isGreaterThan(governedAnswerIndex);
+        assertThat(responseIndex).isGreaterThan(governedAnswerIndex);
+        assertThat(fallbackIntentIndex).isGreaterThan(responseIndex);
     }
 
     @Test

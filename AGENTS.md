@@ -32,6 +32,14 @@ Fronteira Canonica Local
 - O quickstart e o host operacional de prova downstream. Use-o para validar consumo real, nao para redefinir a semantica canonica do starter.
 - O starter deve funcionar como repositorio isolado no GitHub Actions. Nao assuma que o checkout contem a raiz completa do monorepo.
 
+Roteamento Semantico de Intencao
+- `praxis-config-starter` e a fronteira canonica de backend para resolver intencao de authoring agentico, validar decisoes, compilar planos e materializar alteracoes governadas.
+- `AiOrchestratorService`, manifests de authoring, validators, compilers, previews e controllers nao devem decidir a intencao primaria do usuario por palavras-chave, regex, `contains`, listas de termos, normalizacao textual ou fast paths locais.
+- O fluxo correto e: contexto governado + catalogos semanticos + manifests de operacoes + LLM/tooling resolvem primeiro a intencao canonica; somente depois resolvers locais podem usar aliases, fuzzy search, matching aproximado ou normalizacao textual para ranquear campos, surfaces, filtros, actions ou candidatos.
+- Se uma operacao necessaria ainda nao existir no contrato, modele a operacao/tool canonica apropriada em vez de criar um caminho deterministico por texto.
+- Qualquer heuristica textual residual deve declarar explicitamente que nao e roteador primario de intencao, qual decisao semantica previa a habilita e como ela sera removida ou migrada para contrato canonico.
+- Fast paths historicos que ainda existirem devem ser tratados como legado tecnico: mantenha-os estreitos, testados, inventariados e fora do caminho preferencial de novas capacidades.
+
 Areas de Alto Risco Local
 - `src/main/java/org/praxisplatform/config/**`
 - `src/main/resources/**`

@@ -595,6 +595,7 @@ public class AiOrchestratorService {
             warnings.add("selected-record-filter-candidate-resolver-skipped-by-response-mode:"
                     + selectedResponseMode);
         }
+        AiIntentClassification preclassifiedIntent = null;
         if ("consult".equals(selectedResponseMode)) {
             AiIntentClassification consultIntent = classifyConsultIntentSafely(
                     planningPrompt,
@@ -623,6 +624,14 @@ public class AiOrchestratorService {
                         isTable,
                         warnings);
             }
+            if (shouldPromoteConsultIntentToAuthoring(
+                    consultIntent,
+                    isTable,
+                    componentActions,
+                    authoringManifest)) {
+                preclassifiedIntent = consultIntent;
+                warnings.add("authoring-response-mode-consult-promoted-by-semantic-intent");
+            } else {
             AiOrchestratorResponse governedCategoricalRendererConsultation =
                     buildUngovernedCategoricalRendererConsultation(
                             request,
@@ -694,20 +703,23 @@ public class AiOrchestratorService {
                             consultIntent,
                             request != null ? request.getDataProfile() : null),
                     memoryContext);
+            }
         }
 
-        AiIntentClassification intent = classifyIntent(
-                planningPrompt,
-                availableFields,
-                inputKeys,
-                outputKeys,
-                configCategories,
-                componentCategories,
-                runtimeMetadata,
-                fieldTypeHints,
-                authoringContract,
-                request,
-                frontendConfig);
+        AiIntentClassification intent = preclassifiedIntent != null
+                ? preclassifiedIntent
+                : classifyIntent(
+                        planningPrompt,
+                        availableFields,
+                        inputKeys,
+                        outputKeys,
+                        configCategories,
+                        componentCategories,
+                        runtimeMetadata,
+                        fieldTypeHints,
+                        authoringContract,
+                        request,
+                        frontendConfig);
 
         if (intent == null) {
             return finalizeResponse(error("Falha ao classificar a intenção do usuário."), memoryContext);
@@ -1058,21 +1070,6 @@ public class AiOrchestratorService {
                 }
             }
         }
-        JsonNode earlyVisibilityPlanFromPrompt = buildDeterministicColumnVisibilityEditPlan(
-                request,
-                currentState,
-                columnDescriptors,
-                authoringManifest,
-                warnings);
-        if (earlyVisibilityPlanFromPrompt != null && earlyVisibilityPlanFromPrompt.isObject()) {
-            ObjectNode planResult = objectMapper.createObjectNode();
-            planResult.put("message", "Vou ajustar a visibilidade das colunas usando o contrato governado do componente.");
-            planResult.set("componentEditPlan", earlyVisibilityPlanFromPrompt);
-            return finalizeResponse(
-                    componentEditPlanResponse(planResult, request, warnings, authoringManifest),
-                    memoryContext);
-        }
-
         if ("ask_about_config".equalsIgnoreCase(intent.getIntent())) {
             String tableFormatAnswer = answerTableFormatCapabilityQuestion(
                     request != null ? request.getUserPrompt() : null,
@@ -1142,6 +1139,12 @@ public class AiOrchestratorService {
                     currentState,
                     authoringManifest,
                     warnings);
+            actionPlan = ensureComputedColumnActionFromSemanticIntent(
+                    actionPlan,
+                    intent,
+                    currentState,
+                    authoringManifest,
+                    warnings);
             if (isActionPlanEmpty(actionPlan)) {
                 warnings.add("table-action-plan-empty-without-local-text-fallback");
             }
@@ -1203,19 +1206,21 @@ public class AiOrchestratorService {
                     warnings);
             expectedActions = dropEmptyActionsShadowedByClear(expectedActions);
 
-            JsonNode visibilityPlanFromPrompt = buildDeterministicColumnVisibilityEditPlan(
-                    request,
-                    currentState,
-                    columnDescriptors,
-                    authoringManifest,
-                    warnings);
-            if (visibilityPlanFromPrompt != null && visibilityPlanFromPrompt.isObject()) {
-                ObjectNode planResult = objectMapper.createObjectNode();
-                planResult.put("message", "Vou ajustar a visibilidade das colunas usando o contrato governado do componente.");
-                planResult.set("componentEditPlan", visibilityPlanFromPrompt);
-                return finalizeResponse(
-                        componentEditPlanResponse(planResult, request, warnings, authoringManifest),
-                        memoryContext);
+            if (isActionPlanEmpty(actionPlan) && expectedActions.isEmpty()) {
+                JsonNode visibilityPlanFromPrompt = buildDeterministicColumnVisibilityEditPlan(
+                        request,
+                        currentState,
+                        columnDescriptors,
+                        authoringManifest,
+                        warnings);
+                if (visibilityPlanFromPrompt != null && visibilityPlanFromPrompt.isObject()) {
+                    ObjectNode planResult = objectMapper.createObjectNode();
+                    planResult.put("message", "Vou ajustar a visibilidade das colunas usando o contrato governado do componente.");
+                    planResult.set("componentEditPlan", visibilityPlanFromPrompt);
+                    return finalizeResponse(
+                            componentEditPlanResponse(planResult, request, warnings, authoringManifest),
+                            memoryContext);
+                }
             }
 
             List<String> ambiguityOptions = collectAmbiguityOptions(actionPlan);
@@ -1434,6 +1439,12 @@ public class AiOrchestratorService {
                     actionPlan,
                     request,
                     targetCandidates,
+                    currentState,
+                    authoringManifest,
+                    warnings);
+            actionPlan = ensureComputedColumnActionFromSemanticIntent(
+                    actionPlan,
+                    intent,
                     currentState,
                     authoringManifest,
                     warnings);
@@ -2403,6 +2414,24 @@ public class AiOrchestratorService {
         return selectedResponseMode == null
                 || "runtime".equals(selectedResponseMode)
                 || hasSelectedRecordFilterApplyOptionSelection(request);
+    }
+
+    private boolean shouldPromoteConsultIntentToAuthoring(
+            AiIntentClassification intent,
+            boolean isTable,
+            List<ComponentAction> componentActions,
+            JsonNode authoringManifest) {
+        if (intent == null || !isTable || componentActions == null || componentActions.isEmpty()) {
+            return false;
+        }
+        String intentType = normalizeIntentType(intent.getIntent());
+        if ("add_column_computed".equalsIgnoreCase(intentType)) {
+            return isTableManifestOperationAvailable(
+                    componentActions,
+                    authoringManifest,
+                    "column.computed.add");
+        }
+        return false;
     }
 
     private boolean hasSelectedRecordFilterApplyOptionSelection(AiOrchestratorRequest request) {
@@ -8149,6 +8178,344 @@ public class AiOrchestratorService {
             }
         }
         return false;
+    }
+
+    private AiActionPlan ensureComputedColumnActionFromSemanticIntent(
+            AiActionPlan actionPlan,
+            AiIntentClassification intent,
+            JsonNode currentState,
+            JsonNode authoringManifest,
+            List<String> warnings) {
+        if (intent == null
+                || authoringManifest == null
+                || !authoringManifest.isObject()
+                || !"add_column_computed".equalsIgnoreCase(intent.getIntent())) {
+            return actionPlan;
+        }
+        Map<String, JsonNode> operationsById = indexManifestOperations(authoringManifest, new ArrayList<>());
+        if (!operationsById.containsKey("column.computed.add")) {
+            return actionPlan;
+        }
+        AiActionPlan.Action action = buildComputedColumnActionFromSemanticIntent(intent, currentState);
+        if (action == null) {
+            return actionPlan;
+        }
+        if (actionPlanContainsMatchingComputedColumnAction(actionPlan, operationsById, action)) {
+            return dropConflictingComputedColumnAuxiliaryActions(
+                    actionPlan,
+                    operationsById,
+                    action.getTarget(),
+                    warnings);
+        }
+        List<AiActionPlan.Action> actions = new ArrayList<>();
+        actions.add(action);
+        if (actionPlan != null && actionPlan.getActions() != null) {
+            for (AiActionPlan.Action existing : actionPlan.getActions()) {
+                if (!isManifestOperation(existing, operationsById, "column.computed.add")) {
+                    if (isConflictingComputedColumnAuxiliaryAction(existing, operationsById, action.getTarget())) {
+                        continue;
+                    }
+                    actions.add(existing);
+                }
+            }
+        }
+        AiActionPlan ensuredPlan = actionPlan != null ? actionPlan : AiActionPlan.builder().build();
+        ensuredPlan.setActions(actions);
+        if (warnings != null) {
+            warnings.add("column.computed.add preservado a partir da intencao semantica resolvida pela IA.");
+        }
+        return ensuredPlan;
+    }
+
+    private AiActionPlan dropConflictingComputedColumnAuxiliaryActions(
+            AiActionPlan actionPlan,
+            Map<String, JsonNode> operationsById,
+            String computedField,
+            List<String> warnings) {
+        if (actionPlan == null
+                || actionPlan.getActions() == null
+                || actionPlan.getActions().isEmpty()
+                || operationsById == null
+                || isBlank(computedField)) {
+            return actionPlan;
+        }
+        List<AiActionPlan.Action> actions = new ArrayList<>();
+        boolean changed = false;
+        for (AiActionPlan.Action existing : actionPlan.getActions()) {
+            if (isConflictingComputedColumnAuxiliaryAction(existing, operationsById, computedField)) {
+                changed = true;
+                continue;
+            }
+            actions.add(existing);
+        }
+        if (!changed) {
+            return actionPlan;
+        }
+        actionPlan.setActions(actions);
+        if (warnings != null) {
+            warnings.add("column.renderer.set removido por conflitar com coluna calculada resolvida semanticamente.");
+        }
+        return actionPlan;
+    }
+
+    private boolean isConflictingComputedColumnAuxiliaryAction(
+            AiActionPlan.Action action,
+            Map<String, JsonNode> operationsById,
+            String computedField) {
+        if (action == null || isBlank(computedField)) {
+            return false;
+        }
+        if (!computedField.equals(action.getTarget())) {
+            String field = textOrNull(action.getParams() != null ? action.getParams().get("field") : null);
+            if (!computedField.equals(field)) {
+                return isActionType(action, "column.add")
+                        || isManifestOperation(action, operationsById, "column.add")
+                        || isActionType(action, "column.renderer.set")
+                        || isManifestOperation(action, operationsById, "column.renderer.set");
+            }
+        }
+        if (isActionType(action, "column.add") || isManifestOperation(action, operationsById, "column.add")) {
+            return true;
+        }
+        if (!isActionType(action, "column.renderer.set")
+                && !isManifestOperation(action, operationsById, "column.renderer.set")) {
+            return false;
+        }
+        JsonNode renderer = action.getParams();
+        String rendererType = textOrNull(renderer != null ? renderer.get("type") : null);
+        if (isBlank(rendererType)) {
+            rendererType = textOrNull(renderer != null ? renderer.at("/renderer/type") : null);
+        }
+        return isBlank(rendererType) || "compose".equalsIgnoreCase(rendererType);
+    }
+
+    private boolean isActionType(AiActionPlan.Action action, String expectedType) {
+        if (action == null || isBlank(action.getType()) || isBlank(expectedType)) {
+            return false;
+        }
+        return expectedType.equals(action.getType()) || expectedType.equals(normalizeActionKey(action.getType()));
+    }
+
+    private boolean actionPlanContainsMatchingComputedColumnAction(
+            AiActionPlan actionPlan,
+            Map<String, JsonNode> operationsById,
+            AiActionPlan.Action expectedAction) {
+        String expectedField = expectedAction != null ? expectedAction.getTarget() : null;
+        if (actionPlan == null || actionPlan.getActions() == null || isBlank(expectedField)) {
+            return false;
+        }
+        for (AiActionPlan.Action action : actionPlan.getActions()) {
+            if (!isManifestOperation(action, operationsById, "column.computed.add")) {
+                continue;
+            }
+            String target = action != null ? action.getTarget() : null;
+            String field = textOrNull(action != null && action.getParams() != null
+                    ? action.getParams().get("field")
+                    : null);
+            if (expectedField.equals(target) || expectedField.equals(field)) {
+                return computedActionParamsSemanticallyMatch(action, expectedAction);
+            }
+        }
+        return false;
+    }
+
+    private boolean computedActionParamsSemanticallyMatch(
+            AiActionPlan.Action actual,
+            AiActionPlan.Action expected) {
+        if (actual == null || expected == null) {
+            return false;
+        }
+        JsonNode actualParams = actual.getParams();
+        JsonNode expectedParams = expected.getParams();
+        if (actualParams == null || expectedParams == null) {
+            return false;
+        }
+        JsonNode actualExpression = normalizeComputedExpressionNode(actualParams.get("expression"));
+        JsonNode expectedExpression = normalizeComputedExpressionNode(expectedParams.get("expression"));
+        if (actualExpression == null || expectedExpression == null || !actualExpression.equals(expectedExpression)) {
+            return false;
+        }
+        JsonNode actualDependencies = actualParams.get("dependencies");
+        JsonNode expectedDependencies = expectedParams.get("dependencies");
+        if (expectedDependencies != null
+                && expectedDependencies.isArray()
+                && (!actualDependenciesIsEquivalent(actualDependencies, expectedDependencies))) {
+            return false;
+        }
+        String actualOutputType = textOrNull(actualParams.get("outputType"));
+        String expectedOutputType = textOrNull(expectedParams.get("outputType"));
+        return isBlank(expectedOutputType) || expectedOutputType.equalsIgnoreCase(actualOutputType != null ? actualOutputType : "");
+    }
+
+    private JsonNode normalizeComputedExpressionNode(JsonNode expression) {
+        if (expression == null || expression.isMissingNode() || expression.isNull()) {
+            return null;
+        }
+        if (expression.isTextual()) {
+            JsonNode parsed = tryParseJson(expression.asText());
+            return parsed != null ? parsed : expression;
+        }
+        return expression;
+    }
+
+    private boolean actualDependenciesIsEquivalent(JsonNode actualDependencies, JsonNode expectedDependencies) {
+        if (actualDependencies == null || !actualDependencies.isArray()) {
+            return false;
+        }
+        if (actualDependencies.size() != expectedDependencies.size()) {
+            return false;
+        }
+        for (int i = 0; i < expectedDependencies.size(); i++) {
+            String actual = textOrNull(actualDependencies.get(i));
+            String expected = textOrNull(expectedDependencies.get(i));
+            if (!(expected != null ? expected : "").equals(actual != null ? actual : "")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isManifestOperation(
+            AiActionPlan.Action action,
+            Map<String, JsonNode> operationsById,
+            String expectedOperationId) {
+        if (action == null || operationsById == null || isBlank(action.getType()) || isBlank(expectedOperationId)) {
+            return false;
+        }
+        JsonNode manifestOperation = operationsById.get(action.getType());
+        if (manifestOperation == null) {
+            manifestOperation = operationsById.get(normalizeActionKey(action.getType()));
+        }
+        return expectedOperationId.equals(textOrNull(manifestOperation != null
+                ? manifestOperation.get("operationId")
+                : null));
+    }
+
+    private AiActionPlan.Action buildComputedColumnActionFromSemanticIntent(
+            AiIntentClassification intent,
+            JsonNode currentState) {
+        if (intent == null || isBlank(intent.getNewField())) {
+            return null;
+        }
+        List<String> baseFields = intent.getBaseFields() != null
+                ? intent.getBaseFields().stream()
+                .filter(field -> !isBlank(field))
+                .distinct()
+                .toList()
+                : List.of();
+        if (baseFields.isEmpty() || !computedBaseFieldsAreGrounded(baseFields, currentState)) {
+            return null;
+        }
+        JsonNode expression = resolveSemanticComputedExpression(intent, baseFields);
+        if (expression == null || expression.isMissingNode() || expression.isNull()) {
+            return null;
+        }
+        String field = normalizeFieldName(intent.getNewField());
+        ObjectNode params = buildComputedColumnParams(
+                field,
+                titleCase(field),
+                expression,
+                inferOutputTypeFromSemanticComputedExpression(expression),
+                null,
+                baseFields);
+        if (params == null) {
+            return null;
+        }
+        return AiActionPlan.Action.builder()
+                .type("column.computed.add")
+                .target(field)
+                .params(params)
+                .build();
+    }
+
+    private boolean computedBaseFieldsAreGrounded(List<String> baseFields, JsonNode currentState) {
+        if (baseFields == null || baseFields.isEmpty()) {
+            return false;
+        }
+        List<String> knownFields = extractColumnNames(currentState);
+        if (knownFields == null || knownFields.isEmpty()) {
+            return true;
+        }
+        for (String field : baseFields) {
+            if (isBlank(field) || !containsFieldIgnoreCase(knownFields, field)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private JsonNode resolveSemanticComputedExpression(
+            AiIntentClassification intent,
+            List<String> baseFields) {
+        String expressionText = intent != null ? intent.getExpression() : null;
+        JsonNode parsed = tryParseJson(expressionText);
+        if (parsed != null && parsed.isObject()) {
+            return normalizeSemanticComputedExpression(parsed, baseFields);
+        }
+        if (baseFields != null && baseFields.size() >= 2) {
+            ObjectNode expression = objectMapper.createObjectNode();
+            ArrayNode args = expression.putArray("cat");
+            for (int i = 0; i < baseFields.size(); i++) {
+                if (i > 0) {
+                    args.add(" - ");
+                }
+                ObjectNode var = objectMapper.createObjectNode();
+                var.put("var", baseFields.get(i));
+                args.add(var);
+            }
+            return expression;
+        }
+        return null;
+    }
+
+    private JsonNode normalizeSemanticComputedExpression(JsonNode expression, List<String> baseFields) {
+        if (expression == null || !expression.isObject() || baseFields == null || baseFields.isEmpty()) {
+            return expression;
+        }
+        JsonNode cat = expression.get("cat");
+        if ((cat == null || !cat.isArray()) && expression.get("concat") != null && expression.get("concat").isArray()) {
+            cat = expression.get("concat");
+        }
+        if (cat == null || !cat.isArray()) {
+            return expression;
+        }
+        ObjectNode normalizedExpression = objectMapper.createObjectNode();
+        ArrayNode normalizedCat = objectMapper.createArrayNode();
+        for (JsonNode item : cat) {
+            String text = item != null && item.isTextual() ? item.asText() : null;
+            String baseField = !isBlank(text) ? resolveBaseFieldToken(text, baseFields) : null;
+            if (!isBlank(baseField)) {
+                ObjectNode var = objectMapper.createObjectNode();
+                var.put("var", baseField);
+                normalizedCat.add(var);
+            } else {
+                normalizedCat.add(item != null ? item.deepCopy() : objectMapper.nullNode());
+            }
+        }
+        normalizedExpression.set("cat", normalizedCat);
+        return normalizedExpression;
+    }
+
+    private String resolveBaseFieldToken(String value, List<String> baseFields) {
+        if (isBlank(value) || baseFields == null) {
+            return null;
+        }
+        for (String baseField : baseFields) {
+            if (!isBlank(baseField) && baseField.equals(value.trim())) {
+                return baseField;
+            }
+        }
+        return null;
+    }
+
+    private String inferOutputTypeFromSemanticComputedExpression(JsonNode expression) {
+        if (expression == null || expression.isMissingNode() || expression.isNull()) {
+            return null;
+        }
+        if (expression.has("cat")) {
+            return "string";
+        }
+        return null;
     }
 
     private boolean looksLikeDynamicFormInlineFieldAuthoringPrompt(
@@ -19316,6 +19683,7 @@ public class AiOrchestratorService {
 
     private ObjectNode tableManifestOperationFromRuntimeContract(String operationId) {
         return switch (operationId) {
+            case "column.computed.add" -> tableManifestColumnComputedOperation();
             case "column.renderer.set" -> tableManifestColumnRendererOperation();
             case "column.valueMapping.set" -> tableManifestColumnValueMappingOperation();
             case "column.conditionalRenderer.add" -> tableManifestColumnConditionalRendererOperation();
@@ -19400,6 +19768,45 @@ public class AiOrchestratorService {
         inputSchema.put("type", "object");
         inputSchema.putArray("required").add("valueMapping");
         inputSchema.putObject("properties").putObject("valueMapping").put("type", "object");
+        return operation;
+    }
+
+    private ObjectNode tableManifestColumnComputedOperation() {
+        ObjectNode operation = tableManifestColumnOperation(
+                "column.computed.add",
+                "computedColumn",
+                "column-by-field");
+        operation.put("title", "Adicionar coluna calculada");
+        operation.withObject("/target").put("required", false);
+        ObjectNode inputSchema = operation.putObject("inputSchema");
+        inputSchema.put("type", "object");
+        ArrayNode required = inputSchema.putArray("required");
+        required.add("field");
+        required.add("header");
+        required.add("expression");
+        ObjectNode properties = inputSchema.putObject("properties");
+        properties.putObject("field").put("type", "string");
+        properties.putObject("header").put("type", "string");
+        properties.putObject("expression").put("type", "object");
+        ObjectNode dependencies = properties.putObject("dependencies");
+        dependencies.put("type", "array");
+        dependencies.putObject("items").put("type", "string");
+        properties.putObject("outputType").put("type", "string");
+        properties.putObject("format").put("type", "string");
+        ObjectNode effect = operation.putArray("effects").addObject();
+        effect.put("kind", "append-unique");
+        effect.put("path", "columns[]");
+        effect.put("key", "field");
+        operation.putArray("validators")
+                .add("column-field-unique")
+                .add("computed-expression-valid");
+        operation.putArray("affectedPaths")
+                .add("columns[]")
+                .add("columns[].computed")
+                .add("columns[].field")
+                .add("columns[].header");
+        operation.put("submissionImpact", "affects-schema-backed-data");
+        operation.putArray("preconditions").add("config-initialized");
         return operation;
     }
 
@@ -25792,6 +26199,9 @@ public class AiOrchestratorService {
                         null,
                         authoringManifest,
                         outWarnings);
+                componentEditPlan = normalizeComputedColumnComponentEditPlan(
+                        componentEditPlan,
+                        outWarnings);
                 List<String> validationFailures = validateComponentEditPlanAgainstAuthoringManifest(
                         componentEditPlan,
                         authoringManifest);
@@ -26739,6 +27149,9 @@ public class AiOrchestratorService {
                 request,
                 authoringManifest,
                 responseWarnings);
+        componentEditPlan = normalizeComputedColumnComponentEditPlan(
+                componentEditPlan,
+                responseWarnings);
         if (responseWarnings.contains("table-categorical-renderer-ungoverned-policy-collapsed-to-neutral")
                 && !explicitlyAllowsNeutralCategoricalFallback(request != null ? request.getUserPrompt() : null)) {
             return ungovernedCategoricalSemanticsClarification(componentEditPlan, request, responseWarnings);
@@ -26764,6 +27177,122 @@ public class AiOrchestratorService {
                 .explanation(polishComponentEditPlanExplanation(textOrNull(result.get("explanation"))))
                 .warnings(responseWarnings.isEmpty() ? null : List.copyOf(responseWarnings))
                 .build();
+    }
+
+    private JsonNode normalizeComputedColumnComponentEditPlan(
+            JsonNode componentEditPlan,
+            List<String> warnings) {
+        if (componentEditPlan == null || !componentEditPlan.isObject()) {
+            return componentEditPlan;
+        }
+        JsonNode operations = componentEditPlan.get("operations");
+        if (operations == null || !operations.isArray() || operations.isEmpty()) {
+            return componentEditPlan;
+        }
+        LinkedHashSet<String> computedFields = new LinkedHashSet<>();
+        for (JsonNode operation : operations) {
+            if (operation == null || !operation.isObject()) {
+                continue;
+            }
+            String operationId = componentEditPlanOperationId(operation);
+            if (!isComputedColumnComponentOperationId(operationId)) {
+                continue;
+            }
+            String field = firstNonBlank(
+                    textOrNull(operation.at("/input/field")),
+                    textOrNull(operation.at("/target/field")),
+                    textOrNull(operation.at("/target/id")));
+            if (!isBlank(field)) {
+                computedFields.add(field);
+            }
+        }
+        if (computedFields.isEmpty()) {
+            return componentEditPlan;
+        }
+        ObjectNode normalizedPlan = ((ObjectNode) componentEditPlan).deepCopy();
+        ArrayNode normalizedOperations = objectMapper.createArrayNode();
+        boolean changed = false;
+        for (JsonNode operation : normalizedPlan.withArray("operations")) {
+            if (operation == null || !operation.isObject()) {
+                continue;
+            }
+            String operationId = componentEditPlanOperationId(operation);
+            String normalizedOperationId = normalizeComponentEditPlanOperationAlias(operationId);
+            String canonicalOperationId = canonicalManifestOperationAlias(normalizedOperationId);
+            if ("column.add".equals(operationId)
+                    || "add_column".equals(operationId)
+                    || "columnadd".equals(normalizedOperationId)
+                    || "addcolumn".equals(normalizedOperationId)) {
+                changed = true;
+                continue;
+            }
+            if (("column.renderer.set".equals(operationId)
+                    || "columnrendererset".equals(normalizedOperationId)
+                    || "setcolumnrenderer".equals(normalizedOperationId))
+                    && isComputedColumnAuxiliaryRenderer(operation, computedFields)) {
+                changed = true;
+                continue;
+            }
+            if (isComputedColumnComponentOperationId(operationId)
+                    && operation instanceof ObjectNode operationObject) {
+                if (!isBlank(canonicalOperationId)
+                        && !canonicalOperationId.equals(operationObject.path("operationId").asText(null))) {
+                    operationObject.put("operationId", canonicalOperationId);
+                    changed = true;
+                }
+                JsonNode input = operationObject.get("input");
+                if (input instanceof ObjectNode inputObject) {
+                    JsonNode expression = inputObject.get("expression");
+                    List<String> dependencies = readStringArray(inputObject.get("dependencies"));
+                    JsonNode normalizedExpression = normalizeSemanticComputedExpression(expression, dependencies);
+                    if (normalizedExpression != null && !normalizedExpression.equals(expression)) {
+                        inputObject.set("expression", normalizedExpression);
+                        changed = true;
+                    }
+                }
+            }
+            normalizedOperations.add(operation);
+        }
+        if (!changed) {
+            return componentEditPlan;
+        }
+        normalizedPlan.set("operations", normalizedOperations);
+        if (warnings != null) {
+            warnings.add("component-edit-plan-computed-column-normalized");
+        }
+        return normalizedPlan;
+    }
+
+    private boolean isComputedColumnComponentOperationId(String operationId) {
+        String normalizedOperationId = normalizeComponentEditPlanOperationAlias(operationId);
+        return "column.computed.add".equals(operationId)
+                || "column.computed.set".equals(operationId)
+                || "add_computed_column".equals(operationId)
+                || "add_column_computed".equals(operationId)
+                || "set_column_computed".equals(operationId)
+                || "addcomputedcolumn".equals(normalizedOperationId)
+                || "addcolumncomputed".equals(normalizedOperationId)
+                || "setcomputedcolumn".equals(normalizedOperationId)
+                || "setcolumncomputed".equals(normalizedOperationId);
+    }
+
+    private boolean isComputedColumnComposeRenderer(JsonNode operation, Set<String> computedFields) {
+        return isComputedColumnAuxiliaryRenderer(operation, computedFields);
+    }
+
+    private boolean isComputedColumnAuxiliaryRenderer(JsonNode operation, Set<String> computedFields) {
+        if (operation == null || computedFields == null || computedFields.isEmpty()) {
+            return false;
+        }
+        JsonNode input = componentEditPlanOperationInput(operation);
+        String rendererType = textOrNull(input != null ? input.get("type") : null);
+        if (isBlank(rendererType)) {
+            rendererType = textOrNull(input != null ? input.at("/renderer/type") : null);
+        }
+        return isBlank(rendererType)
+                || "compose".equalsIgnoreCase(rendererType)
+                || "chip".equalsIgnoreCase(rendererType)
+                || "badge".equalsIgnoreCase(rendererType);
     }
 
     private AiOrchestratorResponse ungovernedCategoricalSemanticsClarification(
@@ -27947,14 +28476,22 @@ public class AiOrchestratorService {
     private Map<String, String> indexManifestOperationAliases(Map<String, JsonNode> operationsById) {
         Map<String, String> aliasOwners = new LinkedHashMap<>();
         Map<String, Boolean> ambiguousAliases = new LinkedHashMap<>();
+        Set<String> indexedOperationIds = new LinkedHashSet<>();
         operationsById.forEach((operationId, operation) -> {
-            for (String alias : componentEditPlanOperationAliases(operationId, operation)) {
+            String canonicalOperationId = textOrNull(operation != null ? operation.get("operationId") : null);
+            if (canonicalOperationId == null || canonicalOperationId.isBlank()) {
+                canonicalOperationId = operationId;
+            }
+            if (!indexedOperationIds.add(canonicalOperationId)) {
+                return;
+            }
+            for (String alias : componentEditPlanOperationAliases(canonicalOperationId, operation)) {
                 String normalizedAlias = normalizeComponentEditPlanOperationAlias(alias);
                 if (normalizedAlias == null || normalizedAlias.isBlank()) {
                     continue;
                 }
-                String previousOwner = aliasOwners.putIfAbsent(normalizedAlias, operationId);
-                if (previousOwner != null && !previousOwner.equals(operationId)) {
+                String previousOwner = aliasOwners.putIfAbsent(normalizedAlias, canonicalOperationId);
+                if (previousOwner != null && !previousOwner.equals(canonicalOperationId)) {
                     ambiguousAliases.put(normalizedAlias, true);
                 }
             }
@@ -28033,6 +28570,10 @@ public class AiOrchestratorService {
             case "setcolumnformat" -> "column.format.set";
             case "setcolumnvisibility" -> "column.visibility.set";
             case "setcolumnorder" -> "column.order.set";
+            case "addcomputedcolumn" -> "column.computed.add";
+            case "addcolumncomputed" -> "column.computed.add";
+            case "setcolumncomputed" -> "column.computed.add";
+            case "setcomputedcolumn" -> "column.computed.add";
             case "configureexport" -> "export.configure";
             default -> normalizedAlias.startsWith("setformat")
                     ? "column.format.set"
@@ -28481,8 +29022,50 @@ public class AiOrchestratorService {
                 continue;
             }
             operationsById.put(operationId, operation);
+            String normalizedOperationId = normalizeActionKey(operationId);
+            if (!isBlank(normalizedOperationId)) {
+                operationsById.putIfAbsent(normalizedOperationId, operation);
+            }
+            String canonicalOperationId = canonicalManifestOperationAlias(normalizedOperationId);
+            if (!isBlank(canonicalOperationId)) {
+                operationsById.putIfAbsent(canonicalOperationId, operation);
+                String normalizedCanonicalOperationId = normalizeActionKey(canonicalOperationId);
+                if (!isBlank(normalizedCanonicalOperationId)) {
+                    operationsById.putIfAbsent(normalizedCanonicalOperationId, operation);
+                }
+            }
+            for (String alias : canonicalManifestOperationAliasesFor(operationId)) {
+                operationsById.putIfAbsent(alias, operation);
+                String normalizedAlias = normalizeActionKey(alias);
+                if (!isBlank(normalizedAlias)) {
+                    operationsById.putIfAbsent(normalizedAlias, operation);
+                }
+            }
         }
         return operationsById;
+    }
+
+    private List<String> canonicalManifestOperationAliasesFor(String operationId) {
+        if ("column.computed.add".equals(operationId)) {
+            return List.of(
+                    "add_computed_column",
+                    "add_column_computed",
+                    "set_computed_column",
+                    "set_column_computed");
+        }
+        return List.of();
+    }
+
+    private String canonicalManifestOperationAlias(String normalizedOperationId) {
+        if (normalizedOperationId == null || normalizedOperationId.isBlank()) {
+            return null;
+        }
+        return switch (normalizedOperationId) {
+            case "addcomputedcolumn", "addcolumncomputed", "add_column_computed", "add_computed_column",
+                    "setcolumncomputed", "setcomputedcolumn", "set_column_computed", "set_computed_column" ->
+                    "column.computed.add";
+            default -> null;
+        };
     }
 
     private Set<String> declaredTargetKinds(JsonNode manifest) {
