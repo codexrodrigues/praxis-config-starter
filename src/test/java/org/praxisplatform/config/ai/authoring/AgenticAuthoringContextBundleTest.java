@@ -44,6 +44,10 @@ class AgenticAuthoringContextBundleTest {
         assertThat(componentIds(componentContext.path("componentCapabilities").path("catalogs")))
                 .contains("praxis-expansion")
                 .doesNotContain("praxis-settings-panel", "praxis-files-upload");
+        assertThat(bundle.path("toolCatalog").path("presentationAffordanceDiscovery").path("purpose").asText())
+                .contains("table column renderers", "badges", "alignment");
+        assertThat(bundle.path("toolCatalog").path("presentationAffordanceDiscovery").path("result").asText())
+                .contains("component target and data type");
     }
 
     private List<String> componentIds(JsonNode catalogs) {

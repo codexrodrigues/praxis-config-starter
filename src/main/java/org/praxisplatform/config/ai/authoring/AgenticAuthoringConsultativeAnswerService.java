@@ -25,15 +25,25 @@ public class AgenticAuthoringConsultativeAnswerService {
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringConsultativeApiCatalogProjectionService apiCatalogProjectionService;
+    private final AgenticAuthoringToolRegistry toolRegistry;
 
     public AgenticAuthoringConsultativeAnswerService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
             AgenticAuthoringConsultativeApiCatalogProjectionService apiCatalogProjectionService) {
+        this(providerManagementService, objectMapper, apiCatalogProjectionService, null);
+    }
+
+    public AgenticAuthoringConsultativeAnswerService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringConsultativeApiCatalogProjectionService apiCatalogProjectionService,
+            AgenticAuthoringToolRegistry toolRegistry) {
         this.providerManagementService = Objects.requireNonNull(
                 providerManagementService, "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.apiCatalogProjectionService = apiCatalogProjectionService;
+        this.toolRegistry = toolRegistry;
     }
 
     public Optional<AgenticAuthoringConsultativeAnswer> answer(
@@ -454,6 +464,10 @@ public class AgenticAuthoringConsultativeAnswerService {
             root.set("domainApiCatalog", objectMapper.valueToTree(projection));
         }
         root.set("componentCatalogs", componentCatalogSummary(componentCapabilities, 12));
+        JsonNode presentationAffordances = presentationAffordanceDiscoveryEvidence(request);
+        if (presentationAffordances != null && !presentationAffordances.isMissingNode() && !presentationAffordances.isNull()) {
+            root.set("presentationAffordanceDiscovery", presentationAffordances);
+        }
         if ("domain_api".equals(category)
                 && request != null
                 && request.contextHints() != null
@@ -461,6 +475,77 @@ public class AgenticAuthoringConsultativeAnswerService {
             root.set("projectKnowledge", request.contextHints().path("projectKnowledge"));
         }
         return root;
+    }
+
+    private JsonNode presentationAffordanceDiscoveryEvidence(AgenticAuthoringTurnStreamRequest request) {
+        if (toolRegistry == null || request == null) {
+            return null;
+        }
+        JsonNode hints = request.contextHints();
+        String componentId = firstNonBlank(
+                text(hints, "targetComponentId"),
+                text(hints, "selectedComponentId"),
+                text(hints, "componentId"),
+                text(hints, "surfaceWidgetId"),
+                request.targetComponentId());
+        if (!"praxis-table".equals(componentId)) {
+            return null;
+        }
+        String targetField = firstNonBlank(
+                text(hints, "targetField"),
+                text(hints, "columnField"),
+                text(hints, "selectedField"),
+                text(hints, "field"));
+        String dataType = firstNonBlank(
+                text(hints, "outputType"),
+                text(hints, "dataType"),
+                text(hints, "inferredType"),
+                fieldDescriptorText(hints, targetField, "outputType"),
+                fieldDescriptorText(hints, targetField, "type"));
+        AgenticAuthoringToolResult result = toolRegistry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.DISCOVER_PRESENTATION_AFFORDANCES,
+                        "component_authoring",
+                        new PresentationAffordanceDiscoveryToolRequest(
+                                null,
+                                componentId,
+                                firstNonBlank(text(hints, "targetKind"), "column"),
+                                targetField,
+                                text(hints, "columnField"),
+                                dataType,
+                                text(hints, "outputType"),
+                                text(hints, "inferredType"),
+                                request.userPrompt(),
+                                20)),
+                null,
+                "retrieveEvidence");
+        if (!result.valid() || !(result.payload() instanceof JsonNode payload)) {
+            return null;
+        }
+        return payload;
+    }
+
+    private String fieldDescriptorText(JsonNode hints, String targetField, String propertyName) {
+        if (!StringUtils.hasText(targetField) || hints == null || !hints.isObject()) {
+            return "";
+        }
+        for (String arrayName : List.of("schemaFields", "fieldCatalog", "fieldMetadata", "columns")) {
+            JsonNode array = hints.path(arrayName);
+            if (!array.isArray()) {
+                continue;
+            }
+            for (JsonNode item : array) {
+                if (targetField.equals(value(item.path("field").asText()))
+                        || targetField.equals(value(item.path("name").asText()))
+                        || targetField.equals(value(item.path("path").asText()))) {
+                    String text = text(item, propertyName);
+                    if (StringUtils.hasText(text)) {
+                        return text;
+                    }
+                }
+            }
+        }
+        return "";
     }
 
     private ArrayNode componentCatalogSummary(
@@ -736,6 +821,32 @@ public class AgenticAuthoringConsultativeAnswerService {
 
     private String stripTrailingSentencePunctuation(String value) {
         return value(value).replaceAll("[.?!]+$", "").trim();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String candidate : values) {
+            if (StringUtils.hasText(candidate)) {
+                return candidate.trim();
+            }
+        }
+        return "";
+    }
+
+    private String text(JsonNode node, String fieldName) {
+        if (node == null || !node.isObject() || !StringUtils.hasText(fieldName)) {
+            return "";
+        }
+        JsonNode value = node.get(fieldName);
+        if (value == null || value.isNull() || value.isMissingNode()) {
+            return "";
+        }
+        if (value.isTextual()) {
+            return value.asText().trim();
+        }
+        return value.isNumber() || value.isBoolean() ? value.asText() : "";
     }
 
     private String componentDisplayName(String componentId) {

@@ -1,0 +1,54 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.presentation-affordance-catalog",
+  "componentId": "praxis-dynamic-form",
+  "defaultTargetKind": "field",
+  "sourceRef": "@praxisui/dynamic-form:FieldMetadata",
+  "affordances": [
+    {
+      "id": "field.label",
+      "targetKind": "field",
+      "category": "labeling",
+      "description": "Change the visible field label without changing the data binding.",
+      "options": ["label", "short label", "translated label"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "field.helperText",
+      "targetKind": "field",
+      "category": "guidance",
+      "description": "Show helper text or a short instruction near the field.",
+      "options": ["hint", "description", "inline help"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "field.placeholder",
+      "targetKind": "field",
+      "category": "guidance",
+      "description": "Show placeholder text for empty textual inputs.",
+      "options": ["placeholder", "example value"],
+      "appliesToTypes": ["string", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "field.controlType",
+      "targetKind": "field",
+      "category": "renderer",
+      "description": "Choose a field control compatible with the grounded value type.",
+      "options": ["text", "textarea", "select", "autocomplete", "date", "checkbox", "switch", "number", "currency", "chip input"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "custom"],
+      "unknownCompatible": false
+    },
+    {
+      "id": "field.layout",
+      "targetKind": "field",
+      "category": "layout",
+      "description": "Position the field in a responsive form layout.",
+      "options": ["full width", "half width", "third width", "section", "group"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    }
+  ]
+}

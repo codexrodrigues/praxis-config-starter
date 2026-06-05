@@ -26,22 +26,24 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
- * Endpoint canÃ´nico de orquestraÃ§Ã£o AI para geraÃ§Ã£o de patches metadata-driven.
+ * Endpoint legado de compatibilidade para geracao de patches metadata-driven.
  *
  * <p>
- * O controller expÃµe {@code POST /api/praxis/config/ai/patch} e faz a mediaÃ§Ã£o entre contrato
- * HTTP, validaÃ§Ã£o de metadados de contrato ({@code contractVersion}/{@code schemaHash}),
- * resoluÃ§Ã£o de contexto principal ({@code tenant/user/environment}) e delegaÃ§Ã£o para o
+ * O controller expoe {@code POST /api/praxis/config/ai/patch} e faz a mediacao entre contrato
+ * HTTP, validacao de metadados de contrato ({@code contractVersion}/{@code schemaHash}),
+ * resolucao de contexto principal ({@code tenant/user/environment}) e delegacao para o
  * {@link AiOrchestratorService}.
+ * Novos fluxos semanticos de authoring devem usar
+ * {@code /api/praxis/config/ai/authoring/turn/**}.
  * </p>
  *
  * <p>
- * PrecedÃªncia documental importante:
+ * Precedencia documental importante:
  * </p>
  * <ul>
- *   <li>Valores de contrato no body tÃªm precedÃªncia sobre headers homÃ´nimos.</li>
- *   <li>Quando ausentes, versÃ£o e schema hash caem nos defaults do {@link AiContractSpec}.</li>
- *   <li>DivergÃªncia de contrato retorna {@code 409 Conflict} com payload explicativo e headers canÃ´nicos.</li>
+ *   <li>Valores de contrato no body tem precedencia sobre headers homonimos.</li>
+ *   <li>Quando ausentes, versao e schema hash caem nos defaults do {@link AiContractSpec}.</li>
+ *   <li>Divergencia de contrato retorna {@code 409 Conflict} com payload explicativo e headers canonicos.</li>
  * </ul>
  */
 @RestController
@@ -209,4 +211,3 @@ public class AiOrchestratorController {
     private record ContractValidationError(String code, String message) {
     }
 }
-

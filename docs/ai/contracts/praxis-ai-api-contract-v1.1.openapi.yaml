@@ -366,6 +366,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/AgenticAuthoringDryRunErrorResponse'
 
+  /api/praxis/config/ai/authoring/manifests/{componentId}/presentation-affordances:
+    get:
+      tags: [ai-authoring]
+      operationId: listAgenticAuthoringManifestPresentationAffordances
+      summary: Lista affordances de apresentacao governadas para o componente
+      parameters:
+        - $ref: '#/components/parameters/ComponentIdPath'
+      responses:
+        '200':
+          description: Catalogo de affordances de apresentacao do componente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringPresentationAffordanceCatalog'
+        '400':
+          description: Catalogo inexistente ou invalido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenticAuthoringDryRunErrorResponse'
+
   /api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target:
     post:
       tags: [ai-authoring]
@@ -1569,6 +1590,64 @@ components:
             carregar o schema request de filtro canônico em filterRequestSchema ou
             metadados equivalentes em filterRequestFieldMetadata, permitindo validar
             campos de filtro que não são colunas visíveis da tabela.
+      additionalProperties: false
+
+    AgenticAuthoringPresentationAffordanceCatalog:
+      type: object
+      properties:
+        version:
+          type: string
+        kind:
+          type: string
+          enum: [praxis.ai-authoring.presentation-affordance-catalog]
+        componentId:
+          type: string
+        defaultTargetKind:
+          type: string
+        sourceRef:
+          type: string
+        affordances:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgenticAuthoringPresentationAffordance'
+      required:
+        - version
+        - kind
+        - componentId
+        - defaultTargetKind
+        - sourceRef
+        - affordances
+      additionalProperties: false
+
+    AgenticAuthoringPresentationAffordance:
+      type: object
+      properties:
+        id:
+          type: string
+        targetKind:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        appliesToTypes:
+          type: array
+          items:
+            type: string
+        unknownCompatible:
+          type: boolean
+      required:
+        - id
+        - targetKind
+        - category
+        - description
+        - options
+        - appliesToTypes
+        - unknownCompatible
       additionalProperties: false
 
     AgenticAuthoringResolveTargetRequest:

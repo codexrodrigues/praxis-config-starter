@@ -487,6 +487,121 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void consultativeAnswerPromptIncludesPresentationAffordanceDiscoveryEvidenceForTableColumn() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        when(providerManagementService.generateText(
+                anyString(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("""
+                        CONSULTATIVE_CATEGORY: component_capability
+                        ANSWER:
+                        Para essa coluna textual, use badge, chip ou compose; formatos de data nao se aplicam.
+                        """);
+        AgenticAuthoringToolRegistry toolRegistry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper);
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                null,
+                toolRegistry);
+        com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("targetComponentId", "praxis-table");
+        contextHints.put("targetKind", "column");
+        contextHints.put("targetField", "statusPriority");
+        contextHints.put("outputType", "string");
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                requestWithContextHints(
+                        "Quais opcoes de formatacao combinam com a coluna calculada Status Priority?",
+                        contextHints),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(providerManagementService).generateText(
+                promptCaptor.capture(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(promptCaptor.getValue())
+                .contains("\"presentationAffordanceDiscovery\"")
+                .contains("\"targetField\" : \"statusPriority\"")
+                .contains("\"dataType\" : \"string\"")
+                .contains("\"column.renderer.badge\"")
+                .contains("\"column.renderer.chip\"")
+                .contains("\"column.renderer.compose\"")
+                .contains("\"column.align\"")
+                .doesNotContain("\"column.format.date\"");
+    }
+
+    @Test
+    void consultativeAnswerPromptIncludesPartialPresentationAffordanceDiscoveryWhenTypeIsMissing() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        when(providerManagementService.generateText(
+                anyString(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("""
+                        CONSULTATIVE_CATEGORY: component_capability
+                        ANSWER:
+                        Existem recursos gerais de apresentacao, mas preciso confirmar o tipo da coluna para recomendar formatos especificos.
+                        """);
+        AgenticAuthoringToolRegistry toolRegistry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper);
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                null,
+                toolRegistry);
+        com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("targetComponentId", "praxis-table");
+        contextHints.put("targetKind", "column");
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                requestWithContextHints(
+                        "Quais recursos de formatacao de coluna estao disponiveis?",
+                        contextHints),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(providerManagementService).generateText(
+                promptCaptor.capture(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(promptCaptor.getValue())
+                .contains("\"presentationAffordanceDiscovery\"")
+                .contains("\"dataType\" : \"unknown\"")
+                .contains("\"requiresTypeConfirmation\" : true")
+                .contains("\"column.renderer.badge\"")
+                .contains("\"column.renderer.compose\"")
+                .doesNotContain("\"column.format.date\"")
+                .doesNotContain("\"column.format.numeric\"");
+    }
+
+    @Test
     void consultativeComponentCatalogFallbackDeduplicatesComponentFamilies() {
         AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
         AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(

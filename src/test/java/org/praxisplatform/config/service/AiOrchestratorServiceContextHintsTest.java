@@ -494,6 +494,64 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void buildExecutionPromptPromotesPresentationTargetGroundingAsGovernedRuntimeMetadata() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "presentationTargetGrounding": {
+                    "kind": "praxis.table.presentation-target-grounding.v1",
+                    "scope": "presentation-authoring",
+                    "candidates": [
+                      {
+                        "field": "status",
+                        "label": "Status",
+                        "confidence": "high",
+                        "evidence": ["field mention", "header mention", "observed value \\"Pausada\\""]
+                      }
+                    ]
+                  }
+                }
+                """);
+        String runtimeMetadata = ReflectionTestUtils.invokeMethod(
+                service,
+                "formatRuntimeMetadata",
+                null,
+                null,
+                null,
+                contextHints);
+
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .aiMode("assist")
+                .componentDefinition(objectMapper.createObjectNode())
+                .currentState(objectMapper.createObjectNode())
+                .build();
+
+        String prompt = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildExecutionPrompt",
+                "na coluna status crie uma formatacao para que quando o valor for Pausada mostre um icone correspondente",
+                context,
+                objectMapper.createObjectNode(),
+                List.of(),
+                "",
+                "",
+                null,
+                null,
+                runtimeMetadata,
+                null,
+                "N/A",
+                "N/A",
+                null);
+
+        assertThat(prompt).contains("presentationTargetGrounding");
+        assertThat(prompt).contains("\"field\" : \"status\"");
+        assertThat(prompt).contains("\"confidence\" : \"high\"");
+        assertThat(prompt).contains("trate esse candidato como grounding governado do alvo visual");
+        assertThat(prompt).contains("Não substitua por campos semanticamente próximos como prioridade/priority");
+    }
+
+    @Test
     void classifyIntentReceivesAuthoringContractResponseModes() throws Exception {
         JsonNode authoringContract = objectMapper.readTree("""
                 {
@@ -2765,6 +2823,136 @@ class AiOrchestratorServiceContextHintsTest {
                 .isEqualTo("set_column_header");
         assertThat(response.getPatch()).isNull();
         assertThat(response.getWarnings()).containsExactly("authoring-contract-used");
+    }
+
+    @Test
+    void componentEditPlanResponseRejectsPresentationTargetMismatchFromGrounding() throws Exception {
+        JsonNode result = objectMapper.readTree("""
+                {
+                  "componentEditPlan": {
+                    "schemaVersion": "praxis-component-edit-plan.v1",
+                    "componentId": "praxis-table",
+                    "operations": [
+                      {
+                        "operationId": "column.renderer.set",
+                        "target": { "kind": "column", "field": "priority" },
+                        "input": { "field": "priority", "type": "badge" }
+                      }
+                    ]
+                  },
+                  "explanation": "Vou formatar a prioridade."
+                }
+                """);
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "presentationTargetGrounding": {
+                    "kind": "praxis.table.presentation-target-grounding.v1",
+                    "scope": "presentation-authoring",
+                    "candidates": [
+                      {
+                        "field": "status",
+                        "label": "Status",
+                        "confidence": "high",
+                        "evidence": ["field mention", "observed value \\"Pausada\\""]
+                      }
+                    ]
+                  }
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .contextHints(contextHints)
+                .build();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                result,
+                request,
+                List.of("authoring-manifest-contract-used"));
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("clarification");
+        assertThat(response.getMessage())
+                .contains("alvo governado deste ajuste é Status")
+                .contains("plano executável retornou alteração para Priority");
+        assertThat(response.getComponentEditPlan()).isNull();
+        assertThat(response.getOptions()).containsExactly("Status");
+        assertThat(response.getOptionPayloads()).hasSize(1);
+        assertThat(response.getOptionPayloads().get(0).getValue()).isEqualTo("status");
+        assertThat(response.getOptionPayloads().get(0).getContextHints()
+                .at("/presentationTargetGrounding/candidates/0/field").asText())
+                .isEqualTo("status");
+        assertThat(response.getWarnings())
+                .contains(
+                        "component-edit-plan-rejected-by-presentation-target-grounding",
+                        "presentation-target-grounding-expected:status",
+                        "presentation-target-grounding-plan-fields:priority");
+    }
+
+    @Test
+    void groundedCategoricalPresentationReturnsGovernedOptionsBeforePlanSynthesis() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "presentationTargetGrounding": {
+                    "kind": "praxis.table.presentation-target-grounding.v1",
+                    "scope": "presentation-authoring",
+                    "candidates": [
+                      {
+                        "field": "status",
+                        "label": "Status",
+                        "confidence": "high",
+                        "evidence": ["field mention", "observed value \\"Pausada\\""]
+                      }
+                    ]
+                  }
+                }
+                """);
+        AiOrchestratorRequest request = AiOrchestratorRequest.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .userPrompt("na coluna status crie uma formatacao para que quando o valor for Pausada mostre um icone correspondente")
+                .contextHints(contextHints)
+                .dataProfile(objectMapper.readTree("""
+                        {
+                          "columns": {
+                            "status": {
+                              "inferredType": "string",
+                              "cardinality": 5,
+                              "topValues": ["PAUSADA", "PLANEJADA", "EM_ANDAMENTO", "CONCLUIDA", "FALHOU"]
+                            }
+                          }
+                        }
+                        """))
+                .build();
+        List<String> warnings = new ArrayList<>();
+
+        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
+                service,
+                "groundedCategoricalPresentationAuthoringClarification",
+                request,
+                warnings);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getType()).isEqualTo("clarification");
+        assertThat(response.getMessage())
+                .contains("Para Status")
+                .contains("semântica visual governada")
+                .doesNotContain("Prioridade", "Ativo", "Inativo");
+        assertThat(response.getOptions()).containsExactly(
+                "Definir semântica visual governada",
+                "Aplicar chips neutros por enquanto");
+        assertThat(response.getOptionPayloads()).hasSize(2);
+        assertThat(response.getOptionPayloads().get(0).getContextHints()
+                .at("/categoricalFieldSemantics/field").asText())
+                .isEqualTo("status");
+        assertThat(response.getOptionPayloads().get(1).getContextHints()
+                .at("/badge/governanceStatus").asText())
+                .isEqualTo("ungoverned_neutral_fallback_confirmed");
+        assertThat(warnings).contains(
+                "presentation-target-grounding-short-circuited-to-governed-categorical-options",
+                "table-categorical-renderer-consultation-governed-options");
     }
 
     @Test

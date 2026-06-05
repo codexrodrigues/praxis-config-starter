@@ -1,0 +1,45 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.presentation-affordance-catalog",
+  "componentId": "praxis-filter",
+  "defaultTargetKind": "filter",
+  "sourceRef": "@praxisui/core:PraxisFilterConfig",
+  "affordances": [
+    {
+      "id": "filter.fieldSelection",
+      "targetKind": "filter",
+      "category": "fields",
+      "description": "Choose which governed schema fields are searchable.",
+      "options": ["always visible fields", "optional fields", "field ordering"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "filter.operator",
+      "targetKind": "filter",
+      "category": "interaction",
+      "description": "Choose compatible search operators for selected fields.",
+      "options": ["contains", "equals", "between", "greater than", "less than"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": false
+    },
+    {
+      "id": "filter.layout",
+      "targetKind": "filter",
+      "category": "layout",
+      "description": "Arrange the filter controls for compact or expanded search.",
+      "options": ["inline", "stacked", "collapsible", "toolbar"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "filter.activeCriteriaChips",
+      "targetKind": "filter",
+      "category": "feedback",
+      "description": "Show applied criteria as removable chips.",
+      "options": ["show chips", "remove one", "clear all"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    }
+  ]
+}

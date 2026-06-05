@@ -475,12 +475,25 @@ final class AgenticAuthoringContextBundle {
         getManifestSlice.put("method", "INTERNAL_TOOL");
         getManifestSlice.put("endpoint", "praxis-config-starter:ai_registry/authoringManifest");
         getManifestSlice.put("purpose", "Retrieve a bounded backend manifest slice for a component operation.");
-        getManifestSlice.put("result", "A read-only manifest slice such as operations, editableTargets, validators, or one operationId.");
+        getManifestSlice.put("result", "A read-only manifest slice such as operations, editableTargets, validators, presentationAffordances, or one operationId.");
         ObjectNode searchSchemaFields = tools.putObject("searchSchemaFields");
         searchSchemaFields.put("method", "INTERNAL_TOOL");
         searchSchemaFields.put("endpoint", "praxis-config-starter:/schemas/filtered");
         searchSchemaFields.put("purpose", "Retrieve governed schema evidence for fields and operations without applying patches.");
         searchSchemaFields.put("result", "Read-only schema evidence with sourceRef.");
+        ObjectNode presentationAffordanceDiscovery = tools.putObject("presentationAffordanceDiscovery");
+        presentationAffordanceDiscovery.put("method", "INTERNAL_TOOL");
+        presentationAffordanceDiscovery.put("endpoint", "praxis-config-starter:ai-authoring/presentation-affordances");
+        presentationAffordanceDiscovery.put("purpose", "Discover target-aware presentation affordances such as table column renderers, badges, icons, compose layouts, alignment, and compatible value formats.");
+        ArrayNode presentationInputs = presentationAffordanceDiscovery.putArray("inputs");
+        presentationInputs.add("targetComponentId");
+        presentationInputs.add("targetKind");
+        presentationInputs.add("targetField");
+        presentationInputs.add("dataType");
+        presentationInputs.add("outputType");
+        presentationInputs.add("query");
+        presentationAffordanceDiscovery.put("result", "Read-only affordances[] grounded by component target and data type; use it before suggesting visual formatting options.");
+        presentationAffordanceDiscovery.put("whenToUse", "Use when the user asks which presentation, renderer, layout, icon, badge, alignment, or format options fit a selected target.");
         return tools;
     }
 

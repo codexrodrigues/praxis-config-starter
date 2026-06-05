@@ -23,6 +23,7 @@ public class AgenticAuthoringToolRegistry {
     static final String SEARCH_CONFIG_PATH_DOCS = "searchConfigPathDocs";
     static final String SEARCH_EXAMPLES = "searchExamples";
     static final String SEARCH_SCHEMA_FIELDS = "searchSchemaFields";
+    static final String DISCOVER_PRESENTATION_AFFORDANCES = "presentationAffordanceDiscovery";
 
     private final Map<String, AgenticAuthoringToolExecutor> executors;
 
@@ -36,6 +37,22 @@ public class AgenticAuthoringToolRegistry {
             AgenticAuthoringManifestService manifestService,
             SchemaRetrievalService schemaRetrievalService,
             ObjectMapper objectMapper) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper));
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService) {
         Map<String, AgenticAuthoringToolExecutor> registered = new LinkedHashMap<>();
         register(registered, new SearchApiResourcesToolExecutor(resourceDiscoveryService));
         register(registered, new SearchComponentCorpusToolExecutor(contextRetrievalService));
@@ -44,6 +61,10 @@ public class AgenticAuthoringToolRegistry {
         register(registered, new SearchConfigPathDocsToolExecutor(contextRetrievalService));
         register(registered, new SearchExamplesToolExecutor(contextRetrievalService));
         register(registered, new SearchSchemaFieldsToolExecutor(schemaRetrievalService, objectMapper));
+        register(registered, new PresentationAffordanceDiscoveryToolExecutor(
+                presentationAffordanceDiscoveryService != null
+                        ? presentationAffordanceDiscoveryService
+                        : AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper)));
         this.executors = Map.copyOf(registered);
     }
 
@@ -377,6 +398,7 @@ public class AgenticAuthoringToolRegistry {
                 case "operations" -> limitedArray(manifest.path("operations"), request.limit());
                 case "editableTargets" -> limitedArray(manifest.path("editableTargets"), request.limit());
                 case "validators" -> limitedArray(manifest.path("validators"), request.limit());
+                case "presentationAffordances" -> manifestService.listPresentationAffordances(request.componentId());
                 default -> manifest.deepCopy();
             };
         }
@@ -460,6 +482,64 @@ public class AgenticAuthoringToolRegistry {
                             "operation", safeText(request.operation()),
                             "schemaType", safeText(request.schemaType()),
                             "schemaFound", schema != null));
+        }
+    }
+
+    private static final class PresentationAffordanceDiscoveryToolExecutor implements AgenticAuthoringToolExecutor {
+
+        private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
+                DISCOVER_PRESENTATION_AFFORDANCES,
+                Set.of("component_authoring", "mixed", "needs_clarification", "advisory_authoring"),
+                "praxis-config-starter:ai-authoring/presentation-affordances",
+                "read_only",
+                "safe_grounding",
+                "safe_event_projection_only");
+
+        private final AgenticAuthoringPresentationAffordanceDiscoveryService discoveryService;
+
+        private PresentationAffordanceDiscoveryToolExecutor(
+                AgenticAuthoringPresentationAffordanceDiscoveryService discoveryService) {
+            this.discoveryService = Objects.requireNonNull(discoveryService, "discoveryService must not be null");
+        }
+
+        @Override
+        public AgenticAuthoringToolDefinition definition() {
+            return DEFINITION;
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+            return execute(call, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call, AiPrincipalContext principalContext) {
+            if (!(call.payload() instanceof PresentationAffordanceDiscoveryToolRequest request)) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "tool-payload-invalid",
+                        "presentationAffordanceDiscovery requires PresentationAffordanceDiscoveryToolRequest payload.");
+            }
+            String componentId = firstNonBlank(request.targetComponentId(), request.componentId());
+            JsonNode payload = discoveryService.discover(request).orElse(null);
+            if (payload == null) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "presentation-affordance-target-unsupported",
+                        "No presentation affordance catalog is registered for target " + safeText(componentId) + ".");
+            }
+            return AgenticAuthoringToolResult.success(
+                    call.name(),
+                    payload,
+                    Map.of(
+                            "componentId", payload.path("componentId").asText(safeText(componentId)),
+                            "targetKind", payload.path("targetKind").asText(""),
+                            "dataType", payload.path("dataType").asText("unknown"),
+                            "requiresTypeConfirmation", payload.path("requiresTypeConfirmation").asBoolean(false),
+                            "affordanceCount", payload.path("affordances").isArray()
+                                    ? payload.path("affordances").size()
+                                    : 0,
+                            "sourceRef", payload.path("sourceRef").asText("")));
         }
     }
 

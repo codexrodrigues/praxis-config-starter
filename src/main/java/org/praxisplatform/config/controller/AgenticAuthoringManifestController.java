@@ -56,6 +56,15 @@ public class AgenticAuthoringManifestController {
         }
     }
 
+    @GetMapping("/manifests/{componentId}/presentation-affordances")
+    public ResponseEntity<?> listPresentationAffordances(@PathVariable String componentId) {
+        try {
+            return ResponseEntity.ok(manifestService.listPresentationAffordances(componentId));
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));
+        }
+    }
+
     @PostMapping("/manifests/{componentId}/resolve-target")
     public ResponseEntity<?> resolveTarget(
             @PathVariable String componentId,

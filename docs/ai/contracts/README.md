@@ -20,6 +20,7 @@ Escopo coberto:
 - `GET /api/praxis/config/ai/authoring/manifests/{componentId}`
 - `GET /api/praxis/config/ai/authoring/manifests/{componentId}/editable-targets`
 - `GET /api/praxis/config/ai/authoring/manifests/{componentId}/operations`
+- `GET /api/praxis/config/ai/authoring/manifests/{componentId}/presentation-affordances`
 - `POST /api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target`
 - `POST /api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan`
 - `POST /api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch`

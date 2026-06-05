@@ -70,6 +70,120 @@ class AgenticAuthoringManifestContractValidatorTest {
     }
 
     @Test
+    void shouldAcceptPresentationAffordancesWhenCatalogShapeIsValid() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "schemaVersion": "1.0.0",
+                  "componentId": "praxis-table",
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [
+                    { "kind": "column", "resolver": "column-by-field" }
+                  ],
+                  "validators": [
+                    { "validatorId": "target-column-exists" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "column.header.set",
+                      "target": {
+                        "kind": "column",
+                        "resolver": "column-by-field",
+                        "required": true
+                      },
+                      "preconditions": ["config-initialized"],
+                      "validators": ["target-column-exists"],
+                      "effects": [
+                        { "kind": "merge-by-key", "path": "columns[]", "key": "field" }
+                      ],
+                      "affectedPaths": ["columns[].header"],
+                      "submissionImpact": "visual-only"
+                    }
+                  ],
+                  "presentationAffordances": {
+                    "version": "1.0.0",
+                    "kind": "praxis.ai-authoring.presentation-affordance-catalog",
+                    "defaultTargetKind": "column",
+                    "sourceRef": "ai_registry:praxis-table:authoringManifest.presentationAffordances",
+                    "affordances": [
+                      {
+                        "id": "column.renderer.badge",
+                        "targetKind": "column",
+                        "category": "renderer",
+                        "description": "Render status values as a badge.",
+                        "options": ["soft"],
+                        "appliesToTypes": ["string"],
+                        "unknownCompatible": false
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        assertThat(validator.validate(manifest)).isEmpty();
+    }
+
+    @Test
+    void shouldRejectInvalidPresentationAffordanceCatalogShape() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "editableTargets": [
+                    { "kind": "column", "resolver": "column-by-field" }
+                  ],
+                  "validators": [
+                    { "validatorId": "target-column-exists" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "column.header.set",
+                      "target": {
+                        "kind": "column",
+                        "resolver": "column-by-field",
+                        "required": true
+                      },
+                      "preconditions": ["config-initialized"],
+                      "validators": ["target-column-exists"],
+                      "effects": [
+                        { "kind": "merge-by-key", "path": "columns[]", "key": "field" }
+                      ],
+                      "affectedPaths": ["columns[].header"],
+                      "submissionImpact": "visual-only"
+                    }
+                  ],
+                  "presentationAffordances": {
+                    "version": "",
+                    "defaultTargetKind": "column",
+                    "sourceRef": "",
+                    "affordances": [
+                      {
+                        "id": "",
+                        "targetKind": "",
+                        "category": "",
+                        "description": "",
+                        "options": ["soft", ""],
+                        "appliesToTypes": [],
+                        "unknownCompatible": "false"
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        List<String> failures = validator.validate(manifest);
+
+        assertThat(failures)
+                .contains(
+                        "presentationAffordances.version is required",
+                        "presentationAffordances.sourceRef is required",
+                        "presentationAffordances.affordances[].id is required",
+                        "presentationAffordances.affordances[].targetKind is required",
+                        "presentationAffordances.affordances[].category is required",
+                        "presentationAffordances.affordances[].description is required",
+                        "presentationAffordances.affordances[].options must contain only non-blank strings",
+                        "presentationAffordances.affordances[].appliesToTypes must be a non-empty array",
+                        "presentationAffordances.affordances[].unknownCompatible must be boolean");
+    }
+
+    @Test
     void shouldAggregateContractShapeFailures() {
         ObjectNode manifest = objectMapper.createObjectNode();
         ObjectNode operation = manifest.putArray("operations").addObject();

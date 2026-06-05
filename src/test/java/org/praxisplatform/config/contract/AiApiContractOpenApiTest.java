@@ -51,6 +51,7 @@ class AiApiContractOpenApiTest {
                 "/api/praxis/config/ai/authoring/manifests/{componentId}",
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/editable-targets",
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/operations",
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/presentation-affordances",
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target",
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan",
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/compile-patch",
@@ -105,6 +106,8 @@ class AiApiContractOpenApiTest {
                 "AgenticAuthoringManifestCompileResult",
                 "AgenticAuthoringCompiledComponentPatch",
                 "AgenticAuthoringCompiledPatchOperation",
+                "AgenticAuthoringPresentationAffordanceCatalog",
+                "AgenticAuthoringPresentationAffordance",
                 "AgenticAuthoringResourceCandidatesRequest",
                 "AgenticAuthoringResourceCandidatesResult",
                 "AgenticAuthoringCandidate",
@@ -289,6 +292,8 @@ class AiApiContractOpenApiTest {
         assertManifestEndpointUsesAuthoringError(paths,
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/operations");
         assertManifestEndpointUsesAuthoringError(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/presentation-affordances");
+        assertManifestEndpointUsesAuthoringError(paths,
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target");
         assertManifestEndpointUsesAuthoringError(paths,
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/validate-plan");
@@ -310,6 +315,11 @@ class AiApiContractOpenApiTest {
                 "get",
                 null,
                 null);
+        assertManifestEndpointSchemas(paths,
+                "/api/praxis/config/ai/authoring/manifests/{componentId}/presentation-affordances",
+                "get",
+                null,
+                "#/components/schemas/AgenticAuthoringPresentationAffordanceCatalog");
         assertManifestEndpointSchemas(paths,
                 "/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target",
                 "post",
@@ -427,7 +437,10 @@ class AiApiContractOpenApiTest {
     private void assertManifestEndpointUsesAuthoringError(Map<String, Object> paths, String path) {
         Map<String, Object> pathItem = (Map<String, Object>) paths.get(path);
         assertThat(pathItem).isNotNull();
-        String method = path.endsWith("editable-targets") || path.endsWith("operations") || path.endsWith("{componentId}")
+        String method = path.endsWith("editable-targets")
+                || path.endsWith("operations")
+                || path.endsWith("presentation-affordances")
+                || path.endsWith("{componentId}")
                 ? "get"
                 : "post";
         Map<String, Object> operation = (Map<String, Object>) pathItem.get(method);

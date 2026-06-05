@@ -34,13 +34,14 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
- * Endpoints de streaming para geração incremental de patch AI.
+ * Endpoints legados de streaming para geracao incremental de patch AI.
  *
  * <p>
- * Esta superfície complementa o endpoint síncrono de patch com um fluxo em três etapas:
+ * Esta superficie complementa o endpoint sincrono de patch com um fluxo em tres etapas:
  * iniciar stream, conectar via SSE e cancelar/probar o stream. O controller preserva a mesma
- * validação de contrato da rota síncrona e delega o controle de ciclo de vida ao
- * {@link AiStreamService}.
+ * validacao de contrato da rota sincrona e delega o controle de ciclo de vida ao
+ * {@link AiStreamService}. Novos fluxos semanticos de authoring devem usar
+ * {@code /api/praxis/config/ai/authoring/turn/**}.
  * </p>
  */
 @RestController

@@ -418,6 +418,7 @@ INSTRUÇÕES:
    - Se CONTRATO DECLARATIVO DE AUTORIA declarar runtimeOperations e o usuário pedir para executar agora uma operação runtime declarada, como aplicar filtros, executar exportação ou abrir uma superfície relacionada, retorne patch com tableRuntimeOperations em vez de componentEditPlan de configuração.
    - Para várias alterações declarativas no mesmo componente, use o batchKind informado no contrato de autoria.
    - Se METADADOS.contextHints.tableConversationMemory.lastComponentEditDecision existir, preserve esse alvo como memória semântica de continuação. Para pedidos sem alvo explícito, refine o lastTarget em vez de escolher uma operação global não solicitada.
+   - Se METADADOS.contextHints.presentationTargetGrounding existir com scope="presentation-authoring" e um candidato confidence="high", trate esse candidato como grounding governado do alvo visual deste turno. Para operações de renderer, badge, chip, formato, alinhamento, estilo condicional, visibilidade ou coluna calculada ligada ao pedido, use esse field como target/input.field. Não substitua por campos semanticamente próximos como prioridade/priority quando o grounding alto for status. Se a operação realmente exigir outro campo, responda com clarificação em vez de componentEditPlan executável.
 3. O patch será aplicado via "Smart Merge".
    - Para arrays com identidade conhecida (ex.: columns[].field, fieldMetadata[].name), use a chave para atualizar itens existentes.
    - Se a identidade do array não estiver clara, peça confirmação.

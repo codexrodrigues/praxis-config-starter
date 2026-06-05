@@ -172,6 +172,26 @@ class AgenticAuthoringManifestControllerTest {
     }
 
     @Test
+    void listPresentationAffordancesDelegatesToService() throws Exception {
+        JsonNode affordances = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "defaultTargetKind": "column",
+                  "affordances": [
+                    { "id": "column.renderer.badge" }
+                  ]
+                }
+                """);
+        when(manifestService.listPresentationAffordances("praxis-table")).thenReturn(affordances);
+
+        ResponseEntity<?> response = controller().listPresentationAffordances("praxis-table");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isSameAs(affordances);
+        verify(manifestService).listPresentationAffordances("praxis-table");
+    }
+
+    @Test
     void listEditableTargetsDelegatesToService() throws Exception {
         JsonNode targets = objectMapper.readTree("[{ \"kind\": \"column\" }]");
         when(manifestService.listEditableTargets("praxis-table")).thenReturn(targets);
@@ -199,6 +219,15 @@ class AgenticAuthoringManifestControllerTest {
                 """);
         JsonNode operations = objectMapper.readTree("[{ \"operationId\": \"column.header.set\" }]");
         JsonNode targets = objectMapper.readTree("[{ \"kind\": \"column\" }]");
+        JsonNode affordances = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "defaultTargetKind": "column",
+                  "affordances": [
+                    { "id": "column.renderer.badge" }
+                  ]
+                }
+                """);
         AgenticAuthoringResolveTargetRequest resolveRequest = new AgenticAuthoringResolveTargetRequest(
                 objectMapper.readTree("{ \"columns\": [{ \"field\": \"email\" }] }"),
                 "column.header.set",
@@ -255,6 +284,7 @@ class AgenticAuthoringManifestControllerTest {
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(manifestService.listEditableTargets("praxis-table")).thenReturn(targets);
         when(manifestService.listOperations("praxis-table")).thenReturn(operations);
+        when(manifestService.listPresentationAffordances("praxis-table")).thenReturn(affordances);
         when(manifestService.resolveTarget("praxis-table", resolveRequest)).thenReturn(resolvedTarget);
         when(manifestService.validateEditPlan(eq("praxis-table"), any(AgenticAuthoringManifestEditPlanRequest.class)))
                 .thenReturn(validationResult);
@@ -273,6 +303,12 @@ class AgenticAuthoringManifestControllerTest {
         mockMvc.perform(get("/api/praxis/config/ai/authoring/manifests/{componentId}/operations", "praxis-table"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].operationId").value("column.header.set"));
+
+        mockMvc.perform(get("/api/praxis/config/ai/authoring/manifests/{componentId}/presentation-affordances", "praxis-table"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.componentId").value("praxis-table"))
+                .andExpect(jsonPath("$.defaultTargetKind").value("column"))
+                .andExpect(jsonPath("$.affordances[0].id").value("column.renderer.badge"));
 
         mockMvc.perform(post("/api/praxis/config/ai/authoring/manifests/{componentId}/resolve-target", "praxis-table")
                         .contentType(MediaType.APPLICATION_JSON)

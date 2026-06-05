@@ -26,6 +26,7 @@ public class AgenticAuthoringManifestService {
     private final AgenticAuthoringValidatorRegistry validatorRegistry;
     private final AgenticAuthoringEffectCompilerRegistry effectCompilerRegistry;
     private final AgenticAuthoringManifestContractValidator manifestContractValidator;
+    private final AgenticAuthoringPresentationAffordanceCatalogService presentationAffordanceCatalogService;
 
     public AgenticAuthoringManifestService(
             AiRegistryRepository repository,
@@ -34,12 +35,33 @@ public class AgenticAuthoringManifestService {
             AgenticAuthoringValidatorRegistry validatorRegistry,
             AgenticAuthoringEffectCompilerRegistry effectCompilerRegistry,
             AgenticAuthoringManifestContractValidator manifestContractValidator) {
+        this(
+                repository,
+                objectMapper,
+                targetResolverRegistry,
+                validatorRegistry,
+                effectCompilerRegistry,
+                manifestContractValidator,
+                AgenticAuthoringPresentationAffordanceCatalogService.defaultService(objectMapper));
+    }
+
+    public AgenticAuthoringManifestService(
+            AiRegistryRepository repository,
+            ObjectMapper objectMapper,
+            AgenticAuthoringTargetResolverRegistry targetResolverRegistry,
+            AgenticAuthoringValidatorRegistry validatorRegistry,
+            AgenticAuthoringEffectCompilerRegistry effectCompilerRegistry,
+            AgenticAuthoringManifestContractValidator manifestContractValidator,
+            AgenticAuthoringPresentationAffordanceCatalogService presentationAffordanceCatalogService) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.targetResolverRegistry = Objects.requireNonNull(targetResolverRegistry, "targetResolverRegistry must not be null");
         this.validatorRegistry = Objects.requireNonNull(validatorRegistry, "validatorRegistry must not be null");
         this.effectCompilerRegistry = Objects.requireNonNull(effectCompilerRegistry, "effectCompilerRegistry must not be null");
         this.manifestContractValidator = Objects.requireNonNull(manifestContractValidator, "manifestContractValidator must not be null");
+        this.presentationAffordanceCatalogService = presentationAffordanceCatalogService != null
+                ? presentationAffordanceCatalogService
+                : AgenticAuthoringPresentationAffordanceCatalogService.defaultService(objectMapper);
     }
 
     public JsonNode getManifest(String componentId) {
@@ -53,6 +75,10 @@ public class AgenticAuthoringManifestService {
 
     public JsonNode listOperations(String componentId) {
         return getManifest(componentId).path("operations");
+    }
+
+    public JsonNode listPresentationAffordances(String componentId) {
+        return presentationAffordanceCatalogService.getCatalogSlice(componentId);
     }
 
     public AgenticAuthoringResolvedTarget resolveTarget(

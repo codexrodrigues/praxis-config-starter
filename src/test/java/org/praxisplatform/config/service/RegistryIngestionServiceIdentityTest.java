@@ -215,6 +215,68 @@ class RegistryIngestionServiceIdentityTest {
     }
 
     @Test
+    void shouldRejectInvalidPresentationAffordanceCatalogOnIngestion() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectNode manifest = objectMapper.createObjectNode();
+        manifest.put("schemaVersion", "1.0.0");
+        manifest.put("componentId", "table");
+        manifest.putArray("editableTargets")
+                .addObject()
+                .put("kind", "column")
+                .put("resolver", "column-by-field");
+        manifest.putArray("validators")
+                .addObject()
+                .put("validatorId", "target-column-exists");
+        ObjectNode operation = manifest.putArray("operations").addObject();
+        operation.put("operationId", "column.header.set");
+        operation.putObject("target")
+                .put("kind", "column")
+                .put("resolver", "column-by-field");
+        operation.putArray("effects").addObject().put("kind", "merge-by-key").put("path", "columns[]");
+        operation.putArray("affectedPaths").add("columns[].header");
+        operation.putArray("preconditions").add("config-initialized");
+        operation.putArray("validators").add("target-column-exists");
+        operation.put("submissionImpact", "visual-only");
+
+        ObjectNode catalog = manifest.putObject("presentationAffordances");
+        catalog.put("version", "");
+        catalog.put("defaultTargetKind", "column");
+        catalog.put("sourceRef", "");
+        ObjectNode affordance = catalog.putArray("affordances").addObject();
+        affordance.put("id", "date-short");
+        affordance.put("targetKind", "column");
+        affordance.put("category", "format");
+        affordance.put("description", "Short date");
+        affordance.putArray("options").add("date.short");
+        affordance.putArray("appliesToTypes");
+        affordance.put("unknownCompatible", "false");
+
+        RegistryIngestionRequest.ComponentEntry component = RegistryIngestionRequest.ComponentEntry.builder()
+                .description("Table component")
+                .inputs(List.of())
+                .outputs(List.of())
+                .build();
+        component.addAdditionalProperty("authoringManifest", manifest);
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .components(Map.of("table", component))
+                .build();
+
+        assertThatThrownBy(() -> service.ingestRegistry(request, null, null))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("Error processing component: table")
+                .hasCauseInstanceOf(ConfigurationIngestionException.class)
+                .satisfies(error -> {
+                    assertThat(error.getCause()).hasMessageContaining("Invalid authoringManifest");
+                    assertThat(error.getCause()).hasMessageContaining("presentationAffordances.version is required");
+                    assertThat(error.getCause()).hasMessageContaining("presentationAffordances.sourceRef is required");
+                    assertThat(error.getCause()).hasMessageContaining(
+                            "presentationAffordances.affordances[date-short].appliesToTypes must be a non-empty array");
+                    assertThat(error.getCause()).hasMessageContaining(
+                            "presentationAffordances.affordances[date-short].unknownCompatible must be boolean");
+                });
+    }
+
+    @Test
     void shouldIngestMultiChunksAndInvokePurge() {
         RegistryIngestionRequest.ChunkEntry chunk1 = RegistryIngestionRequest.ChunkEntry.builder()
                 .chunkIndex(0)

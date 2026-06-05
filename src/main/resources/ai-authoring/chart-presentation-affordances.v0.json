@@ -1,0 +1,45 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.presentation-affordance-catalog",
+  "componentId": "praxis-chart",
+  "defaultTargetKind": "chart",
+  "sourceRef": "@praxisui/charts:PraxisChartConfig",
+  "affordances": [
+    {
+      "id": "chart.type",
+      "targetKind": "chart",
+      "category": "renderer",
+      "description": "Choose the chart visual form while preserving the governed data bindings.",
+      "options": ["bar", "line", "donut"],
+      "appliesToTypes": ["number", "currency", "percentage", "custom"],
+      "unknownCompatible": false
+    },
+    {
+      "id": "chart.legend",
+      "targetKind": "chart",
+      "category": "layout",
+      "description": "Configure legend visibility and placement.",
+      "options": ["show", "hide", "top", "right", "bottom"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "chart.valueFormat.numeric",
+      "targetKind": "chart",
+      "category": "format",
+      "description": "Format numeric chart values without changing the metric field.",
+      "options": ["integer", "decimal precision", "currency", "percent"],
+      "appliesToTypes": ["number", "currency", "percentage"],
+      "unknownCompatible": false
+    },
+    {
+      "id": "chart.tooltip",
+      "targetKind": "chart",
+      "category": "interaction",
+      "description": "Show contextual value details on hover or selection.",
+      "options": ["enabled", "dimension label", "metric value", "formatted value"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    }
+  ]
+}

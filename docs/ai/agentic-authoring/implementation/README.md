@@ -93,9 +93,12 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 18. [14-platform-hygiene-for-host-neutral-authoring.md](./14-platform-hygiene-for-host-neutral-authoring.md)
 19. [release-readiness-2026-05-02-runtime-enforcement-consumer.md](../../release-readiness-2026-05-02-runtime-enforcement-consumer.md)
 20. [runtime-enforcement-consumer-release-checklist-2026-05-02.md](../../runtime-enforcement-consumer-release-checklist-2026-05-02.md)
-21. [01-current-state-and-target.md](./01-current-state-and-target.md)
-22. [02-implementation-backlog.md](./02-implementation-backlog.md)
-23. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+21. [17-semantic-intent-routing-guardrails.md](./17-semantic-intent-routing-guardrails.md)
+22. [18-intent-routing-legacy-inventory.md](./18-intent-routing-legacy-inventory.md)
+23. [19-authoring-flow-hygiene-before-affordance-discovery.md](./19-authoring-flow-hygiene-before-affordance-discovery.md)
+24. [01-current-state-and-target.md](./01-current-state-and-target.md)
+25. [02-implementation-backlog.md](./02-implementation-backlog.md)
+26. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e

@@ -27,7 +27,7 @@ class AgenticAuthoringToolRegistryTest {
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
 
         assertThat(registry.definitions())
-                .hasSize(7)
+                .hasSize(8)
                 .anySatisfy(definition -> {
                     assertThat(definition.name()).isEqualTo("searchApiResources");
                     assertThat(definition.allowedRoutes())
@@ -53,7 +53,216 @@ class AgenticAuthoringToolRegistryTest {
                         "getManifestSlice",
                         "searchConfigPathDocs",
                         "searchExamples",
-                        "searchSchemaFields");
+                        "searchSchemaFields",
+                        "presentationAffordanceDiscovery");
+    }
+
+    @Test
+    void exposesPresentationAffordanceDiscoveryAsReadOnlyGroundingTool() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        assertThat(registry.definitions())
+                .anySatisfy(definition -> {
+                    assertThat(definition.name()).isEqualTo("presentationAffordanceDiscovery");
+                    assertThat(definition.allowedRoutes())
+                            .containsExactlyInAnyOrder(
+                                    "component_authoring",
+                                    "mixed",
+                                    "needs_clarification",
+                                    "advisory_authoring");
+                    assertThat(definition.ownerSurface())
+                            .isEqualTo("praxis-config-starter:ai-authoring/presentation-affordances");
+                    assertThat(definition.allowedPhases())
+                            .containsExactlyInAnyOrder("retrieveEvidence", "repairOrAsk");
+                    assertThat(definition.sideEffectClass()).isEqualTo("read_only");
+                    assertThat(definition.governanceLevel()).isEqualTo("safe_grounding");
+                    assertThat(definition.auditRedactionPolicy()).isEqualTo("safe_event_projection_only");
+                });
+    }
+
+    @Test
+    void discoversStringTableColumnAffordancesWithoutDateFormats() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "presentationAffordanceDiscovery",
+                        "component_authoring",
+                        new PresentationAffordanceDiscoveryToolRequest(
+                                null,
+                                "praxis-table",
+                                "column",
+                                "statusPriority",
+                                null,
+                                "string",
+                                null,
+                                null,
+                                "opcoes de formatacao para coluna calculada textual",
+                                20)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics())
+                .containsEntry("componentId", "praxis-table")
+                .containsEntry("targetKind", "column")
+                .containsEntry("dataType", "string")
+                .containsEntry("sourceRef", "@praxisui/core:ColumnDefinition");
+        JsonNode payload = (JsonNode) result.payload();
+        assertThat(payload.path("targetField").asText()).isEqualTo("statusPriority");
+        assertThat(payload.path("affordances"))
+                .extracting(affordance -> affordance.path("id").asText())
+                .contains(
+                        "column.align",
+                        "column.renderer.badge",
+                        "column.renderer.chip",
+                        "column.renderer.icon",
+                        "column.renderer.compose",
+                        "column.conditionalRenderers")
+                .doesNotContain("column.format.date");
+    }
+
+    @Test
+    void discoversGenericTableColumnAffordancesWhenTypeIsUnknown() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "presentationAffordanceDiscovery",
+                        "component_authoring",
+                        new PresentationAffordanceDiscoveryToolRequest(
+                                null,
+                                "praxis-table",
+                                "column",
+                                "",
+                                null,
+                                null,
+                                null,
+                                null,
+                                "quais recursos de apresentacao existem para colunas",
+                                20)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics())
+                .containsEntry("dataType", "unknown")
+                .containsEntry("requiresTypeConfirmation", true);
+        JsonNode payload = (JsonNode) result.payload();
+        assertThat(payload.path("requiresTypeConfirmation").asBoolean()).isTrue();
+        assertThat(payload.path("affordances"))
+                .extracting(affordance -> affordance.path("id").asText())
+                .contains(
+                        "column.align",
+                        "column.renderer.badge",
+                        "column.renderer.chip",
+                        "column.renderer.compose")
+                .doesNotContain("column.format.date", "column.format.numeric");
+    }
+
+    @Test
+    void rejectsPresentationAffordanceDiscoveryWhenTargetHasNoProvider() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "presentationAffordanceDiscovery",
+                        "component_authoring",
+                        new PresentationAffordanceDiscoveryToolRequest(
+                                null,
+                                "praxis-unknown",
+                                "field",
+                                "statusPriority",
+                                null,
+                                "string",
+                                null,
+                                null,
+                                "opcoes de formatacao para campo",
+                                20)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("presentation-affordance-target-unsupported");
+    }
+
+    @Test
+    void discoversDynamicFormAffordancesThroughSameTool() {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "presentationAffordanceDiscovery",
+                        "component_authoring",
+                        new PresentationAffordanceDiscoveryToolRequest(
+                                null,
+                                "praxis-dynamic-form",
+                                null,
+                                "observacaoInterna",
+                                null,
+                                null,
+                                null,
+                                null,
+                                "quais opcoes visuais existem para campo",
+                                20)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode payload = (JsonNode) result.payload();
+        assertThat(payload.path("componentId").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(payload.path("targetKind").asText()).isEqualTo("field");
+        assertThat(payload.path("affordances"))
+                .extracting(affordance -> affordance.path("id").asText())
+                .contains("field.label", "field.helperText", "field.layout");
+    }
+
+    @Test
+    void getManifestSliceCanReturnPresentationAffordances() throws Exception {
+        AgenticAuthoringManifestService manifestService = Mockito.mock(AgenticAuthoringManifestService.class);
+        when(manifestService.getManifest("praxis-table")).thenReturn(objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [],
+                  "operations": [],
+                  "validators": []
+                }
+                """));
+        when(manifestService.listPresentationAffordances("praxis-table")).thenReturn(objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "defaultTargetKind": "column",
+                  "affordances": [
+                    { "id": "column.renderer.badge" }
+                  ]
+                }
+                """));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                manifestService,
+                null,
+                objectMapper);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "getManifestSlice",
+                        "component_authoring",
+                        new ManifestSliceToolRequest("praxis-table", null, "presentationAffordances", 20)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode payload = (JsonNode) result.payload();
+        assertThat(payload.path("sliceKind").asText()).isEqualTo("presentationAffordances");
+        assertThat(payload.path("evidence").path("affordances").get(0).path("id").asText())
+                .isEqualTo("column.renderer.badge");
     }
 
     @Test

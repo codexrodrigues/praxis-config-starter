@@ -1,0 +1,81 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.ai-authoring.presentation-affordance-catalog",
+  "componentId": "praxis-table",
+  "defaultTargetKind": "column",
+  "sourceRef": "@praxisui/core:ColumnDefinition",
+  "affordances": [
+    {
+      "id": "column.align",
+      "targetKind": "column",
+      "category": "alignment",
+      "description": "Align cell content left, center or right.",
+      "options": ["left", "center", "right"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "column.renderer.badge",
+      "targetKind": "column",
+      "category": "renderer",
+      "description": "Render categorical or status-like values as a badge.",
+      "options": ["filled", "outlined", "soft", "optional icon", "tooltip"],
+      "appliesToTypes": ["string", "boolean", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "column.renderer.chip",
+      "targetKind": "column",
+      "category": "renderer",
+      "description": "Render short categorical values as a compact chip.",
+      "options": ["filled", "outlined", "soft", "optional icon", "tooltip"],
+      "appliesToTypes": ["string", "boolean", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "column.renderer.icon",
+      "targetKind": "column",
+      "category": "renderer",
+      "description": "Render a fixed or row-driven Material icon.",
+      "options": ["name", "nameField", "color", "size", "ariaLabel"],
+      "appliesToTypes": ["string", "boolean", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "column.renderer.compose",
+      "targetKind": "column",
+      "category": "renderer",
+      "description": "Compose multiple cell elements in one row or a second line.",
+      "options": ["icon", "text", "link", "badge", "chip", "progress", "rating", "avatar", "button", "menu", "row layout", "column layout", "wrap", "ellipsis"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "column.conditionalRenderers",
+      "targetKind": "column",
+      "category": "conditional-renderer",
+      "description": "Select a renderer per row from governed JSON Logic conditions.",
+      "options": ["first-match wins", "badge", "chip", "icon", "compose", "tooltip"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "column.format.numeric",
+      "targetKind": "column",
+      "category": "format",
+      "description": "Format numeric values without changing the data source.",
+      "options": ["integer", "decimal precision", "currency", "percent"],
+      "appliesToTypes": ["number", "currency", "percentage"],
+      "unknownCompatible": false
+    },
+    {
+      "id": "column.format.date",
+      "targetKind": "column",
+      "category": "format",
+      "description": "Format date values without changing the data source.",
+      "options": ["dd/MM/yyyy", "medium date", "long date", "date-time"],
+      "appliesToTypes": ["date"],
+      "unknownCompatible": false
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
@@ -470,6 +471,312 @@ class AiOrchestratorServiceCpfMaskTest {
         .isEqualTo("Aplicar formato");
     assertThat(enriched.getOptionPayloads().get(0).getContextHints().at("/optionSelected/selection/value").asText())
         .isEqualTo("dd/MM/yyyy");
+  }
+
+  @Test
+  void consultativeVisualAffordanceOptionsArePromotedFromFormatToRenderer() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "inicioPrev", "header": "Início previsto", "type": "date", "format": "yyyy-MM-dd" },
+                { "field": "statusPriority", "header": "Status Priority", "type": "string" }
+              ]
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .userPrompt(
+                "Quais opcoes de formatacao combinam e estao disponiveis para Status Priority? Considere icones badges alinhamento e duas linhas.")
+            .build();
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("ask_about_config")
+            .category("format")
+            .scope("config")
+            .targetField("Status_Priority")
+            .options(
+                List.of(
+                    "Badge duas linhas: linha 1 = STATUS, linha 2 = prioridade",
+                    "Ícone circular + texto em duas linhas",
+                    "Alinhamento configurável para ícones e linhas de texto"))
+            .needsClarification(false)
+            .build();
+    @SuppressWarnings("unchecked")
+    List<?> columns =
+        (List<?>)
+            ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<String> warnings = new ArrayList<>();
+
+    ReflectionTestUtils.invokeMethod(
+        service,
+        "normalizeIntent",
+        intent,
+        null,
+        request.getUserPrompt(),
+        columns,
+        List.of("statusPriority"),
+        List.of("statusPriority", "inicioPrev"),
+        List.of("Status Priority", "Início previsto"),
+        List.of("format", "renderer"),
+        List.of(),
+        true,
+        warnings);
+    AiOrchestratorResponse response =
+        AiOrchestratorResponse.builder()
+            .type("info")
+            .message("Sugiro opções visuais para a coluna.")
+            .build();
+
+    AiOrchestratorResponse enriched =
+        (AiOrchestratorResponse)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "attachConsultativeTableActionOptions",
+                response,
+                request,
+                currentState,
+                List.of(),
+                intent,
+                null);
+
+    assertThat(intent.getCategory()).isEqualTo("renderer");
+    assertThat(warnings)
+        .contains(
+            "Categoria ajustada para renderer porque as opções semânticas resolvidas são affordances visuais.");
+    assertThat(enriched.getMessage())
+        .isEqualTo("Encontrei algumas formas de apresentar Status_Priority. Escolha uma opção para aplicar.");
+    assertThat(enriched.getClarification()).isNotNull();
+    assertThat(enriched.getClarification().getResponseType()).isEqualTo("choice");
+    assertThat(enriched.getOptionPayloads()).hasSize(3);
+    assertThat(enriched.getOptionPayloads())
+        .extracting(AiOption::getLabel)
+        .doesNotContain("Data curta", "Data média", "Data por extenso", "Data completa");
+    assertThat(enriched.getOptionPayloads().get(0).getContextHints().at("/presentation/ctaLabel").asText())
+        .isEqualTo("Aplicar opção");
+    assertThat(enriched.getOptionPayloads().get(0).getContextHints().at("/optionSelected/selection/mode").asText())
+        .isEqualTo("renderer");
+
+    AiOrchestratorResponse clarification =
+        (AiOrchestratorResponse)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "buildConsultativeRendererChoiceResponse",
+                intent,
+                request,
+                currentState,
+                warnings);
+
+    assertThat(clarification.getType()).isEqualTo("clarification");
+    assertThat(clarification.getMessage())
+        .isEqualTo("Encontrei algumas formas de apresentar Status_Priority. Escolha uma opção para aplicar.");
+    assertThat(clarification.getOptionPayloads())
+        .extracting(AiOption::getLabel)
+        .doesNotContain("Data curta", "Data média", "Data por extenso", "Data completa");
+  }
+
+  @Test
+  void consultativeVisualAffordanceOptionsArePromotedFromAppearanceToRenderer() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode currentState =
+        mapper.readTree(
+            """
+            {
+              "columns": [
+                { "field": "statusPriority", "header": "Status Priority", "type": "string" }
+              ]
+            }
+            """);
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .userPrompt(
+                "Quais opcoes de formatacao combinam e estao disponiveis para a nova coluna Status Priority? Considere icones badges alinhamento e duas linhas.")
+            .contextHints(
+                mapper.readTree(
+                    """
+                    {
+                      "optionSelected": {
+                        "selection": {
+                          "mode": "renderer",
+                          "field": "statusPriority",
+                          "value": "opção visual anterior"
+                        }
+                      }
+                    }
+                    """))
+            .build();
+    AiIntentClassification intent =
+        AiIntentClassification.builder()
+            .intent("ask_about_config")
+            .category("appearance")
+            .scope("config")
+            .targetField("statusPriority")
+            .options(
+                List.of(
+                    "Badge colorido por prioridade com texto STATUS - PRIORIDADE",
+                    "Renderer de duas linhas: linha 1 = status, linha 2 = prioridade",
+                    "Ícone + texto inline com alinhamento à esquerda"))
+            .needsClarification(false)
+            .build();
+    @SuppressWarnings("unchecked")
+    List<?> columns =
+        (List<?>)
+            ReflectionTestUtils.invokeMethod(service, "extractColumnDescriptors", currentState);
+    List<String> warnings = new ArrayList<>();
+
+    ReflectionTestUtils.invokeMethod(
+        service,
+        "normalizeIntent",
+        intent,
+        null,
+        request.getUserPrompt(),
+        columns,
+        List.of("statusPriority"),
+        List.of("statusPriority"),
+        List.of("Status Priority"),
+        List.of("format", "appearance", "renderer"),
+        List.of(),
+        true,
+        warnings);
+
+    AiOrchestratorResponse clarification =
+        (AiOrchestratorResponse)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "buildConsultativeRendererChoiceResponse",
+                intent,
+                request,
+                currentState,
+                warnings);
+
+    assertThat(intent.getCategory()).isEqualTo("renderer");
+    assertThat(clarification.getType()).isEqualTo("clarification");
+    assertThat(clarification.getMessage())
+        .isEqualTo("Encontrei algumas formas de apresentar Status Priority. Escolha uma opção para aplicar.");
+    assertThat(clarification.getOptionPayloads())
+        .extracting(AiOption::getLabel)
+        .contains(
+            "Badge colorido por prioridade com texto STATUS - PRIORIDADE",
+            "Renderer de duas linhas: linha 1 = status, linha 2 = prioridade",
+            "Ícone + texto inline com alinhamento à esquerda");
+    assertThat(clarification.getOptionPayloads())
+        .extracting(AiOption::getLabel)
+        .doesNotContain("Data curta", "Data média", "Data por extenso", "Data completa");
+  }
+
+  @Test
+  void consultativePresentationQuestionConvertsRendererLikeComponentPlanToClarification()
+      throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    ObjectNode planResult = mapper.createObjectNode();
+    planResult.set(
+        "componentEditPlan",
+        mapper.readTree(
+            """
+            {
+              "operations": [
+                {
+                  "operationId": "column.update",
+                  "target": { "id": "statusPriority" },
+                  "input": {
+                    "renderer": {
+                      "type": "badge",
+                      "badge": { "textField": "statusPriority", "variant": "soft" }
+                    }
+                  }
+                }
+              ]
+            }
+            """));
+    planResult.put(
+        "explanation",
+        "Vou mostrar a coluna Status como badge: Ativo para verdadeiro e Inativo para falso.");
+    AiOrchestratorRequest request =
+        AiOrchestratorRequest.builder()
+            .componentId("praxis-table")
+            .componentType("table")
+            .userPrompt(
+                "Quais opcoes de apresentacao para Status Priority? Compare badge, icone, alinhamento e duas linhas.")
+            .build();
+    List<String> warnings = new ArrayList<>();
+
+    AiOrchestratorResponse response =
+        (AiOrchestratorResponse)
+            ReflectionTestUtils.invokeMethod(
+                service,
+                "componentEditPlanResponse",
+                planResult,
+                request,
+                warnings,
+                null);
+
+    assertThat(response.getType()).isEqualTo("clarification");
+    assertThat(response.getMessage())
+        .isEqualTo("Encontrei algumas formas de apresentar statusPriority. Escolha uma opção para aplicar.");
+    assertThat(response.getExplanation()).doesNotContain("Ativo", "Inativo");
+    assertThat(response.getComponentEditPlan()).isNull();
+    assertThat(response.getOptionPayloads())
+        .extracting(AiOption::getLabel)
+        .contains("badge", "ícone", "alinhamento", "duas linhas")
+        .doesNotContain("Data curta", "Data média", "Data por extenso", "Data completa");
+    assertThat(response.getWarnings())
+        .contains("component-edit-plan-renderer-choice-converted-to-clarification");
+  }
+
+  @Test
+  void rendererOptionSelectionAcceptsTargetFieldInsideSelection() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode hints =
+        mapper.readTree(
+            """
+            {
+              "optionSelected": {
+                "selection": {
+                  "mode": "renderer",
+                  "field": "statusPriority",
+                  "value": "badge"
+                }
+              }
+            }
+            """);
+
+    Object selection =
+        ReflectionTestUtils.invokeMethod(service, "extractSelectedRendererFromHints", hints);
+
+    assertThat(selection).isNotNull();
+    assertThat(ReflectionTestUtils.getField(selection, "targetField")).isEqualTo("statusPriority");
+    assertThat(ReflectionTestUtils.getField(selection, "value")).isEqualTo("badge");
+  }
+
+  @Test
+  void rendererOptionSelectionIsNotConsumedAsFormatSelection() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode hints =
+        mapper.readTree(
+            """
+            {
+              "optionSelected": {
+                "targetField": "statusPriority",
+                "selection": {
+                  "mode": "renderer",
+                  "field": "statusPriority",
+                  "value": "badge"
+                }
+              }
+            }
+            """);
+
+    Object formatSelection =
+        ReflectionTestUtils.invokeMethod(service, "extractSelectedFormatFromHints", hints);
+    Object rendererSelection =
+        ReflectionTestUtils.invokeMethod(service, "extractSelectedRendererFromHints", hints);
+
+    assertThat(formatSelection).isNull();
+    assertThat(rendererSelection).isNotNull();
+    assertThat(ReflectionTestUtils.getField(rendererSelection, "targetField")).isEqualTo("statusPriority");
+    assertThat(ReflectionTestUtils.getField(rendererSelection, "value")).isEqualTo("badge");
   }
 
   @Test

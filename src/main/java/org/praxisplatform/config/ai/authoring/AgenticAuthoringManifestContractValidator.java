@@ -46,7 +46,51 @@ public final class AgenticAuthoringManifestContractValidator {
         for (JsonNode operation : manifest.path("operations")) {
             validateOperation(operation, targetKinds, validatorIds, failures);
         }
+        validatePresentationAffordances(manifest.path("presentationAffordances"), failures);
         return List.copyOf(failures);
+    }
+
+    private void validatePresentationAffordances(JsonNode catalog, List<String> failures) {
+        if (catalog == null || catalog.isMissingNode() || catalog.isNull()) {
+            return;
+        }
+        if (!catalog.isObject()) {
+            failures.add("presentationAffordances must be an object");
+            return;
+        }
+        requireText(catalog, "presentationAffordances.version", failures);
+        requireText(catalog, "presentationAffordances.defaultTargetKind", failures);
+        requireText(catalog, "presentationAffordances.sourceRef", failures);
+        JsonNode affordances = catalog.path("affordances");
+        if (!affordances.isArray() || affordances.isEmpty()) {
+            failures.add("presentationAffordances.affordances must be a non-empty array");
+            return;
+        }
+        Set<String> ids = new HashSet<>();
+        for (JsonNode affordance : affordances) {
+            String id = text(affordance, "id");
+            if (id.isBlank()) {
+                failures.add("presentationAffordances.affordances[].id is required");
+            } else if (!ids.add(id)) {
+                failures.add("presentationAffordances duplicate affordance id: " + id);
+            }
+            requireText(affordance, "presentationAffordances.affordances[" + id + "].targetKind", "targetKind", failures);
+            requireText(affordance, "presentationAffordances.affordances[" + id + "].category", "category", failures);
+            requireText(affordance, "presentationAffordances.affordances[" + id + "].description", "description", failures);
+            validateStringArray(
+                    affordance.path("options"),
+                    "presentationAffordances.affordances[" + id + "].options",
+                    true,
+                    failures);
+            validateStringArray(
+                    affordance.path("appliesToTypes"),
+                    "presentationAffordances.affordances[" + id + "].appliesToTypes",
+                    false,
+                    failures);
+            if (!affordance.path("unknownCompatible").isBoolean()) {
+                failures.add("presentationAffordances.affordances[" + id + "].unknownCompatible must be boolean");
+            }
+        }
     }
 
     private void validateOperation(
@@ -98,5 +142,37 @@ public final class AgenticAuthoringManifestContractValidator {
         }
         JsonNode value = node.path(field);
         return value.isTextual() ? value.asText() : value.asText("");
+    }
+
+    private void requireText(JsonNode node, String path, List<String> failures) {
+        String field = path.substring(path.lastIndexOf('.') + 1);
+        requireText(node, path, field, failures);
+    }
+
+    private void requireText(JsonNode node, String path, String field, List<String> failures) {
+        if (text(node, field).isBlank()) {
+            failures.add(path + " is required");
+        }
+    }
+
+    private void validateStringArray(
+            JsonNode node,
+            String path,
+            boolean allowEmpty,
+            List<String> failures) {
+        if (!node.isArray()) {
+            failures.add(path + " must be an array");
+            return;
+        }
+        if (!allowEmpty && node.isEmpty()) {
+            failures.add(path + " must be a non-empty array");
+            return;
+        }
+        for (JsonNode value : node) {
+            if (!value.isTextual() || value.asText().isBlank()) {
+                failures.add(path + " must contain only non-blank strings");
+                return;
+            }
+        }
     }
 }

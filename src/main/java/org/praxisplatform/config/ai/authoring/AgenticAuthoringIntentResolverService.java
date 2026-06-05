@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 public class AgenticAuthoringIntentResolverService {
 
@@ -41,6 +42,7 @@ public class AgenticAuthoringIntentResolverService {
             new AgenticAuthoringConversationTurnOrchestrator();
     private final AgenticAuthoringSemanticDecisionPolicy semanticDecisionPolicy =
             new AgenticAuthoringSemanticDecisionPolicy();
+    private final AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService;
 
     public AgenticAuthoringIntentResolverService(ObjectMapper objectMapper) {
         this(objectMapper, null, null, null);
@@ -94,6 +96,8 @@ public class AgenticAuthoringIntentResolverService {
         this.componentCapabilitiesService = componentCapabilitiesService;
         this.domainCatalogServiceKey = domainCatalogServiceKey;
         this.domainCatalogCandidateEnhancer = domainCatalogCandidateEnhancer;
+        this.presentationAffordanceDiscoveryService =
+                AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper);
     }
 
     public AgenticAuthoringIntentResolutionResult resolve(AgenticAuthoringIntentResolutionRequest request) {
@@ -781,6 +785,7 @@ public class AgenticAuthoringIntentResolverService {
             quickReplies = llmAuthoredQuickReplies.isEmpty() ? llmIntent.quickReplies() : llmAuthoredQuickReplies;
             llmAuthoredQuickRepliesUsed = !llmAuthoredQuickReplies.isEmpty();
         }
+        quickReplies = canonicalizePresentationAffordanceQuickReplies(request, quickReplies);
         if (shouldHideTechnicalAddresses(request, operationKind, artifactKind, llmRequiresGovernedAuthoring)) {
             quickReplies = sanitizeQuickReplies(quickReplies, selectedCandidate, candidates);
         }
@@ -5040,6 +5045,173 @@ public class AgenticAuthoringIntentResolverService {
                 reply.icon(),
                 reply.tone(),
                 mergedHints);
+    }
+
+    private List<AgenticAuthoringQuickReply> canonicalizePresentationAffordanceQuickReplies(
+            AgenticAuthoringIntentResolutionRequest request,
+            List<AgenticAuthoringQuickReply> quickReplies) {
+        if (request == null || quickReplies == null || quickReplies.isEmpty()) {
+            return quickReplies == null ? List.of() : quickReplies;
+        }
+        Set<String> alignmentOptions = discoveredAlignmentOptions(request);
+        if (alignmentOptions.isEmpty()) {
+            return quickReplies;
+        }
+        List<String> values = quickReplies.stream()
+                .map(this::alignmentOptionValue)
+                .toList();
+        if (values.stream().anyMatch(String::isBlank)
+                || values.stream().distinct().count() < Math.min(2, values.size())) {
+            return quickReplies;
+        }
+        for (String value : values) {
+            if (!alignmentOptions.contains(value)) {
+                return quickReplies;
+            }
+        }
+        return quickReplies.stream()
+                .map(reply -> canonicalAlignmentQuickReply(reply, alignmentOptionValue(reply), request))
+                .toList();
+    }
+
+    private Set<String> discoveredAlignmentOptions(AgenticAuthoringIntentResolutionRequest request) {
+        List<String> componentIds = Stream.of(
+                        request.targetComponentId(),
+                        jsonText(request.contextHints(), "targetComponentId"),
+                        jsonText(request.contextHints(), "componentId"),
+                        jsonText(request.contextHints() == null ? null : request.contextHints().path("authoringManifestRef"), "componentId"),
+                        jsonText(request.contextHints() == null ? null : request.contextHints().path("identity"), "componentId"))
+                .map(value -> value == null ? "" : value.trim())
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
+        for (String componentId : componentIds) {
+            Optional<JsonNode> discovery = presentationAffordanceDiscoveryService.discover(
+                    new PresentationAffordanceDiscoveryToolRequest(
+                            componentId,
+                            componentId,
+                            "column",
+                            firstNonBlank(
+                                    jsonText(request.contextHints(), "targetField"),
+                                    jsonText(request.contextHints(), "columnField")),
+                            null,
+                            null,
+                            null,
+                            "unknown",
+                            request.userPrompt(),
+                            12));
+            if (discovery.isEmpty()) {
+                continue;
+            }
+            Set<String> options = alignmentOptionsFromDiscovery(discovery.get());
+            if (!options.isEmpty()) {
+                return options;
+            }
+        }
+        return Set.of();
+    }
+
+    private Set<String> alignmentOptionsFromDiscovery(JsonNode discovery) {
+        JsonNode affordances = discovery == null ? null : discovery.path("affordances");
+        if (affordances == null || !affordances.isArray()) {
+            return Set.of();
+        }
+        for (JsonNode affordance : affordances) {
+            if ("column.align".equals(affordance.path("id").asText(""))
+                    || "alignment".equals(affordance.path("category").asText(""))) {
+                Set<String> options = StreamSupport.stream(affordance.path("options").spliterator(), false)
+                        .filter(JsonNode::isTextual)
+                        .map(JsonNode::asText)
+                        .map(this::normalize)
+                        .filter(option -> !option.isBlank())
+                        .collect(Collectors.toSet());
+                return options.containsAll(Set.of("left", "center", "right")) ? options : Set.of();
+            }
+        }
+        return Set.of();
+    }
+
+    private AgenticAuthoringQuickReply canonicalAlignmentQuickReply(
+            AgenticAuthoringQuickReply reply,
+            String value,
+            AgenticAuthoringIntentResolutionRequest request) {
+        return new AgenticAuthoringQuickReply(
+                firstNonBlank(reply.id(), "column-align-" + value),
+                firstNonBlank(reply.kind(), "guided-option"),
+                alignmentOptionLabel(value),
+                value,
+                firstNonBlank(reply.description(), alignmentOptionDescription(value)),
+                alignmentOptionIcon(value),
+                firstNonBlank(reply.tone(), "neutral"),
+                canonicalAlignmentContextHints(reply.contextHints(), value, request));
+    }
+
+    private ObjectNode canonicalAlignmentContextHints(
+            JsonNode existingHints,
+            String value,
+            AgenticAuthoringIntentResolutionRequest request) {
+        ObjectNode hints = existingHints != null && existingHints.isObject()
+                ? existingHints.deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode selected = hints.putObject("optionSelected");
+        selected.put("targetField", firstNonBlank(
+                jsonText(existingHints, "targetField"),
+                jsonText(request.contextHints(), "targetField"),
+                jsonText(request.contextHints(), "columnField")));
+        ObjectNode selection = selected.putObject("selection");
+        selection.put("mode", "renderer");
+        selection.put("value", "alignment:" + value);
+        selection.put("affordanceId", "column.align");
+        ObjectNode presentation = hints.putObject("presentation");
+        presentation.put("kind", "guided-option");
+        presentation.put("ctaLabel", "Aplicar alinhamento");
+        presentation.put("icon", alignmentOptionIcon(value));
+        presentation.put("tone", "neutral");
+        ObjectNode affordance = hints.putObject("presentationAffordance");
+        affordance.put("id", "column.align");
+        affordance.put("category", "alignment");
+        affordance.put("option", value);
+        affordance.put("source", "presentationAffordanceDiscovery");
+        return hints;
+    }
+
+    private String alignmentOptionValue(AgenticAuthoringQuickReply reply) {
+        String prompt = normalize(valueOrDefault(reply == null ? null : reply.prompt(), ""));
+        if (Set.of("left", "center", "right").contains(prompt)) {
+            return prompt;
+        }
+        String label = normalize(valueOrDefault(reply == null ? null : reply.label(), ""));
+        if (Set.of("left", "center", "right").contains(label)) {
+            return label;
+        }
+        return "";
+    }
+
+    private String alignmentOptionLabel(String value) {
+        return switch (value) {
+            case "left" -> "Alinhar à esquerda";
+            case "center" -> "Alinhar ao centro";
+            case "right" -> "Alinhar à direita";
+            default -> value;
+        };
+    }
+
+    private String alignmentOptionDescription(String value) {
+        return switch (value) {
+            case "left" -> "Mantém o conteúdo encostado no início da célula.";
+            case "center" -> "Centraliza o conteúdo da célula.";
+            case "right" -> "Alinha o conteúdo ao fim da célula.";
+            default -> "Aplica uma opção de alinhamento da coluna.";
+        };
+    }
+
+    private String alignmentOptionIcon(String value) {
+        return switch (value) {
+            case "left" -> "format_align_left";
+            case "center" -> "format_align_center";
+            case "right" -> "format_align_right";
+            default -> "format_align_left";
+        };
     }
 
     private boolean shouldUseLlmAuthoredQuickReplies(

@@ -1,6 +1,7 @@
 package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
@@ -19,6 +20,10 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractVa
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAffordanceCatalogService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAffordanceDiscoveryService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAffordanceProvider;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceBackedPresentationAffordanceProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewMessageSynthesizerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringProjectKnowledgeService;
@@ -35,6 +40,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolLoopPlanner;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
+import org.praxisplatform.config.controller.AgenticAuthoringManifestController;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
@@ -187,14 +193,25 @@ public class AgenticAuthoringAutoConfiguration {
             AgenticAuthoringTargetResolverRegistry targetResolverRegistry,
             AgenticAuthoringValidatorRegistry validatorRegistry,
             AgenticAuthoringEffectCompilerRegistry effectCompilerRegistry,
-            AgenticAuthoringManifestContractValidator manifestContractValidator) {
+            AgenticAuthoringManifestContractValidator manifestContractValidator,
+            ObjectProvider<AgenticAuthoringPresentationAffordanceCatalogService> presentationAffordanceCatalogService) {
         return new AgenticAuthoringManifestService(
                 aiRegistryRepository,
                 objectMapper,
                 targetResolverRegistry,
                 validatorRegistry,
                 effectCompilerRegistry,
-                manifestContractValidator);
+                manifestContractValidator,
+                presentationAffordanceCatalogService.getIfAvailable());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(AgenticAuthoringManifestService.class)
+    @ConditionalOnProperty(prefix = "praxis.ai.authoring", name = "http-enabled", havingValue = "true")
+    public AgenticAuthoringManifestController agenticAuthoringManifestController(
+            AgenticAuthoringManifestService manifestService) {
+        return new AgenticAuthoringManifestController(manifestService);
     }
 
     @Bean
@@ -219,11 +236,39 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringConsultativeAnswerService agenticAuthoringConsultativeAnswerService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
-            ObjectProvider<AgenticAuthoringConsultativeApiCatalogProjectionService> consultativeApiCatalogProjectionService) {
+            ObjectProvider<AgenticAuthoringConsultativeApiCatalogProjectionService> consultativeApiCatalogProjectionService,
+            ObjectProvider<AgenticAuthoringToolRegistry> toolRegistry) {
         return new AgenticAuthoringConsultativeAnswerService(
                 providerManagementService,
                 objectMapper,
-                consultativeApiCatalogProjectionService.getIfAvailable());
+                consultativeApiCatalogProjectionService.getIfAvailable(),
+                toolRegistry.getIfAvailable());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringPresentationAffordanceCatalogService agenticAuthoringPresentationAffordanceCatalogService(
+            ObjectMapper objectMapper,
+            ObjectProvider<AiRegistryRepository> aiRegistryRepository) {
+        return AgenticAuthoringPresentationAffordanceCatalogService.defaultService(
+                objectMapper,
+                aiRegistryRepository.getIfAvailable());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringResourceBackedPresentationAffordanceProvider agenticAuthoringPresentationAffordanceProvider(
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceCatalogService catalogService) {
+        return new AgenticAuthoringResourceBackedPresentationAffordanceProvider(objectMapper, catalogService);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringPresentationAffordanceDiscoveryService agenticAuthoringPresentationAffordanceDiscoveryService(
+            ObjectProvider<AgenticAuthoringPresentationAffordanceProvider> providers) {
+        List<AgenticAuthoringPresentationAffordanceProvider> availableProviders = providers.orderedStream().toList();
+        return new AgenticAuthoringPresentationAffordanceDiscoveryService(availableProviders);
     }
 
     @Bean
@@ -233,13 +278,15 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<ContextRetrievalService> contextRetrievalService,
             ObjectProvider<AgenticAuthoringManifestService> manifestService,
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
+            ObjectProvider<AgenticAuthoringPresentationAffordanceDiscoveryService> presentationAffordanceDiscoveryService,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringToolRegistry(
                 resourceDiscoveryService,
                 contextRetrievalService.getIfAvailable(),
                 manifestService.getIfAvailable(),
                 schemaRetrievalService.getIfAvailable(),
-                objectMapper);
+                objectMapper,
+                presentationAffordanceDiscoveryService.getIfAvailable());
     }
 
     @Bean

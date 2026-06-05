@@ -216,6 +216,79 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void tableAlignmentQuickRepliesAreCanonicalizedFromPresentationAffordanceCatalog() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "component",
+                        "presentation_affordance_choice",
+                        null,
+                        null,
+                        "new_instruction",
+                        "Escolha o alinhamento da coluna.",
+                        List.of(
+                                new AgenticAuthoringQuickReply("align-left", "guided-option", "left", "left"),
+                                new AgenticAuthoringQuickReply("align-center", "guided-option", "center", "center"),
+                                new AgenticAuthoringQuickReply("align-right", "guided-option", "right", "right")),
+                        List.of("Escolha o alinhamento da coluna."),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("targetComponentId", "nested-path-missions-table");
+        contextHints.put("targetField", "statusPriority");
+        contextHints.putObject("authoringManifestRef")
+                .put("componentId", "praxis-table")
+                .put("source", "PRAXIS_TABLE_AUTHORING_MANIFEST");
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Quero aplicar alinhamento na coluna Status Priority.",
+                        "praxis-ui-angular",
+                        "nested-path-missions-table",
+                        "/examples/dynamic-page",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        contextHints));
+
+        assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::label)
+                .containsExactly("Alinhar à esquerda", "Alinhar ao centro", "Alinhar à direita");
+        assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::prompt)
+                .containsExactly("left", "center", "right");
+        JsonNode centerHints = result.quickReplies().get(1).contextHints();
+        assertThat(centerHints.path("optionSelected").path("targetField").asText())
+                .isEqualTo("statusPriority");
+        assertThat(centerHints.path("optionSelected").path("selection").path("value").asText())
+                .isEqualTo("alignment:center");
+        assertThat(centerHints.path("presentationAffordance").path("source").asText())
+                .isEqualTo("presentationAffordanceDiscovery");
+    }
+
+    @Test
     void explicitSourceSelectionSkipsDomainCatalogFanOutForExplicitCandidate() {
         AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
                 Mockito.mock(AgenticAuthoringDomainCatalogCandidateEnhancer.class);
