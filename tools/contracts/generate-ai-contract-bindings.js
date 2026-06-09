@@ -481,7 +481,9 @@ export interface AgenticAuthoringQuickReplyContract {
   icon?: string | null;
   tone?: string | null;
   contextHints?: AiContextHintsContract | null;
-  [key: string]: AiJsonValue | AiContextHintsContract | undefined;
+  semanticDecision?: AgenticAuthoringSemanticDecisionContract | null;
+  value?: AiJsonObject | AiJsonValue | null;
+  [key: string]: AiJsonValue | AiContextHintsContract | AgenticAuthoringSemanticDecisionContract | null | undefined;
 }
 
 export interface AgenticAuthoringSemanticSelectedResourceContract {
@@ -657,7 +659,10 @@ export interface AgenticAuthoringTurnStreamRequestContract
   contextHints?: AiContextHintsContract | null;
   componentCapabilities?: AgenticAuthoringComponentCapabilitiesResultContract | null;
   activeSemanticDecision?: AgenticAuthoringSemanticDecisionContract | null;
-  [key: string]: AiJsonValue | AiContextHintsContract | AgenticAuthoringComponentCapabilitiesResultContract | AgenticAuthoringSemanticDecisionContract | AgenticAuthoringConversationMessageContract[] | AgenticAuthoringPendingClarificationContract | AgenticAuthoringAttachmentSummaryContract[] | undefined;
+  diagnostics?: AiJsonObject | null;
+  runtimeComponentObservations?: unknown[] | null;
+  runtimeComponentObservationTrustBoundary?: 'untrusted_frontend_observation' | null;
+  [key: string]: AiJsonValue | AiContextHintsContract | AgenticAuthoringComponentCapabilitiesResultContract | AgenticAuthoringSemanticDecisionContract | AgenticAuthoringConversationMessageContract[] | AgenticAuthoringPendingClarificationContract | AgenticAuthoringAttachmentSummaryContract[] | unknown[] | undefined;
 }
 
 export interface AgenticAuthoringSemanticAxisDecisionDiagnosticContract {

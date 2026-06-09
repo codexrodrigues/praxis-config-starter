@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -198,6 +199,124 @@ class AgenticAuthoringTurnStreamServiceTest {
                             .isGreaterThanOrEqualTo(1L);
                     org.assertj.core.api.Assertions.assertThat(node.path("state").asText()).isEqualTo("in_progress");
                 });
+    }
+
+    @Test
+    void startPassesGroundedRuntimeComponentContextToAsyncTurnEngine() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = new AgenticAuthoringTurnStreamRequest(
+                "Quem participa da missão selecionada?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session-runtime",
+                "turn-runtime-grounding",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                List.of(runtimeObservation()),
+                AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION);
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+        CountDownLatch processed = new CountDownLatch(1);
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Quem participa da missão selecionada?")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        when(turnEventService.findLastEvent(any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
+                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
+                        .eventId(UUID.randomUUID())
+                        .streamId(invocation.getArgument(1, UUID.class))
+                        .threadId(invocation.getArgument(2, UUID.class))
+                        .turnId(invocation.getArgument(3, UUID.class))
+                        .type(invocation.getArgument(4, String.class))
+                        .timestamp(Instant.now())
+                        .payload(objectMapper.valueToTree(invocation.getArgument(5)))
+                        .build());
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+        when(turnEngine.execute(any(), eq(principalContext), any(), eq("http://localhost")))
+                .thenAnswer(invocation -> {
+                    processed.countDown();
+                    return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.completed(
+                            new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState(
+                                    "consultative_fast_path",
+                                    null,
+                                    null));
+                });
+
+        AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
+                turnEngine,
+                threadService,
+                turnService,
+                turnEventService,
+                streamAccessTokenService);
+        service.start(request, "http://localhost", principalContext);
+
+        org.assertj.core.api.Assertions.assertThat(processed.await(2, TimeUnit.SECONDS)).isTrue();
+        service.shutdown();
+        ArgumentCaptor<AgenticAuthoringTurnStreamRequest> requestCaptor =
+                ArgumentCaptor.forClass(AgenticAuthoringTurnStreamRequest.class);
+        verify(turnEngine).execute(requestCaptor.capture(), eq(principalContext), any(), eq("http://localhost"));
+        JsonNode groundedContext = requestCaptor.getValue().contextHints().path("groundedRuntimeComponentContext");
+        org.assertj.core.api.Assertions.assertThat(groundedContext.path("canonicalContext").asText())
+                .isEqualTo("GroundedRuntimeComponentContext");
+        org.assertj.core.api.Assertions.assertThat(groundedContext.path("availableSurfaces").toString())
+                .contains("missionTeam");
+        org.assertj.core.api.Assertions.assertThat(groundedContext.toString())
+                .doesNotContain("Ana Torres")
+                .doesNotContain("sampleRows");
+    }
+
+    @Test
+    void startWithExistingClientTurnIdReplaysExistingStreamWithoutProcessingAgain() {
+        UUID threadId = UUID.randomUUID();
+        UUID streamId = UUID.randomUUID();
+        Instant createdAt = Instant.now().minusSeconds(5);
+        Instant expiresAt = Instant.now().plusSeconds(300);
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = request();
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class)))
+                .thenReturn(Optional.of(new AiTurnEventService.StreamStartMetadata(
+                        streamId,
+                        threadId,
+                        UUID.randomUUID(),
+                        createdAt,
+                        expiresAt,
+                        "request-hash",
+                        "status")));
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+
+        AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
+                turnEngine,
+                threadService,
+                turnService,
+                turnEventService,
+                streamAccessTokenService);
+
+        AgenticAuthoringTurnStreamService.StartResult result =
+                service.start(request, "http://localhost", principalContext);
+        service.shutdown();
+
+        org.assertj.core.api.Assertions.assertThat(result.created()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.response().getStreamId()).isEqualTo(streamId);
+        verify(turnService, never()).reserveTurnForStreaming(any(), any());
+        verify(turnEngine, never()).execute(any(), any(), any(), anyString());
+        verify(turnEventService, never()).appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any());
     }
 
     @Test
@@ -480,6 +599,47 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void heartbeatDiagnosticsMarkRuntimeAuditPhaseAsTechnicalDuplicate() {
+        UUID streamId = UUID.randomUUID();
+        ObjectNode payload = objectMapper.createObjectNode()
+                .put("phase", "runtime.tool-plan.step")
+                .put("summary", "Runtime tool plan step status recorded.");
+        payload.putObject("streamEventDiagnostics")
+                .put("schemaVersion", "praxis-authoring-stream-event-diagnostics.v1")
+                .put("dedupeKey", "runtime.tool-plan.step:consultativeIntent:runtime-tool-step:missionTeam")
+                .put("eventUniquenessKey", "runtime.tool-plan.step:consultativeIntent:runtime-tool-step:missionTeam")
+                .put("technicalDuplicate", false)
+                .put("replaySafe", true)
+                .put("duplicatesDoNotIndicateExecution", true);
+        AiTurnEventEnvelope tail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(streamId)
+                .type("thought.step")
+                .payload(payload)
+                .build();
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> diagnostics = ReflectionTestUtils.invokeMethod(
+                service(),
+                "technicalDuplicateStreamEventDiagnostics",
+                "heartbeat",
+                streamId,
+                "runtime.tool-plan.step",
+                tail);
+
+        org.assertj.core.api.Assertions.assertThat(diagnostics)
+                .containsEntry("schemaVersion", "praxis-authoring-stream-event-diagnostics.v1")
+                .containsEntry("dedupeKey", "runtime.tool-plan.step:consultativeIntent:runtime-tool-step:missionTeam")
+                .containsEntry("technicalDuplicate", true)
+                .containsEntry("technicalDuplicateOf", "runtime.tool-plan.step:consultativeIntent:runtime-tool-step:missionTeam")
+                .containsEntry("replaySafe", true)
+                .containsEntry("duplicatesDoNotIndicateExecution", true);
+        org.assertj.core.api.Assertions.assertThat(String.valueOf(diagnostics.get("eventUniquenessKey")))
+                .contains("heartbeat")
+                .contains("runtime.tool-plan.step");
+    }
+
+    @Test
     void cancelDoesNotOverwriteTurnWhenTerminalEventWinsRace() {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();
@@ -535,6 +695,45 @@ class AgenticAuthoringTurnStreamServiceTest {
                 List.of(),
                 null,
                 null);
+    }
+
+    private JsonNode runtimeObservation() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-runtime-component-observation.v1",
+                  "identity": {
+                    "instanceId": "mission-summary-table",
+                    "componentId": "praxis-table",
+                    "componentType": "table",
+                    "widgetKey": "missionSummary",
+                    "ownerPackage": "@praxisui/table"
+                  },
+                  "refs": {
+                    "resourceKey": "missions",
+                    "pageId": "mission-command-center"
+                  },
+                  "lifecycle": {
+                    "active": true,
+                    "visible": true
+                  },
+                  "snapshot": {
+                    "selectionDigest": {
+                      "selectedCount": 1,
+                      "selectedIds": ["1"],
+                      "idField": "missaoId",
+                      "sampleRows": [{"titulo": "Operacao Aurora"}]
+                    },
+                    "schemaFieldRefs": ["titulo", "status", "prioridade", "ameaca"]
+                  },
+                  "affordances": {
+                    "activeSurfaceRefs": ["missionTeam"],
+                    "activeActionRefs": ["table.selection", "dynamicPage.surface.open"]
+                  },
+                  "claims": [
+                    {"kind": "surface", "ref": "missionTeam", "observed": true}
+                  ]
+                }
+                """);
     }
 
     private AgenticAuthoringIntentResolutionResult validIntent() {

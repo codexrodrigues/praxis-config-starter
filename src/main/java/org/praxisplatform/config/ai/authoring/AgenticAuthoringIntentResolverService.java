@@ -5143,7 +5143,9 @@ public class AgenticAuthoringIntentResolverService {
                 firstNonBlank(reply.description(), alignmentOptionDescription(value)),
                 alignmentOptionIcon(value),
                 firstNonBlank(reply.tone(), "neutral"),
-                canonicalAlignmentContextHints(reply.contextHints(), value, request));
+                canonicalAlignmentContextHints(reply.contextHints(), value, request),
+                reply.semanticDecision(),
+                reply.value());
     }
 
     private ObjectNode canonicalAlignmentContextHints(
@@ -5813,7 +5815,9 @@ public class AgenticAuthoringIntentResolverService {
                         sanitizePresentationText(reply.description(), selectedCandidate, candidates),
                         reply.icon(),
                         reply.tone(),
-                        reply.contextHints()))
+                        reply.contextHints(),
+                        reply.semanticDecision(),
+                        reply.value()))
                 .toList();
     }
 

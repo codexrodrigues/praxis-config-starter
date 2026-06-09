@@ -237,12 +237,21 @@ public class AgenticAuthoringAutoConfiguration {
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
             ObjectProvider<AgenticAuthoringConsultativeApiCatalogProjectionService> consultativeApiCatalogProjectionService,
-            ObjectProvider<AgenticAuthoringToolRegistry> toolRegistry) {
+            ObjectProvider<AgenticAuthoringToolRegistry> toolRegistry,
+            @Value("${praxis.ai.authoring.runtime-tool.policy-ref:runtime-tool-policy:single-read-beta}")
+            String runtimeToolPolicyRef,
+            @Value("${praxis.ai.authoring.runtime-related-surface.intent-policy-ref:runtime-related-surface-intent-policy:llm}")
+            String runtimeRelatedSurfaceIntentPolicyRef,
+            @Value("${praxis.ai.authoring.runtime-related-surface.temporal-comparison-field-ref:ocorridoEm}")
+            String temporalComparisonFieldRef) {
         return new AgenticAuthoringConsultativeAnswerService(
                 providerManagementService,
                 objectMapper,
                 consultativeApiCatalogProjectionService.getIfAvailable(),
-                toolRegistry.getIfAvailable());
+                toolRegistry.getIfAvailable(),
+                runtimeToolPolicyRef,
+                runtimeRelatedSurfaceIntentPolicyRef,
+                temporalComparisonFieldRef);
     }
 
     @Bean

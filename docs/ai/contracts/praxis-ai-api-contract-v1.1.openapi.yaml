@@ -1523,7 +1523,7 @@ components:
       required: false
       schema:
         type: string
-        default: 41767dafdf6ebea802c083d77187ad6612937d6831188938dc21adce384b57a2
+        default: daab9623a5c4d660105dfe1c85a6bd1ee1ef1b54ef5981e26d27c44aa82ddb4f
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1553,7 +1553,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 41767dafdf6ebea802c083d77187ad6612937d6831188938dc21adce384b57a2
+        example: daab9623a5c4d660105dfe1c85a6bd1ee1ef1b54ef5981e26d27c44aa82ddb4f
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2024,6 +2024,24 @@ components:
               $ref: '#/components/schemas/AgenticAuthoringSemanticDecision'
               nullable: true
               description: Decisao semantica ativa carregada da conversa/thread para orientar refinamentos do proximo turno sem depender apenas do texto conversacional.
+            diagnostics:
+              type: object
+              nullable: true
+              description: Diagnosticos seguros do turno anterior preservados pelo cliente. Podem incluir runtimeRelatedSurfaceDisambiguationContext como grounding read-free; esse bloco nao autoriza leituras nem substitui activeSemanticDecision. Para ser considerado pelo backend, runtimeRelatedSurfaceDisambiguationContext deve carregar sessionId, sourceTurnId, pageId, capturedAt e ttlMs e ainda reconciliar suas opcoes contra candidatos aceitos no runtime atual; contexto expirado, de outra sessao/pagina, do mesmo clientTurnId ou com opcao antiga e ignorado fail-closed.
+              additionalProperties: true
+            runtimeComponentObservations:
+              type: array
+              nullable: true
+              description: Observacoes runtime opcionais enviadas pelo frontend como evidencia nao confiavel. O backend deve aterrar esses envelopes em GroundedRuntimeComponentContext antes de qualquer resposta e nao deve promover os claims diretamente a capabilities, permissoes ou execucao de actions. Quando relationSurfaceRefs publicar runtimeSurfaceInstanceRef/targetRuntimeSurfaceInstanceRef, essa identidade canonica governa a reconciliacao da superficie alvo; resourcePath ambiguo sem identidade canonica ou targetWidget reconciliavel deve falhar antes de qualquer HTTP.
+              items:
+                type: object
+                additionalProperties: true
+            runtimeComponentObservationTrustBoundary:
+              type: string
+              nullable: true
+              enum:
+                - untrusted_frontend_observation
+              description: Trust boundary obrigatorio quando runtimeComponentObservations for enviado.
 
     AgenticAuthoringSemanticAxisDecisionDiagnostic:
       type: object
@@ -2197,6 +2215,130 @@ components:
         decisionDiagnostics:
           $ref: '#/components/schemas/AgenticAuthoringDecisionDiagnostics'
           nullable: true
+        evidenceBundle:
+          type: object
+          nullable: true
+          description: >-
+            Evidencia consultiva sanitizada do turno. Pode incluir
+            runtimeConsultableContext, runtimeRelatedSurfaceResolution,
+            runtimeToolPlan, runtimeRelatedSurfaceReads[],
+            runtimeRelatedSurfaceDisambiguation, runtimeRelatedSurfaceSummary,
+            runtimeRelatedSurfaceCompare e o alias beta runtimeRelatedSurfaceRead.
+            runtimeToolPlan e um sub-budget auditavel do orcamento global do
+            engine e nao autoriza loops abertos de tools; politicas backend
+            multi-tool em dry-run podem planejar candidatos sem executar tools,
+            enquanto multi-tool-readonly-beta pode executar ate duas leituras
+            read-only governadas, incluindo summary como agregacao governada
+            sobre reads sanitizados, com fail-closed sem records parciais.
+            Compare sem comparisonDimension canonica aceita deve expor compare_planning_only,
+            runtime-related-surface-compare-not-enabled, zero reads e nenhum
+            runtimeRelatedSurfaceCompare; quando a decisao semantica retornar
+            COMPARISON_DIMENSION_FIELD e o backend reconciliar esse campo contra
+            as superficies aceitas, ou quando o backend inferir exatamente uma
+            dimensao comum nao sensivel a partir de contratos reconciliados,
+            pode executar o compare governado com ate dois reads governados,
+            governed_compare, comparisonDimension.source semantic_decision ou
+            backend_contract, provenance=backend_reconciled,
+            compareEvidenceEmitted=true e runtimeRelatedSurfaceCompare terminal
+            com fatos de contagem por superficie, distribuicao categorica,
+            projection_redaction_coverage, delta de contagem, overlap categorico
+            e record_presence_matrix, e temporal_coverage apenas quando a dimensao
+            aceita for temporal por fieldType date/date-time reconciliado em
+            schemaFieldDescriptors. Tipo temporal ausente ou divergente em qualquer
+            superficie comparada bloqueia antes de qualquer read. Se a resolucao
+            LLM da intencao runtime-related falhar sem activeSemanticDecision
+            governada, o fallback canonico e runtime_surface_disambiguation
+            read-free, sem steps, chamadas HTTP ou runtimeRelatedSurfaceReads; se
+            houver multiplas superficies aceitas, pode emitir
+            runtimeRelatedSurfaceDisambiguation.options[] sanitizado para escolha
+            de alvo.
+            Detail pode executar exatamente um read governado com governed_detail
+            quando houver uma unica superficie aceita ou quando a decisao
+            semantica retornar DETAIL_TARGET_SURFACE_REF e o backend reconciliar
+            esse surfaceRef contra um candidato aceito. Um follow-up de
+            desambiguacao tambem pode enviar
+            activeSemanticDecision.constraints.runtimeRelatedSurfaceDisambiguationSelection
+            com optionRef, candidateRef e surfaceRef emitidos anteriormente; o
+		            backend so executa detail quando esses refs forem reconciliados
+		            contra um candidato aceito no contexto runtime atual. Alvo ausente,
+		            ambiguo, divergente ou nao reconciliado bloqueia antes de qualquer
+		            read. Quando a primeira classificacao semantica runtime-related
+		            deixar uma intent targetable sem alvo, o backend pode primeiro
+		            reconciliar o alvo contra um catalogo backend-owned dos candidatos
+		            aceitos, usando somente surfaceRef, candidateRef,
+		            runtimeSurfaceInstanceRef, label e semanticAliases sanitizados como
+		            grounding. Esse passo so roda depois de list, summary ou detail
+		            semanticamente resolvido e TARGET_RESOLUTION_MODE=optional|required;
+		            nao decide intencao primaria, nao usa hints de frontend como
+		            autorizacao e nao executa tool. Quando a primeira decisao ficar
+			            em runtime_surface_disambiguation com
+			            TARGET_RESOLUTION_MODE=required, ou com optional e objetivo
+			            explicitamente de detalhe/foco, o catalogo tambem pode resolver
+			            somente o alvo e materializar runtime_related_surface_detail,
+			            porque a classificacao semantica ja declarou que ha um alvo
+			            runtime-related a reconciliar antes da leitura; esse caminho
+			            continua proibido para availability, compare, list ou summary
+			            sem kind semanticamente resolvido. Quando o classificador falhar
+			            e o fallback conservador detectar detalhe/foco, o fallback pode
+			            declarar runtime_surface_disambiguation com
+			            TARGET_RESOLUTION_MODE=optional e permitir que o mesmo catalogo
+			            reconcilie somente o alvo; sem alvo unico aceito, o turno
+			            continua read-free/fail-closed. Termos de alvo em escopo
+			            simples de negacao do prompt, como nao detalhe participantes,
+			            nao pontuam no ranking do catalogo. Quando aceito,
+			            runtimeRelatedSurfaceResolution pode expor targetCandidateResolution
+		            com schemaVersion
+		            praxis-runtime-related-surface-target-candidate-resolution.v1,
+		            source=backend_runtime_target_catalog, targetResolutionMode,
+		            intentKind, targetSurfaceRef, candidateRef,
+			            runtimeSurfaceInstanceRef, matchedTermKind,
+			            provenance=backend_reconciled, accepted=true e score. Quando
+			            rejeitado ou ambiguo, o mesmo diagnostico pode declarar
+			            provenance=backend_rejected, failureCode e
+			            evaluatedCandidates[]; cada item e sanitizado e carrega apenas
+			            surfaceRef, candidateRef, runtimeSurfaceInstanceRef, matched,
+			            score, matchedTermKind, ignoredNegatedTermCount e failureCode,
+			            sem termo cru do prompt nem valores de registros. O caminho
+			            accepted=true permanece enxuto e nao precisa emitir
+			            evaluatedCandidates[].
+		            Se esse catalogo nao aceitar um unico alvo, ou se a primeira
+		            classificacao ficar conservadora, o backend so pode fazer uma
+		            segunda decisao semantica focada em KIND + TARGET_SURFACE_REF
+		            quando a primeira decisao declarar
+		            TARGET_RESOLUTION_MODE=optional|required;
+		            TARGET_RESOLUTION_MODE=none preserva multi-read e summary
+		            multi-superficie sem segunda LLM. Se tentada,
+		            runtimeRelatedSurfaceResolution pode expor targetRefinementDiagnostics
+		            com schemaVersion praxis-runtime-related-surface-target-refinement.v1,
+		            targetResolutionMode, initialKind, refinedKind, targetSurfaceRef,
+		            provenance, confidence, accepted e failureCode quando rejeitado.
+		            Esse diagnostico e sanitizado e nao autoriza leitura por si so.
+	            List direcionado pode executar exatamente um read governado com
+            governed_list_targeted quando a decisao semantica retornar
+            LIST_TARGET_SURFACE_REF e o backend reconciliar esse surfaceRef
+            contra um candidato aceito. O terminal pode expor
+            runtimeRelatedSurfaceResolution.listTarget,
+            runtimeToolPlan.readMode=list_targeted e
+            aggregationPolicy.mode=governed_list_targeted. Sem alvo reconciliado,
+            runtime_related_surface_list preserva o multi-read governado; alvo
+            divergente ou forjado bloqueia antes de qualquer HTTP.
+            Summary direcionado segue a mesma governanca: quando a decisao
+            semantica retornar SUMMARY_TARGET_SURFACE_REF e o backend reconciliar
+            esse surfaceRef contra um candidato aceito, executa exatamente um read
+            governado com runtimeRelatedSurfaceResolution.summaryTarget,
+            runtimeToolPlan.readMode=summary_targeted,
+            aggregationPolicy.mode=governed_summary_targeted e
+            runtimeRelatedSurfaceSummary derivado somente desse read sanitizado.
+            Sem alvo reconciliado, runtime_related_surface_summary preserva o
+            resumo multi-superficie governado; alvo divergente ou forjado bloqueia
+            antes de qualquer HTTP.
+            Hints de frontend
+            nao autorizam a dimensao; campos nao declarados, ambiguos,
+            omitidos/redigidos ou sensiveis bloqueiam antes de qualquer read.
+            Eventos tecnicos SSE podem carregar
+            streamEventDiagnostics com dedupeKey/replaySafe; duplicatas tecnicas
+            nao indicam nova execucao.
+          additionalProperties: true
         toolLoopTrace:
           type: array
           nullable: true
@@ -2925,6 +3067,15 @@ components:
           properties:
             domainCatalog:
               $ref: '#/components/schemas/AiDomainCatalogContextHint'
+          additionalProperties: true
+        semanticDecision:
+          $ref: '#/components/schemas/AgenticAuthoringSemanticDecision'
+          nullable: true
+          description: Decisao semantica backend-authored que o cliente deve reenviar como activeSemanticDecision quando o chip for selecionado.
+        value:
+          type: object
+          nullable: true
+          description: Valor estruturado seguro da opcao selecionavel, por exemplo refs de uma runtimeRelatedSurfaceDisambiguationSelection.
           additionalProperties: true
       additionalProperties: true
 

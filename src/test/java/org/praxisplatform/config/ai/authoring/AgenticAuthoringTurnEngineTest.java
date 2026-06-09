@@ -10,12 +10,18 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -98,6 +104,338 @@ class AgenticAuthoringTurnEngineTest {
                 .isTrue();
         org.assertj.core.api.Assertions.assertThat(result.path("intentResolution").path("artifactKind").asText())
                 .isEqualTo("api_catalog");
+    }
+
+    @Test
+    void groundsRuntimeComponentObservationsBeforeConsultativeFastPath() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        com.fasterxml.jackson.databind.node.ObjectNode evidenceBundle = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode resolution = evidenceBundle.putObject("runtimeRelatedSurfaceResolution");
+        resolution.put("schemaVersion", "praxis-runtime-related-surface-resolution.v1");
+        resolution.put("semanticDecisionRef", "consultativeIntent:runtime_related_surface_read");
+        resolution.put("selectedCandidateRef", "missionTeam");
+        resolution.put("selectedCandidateEvidenceRef", "runtime-surface-candidate:missionTeam");
+        resolution.putArray("candidates")
+                .addObject()
+                .put("candidateRef", "runtime-surface-candidate:missionTeam")
+                .put("surfaceRef", "missionTeam")
+                .put("status", "accepted");
+        evidenceBundle.putArray("runtimeRelatedSurfaceReads")
+                .addObject()
+                .put("surfaceRef", "missionTeam")
+                .put("recordCount", 2);
+        com.fasterxml.jackson.databind.node.ObjectNode toolPlan = evidenceBundle.putObject("runtimeToolPlan");
+        toolPlan.put("schemaVersion", "praxis-runtime-tool-plan.v1");
+        toolPlan.put("semanticDecisionRef", "consultativeIntent:runtime_related_surface_read");
+        toolPlan.put("intentKind", "runtime_related_surface_list");
+        toolPlan.put("readMode", "single");
+        toolPlan.putObject("budget")
+                .put("maxToolCalls", 1)
+                .put("maxRelatedSurfaceReads", 1)
+                .put("usedToolCalls", 1);
+        toolPlan.putArray("steps")
+                .addObject()
+                .put("stepRef", "runtime-tool-step:missionTeam")
+                .put("surfaceRef", "missionTeam")
+                .put("status", "executed");
+        toolPlan.putArray("blockedSteps");
+        when(consultativeAnswerService.answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(Optional.of(new AgenticAuthoringConsultativeAnswer(
+                        "platform_guidance",
+                        "answer_consultative_question",
+                        "A missão selecionada expõe a superfície de participantes como contexto consultável.",
+                        null,
+                        List.of("consultative-fast-path-used"),
+                        evidenceBundle)));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                null,
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                requestWithRuntimeObservation(
+                        "Quem participa da missão selecionada?",
+                        missionRuntimeObservation()),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        ArgumentCaptor<AgenticAuthoringTurnStreamRequest> requestCaptor =
+                ArgumentCaptor.forClass(AgenticAuthoringTurnStreamRequest.class);
+        verify(consultativeAnswerService).answer(
+                requestCaptor.capture(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        JsonNode groundedContext = requestCaptor.getValue()
+                .contextHints()
+                .path("groundedRuntimeComponentContext");
+        org.assertj.core.api.Assertions.assertThat(groundedContext.path("canonicalContext").asText())
+                .isEqualTo("GroundedRuntimeComponentContext");
+        org.assertj.core.api.Assertions.assertThat(groundedContext.path("availableSurfaces").toString())
+                .contains("missionTeam");
+        org.assertj.core.api.Assertions.assertThat(groundedContext.path("allowedOperations").toString())
+                .contains("table.selection")
+                .contains("dynamicPage.surface.open");
+        org.assertj.core.api.Assertions.assertThat(groundedContext.toString())
+                .doesNotContain("Ana Torres")
+                .doesNotContain("Operacao Aurora")
+                .doesNotContain("sampleRows");
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence(
+                        "context.bundle",
+                        "runtime.context.grounding",
+                        "consultative.intent",
+                        "consultative.fast-path.probe",
+                        "runtime.related-surface.intent",
+                        "runtime.related-surface.candidates",
+                        "runtime.related-surface.read",
+                        "runtime.tool-plan.intent",
+                        "runtime.tool-plan.candidates",
+                        "runtime.tool-plan.created",
+                        "runtime.tool-plan.step",
+                        "runtime.tool-plan.aggregate",
+                        "consultative.answer");
+        JsonNode runtimeGroundingStep = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> "runtime.context.grounding".equals(payload.path("phase").asText("")))
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(runtimeGroundingStep.path("diagnostics").path("availableSurfaces").toString())
+                .contains("missionTeam");
+        org.assertj.core.api.Assertions.assertThat(runtimeGroundingStep.path("diagnostics").path("acceptedClaims").toString())
+                .contains("surface")
+                .contains("missionTeam");
+        org.assertj.core.api.Assertions.assertThat(runtimeGroundingStep.toString())
+                .doesNotContain("Ana Torres")
+                .doesNotContain("Operacao Aurora")
+                .doesNotContain("sampleRows");
+        JsonNode relatedSurfaceCandidatesStep = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> "runtime.related-surface.candidates".equals(payload.path("phase").asText("")))
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(relatedSurfaceCandidatesStep.path("diagnostics").toString())
+                .contains("runtime-surface-candidate:missionTeam")
+                .contains("selectedCandidateRef")
+                .contains("missionTeam");
+        JsonNode runtimeToolPlanStep = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> "runtime.tool-plan.created".equals(payload.path("phase").asText("")))
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(runtimeToolPlanStep.path("diagnostics").toString())
+                .contains("praxis-runtime-tool-plan.v1")
+                .contains("runtime_related_surface_list")
+                .contains("runtime-tool-step:missionTeam");
+        org.assertj.core.api.Assertions.assertThat(runtimeToolPlanStep.path("streamEventDiagnostics").toString())
+                .contains("praxis-authoring-stream-event-diagnostics.v1")
+                .contains("runtime.tool-plan.created:consultativeIntent:runtime_related_surface_read")
+                .contains("runtime_related_surface_list")
+                .contains("\"replaySafe\":true")
+                .contains("\"duplicatesDoNotIndicateExecution\":true");
+        JsonNode runtimeToolPlanAggregate = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> "runtime.tool-plan.aggregate".equals(payload.path("phase").asText("")))
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(runtimeToolPlanAggregate.path("streamEventDiagnostics").toString())
+                .contains("runtime.tool-plan.aggregate:consultativeIntent:runtime_related_surface_read")
+                .contains("runtime_related_surface_list")
+                .contains("\"duplicatesDoNotIndicateExecution\":true");
+        JsonNode consultativeAnswer = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> "consultative.answer".equals(payload.path("phase").asText("")))
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(consultativeAnswer.path("streamEventDiagnostics").toString())
+                .contains("consultative.answer:")
+                .contains("\"replaySafe\":true");
+        verify(intentResolverService, never()).resolve(any(), any(), any(), any());
+    }
+
+    @Test
+    void emitsDryRunRuntimeToolPlanDiagnosticsWithoutExecutableStepsOrReads() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        com.fasterxml.jackson.databind.node.ObjectNode evidenceBundle = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode resolution = evidenceBundle.putObject("runtimeRelatedSurfaceResolution");
+        resolution.put("schemaVersion", "praxis-runtime-related-surface-resolution.v1");
+        resolution.put("semanticDecisionRef", "consultativeIntent:runtime_related_surface_summary");
+        resolution.put("selectedCandidateRef", "missionTeam");
+        resolution.put("selectedCandidateEvidenceRef", "runtime-surface-candidate:missionTeam");
+        resolution.putArray("candidates")
+                .addObject()
+                .put("candidateRef", "runtime-surface-candidate:missionTeam")
+                .put("surfaceRef", "missionTeam")
+                .put("status", "accepted");
+        resolution.withArray("candidates")
+                .addObject()
+                .put("candidateRef", "runtime-surface-candidate:missionTimeline")
+                .put("surfaceRef", "missionTimeline")
+                .put("status", "accepted");
+        evidenceBundle.putArray("runtimeRelatedSurfaceReads");
+        com.fasterxml.jackson.databind.node.ObjectNode toolPlan = evidenceBundle.putObject("runtimeToolPlan");
+        toolPlan.put("schemaVersion", "praxis-runtime-tool-plan.v1");
+        toolPlan.put("semanticDecisionRef", "consultativeIntent:runtime_related_surface_summary");
+        toolPlan.put("intentKind", "runtime_related_surface_summary");
+        toolPlan.put("readMode", "none");
+        toolPlan.putObject("planner")
+                .put("schemaVersion", "praxis-runtime-tool-planner.v1")
+                .put("backendPolicyRef", "runtime-tool-policy:multi-tool-dry-run-beta")
+                .put("dryRun", true)
+                .put("multiToolExecutionEnabled", false)
+                .put("multiToolPlanningEnabled", true)
+                .put("executionMode", "dry_run");
+        toolPlan.putObject("multiToolAuthorization")
+                .put("source", "backend_policy")
+                .put("policyRef", "runtime-tool-policy:multi-tool-dry-run-beta")
+                .put("allowed", true);
+        toolPlan.putObject("budget")
+                .put("maxToolCalls", 0)
+                .put("globalMaxToolCalls", 0)
+                .put("usedToolCalls", 0);
+        toolPlan.putArray("steps");
+        toolPlan.putArray("blockedSteps");
+        toolPlan.putArray("candidateSteps")
+                .addObject()
+                .put("stepRef", "runtime-tool-step:missionTeam")
+                .put("surfaceRef", "missionTeam")
+                .put("executionStatus", "dry_run_planned")
+                .putObject("stepBudget")
+                .put("maxToolCalls", 0);
+        toolPlan.withArray("candidateSteps")
+                .addObject()
+                .put("stepRef", "runtime-tool-step:missionTimeline")
+                .put("surfaceRef", "missionTimeline")
+                .put("executionStatus", "dry_run_planned")
+                .putObject("stepBudget")
+                .put("maxToolCalls", 0);
+        toolPlan.putObject("executionDiagnostics")
+                .put("schemaVersion", "praxis-runtime-tool-plan-execution-diagnostics.v1")
+                .put("policyRef", "runtime-tool-policy:multi-tool-dry-run-beta")
+                .put("dryRun", true)
+                .put("multiToolExecutionEnabled", false)
+                .put("authorizedCandidateCount", 2)
+                .put("maxPlannedSteps", 2)
+                .put("maxExecutableSteps", 0)
+                .put("usedToolCalls", 0)
+                .put("backendReadsPerformed", false)
+                .put("nonExecutionReason", "runtime-multi-tool-dry-run-read-free");
+        when(consultativeAnswerService.answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(Optional.of(new AgenticAuthoringConsultativeAnswer(
+                        "platform_guidance",
+                        "answer_consultative_question",
+                        "Ha duas superficies relacionadas planejadas, sem leitura neste dry-run.",
+                        null,
+                        List.of("consultative-fast-path-used"),
+                        evidenceBundle)));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                null,
+                null,
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                requestWithRuntimeObservation(
+                        "Resuma os dados relacionados da missão selecionada.",
+                        missionRuntimeObservationWithTeamAndTimeline()),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence(
+                        "runtime.tool-plan.created",
+                        "runtime.tool-plan.aggregate",
+                        "consultative.answer")
+                .doesNotContain("runtime.tool-plan.step");
+        JsonNode created = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> "runtime.tool-plan.created".equals(payload.path("phase").asText("")))
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(created.path("diagnostics").toString())
+                .contains("runtime-tool-policy:multi-tool-dry-run-beta")
+                .contains("\"dryRun\":true")
+                .contains("\"multiToolExecutionEnabled\":false")
+                .contains("\"authorizedCandidateCount\":2")
+                .contains("\"maxExecutableSteps\":0")
+                .contains("\"maxToolCalls\":0")
+                .contains("missionTeam")
+                .contains("missionTimeline")
+                .doesNotContain("runtimeRelatedSurfaceReads\":[{");
+        org.assertj.core.api.Assertions.assertThat(created.path("streamEventDiagnostics").toString())
+                .contains("praxis-authoring-stream-event-diagnostics.v1")
+                .contains("runtime.tool-plan.created:consultativeIntent:runtime_related_surface_summary")
+                .contains("runtime-tool-policy:multi-tool-dry-run-beta")
+                .contains("\"technicalDuplicate\":false")
+                .contains("\"duplicatesDoNotIndicateExecution\":true");
+        JsonNode aggregate = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> "runtime.tool-plan.aggregate".equals(payload.path("phase").asText("")))
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(aggregate.path("diagnostics").toString())
+                .contains("runtime-tool-policy:multi-tool-dry-run-beta")
+                .contains("\"dryRun\":true")
+                .contains("\"multiToolExecutionEnabled\":false")
+                .contains("\"authorizedCandidateCount\":2")
+                .contains("\"candidateStepCount\":2")
+                .contains("\"blockedStepCount\":0")
+                .contains("\"maxPlannedSteps\":2")
+                .contains("\"maxExecutableSteps\":0")
+                .contains("\"backendReadsPerformed\":false")
+                .contains("\"readCount\":0")
+                .contains("\"usedToolCalls\":0")
+                .contains("\"maxToolCalls\":0")
+                .contains("runtime-multi-tool-dry-run-read-free");
+        org.assertj.core.api.Assertions.assertThat(aggregate.path("streamEventDiagnostics").toString())
+                .contains("runtime.tool-plan.aggregate:consultativeIntent:runtime_related_surface_summary")
+                .contains(":0:0")
+                .contains("\"replaySafe\":true");
+        JsonNode result = sink.payloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(payload -> payload.path("streamEventDiagnostics").isObject()
+                        && payload.path("assistantMessage").isTextual())
+                .findFirst()
+                .orElse(objectMapper.createObjectNode());
+        org.assertj.core.api.Assertions.assertThat(result.path("streamEventDiagnostics").toString())
+                .contains("result:consultative_fast_path")
+                .contains("\"duplicatesDoNotIndicateExecution\":true");
+        verify(intentResolverService, never()).resolve(any(), any(), any(), any());
+        verify(previewService, never()).preview(any(), any(), any(), any());
     }
 
     @Test
@@ -543,6 +881,5198 @@ class AgenticAuthoringTurnEngineTest {
                 .contains("\"column.renderer.compose\"")
                 .contains("\"column.align\"")
                 .doesNotContain("\"column.format.date\"");
+    }
+
+    @Test
+    void consultativeAnswerPromptIncludesGroundedRuntimeComponentContext() throws Exception {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        when(providerManagementService.generateText(
+                anyString(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("""
+                        KIND: runtime_related_surface_availability
+                        CONFIDENCE: 0.91
+                        REASON: The user asks which governed runtime-related surfaces are available.
+                        """);
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                null,
+                null);
+        com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode groundedRuntimeContext =
+                new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                        List.of(missionRuntimeObservation()),
+                        AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION);
+        groundedRuntimeContext.set("acceptedClaims", objectMapper.createArrayNode()
+                .add(objectMapper.createObjectNode()
+                        .put("kind", "selection")
+                        .put("ref", "table-row-selection")
+                        .put("observed", true)));
+        contextHints.set(
+                "groundedRuntimeComponentContext",
+                groundedRuntimeContext);
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                requestWithContextHints("O que posso consultar aqui sem criar nada?", contextHints),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(providerManagementService).generateText(
+                promptCaptor.capture(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(promptCaptor.getValue())
+                .contains("classifying a consultative runtime-related surface intent")
+                .contains("Governed runtime evidence, sanitized:")
+                .contains("\"missionTeam\"")
+                .contains("\"table.selection\"")
+                .doesNotContain("Ana Torres")
+                .doesNotContain("Operacao Aurora")
+                .doesNotContain("sampleRows");
+    }
+
+    @Test
+    void consultativeAnswerUsesRuntimeSurfaceFallbackWithoutInventingRelatedRecords() throws Exception {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                null,
+                null);
+        com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.set(
+                "groundedRuntimeComponentContext",
+                new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                        List.of(missionRuntimeObservation()),
+                        AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                requestWithContextHints("Quem participa da missão selecionada?", contextHints),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                .contains("superfície runtime consultável")
+                .contains("missionTeam")
+                .contains("tool backend read-only")
+                .doesNotContain("Ana Torres")
+                .doesNotContain("Bruno Lima")
+                .doesNotContain("Operacao Aurora");
+        org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                .contains("runtime-component-context-consultative-answer-used",
+                        "runtime-related-surface-read-tool-required");
+        org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeConsultableContext").toString())
+                .contains("missionTeam")
+                .contains("table.selection")
+                .doesNotContain("Ana Torres")
+                .doesNotContain("Bruno Lima")
+                .doesNotContain("Operacao Aurora");
+        verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+    }
+
+    @Test
+    void consultativeAnswerReadsRelatedRuntimeSurfaceThroughGovernedBackendTool() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER", "principal": true, "resultado": "OK", "missaoTitulo": "Operacao Aurora"},
+                          {"id": 11, "funcionarioNome": "Bruno Lima", "papel": "SUPORTE", "principal": false, "resultado": "OK", "missaoTitulo": "Operacao Aurora"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(missionRuntimeObservation(), missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quem participa da missão selecionada?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(requestBody.get()).contains("\"missaoId\":1");
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("Ana Torres")
+                    .contains("Bruno Lima")
+                    .contains("LIDER")
+                    .contains("SUPORTE")
+                    .doesNotContain("não devo inventar")
+                    .doesNotContain("Operacao Aurora");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .doesNotContain("runtime-related-surface-read-tool-required");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceRead").toString())
+                    .contains("Ana Torres")
+                    .contains("Bruno Lima")
+                    .doesNotContain("Operacao Aurora");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeToolPlan")
+                            .toString())
+                    .contains("praxis-runtime-tool-plan.v1")
+                    .contains("runtime_related_surface_list")
+                    .contains("runtime-tool-step:missionTeam")
+                    .contains("\"usedToolCalls\":1")
+                    .contains("\"maxToolCalls\":1");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceReads")
+                            .path(0)
+                            .path("diagnostics")
+                            .path("stepRef")
+                            .asText())
+                    .isEqualTo("runtime-tool-step:missionTeam");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("candidates")
+                            .toString())
+                    .contains("missionTeam")
+                    .contains("acceptedClaims")
+                    .contains("query-mapping-complete");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void consultativeAnswerUsesTableSelectionWhenPageObservationHasEmptyDigest() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER", "principal": true, "resultado": "OK", "missaoTitulo": "Operacao Aurora"},
+                          {"id": 11, "funcionarioNome": "Bruno Lima", "papel": "SUPORTE", "principal": false, "resultado": "OK", "missaoTitulo": "Operacao Aurora"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionPageRuntimeObservationWithEmptySelection(),
+                                    missionRuntimeObservation(),
+                                    missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quem participa da missão selecionada?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(requestBody.get()).contains("\"missaoId\":1");
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("Ana Torres")
+                    .contains("Bruno Lima")
+                    .contains("LIDER")
+                    .contains("SUPORTE")
+                    .doesNotContain("Operacao Aurora");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .doesNotContain("runtime-related-surface-read-tool-required");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void consultativeAnswerDoesNotReadRelatedRuntimeSurfaceWhenSelectionDigestIsEmpty() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(missionPageRuntimeObservationWithEmptySelection()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quem participa da missão selecionada?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            answer.ifPresent(runtimeAnswer -> {
+                org.assertj.core.api.Assertions.assertThat(runtimeAnswer.assistantMessage())
+                        .doesNotContain("Ana Torres");
+                org.assertj.core.api.Assertions.assertThat(runtimeAnswer.warnings())
+                        .doesNotContain("runtime-related-surface-read-tool-used");
+                org.assertj.core.api.Assertions.assertThat(runtimeAnswer.evidenceBundle().has("runtimeRelatedSurfaceRead"))
+                        .isFalse();
+                org.assertj.core.api.Assertions.assertThat(runtimeAnswer.evidenceBundle()
+                                .path("runtimeToolPlan")
+                                .path("budget")
+                                .path("usedToolCalls")
+                                .asInt(-1))
+                        .isZero();
+            });
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void consultativeAvailabilityIntentCreatesReadFreeRuntimeToolPlan() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_availability");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("runtimeRelatedSurfaceIntentKind", "runtime_related_surface_compare");
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(missionRuntimeObservation(), missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Que dados relacionados posso consultar?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("superfícies consultáveis")
+                    .contains("missionTeam")
+                    .doesNotContain("Ana Torres");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-availability-read-free")
+                    .doesNotContain("runtime-related-surface-read-tool-used")
+                    .doesNotContain("runtime-related-surface-read-tool-required");
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("semanticDecisionRef").asText())
+                    .isEqualTo("consultativeIntent:runtime_related_surface_availability");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_availability");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("maxToolCalls").asInt(-1))
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("usedToolCalls").asInt(-1))
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("budget")
+                            .path("usedToolCalls")
+                            .asInt(-1))
+                    .isZero();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeRelatedSurfaceIntentClassifierFailureFallsBackReadFreeBeforeTools() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenThrow(new RuntimeException("semantic classifier unavailable"));
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-disambiguation-read-free")
+                    .doesNotContain("runtime-related-surface-intent-not-supported")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            JsonNode bundle = answer.get().evidenceBundle();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("semanticDecisionRef").asText())
+                    .isEqualTo("consultativeIntent:runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("usedToolCalls").asInt(-1))
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            JsonNode disambiguation = bundle.path("runtimeRelatedSurfaceDisambiguation");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-disambiguation.v1");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("status").asText())
+                    .isEqualTo("requires_target_selection");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("backendReadsPerformed").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("options").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("options").toString())
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("runtime-related-surface-projection:declared-fields-v1")
+                    .contains("runtime-related-surface-redaction:sensitive-scalars-v1")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Operacao Aurora");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void consultativeAnswerResolvesNaturalAvailabilityIntentWithoutReadTool() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_availability");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(missionRuntimeObservation(), missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Que dados relacionados posso consultar para esta missão?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("superfícies consultáveis")
+                    .contains("missionTeam")
+                    .doesNotContain("Ana Torres");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-availability-read-free")
+                    .doesNotContain("runtime-related-surface-read-tool-used")
+                    .doesNotContain("runtime-related-surface-read-tool-required");
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("semanticDecisionRef").asText())
+                    .isEqualTo("consultativeIntent:runtime_related_surface_availability");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_availability");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-tool-planner.v1");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("multiToolExecutionEnabled").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("readFreeIntent").asBoolean(false))
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("maxToolCallsMayExceedOne").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("backendPolicyRef").asText())
+                    .isEqualTo("runtime-tool-policy:single-read-beta");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("multiToolAuthorization").toString())
+                    .contains("praxis-runtime-tool-multi-tool-authorization.v1")
+                    .contains("backend_policy")
+                    .contains("runtime-tool-policy:single-read-beta")
+                    .contains("runtime-multi-tool-policy-not-enabled")
+                    .contains("\"allowed\":false");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.has("multiToolGuardrail"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("praxis-runtime-tool-aggregation-policy.v1")
+                    .contains("fail_closed")
+                    .contains("\"maxInputReads\":0");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("maxToolCalls").asInt(-1))
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").path(0).path("executionStatus").asText())
+                    .isEqualTo("read_free");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").path(0).toString())
+                    .contains("\"maxToolCalls\":0")
+                    .contains("runtime-related-surface-projection:declared-fields-v1")
+                    .contains("runtime-related-surface-redaction:sensitive-scalars-v1");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("budget")
+                            .path("usedToolCalls")
+                            .asInt(-1))
+                    .isZero();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void consultativeAnswerBlocksSummaryRuntimeRelatedIntentUntilMultiSurfaceIsEnabled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_summary");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(missionRuntimeObservation(), missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Resuma os participantes da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("ainda não habilitada")
+                    .doesNotContain("Ana Torres");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-intent-not-supported")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("semanticDecisionRef").asText())
+                    .isEqualTo("consultativeIntent:runtime_related_surface_summary");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_summary");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-tool-planner.v1");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("multiToolExecutionEnabled").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("planningOnlyForUnsupportedIntents").asBoolean(false))
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").path("maxToolCallsMayExceedOne").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("multiToolAuthorization").toString())
+                    .contains("runtime-tool-policy:single-read-beta")
+                    .contains("runtime-multi-tool-policy-not-enabled")
+                    .contains("\"allowed\":false");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.has("multiToolGuardrail"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("praxis-runtime-tool-aggregation-policy.v1")
+                    .contains("\"mode\":\"none\"")
+                    .contains("\"maxInputReads\":0");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("maxToolCalls").asInt(-1))
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").path(0).toString())
+                    .contains("missionTeam")
+                    .contains("runtime-related-surface-intent-not-supported")
+                    .contains("runtime_related_surface_summary")
+                    .contains("\"maxToolCalls\":0")
+                    .contains("runtime-related-surface-projection:declared-fields-v1")
+                    .contains("runtime-related-surface-redaction:sensitive-scalars-v1");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").path(0).toString())
+                    .contains("missionTeam")
+                    .contains("blocked_by_intent")
+                    .contains("query-mapping-complete")
+                    .contains("\"maxToolCalls\":0");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanKeepsComparePlanningOnlyUnderReadonlyPolicy() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"evento\":\"Briefing\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("compare ainda está em modo planning-only governado")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Briefing");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-compare-planning-only")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_compare");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").toString())
+                    .contains("runtime-tool-policy:multi-tool-readonly-beta")
+                    .contains("\"executionMode\":\"read_only\"")
+                    .contains("\"multiToolPlanningEnabled\":true")
+                    .contains("\"planningOnlyForUnsupportedIntents\":true");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"compare_planning_only\"")
+                    .contains("\"maxInputReads\":0")
+                    .contains("fail_closed");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").toString())
+                    .contains("\"maxToolCalls\":0")
+                    .contains("\"usedToolCalls\":0")
+                    .contains("\"maxRelatedSurfaceReads\":0")
+                    .contains("\"maxReads\":0");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").toString())
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("compare_planning_only")
+                    .contains("\"maxToolCalls\":0");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").path(0).toString())
+                    .contains("runtime_related_surface_compare")
+                    .contains("runtime-related-surface-compare-not-enabled")
+                    .contains("compare-planning-only");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"planningOnly\":true")
+                    .contains("\"aggregateStatus\":\"blocked\"")
+                    .contains("runtime-related-surface-compare-not-enabled")
+                    .contains("\"backendReadsPerformed\":false")
+                    .contains("\"usedToolCalls\":0");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareEmitsGovernedTerminalEvidenceFromSanitizedReads() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "status": "ATIVO", "ordem": 1},
+                          {"id": 11, "funcionarioNome": "Bruno Lima", "status": "ATIVO", "ordem": 2}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO", "ordem": 1}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare", "ordem");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo por ordem.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("compare governado foi materializado")
+                    .contains("sem nova tool")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Briefing");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .contains("runtime-related-surface-compare-aggregate-used")
+                    .doesNotContain("runtime-related-surface-compare-planning-only");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isTrue();
+            JsonNode compare = answer.get().evidenceBundle().path("runtimeRelatedSurfaceCompare");
+            org.assertj.core.api.Assertions.assertThat(compare.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-compare.v1");
+            org.assertj.core.api.Assertions.assertThat(compare.path("aggregationMode").asText())
+                    .isEqualTo("governed_compare");
+            org.assertj.core.api.Assertions.assertThat(compare.path("comparisonDimension").toString())
+                    .contains("\"fieldRef\":\"ordem\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+            org.assertj.core.api.Assertions.assertThat(compare.path("recordCountsBySurface").toString())
+                    .contains("\"missionTeam\":2")
+                    .contains("\"missionTimeline\":1");
+            org.assertj.core.api.Assertions.assertThat(compare.path("categoricalDistributionBySurface").toString())
+                    .contains("\"missionTeam\":{\"1\":1,\"2\":1}")
+                    .contains("\"missionTimeline\":{\"1\":1}");
+            org.assertj.core.api.Assertions.assertThat(compare.path("facts").toString())
+                    .contains("surface_record_count")
+                    .contains("categorical_distribution")
+                    .contains("projection_redaction_coverage")
+                    .contains("record_presence_matrix")
+                    .contains("record_count_delta")
+                    .contains("category_overlap")
+                    .contains("\"absoluteDelta\":1")
+                    .contains("\"sharedCategoryCount\":1")
+                    .contains("\"presenceBySurface\"")
+                    .contains("\"absenceIsNotEvidence\":true")
+                    .contains("\"projectionFieldRefs\"")
+                    .contains("\"omittedFieldRefs\"")
+                    .contains("\"leftOnlyCategories\":[\"2\"]")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Bruno Lima")
+                    .doesNotContain("Briefing");
+            org.assertj.core.api.Assertions.assertThat(compare.path("rawRuntimeValuesCopied").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(compare.path("redactionApplied").asBoolean(false))
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_compare");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("compare");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"governed_compare\"")
+                    .contains("\"compareEvidenceEmitted\":true")
+                    .contains("\"fieldRef\":\"ordem\"")
+                    .contains("\"provenance\":\"backend_reconciled\"")
+                    .contains("\"surface_record_count\"")
+                    .contains("\"categorical_distribution\"")
+                    .contains("\"projection_redaction_coverage\"")
+                    .contains("\"record_presence_matrix\"")
+                    .contains("\"record_count_delta\"")
+                    .contains("\"category_overlap\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"aggregateStatus\":\"success\"")
+                    .contains("\"compareEvidenceEmitted\":true")
+                    .contains("terminal_governed_compare_evidence")
+                    .contains("\"usedToolCalls\":2")
+                    .contains("\"backendReadsPerformed\":true");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionPolicy").asText())
+                    .isEqualTo("multi-tool-readonly-beta-governed-compare");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareOmitsTerminalEvidenceWhenReadProjectionMissesComparisonField() throws Exception {
+        AtomicInteger toolCalls = new AtomicInteger();
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare", "ordem");
+        AgenticAuthoringToolRegistry toolRegistry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper)) {
+            @Override
+            AgenticAuthoringToolResult execute(
+                    AgenticAuthoringToolCall call,
+                    org.praxisplatform.config.service.AiPrincipalContext principalContext,
+                    String phase) {
+                toolCalls.incrementAndGet();
+                RuntimeRelatedSurfaceReadToolRequest request = (RuntimeRelatedSurfaceReadToolRequest) call.payload();
+                com.fasterxml.jackson.databind.node.ObjectNode payload = objectMapper.createObjectNode();
+                payload.put("schemaVersion", "praxis-runtime-related-surface-read.v1");
+                payload.put("surfaceRef", request.surfaceRef());
+                payload.put("resourcePath", "missionTeam".equals(request.surfaceRef())
+                        ? "operations/missao-participantes"
+                        : "operations/missao-eventos");
+                payload.put("operation", "POST /filter");
+                payload.put("recordCount", 1);
+                payload.put("redactionApplied", true);
+                payload.put("rawRuntimeValuesCopied", false);
+                payload.put("truncated", false);
+                com.fasterxml.jackson.databind.node.ArrayNode projectionFields = payload.putArray("projectionFields");
+                if ("missionTeam".equals(request.surfaceRef())) {
+                    projectionFields.add("funcionarioNome");
+                } else {
+                    projectionFields.add("evento");
+                    projectionFields.add("ordem");
+                }
+                com.fasterxml.jackson.databind.node.ArrayNode records = payload.putArray("records");
+                com.fasterxml.jackson.databind.node.ObjectNode record = records.addObject();
+                record.put("ordem", 1);
+                record.put("label", "sanitized");
+                return AgenticAuthoringToolResult.success(
+                        call.name(),
+                        payload,
+                        Map.of(
+                                "surfaceRef", request.surfaceRef(),
+                                "recordCount", 1,
+                                "rawRuntimeValuesCopied", false));
+            }
+        };
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                null,
+                toolRegistry,
+                AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+        com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("requestBaseUrl", "http://localhost:65530");
+        contextHints.set(
+                "groundedRuntimeComponentContext",
+                new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                        List.of(
+                                missionRuntimeObservationWithTeamAndTimeline(),
+                                missionTeamRuntimeObservation(),
+                                missionTimelineRuntimeObservation()),
+                        AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                requestWithContextHints("Compare os participantes e a linha do tempo por ordem.", contextHints),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(toolCalls.get()).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                .isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                .isFalse();
+        JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+        org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                .contains("\"aggregateStatus\":\"success\"")
+                .contains("\"usedToolCalls\":2")
+                .contains("\"compareEvidenceEmitted\":false")
+                .contains("terminal_governed_compare_blocked")
+                .contains("runtime-related-surface-compare-projection-field-missing")
+                .contains("missionTeam");
+        org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                .contains("\"mode\":\"governed_compare\"")
+                .contains("\"compareEvidenceEmitted\":false")
+                .contains("terminal_governed_compare_blocked");
+        org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                .contains("runtime-related-surface-read-tool-used")
+                .doesNotContain("runtime-related-surface-compare-aggregate-used");
+        verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+    }
+
+    @Test
+    void runtimeToolPlanCompareDoesNotEmitPresenceMatrixWhenFactKindNotAllowed() throws Exception {
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                Mockito.mock(AiProviderManagementService.class),
+                objectMapper,
+                null,
+                null,
+                AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+        com.fasterxml.jackson.databind.node.ObjectNode toolPlan = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode aggregationPolicy = toolPlan.putObject("aggregationPolicy");
+        aggregationPolicy.set("comparisonDimension", acceptedCompareDimensionWithoutPresenceMatrix("ordem"));
+        toolPlan.putObject("executionDiagnostics").put("aggregateStatus", "success");
+        com.fasterxml.jackson.databind.node.ArrayNode reads = objectMapper.createArrayNode();
+        reads.add(compareRead("missionTeam", "runtime-tool-step:missionTeam", List.of("ordem"), List.of(1, 2)));
+        reads.add(compareRead("missionTimeline", "runtime-tool-step:missionTimeline", List.of("ordem"), List.of(1)));
+
+        java.lang.reflect.Method method = AgenticAuthoringConsultativeAnswerService.class.getDeclaredMethod(
+                "runtimeRelatedSurfaceCompareEvidence",
+                com.fasterxml.jackson.databind.node.ArrayNode.class,
+                com.fasterxml.jackson.databind.node.ObjectNode.class);
+        method.setAccessible(true);
+        JsonNode compare = (JsonNode) method.invoke(service, reads, toolPlan);
+
+        org.assertj.core.api.Assertions.assertThat(compare).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(compare.path("facts").toString())
+                .contains("surface_record_count")
+                .contains("categorical_distribution")
+                .contains("category_overlap")
+                .doesNotContain("record_presence_matrix")
+                .doesNotContain("presenceBySurface");
+    }
+
+    @Test
+    void runtimeToolPlanCompareEmitsTemporalCoverageForTemporalDimensionOnly() throws Exception {
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                Mockito.mock(AiProviderManagementService.class),
+                objectMapper,
+                null,
+                null,
+                AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+        com.fasterxml.jackson.databind.node.ObjectNode toolPlan = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode aggregationPolicy = toolPlan.putObject("aggregationPolicy");
+        aggregationPolicy.set("comparisonDimension", acceptedCompareDimensionTemporal("data"));
+        toolPlan.putObject("executionDiagnostics").put("aggregateStatus", "success");
+        com.fasterxml.jackson.databind.node.ArrayNode reads = objectMapper.createArrayNode();
+        reads.add(compareTemporalRead(
+                "missionTeam",
+                "runtime-tool-step:missionTeam",
+                List.of("data"),
+                List.of("2026-05-07", "2026-05-06", "")));
+        reads.add(compareTemporalRead(
+                "missionTimeline",
+                "runtime-tool-step:missionTimeline",
+                List.of("data"),
+                List.of("2026-05-08T10:15:00Z", "2026-05-08T11:00:00Z")));
+
+        java.lang.reflect.Method method = AgenticAuthoringConsultativeAnswerService.class.getDeclaredMethod(
+                "runtimeRelatedSurfaceCompareEvidence",
+                com.fasterxml.jackson.databind.node.ArrayNode.class,
+                com.fasterxml.jackson.databind.node.ObjectNode.class);
+        method.setAccessible(true);
+        JsonNode compare = (JsonNode) method.invoke(service, reads, toolPlan);
+
+        org.assertj.core.api.Assertions.assertThat(compare).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(compare.path("facts").toString())
+                .contains("temporal_coverage")
+                .contains("\"fieldRef\":\"data\"")
+                .contains("\"minValue\":\"2026-05-06\"")
+                .contains("\"maxValue\":\"2026-05-07\"")
+                .contains("\"minValue\":\"2026-05-08T10:15:00Z\"")
+                .contains("\"maxValue\":\"2026-05-08T11:00:00Z\"")
+                .contains("\"recordCountWithValue\":2")
+                .contains("\"recordCountMissingValue\":1")
+                .contains("\"rawRuntimeValuesCopied\":false");
+    }
+
+    @Test
+    void runtimeToolPlanCompareDoesNotEmitTemporalCoverageForUntypedCategoricalDimension() throws Exception {
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                Mockito.mock(AiProviderManagementService.class),
+                objectMapper,
+                null,
+                null,
+                AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+        com.fasterxml.jackson.databind.node.ObjectNode toolPlan = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode aggregationPolicy = toolPlan.putObject("aggregationPolicy");
+        aggregationPolicy.set("comparisonDimension", acceptedCompareDimensionWithTemporalCoverageButNoTemporalType("ordem"));
+        toolPlan.putObject("executionDiagnostics").put("aggregateStatus", "success");
+        com.fasterxml.jackson.databind.node.ArrayNode reads = objectMapper.createArrayNode();
+        reads.add(compareRead("missionTeam", "runtime-tool-step:missionTeam", List.of("ordem"), List.of(1, 2)));
+        reads.add(compareRead("missionTimeline", "runtime-tool-step:missionTimeline", List.of("ordem"), List.of(1)));
+
+        java.lang.reflect.Method method = AgenticAuthoringConsultativeAnswerService.class.getDeclaredMethod(
+                "runtimeRelatedSurfaceCompareEvidence",
+                com.fasterxml.jackson.databind.node.ArrayNode.class,
+                com.fasterxml.jackson.databind.node.ObjectNode.class);
+        method.setAccessible(true);
+        JsonNode compare = (JsonNode) method.invoke(service, reads, toolPlan);
+
+        org.assertj.core.api.Assertions.assertThat(compare).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(compare.path("facts").toString())
+                .doesNotContain("temporal_coverage")
+                .doesNotContain("recordCountWithValue")
+                .doesNotContain("recordCountMissingValue");
+    }
+
+    @Test
+    void runtimeToolPlanCompareRejectsNonGovernedComparisonDimensionBeforeRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare", "status");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo por status.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-compare-planning-only")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"compare_planning_only\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"aggregateStatus\":\"blocked\"")
+                    .contains("runtime-related-surface-compare-not-enabled");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("comparisonDimensionDiagnostics")
+                            .toString())
+                    .contains("runtime-related-surface-compare-dimension-field-not-declared");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareRejectsFrontendLikeSemanticDecisionDimensionBeforeRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+            com.fasterxml.jackson.databind.node.ObjectNode frontendLikeDimension = acceptedCompareDimension("status");
+            frontendLikeDimension.remove("provenance");
+            contextHints.set("runtimeRelatedSurfaceComparisonDimension", frontendLikeDimension);
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo por status.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-compare-planning-only")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"compare_planning_only\"");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("comparisonDimensionDiagnostics")
+                            .toString())
+                    .contains("runtime-related-surface-compare-dimension-ambiguous");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareBlocksWhenBackendCannotInferCommonDimensionBeforeRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    runtimeObservationWithSchemaFields(missionTeamRuntimeObservation(), "funcionarioNome"),
+                                    runtimeObservationWithSchemaFields(missionTimelineRuntimeObservation(), "evento")),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("comparisonDimensionDiagnostics")
+                            .toString())
+                    .contains("runtime-related-surface-compare-dimension-required");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareBlocksAmbiguousBackendInferredDimensionBeforeRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    runtimeObservationWithSchemaFields(missionTeamRuntimeObservation(), "status", "ordem"),
+                                    runtimeObservationWithSchemaFields(missionTimelineRuntimeObservation(), "status", "ordem")),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("comparisonDimensionDiagnostics")
+                            .toString())
+                    .contains("runtime-related-surface-compare-dimension-ambiguous")
+                    .contains("status")
+                    .contains("ordem");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareRejectsRedactedComparisonDimensionBeforeRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare", "ordem");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            JsonNode groundedContext = new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                    List.of(
+                            missionRuntimeObservationWithTeamAndTimeline(),
+                            runtimeObservationWithRedactedFields(missionTeamRuntimeObservation(), "ordem"),
+                            missionTimelineRuntimeObservation()),
+                    AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION);
+            org.assertj.core.api.Assertions.assertThat(groundedContext.toString())
+                    .contains("\"omittedFields\":[\"ordem\"]");
+            contextHints.set("groundedRuntimeComponentContext", groundedContext);
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo por ordem.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"compare_planning_only\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"planningOnly\":true")
+                    .contains("\"backendReadsPerformed\":false")
+                    .contains("\"usedToolCalls\":0");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("comparisonDimensionDiagnostics")
+                            .toString())
+                    .as(answer.get().evidenceBundle().toPrettyString())
+                    .contains("runtime-related-surface-compare-dimension-field-redacted")
+                    .contains("missionTeam")
+                    .contains("\"redactedSurfaceRefs\":[\"missionTeam\"]");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-compare-planning-only")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareEmitsTemporalCoverageFromGroundedSchemaDescriptors() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {"success":true,"data":{"content":[
+                      {"data":"2026-01-03T10:00:00Z","ordem":1},
+                      {"data":"2026-01-01","ordem":2}
+                    ]}}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {"success":true,"data":{"content":[
+                      {"data":"2026-01-02T12:00:00Z","ordem":1},
+                      {"data":"2026-01-05T18:30:00Z","ordem":2}
+                    ]}}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare", "data");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    runtimeObservationWithSchemaFieldDescriptors(
+                                            missionTeamRuntimeObservation(),
+                                            "data",
+                                            "date-time"),
+                                    runtimeObservationWithSchemaFieldDescriptors(
+                                            missionTimelineRuntimeObservation(),
+                                            "data",
+                                            "date-time")),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo pela cobertura temporal do campo data.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            JsonNode compare = bundle.path("runtimeRelatedSurfaceCompare");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(compare.path("comparisonDimension").path("fieldRef").asText())
+                    .isEqualTo("data");
+            org.assertj.core.api.Assertions.assertThat(compare.path("comparisonDimension").path("fieldType").asText())
+                    .isEqualTo("date-time");
+            org.assertj.core.api.Assertions.assertThat(compare.path("facts").toString())
+                    .contains("\"kind\":\"temporal_coverage\"")
+                    .contains("\"minValue\":\"2026-01-01\"")
+                    .contains("\"maxValue\":\"2026-01-05T18:30:00Z\"")
+                    .contains("\"rawRuntimeValuesCopied\":false");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareRejectsTemporalDimensionWhenOneSurfaceDoesNotDeclareTemporalType() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare", "data");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    runtimeObservationWithSchemaFieldDescriptors(
+                                            missionTeamRuntimeObservation(),
+                                            "data",
+                                            "date-time"),
+                                    runtimeObservationWithSchemaFields(
+                                            missionTimelineRuntimeObservation(),
+                                            "data")),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo pela cobertura temporal do campo data.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size()).isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceCompare")).isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution")
+                            .path("comparisonDimensionDiagnostics")
+                            .toString())
+                    .contains("runtime-related-surface-compare-dimension-temporal-type-not-reconciled")
+                    .contains("missionTimeline");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanTemporalCompareSmokePolicyResolvesBackendOwnedIntentWithoutProvider() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {"success":true,"data":{"content":[
+                      {"data":"2026-02-01T10:00:00Z","ordem":1},
+                      {"data":"2026-02-04T16:30:00Z","ordem":2}
+                    ]}}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {"success":true,"data":{"content":[
+                      {"data":"2026-02-03T12:00:00Z","ordem":1},
+                      {"data":"2026-02-05","ordem":2}
+                    ]}}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton(),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeRelatedSurfaceIntentPolicy
+                            .temporalCompareSmoke("data"));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    runtimeObservationWithSchemaFieldDescriptors(
+                                            missionTeamRuntimeObservation(),
+                                            "data",
+                                            "date-time"),
+                                    runtimeObservationWithSchemaFieldDescriptors(
+                                            missionTimelineRuntimeObservation(),
+                                            "data",
+                                            "date-time")),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare a cobertura temporal das superfícies relacionadas.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan")
+                            .path("aggregationPolicy")
+                            .path("comparisonDimension")
+                            .path("fieldRef")
+                            .asText())
+                    .isEqualTo("data");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan")
+                            .path("aggregationPolicy")
+                            .path("comparisonDimension")
+                            .path("allowedFactKinds")
+                            .toString())
+                    .contains("temporal_coverage");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceCompare")
+                            .path("facts")
+                            .toString())
+                    .contains("\"kind\":\"temporal_coverage\"")
+                    .contains("\"rawRuntimeValuesCopied\":false");
+            verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanTemporalCompareSmokePolicyStillBlocksWhenTemporalTypeMissing() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton(),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeRelatedSurfaceIntentPolicy
+                            .temporalCompareSmoke("data"));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    runtimeObservationWithSchemaFieldDescriptors(
+                                            missionTeamRuntimeObservation(),
+                                            "data",
+                                            "date-time"),
+                                    runtimeObservationWithSchemaFields(
+                                            missionTimelineRuntimeObservation(),
+                                            "data")),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare a cobertura temporal das superfícies relacionadas.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size()).isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceCompare")).isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution")
+                            .path("comparisonDimensionDiagnostics")
+                            .toString())
+                    .contains("runtime-related-surface-compare-dimension-temporal-type-not-reconciled")
+                    .contains("missionTimeline");
+            verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanCompareKeepsMultipleSelectionReadFreeBeforeCompareSkeleton() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_compare", "ordem");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimelineSelection("1", "2"),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Compare os participantes e a linha do tempo por ordem.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeToolPlan")
+                            .path("executionDiagnostics")
+                            .toString())
+                    .contains("\"backendReadsPerformed\":false");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-compare-planning-only")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanGuardrailClampsMultiToolBudgetWithoutBackendPolicy() throws Exception {
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                Mockito.mock(AiProviderManagementService.class),
+                objectMapper,
+                null,
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        com.fasterxml.jackson.databind.node.ObjectNode plan = objectMapper.createObjectNode();
+        plan.putObject("planner")
+                .put("multiToolExecutionEnabled", false)
+                .put("maxToolCallsMayExceedOne", false);
+        plan.putObject("multiToolAuthorization")
+                .put("allowed", false)
+                .put("policyRef", "runtime-tool-policy:single-read-beta");
+        plan.putObject("budget")
+                .put("maxToolCalls", 3)
+                .put("globalMaxToolCalls", 4);
+        plan.putArray("steps")
+                .addObject()
+                .put("stepRef", "runtime-tool-step:a")
+                .putObject("stepBudget")
+                .put("maxToolCalls", 2);
+        plan.putArray("candidateSteps")
+                .addObject()
+                .put("stepRef", "runtime-tool-step:b")
+                .putObject("stepBudget")
+                .put("maxToolCalls", 2);
+        plan.putArray("blockedSteps");
+
+        java.lang.reflect.Method guardrail = AgenticAuthoringConsultativeAnswerService.class
+                .getDeclaredMethod("enforceRuntimeToolPlanMultiToolGuardrail", com.fasterxml.jackson.databind.node.ObjectNode.class);
+        guardrail.setAccessible(true);
+        guardrail.invoke(service, plan);
+
+        org.assertj.core.api.Assertions.assertThat(plan.path("budget").path("maxToolCalls").asInt())
+                .isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(plan.path("budget").path("globalMaxToolCalls").asInt())
+                .isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(plan.path("steps").path(0).path("stepBudget").path("maxToolCalls").asInt())
+                .isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(plan.path("candidateSteps").path(0).path("stepBudget").path("maxToolCalls").asInt())
+                .isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(plan.path("multiToolGuardrail").toString())
+                .contains("praxis-runtime-tool-multi-tool-guardrail.v1")
+                .contains("runtime-multi-tool-policy-not-enabled")
+                .contains("runtime-tool-policy:single-read-beta");
+        org.assertj.core.api.Assertions.assertThat(plan.path("blockedSteps").toString())
+                .contains("runtime-tool-step:multi-tool")
+                .contains("runtime-multi-tool-policy-not-enabled")
+                .contains("runtime-related-surface-redaction:sensitive-scalars-v1");
+    }
+
+    @Test
+    void runtimeToolPlanAllowsMultiCandidateDryRunOnlyWithBackendPolicy() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_summary");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.dryRunMultiToolBeta());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Resuma os dados relacionados da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").toString())
+                    .contains("runtime-tool-policy:multi-tool-dry-run-beta")
+                    .contains("\"multiToolExecutionEnabled\":false")
+                    .contains("\"multiToolPlanningEnabled\":true")
+                    .contains("\"dryRun\":true")
+                    .contains("\"maxToolCallsMayExceedOne\":false")
+                    .contains("\"executionMode\":\"dry_run\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("multiToolAuthorization").toString())
+                    .contains("runtime-tool-policy:multi-tool-dry-run-beta")
+                    .contains("runtime-multi-tool-policy-dry-run")
+                    .contains("\"allowed\":true");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("maxToolCalls").asInt())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("globalMaxToolCalls").asInt())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("usedToolCalls").asInt())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"dry_run_multi_read\"")
+                    .contains("\"maxInputReads\":2")
+                    .contains("fail_closed");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("praxis-runtime-tool-plan-execution-diagnostics.v1")
+                    .contains("runtime-tool-policy:multi-tool-dry-run-beta")
+                    .contains("\"dryRun\":true")
+                    .contains("\"multiToolExecutionEnabled\":false")
+                    .contains("\"authorizedCandidateCount\":2")
+                    .contains("\"maxPlannedSteps\":2")
+                    .contains("\"maxExecutableSteps\":0")
+                    .contains("\"backendReadsPerformed\":false")
+                    .contains("runtime-multi-tool-dry-run-read-free");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").toString())
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("dry_run_planned")
+                    .contains("\"maxToolCalls\":0")
+                    .contains("runtime-related-surface-projection:declared-fields-v1")
+                    .contains("runtime-related-surface-redaction:sensitive-scalars-v1");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.has("multiToolGuardrail"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceResolution")
+                            .path("targetRefinementDiagnostics").isMissingNode())
+                    .isTrue();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+            verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanDryRunPolicyBlocksExecutableListReadBeforeToolCall() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.dryRunMultiToolBeta());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quem participa da missão selecionada?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("dry-run multi-tool")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Registros encontrados");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-dry-run-read-free")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").toString())
+                    .contains("runtime-tool-policy:multi-tool-dry-run-beta")
+                    .contains("\"dryRun\":true")
+                    .contains("\"multiToolExecutionEnabled\":false")
+                    .contains("\"executionMode\":\"dry_run\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").toString())
+                    .contains("\"maxToolCalls\":0")
+                    .contains("\"usedToolCalls\":0")
+                    .contains("\"globalMaxToolCalls\":0");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"dryRun\":true")
+                    .contains("\"backendReadsPerformed\":false")
+                    .contains("\"usedToolCalls\":0")
+                    .contains("runtime-multi-tool-dry-run-read-free");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyExecutesTwoGovernedListSteps() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"},
+                          {"id": 21, "evento": "Execucao", "status": "EM_ANDAMENTO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Liste os dados relacionados da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("Ana Torres")
+                    .contains("Briefing");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .doesNotContain("runtime-related-surface-readonly-beta-planning-only");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").toString())
+                    .contains("runtime-tool-policy:multi-tool-readonly-beta")
+                    .contains("\"multiToolExecutionEnabled\":true")
+                    .contains("\"multiToolPlanningEnabled\":true")
+                    .contains("\"dryRun\":false")
+                    .contains("\"planningOnlyForPolicySkeleton\":false")
+                    .contains("\"maxToolCallsMayExceedOne\":true")
+                    .contains("\"executionMode\":\"read_only\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("multiToolAuthorization").toString())
+                    .contains("runtime-tool-policy:multi-tool-readonly-beta")
+                    .contains("runtime-multi-tool-readonly-beta")
+                    .contains("\"allowed\":true");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").toString())
+                    .contains("\"maxToolCalls\":2")
+                    .contains("\"usedToolCalls\":2")
+                    .contains("\"globalMaxToolCalls\":2")
+                    .contains("runtimeRelatedSurfaceToolBudget")
+                    .contains("\"maxToolCalls\":2")
+                    .contains("\"maxReads\":2")
+                    .contains("\"usedReads\":2");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"bounded_multi_read\"")
+                    .contains("\"maxInputReads\":2")
+                    .contains("fail_closed");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("runtime-tool-policy:multi-tool-readonly-beta")
+                    .contains("\"dryRun\":false")
+                    .contains("\"planningOnly\":false")
+                    .contains("\"multiToolExecutionEnabled\":true")
+                    .contains("\"authorizedCandidateCount\":2")
+                    .contains("\"maxPlannedSteps\":2")
+                    .contains("\"maxExecutableSteps\":2")
+                    .contains("\"backendReadsPerformed\":true")
+                    .contains("\"aggregateStatus\":\"success\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isGreaterThanOrEqualTo(toolPlan.path("steps").size());
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+                    .contains("runtime-tool-step:missionTeam")
+                    .contains("runtime-tool-step:missionTimeline")
+                    .contains("resolveRuntimeRelatedSurface")
+                    .contains("\"status\":\"executed\"")
+                    .contains("\"executionStatus\":\"executed\"")
+                    .contains("runtime-related-surface-projection:declared-fields-v1")
+                    .contains("runtime-related-surface-redaction:sensitive-scalars-v1")
+                    .contains("acceptedClaimRefs")
+                    .contains("\"maxToolCalls\":1");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").toString())
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("planned_for_read_only_execution")
+                    .contains("\"maxToolCalls\":1");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.has("multiToolGuardrail"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceResolution")
+                            .path("targetRefinementDiagnostics").isMissingNode())
+                    .isTrue();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+            verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyExecutesTargetedListWhenSurfaceIsBackendReconciled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"},
+                          {"id": 21, "evento": "Execucao", "status": "EM_ANDAMENTO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(
+                    providerManagementService,
+                    "runtime_related_surface_list",
+                    "",
+                    "missionTimeline",
+                    "");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Mostre os eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("missionTimeline")
+                    .contains("Briefing")
+                    .doesNotContain("Ana Torres");
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("listTarget").toString())
+                    .contains("\"surfaceRef\":\"missionTimeline\"")
+                    .contains("\"source\":\"semantic_decision\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_list");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("list_targeted");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").path("mode").asText())
+                    .isEqualTo("governed_list_targeted");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+                    .contains("runtime-tool-step:missionTimeline")
+                    .doesNotContain("runtime-tool-step:missionTeam");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").toString())
+                    .contains("\"maxToolCalls\":1")
+                    .contains("\"usedToolCalls\":1")
+                    .contains("\"maxReads\":1")
+                    .contains("\"usedReads\":1");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyBlocksTargetedListWhenSurfaceIsNotReconciled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"evento\":\"Briefing\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(
+                    providerManagementService,
+                    "runtime_related_surface_list",
+                    "",
+                    "missionTelemetry",
+                    "");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Mostre os eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("listTargetDiagnostics").toString())
+                    .contains("\"status\":\"rejected\"")
+                    .contains("\"requestedSurfaceRef\":\"missionTelemetry\"")
+                    .contains("runtime-related-surface-list-target-not-reconciled");
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"aggregateStatus\":\"not_executed\"")
+                    .contains("runtime-related-surface-list-target-not-reconciled")
+                    .contains("\"backendReadsPerformed\":false");
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyResolvesDetailTargetFromBackendCandidateCatalogBeforeLlmRefinement() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_detail");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quero detalhe da linha do tempo e eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            JsonNode resolution = bundle.path("runtimeRelatedSurfaceResolution");
+            org.assertj.core.api.Assertions.assertThat(resolution.path("detailTarget").toString())
+                    .contains("\"surfaceRef\":\"missionTimeline\"")
+                    .contains("\"source\":\"semantic_decision\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+            JsonNode targetCandidateResolution = resolution.path("targetCandidateResolution");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-target-candidate-resolution.v1");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("source").asText())
+                    .isEqualTo("backend_runtime_target_catalog");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("status").asText())
+                    .isEqualTo("accepted");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetSurfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("provenance").asText())
+                    .isEqualTo("backend_reconciled");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("accepted").asBoolean(false))
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("evaluatedCandidates").isMissingNode())
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution")
+                            .path("targetRefinementDiagnostics").isMissingNode())
+                    .isTrue();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+                    .contains("runtime-tool-step:missionTimeline")
+                    .doesNotContain("runtime-tool-step:missionTeam");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+            verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyResolvesOptionalDetailDisambiguationTargetFromBackendCandidateCatalog() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_surface_disambiguation
+                            CONFIDENCE: 0.86
+				                            TARGET_RESOLUTION_MODE: optional
+                            COMPARISON_DIMENSION_FIELD:
+                            LIST_TARGET_SURFACE_REF:
+                            SUMMARY_TARGET_SURFACE_REF:
+                            DETAIL_TARGET_SURFACE_REF:
+                            REASON: The target must be resolved before a focused detail read.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quero um drill-down detalhado da linha do tempo e dos eventos da missão selecionada; não detalhe participantes.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("detail");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            JsonNode targetCandidateResolution = bundle.path("runtimeRelatedSurfaceResolution").path("targetCandidateResolution");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("intentKind").asText())
+                    .isEqualTo("runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetResolutionMode").asText())
+                    .isEqualTo("optional");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetSurfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("provenance").asText())
+                    .isEqualTo("backend_reconciled");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution")
+                            .path("targetRefinementDiagnostics").isMissingNode())
+                    .isTrue();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+            verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyUsesBackendCandidateCatalogWhenSemanticIntentFallsBackForFocusedDetail() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenThrow(new RuntimeException("provider unavailable"));
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quero um drill-down detalhado da linha do tempo e dos eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("detail");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            JsonNode targetCandidateResolution = bundle.path("runtimeRelatedSurfaceResolution").path("targetCandidateResolution");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-target-candidate-resolution.v1");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("intentKind").asText())
+                    .isEqualTo("runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetResolutionMode").asText())
+                    .isEqualTo("optional");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetSurfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("provenance").asText())
+                    .isEqualTo("backend_reconciled");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("accepted").asBoolean(false))
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution")
+                            .path("targetRefinementDiagnostics").isMissingNode())
+                    .isTrue();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+            verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyAuditsAmbiguousBackendCandidateCatalogWithoutRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_surface_disambiguation
+                            CONFIDENCE: 0.84
+                            TARGET_RESOLUTION_MODE: optional
+                            COMPARISON_DIMENSION_FIELD:
+                            LIST_TARGET_SURFACE_REF:
+                            SUMMARY_TARGET_SURFACE_REF:
+                            DETAIL_TARGET_SURFACE_REF:
+                            REASON: The first pass stayed conservative.
+                            """);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("resolving a governed runtime-related surface target")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_surface_disambiguation
+                            CONFIDENCE: 0.80
+                            TARGET_SURFACE_REF:
+                            REASON: The target remains ambiguous.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quero detalhe da equipe e dos eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            JsonNode targetCandidateResolution = bundle.path("runtimeRelatedSurfaceResolution").path("targetCandidateResolution");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("status").asText())
+                    .isEqualTo("ambiguous");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("failureCode").asText())
+                    .isEqualTo("runtime-related-surface-target-candidate-ambiguous");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("evaluatedCandidates").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("evaluatedCandidates").toString())
+                    .contains("\"surfaceRef\":\"missionTeam\"")
+                    .contains("\"surfaceRef\":\"missionTimeline\"")
+                    .contains("\"matched\":true")
+                    .doesNotContain("equipe")
+                    .doesNotContain("eventos")
+                    .doesNotContain("rawRows")
+                    .doesNotContain("sampleRows")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Operacao Aurora");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyAuditsNegatedTargetCatalogTermsWithoutRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_surface_disambiguation
+                            CONFIDENCE: 0.84
+                            TARGET_RESOLUTION_MODE: optional
+                            COMPARISON_DIMENSION_FIELD:
+                            LIST_TARGET_SURFACE_REF:
+                            SUMMARY_TARGET_SURFACE_REF:
+                            DETAIL_TARGET_SURFACE_REF:
+                            REASON: The first pass stayed conservative.
+                            """);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("resolving a governed runtime-related surface target")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_surface_disambiguation
+                            CONFIDENCE: 0.80
+                            TARGET_SURFACE_REF:
+                            REASON: No target can be selected.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quero detalhe da missão selecionada, mas não detalhe participantes.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            JsonNode targetCandidateResolution = bundle.path("runtimeRelatedSurfaceResolution").path("targetCandidateResolution");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("status").asText())
+                    .isEqualTo("not_found");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("failureCode").asText())
+                    .isEqualTo("runtime-related-surface-target-candidate-not-found");
+            JsonNode evaluatedCandidates = targetCandidateResolution.path("evaluatedCandidates");
+            org.assertj.core.api.Assertions.assertThat(evaluatedCandidates.size())
+                    .isEqualTo(2);
+            JsonNode teamDiagnostic = evaluatedCandidates.findValues("surfaceRef").stream()
+                    .filter(node -> "missionTeam".equals(node.asText()))
+                    .findFirst()
+                    .orElse(null);
+            org.assertj.core.api.Assertions.assertThat(teamDiagnostic)
+                    .isNotNull();
+            org.assertj.core.api.Assertions.assertThat(evaluatedCandidates.toString())
+                    .contains("\"surfaceRef\":\"missionTeam\"")
+                    .contains("\"ignoredNegatedTermCount\":1")
+                    .contains("runtime-related-surface-target-candidate-negated")
+                    .doesNotContain("participantes")
+                    .doesNotContain("rawRows")
+                    .doesNotContain("sampleRows")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Operacao Aurora");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyExecutesTargetedSummaryWhenSurfaceIsBackendReconciled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"},
+                          {"id": 21, "evento": "Execucao", "status": "EM_ANDAMENTO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(
+                    providerManagementService,
+                    "runtime_related_surface_summary",
+                    "",
+                    "",
+                    "missionTimeline",
+                    "");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Resuma os eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("Resumo governado")
+                    .contains("missionTimeline")
+                    .contains("Briefing")
+                    .doesNotContain("Ana Torres");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .contains("runtime-related-surface-summary-aggregate-used");
+
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("summaryTarget").toString())
+                    .contains("\"surfaceRef\":\"missionTimeline\"")
+                    .contains("\"source\":\"semantic_decision\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+
+            JsonNode summary = bundle.path("runtimeRelatedSurfaceSummary");
+            org.assertj.core.api.Assertions.assertThat(summary.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-summary.v1");
+            org.assertj.core.api.Assertions.assertThat(summary.path("aggregationMode").asText())
+                    .isEqualTo("governed_summary_targeted");
+            org.assertj.core.api.Assertions.assertThat(summary.path("sourceReadRefs").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(summary.path("surfaceRefs").toString())
+                    .contains("missionTimeline")
+                    .doesNotContain("missionTeam");
+            org.assertj.core.api.Assertions.assertThat(summary.path("totalRecordCount").asInt())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(summary.path("rawRuntimeValuesCopied").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(summary.path("redactionApplied").asBoolean(false))
+                    .isTrue();
+
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_summary");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("summary_targeted");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").path("mode").asText())
+                    .isEqualTo("governed_summary_targeted");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+                    .contains("runtime-tool-step:missionTimeline")
+                    .doesNotContain("runtime-tool-step:missionTeam");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").toString())
+                    .contains("\"maxToolCalls\":1")
+                    .contains("\"usedToolCalls\":1")
+                    .contains("\"maxReads\":1")
+                    .contains("\"usedReads\":1");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyRefinesTargetedSummaryWhenDisambiguationIncorrectlyReturnsNoneMode() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"},
+                          {"id": 21, "evento": "Execucao", "status": "EM_ANDAMENTO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_surface_disambiguation
+                            CONFIDENCE: 0.82
+                            TARGET_RESOLUTION_MODE: none
+                            COMPARISON_DIMENSION_FIELD:
+                            LIST_TARGET_SURFACE_REF:
+                            SUMMARY_TARGET_SURFACE_REF:
+                            DETAIL_TARGET_SURFACE_REF:
+                            REASON: The first pass stayed conservative.
+                            """);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("resolving a governed runtime-related surface target")
+                            && prompt.contains("acceptedCandidates")
+                            && prompt.contains("missionTimeline")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_related_surface_summary
+                            CONFIDENCE: 0.93
+                            TARGET_SURFACE_REF: missionTimeline
+                            REASON: The follow-up asks to summarize the events surface.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Resuma os eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_summary");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("summary_targeted");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("summaryTarget").toString())
+                    .contains("\"surfaceRef\":\"missionTimeline\"")
+                    .contains("\"source\":\"semantic_decision\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+            JsonNode targetRefinementDiagnostics = bundle.path("runtimeRelatedSurfaceResolution").path("targetRefinementDiagnostics");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("targetResolutionMode").asText())
+                    .isEqualTo("optional");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("initialKind").asText())
+                    .isEqualTo("runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("refinedKind").asText())
+                    .isEqualTo("runtime_related_surface_summary");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("accepted").asBoolean(false))
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceSummary").path("aggregationMode").asText())
+                    .isEqualTo("governed_summary_targeted");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyMayRefineFallbackDisambiguationWhenPreviousContextExists() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenThrow(new RuntimeException("primary classifier unavailable"));
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("resolving a governed runtime-related surface target")
+                            && prompt.contains("acceptedCandidates")
+                            && prompt.contains("missionTimeline")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_related_surface_summary
+                            CONFIDENCE: 0.90
+                            TARGET_SURFACE_REF: missionTimeline
+                            REASON: The previous disambiguation context grounds the events option.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+            com.fasterxml.jackson.databind.node.ObjectNode diagnostics = objectMapper.createObjectNode();
+            com.fasterxml.jackson.databind.node.ObjectNode disambiguationContext =
+                    diagnostics.putObject("runtimeRelatedSurfaceDisambiguationContext");
+            disambiguationContext.put("schemaVersion", "praxis-runtime-related-surface-disambiguation-context.v1");
+            disambiguationContext.put("authority", "grounding_only");
+            disambiguationContext.put("sessionId", "session-1");
+            disambiguationContext.put("sourceTurnId", "previous-turn-1");
+            disambiguationContext.put("pageId", "mission-command-center");
+            disambiguationContext.put("capturedAt", "2099-01-01T00:00:00.000Z");
+            disambiguationContext.put("ttlMs", 300000);
+            com.fasterxml.jackson.databind.node.ArrayNode options = disambiguationContext.putArray("options");
+            options.addObject()
+                    .put("surfaceRef", "missionTeam")
+                    .put("optionRef", "runtime-surface-option:missionTeam")
+                    .put("candidateRef", "runtime-surface-candidate:missionSummary->missionTeam");
+            options.addObject()
+                    .put("surfaceRef", "missionTimeline")
+                    .put("optionRef", "runtime-surface-option:missionTimeline")
+                    .put("candidateRef", "runtime-surface-candidate:missionSummary->missionTimeline");
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndDiagnostics(
+                            "Resuma os eventos da missão selecionada.",
+                            contextHints,
+                            diagnostics),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_summary");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("readMode").asText())
+                    .isEqualTo("summary_targeted");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("targetRefinementDiagnostics")
+                            .path("targetResolutionMode").asText())
+                    .isEqualTo("optional");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("summaryTarget").toString())
+                    .contains("\"surfaceRef\":\"missionTimeline\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyIgnoresStalePreviousDisambiguationContext() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenThrow(new RuntimeException("primary classifier unavailable"));
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+            ObjectNode diagnostics = (ObjectNode) previousRuntimeSurfaceDisambiguationDiagnostics();
+            ObjectNode disambiguationContext =
+                    (ObjectNode) diagnostics.path("runtimeRelatedSurfaceDisambiguationContext");
+            disambiguationContext.put("capturedAt", "2000-01-01T00:00:00.000Z");
+            disambiguationContext.put("ttlMs", 1000);
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndDiagnostics(
+                            "Mostre a opção indicada antes.",
+                            contextHints,
+                            diagnostics),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("budget").path("usedToolCalls").asInt(-1))
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyIgnoresPreviousDisambiguationContextFromSameClientTurn() throws Exception {
+        ObjectNode diagnostics = (ObjectNode) previousRuntimeSurfaceDisambiguationDiagnostics();
+        ObjectNode disambiguationContext =
+                (ObjectNode) diagnostics.path("runtimeRelatedSurfaceDisambiguationContext");
+        disambiguationContext.put("sourceTurnId", "turn-client-1");
+
+        assertPreviousRuntimeSurfaceDisambiguationContextIgnored(diagnostics);
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyIgnoresPreviousDisambiguationContextFromDifferentSession() throws Exception {
+        ObjectNode diagnostics = (ObjectNode) previousRuntimeSurfaceDisambiguationDiagnostics();
+        ObjectNode disambiguationContext =
+                (ObjectNode) diagnostics.path("runtimeRelatedSurfaceDisambiguationContext");
+        disambiguationContext.put("sessionId", "other-session");
+
+        assertPreviousRuntimeSurfaceDisambiguationContextIgnored(diagnostics);
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyIgnoresPreviousDisambiguationContextFromDifferentPage() throws Exception {
+        ObjectNode diagnostics = (ObjectNode) previousRuntimeSurfaceDisambiguationDiagnostics();
+        ObjectNode disambiguationContext =
+                (ObjectNode) diagnostics.path("runtimeRelatedSurfaceDisambiguationContext");
+        disambiguationContext.put("pageId", "other-page");
+
+        assertPreviousRuntimeSurfaceDisambiguationContextIgnored(diagnostics);
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyIgnoresPreviousDisambiguationOptionMissingFromCurrentRuntime() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenThrow(new RuntimeException("primary classifier unavailable"));
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(missionRuntimeObservation(), missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndDiagnostics(
+                            "Detalhe a opção de eventos indicada antes.",
+                            contextHints,
+                            previousRuntimeSurfaceDisambiguationDiagnostics()),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("steps").toString())
+                    .doesNotContain("missionTimeline");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private void assertPreviousRuntimeSurfaceDisambiguationContextIgnored(JsonNode diagnostics) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenThrow(new RuntimeException("primary classifier unavailable"));
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndDiagnostics(
+                            "Detalhe a opção indicada antes.",
+                            contextHints,
+                            diagnostics),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("budget").path("usedToolCalls").asInt(-1))
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyBlocksTargetedSummaryWhenSurfaceIsNotReconciled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"evento\":\"Briefing\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(
+                    providerManagementService,
+                    "runtime_related_surface_summary",
+                    "",
+                    "",
+                    "missionTelemetry",
+                    "");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Resuma os eventos da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("summaryTargetDiagnostics").toString())
+                    .contains("\"status\":\"rejected\"")
+                    .contains("\"requestedSurfaceRef\":\"missionTelemetry\"")
+                    .contains("runtime-related-surface-summary-target-not-reconciled");
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"aggregateStatus\":\"not_executed\"")
+                    .contains("runtime-related-surface-summary-target-not-reconciled")
+                    .contains("\"backendReadsPerformed\":false");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyExecutesGovernedDetailOnlyWhenSingleSurfaceIsAccepted() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_detail");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(missionRuntimeObservation(), missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Mostre o detalhe da superfície relacionada da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(requestCount.get())
+                    .as(answer.get().evidenceBundle().toPrettyString())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("missionTeam")
+                    .contains("Ana Torres");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .doesNotContain("runtime-related-surface-intent-not-supported");
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceRead").path("aliasOf").asText())
+                    .isEqualTo("runtimeRelatedSurfaceReads[0]");
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").path("mode").asText())
+                    .isEqualTo("governed_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("usedToolCalls").asInt(-1))
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").path("aggregateStatus").asText())
+                    .isEqualTo("success");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyKeepsDetailReadFreeWhenMultipleSurfacesAreAccepted() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_detail");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Mostre o detalhe relacionado da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-intent-not-supported")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").toString())
+                    .contains("runtime-related-surface-detail-target-ambiguous");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("usedToolCalls").asInt(-1))
+                    .isZero();
+            JsonNode disambiguation = bundle.path("runtimeRelatedSurfaceDisambiguation");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-disambiguation.v1");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("status").asText())
+                    .isEqualTo("requires_target_selection");
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("options").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(disambiguation.path("options").toString())
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("requiresFollowUpSelection")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Operacao Aurora");
+            org.assertj.core.api.Assertions.assertThat(answer.get().quickReplies())
+                    .hasSize(2);
+            String quickRepliesJson = objectMapper.writeValueAsString(answer.get().quickReplies());
+            org.assertj.core.api.Assertions.assertThat(quickRepliesJson)
+                    .contains("runtime_related_surface_detail")
+                    .contains("semanticDecision")
+                    .contains("runtimeRelatedSurfaceDisambiguationSelection")
+                    .contains("runtime-surface-option:missionTeam")
+                    .contains("runtime-surface-option:missionTimeline")
+                    .contains("runtime-surface-candidate:")
+                    .contains("missionSummary->missionTeam")
+                    .contains("missionSummary->missionTimeline")
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Operacao Aurora");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyExecutesGovernedDetailWhenSemanticTargetIsReconciled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(
+                    providerManagementService,
+                    "runtime_related_surface_detail",
+                    "",
+                    "missionTimeline");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Mostre o detalhe da linha do tempo da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("missionTimeline")
+                    .contains("Briefing")
+                    .doesNotContain("Ana Torres");
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").path("mode").asText())
+                    .isEqualTo("governed_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+                    .contains("runtime-tool-step:missionTimeline")
+                    .doesNotContain("runtime-tool-step:missionTeam");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").toString())
+                    .contains("\"maxToolCalls\":1")
+                    .contains("\"usedToolCalls\":1");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").path("maxInputReads").asInt(-1))
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("detailTarget").toString())
+                    .contains("\"surfaceRef\":\"missionTimeline\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyUsesPreviousDisambiguationContextAsSemanticGroundingOnly() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("pendingDisambiguationContext")
+                            && prompt.contains("\"authority\" : \"grounding_only\"")
+                            && prompt.contains("missionTeam")
+                            && prompt.contains("missionTimeline")
+                            && !prompt.contains("Ana Torres")
+                            && !prompt.contains("Operacao Aurora")
+                            && !prompt.contains("sampleRows")
+                            && !prompt.contains("rawRows")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+	                            KIND: runtime_related_surface_detail
+	                            CONFIDENCE: 0.93
+	                            TARGET_RESOLUTION_MODE: none
+	                            COMPARISON_DIMENSION_FIELD:
+	                            DETAIL_TARGET_SURFACE_REF: missionTimeline
+                            REASON: The follow-up semantically asks for the timeline/events option from the previous governed disambiguation.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndDiagnostics(
+                            "Mostre os eventos.",
+                            contextHints,
+                            previousRuntimeSurfaceDisambiguationDiagnostics()),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").path("mode").asText())
+                    .isEqualTo("governed_detail");
+	            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("detailTarget").toString())
+	                    .contains("\"surfaceRef\":\"missionTimeline\"")
+	                    .contains("\"source\":\"semantic_decision\"")
+	                    .contains("\"provenance\":\"backend_reconciled\"");
+	            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("targetRefinementDiagnostics").isMissingNode())
+	                    .isTrue();
+	            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+	                    .contains("runtime-tool-step:missionTimeline")
+	                    .doesNotContain("runtime-tool-step:missionTeam");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceDisambiguation").isMissingNode())
+                    .isTrue();
+            verify(providerManagementService).generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("pendingDisambiguationContext")
+                            && prompt.contains("DETAIL_TARGET_SURFACE_REF")
+                            && prompt.contains("missionTimeline")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyRefinesExplicitDetailTargetWhenInitialClassifierDisambiguates() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+	                            KIND: runtime_surface_disambiguation
+	                            CONFIDENCE: 0.82
+			                            TARGET_RESOLUTION_MODE: required
+	                            COMPARISON_DIMENSION_FIELD:
+                            LIST_TARGET_SURFACE_REF:
+                            SUMMARY_TARGET_SURFACE_REF:
+                            DETAIL_TARGET_SURFACE_REF:
+                            REASON: The first pass stayed conservative.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints(
+                            "Quero um drill-down detalhado da superfície missionTimeline, a linha do tempo de eventos.",
+                            contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").get(0).path("surfaceRef").asText())
+                    .isEqualTo("missionTimeline");
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("detail");
+	            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("detailTarget").toString())
+	                    .contains("\"surfaceRef\":\"missionTimeline\"")
+	                    .contains("\"source\":\"semantic_decision\"")
+	                    .contains("\"provenance\":\"backend_reconciled\"");
+		            JsonNode targetCandidateResolution = bundle.path("runtimeRelatedSurfaceResolution").path("targetCandidateResolution");
+		            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("schemaVersion").asText())
+		                    .isEqualTo("praxis-runtime-related-surface-target-candidate-resolution.v1");
+		            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("intentKind").asText())
+		                    .isEqualTo("runtime_surface_disambiguation");
+		            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetResolutionMode").asText())
+		                    .isEqualTo("required");
+		            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetSurfaceRef").asText())
+		                    .isEqualTo("missionTimeline");
+		            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("provenance").asText())
+		                    .isEqualTo("backend_reconciled");
+		            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("accepted").asBoolean())
+		                    .isTrue();
+		            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution")
+		                            .path("targetRefinementDiagnostics").isMissingNode())
+		                    .isTrue();
+		            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+	                    .contains("runtime-tool-step:missionTimeline")
+	                    .doesNotContain("runtime-tool-step:missionTeam");
+            verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyAuditsRejectedTargetRefinementWithoutRead() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+	                            KIND: runtime_surface_disambiguation
+	                            CONFIDENCE: 0.83
+		                            TARGET_RESOLUTION_MODE: optional
+	                            COMPARISON_DIMENSION_FIELD:
+                            LIST_TARGET_SURFACE_REF:
+                            SUMMARY_TARGET_SURFACE_REF:
+                            DETAIL_TARGET_SURFACE_REF:
+                            REASON: The first pass stayed conservative.
+                            """);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("resolving a governed runtime-related surface target")
+                            && prompt.contains("acceptedCandidates")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_related_surface_detail
+                            CONFIDENCE: 0.91
+                            TARGET_SURFACE_REF: missionBudget
+                            REASON: The target is not among accepted candidates.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints(
+                            "Quero um drill-down detalhado do orçamento da missão selecionada.",
+                            contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeToolPlan").path("steps").size())
+                    .isZero();
+            JsonNode targetCandidateResolution = bundle.path("runtimeRelatedSurfaceResolution").path("targetCandidateResolution");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-target-candidate-resolution.v1");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("source").asText())
+                    .isEqualTo("backend_runtime_target_catalog");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("intentKind").asText())
+                    .isEqualTo("runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("targetResolutionMode").asText())
+                    .isEqualTo("optional");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("provenance").asText())
+                    .isEqualTo("backend_rejected");
+            org.assertj.core.api.Assertions.assertThat(targetCandidateResolution.path("accepted").asBoolean(true))
+                    .isFalse();
+            JsonNode targetRefinementDiagnostics = bundle.path("runtimeRelatedSurfaceResolution").path("targetRefinementDiagnostics");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-target-refinement.v1");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("initialKind").asText())
+                    .isEqualTo("runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("refinedKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("requestedTargetSurfaceRef").asText())
+                    .isEqualTo("missionBudget");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("accepted").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("failureCode").asText())
+                    .isEqualTo("runtime-related-surface-target-refinement-not-reconciled");
+        } finally {
+            server.stop(0);
+        }
+	    }
+
+	    @Test
+	    void runtimeToolPlanReadonlyPolicyRefinesCompareWhenInitialClassifierDisambiguatesAndBlocksWithoutDimension() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("classifying a consultative runtime-related surface intent")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+	                            KIND: runtime_surface_disambiguation
+	                            CONFIDENCE: 0.82
+	                            TARGET_RESOLUTION_MODE: optional
+	                            COMPARISON_DIMENSION_FIELD:
+                            LIST_TARGET_SURFACE_REF:
+                            SUMMARY_TARGET_SURFACE_REF:
+                            DETAIL_TARGET_SURFACE_REF:
+                            REASON: The first pass stayed conservative.
+                            """);
+            when(providerManagementService.generateText(
+                    argThat(prompt -> prompt != null
+                            && prompt.contains("resolving a governed runtime-related surface target")
+                            && prompt.contains("runtime_related_surface_compare")
+                            && prompt.contains("acceptedCandidates")
+                            && prompt.contains("missionTeam")
+                            && prompt.contains("missionTimeline")
+                            && !prompt.contains("Ana Torres")
+                            && !prompt.contains("rawRows")
+                            && !prompt.contains("sampleRows")),
+                    any(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local")))
+                    .thenReturn("""
+                            KIND: runtime_related_surface_compare
+                            CONFIDENCE: 0.91
+                            TARGET_SURFACE_REF:
+                            REASON: The user asks to compare the accepted related surfaces.
+                            """);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints(
+                            "Compare participantes e eventos da missão selecionada.",
+                            contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceCompare").isMissingNode())
+                    .isTrue();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_compare");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").path("mode").asText())
+                    .isEqualTo("compare_planning_only");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").path("planningOnly").asBoolean())
+                    .isTrue();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.toString())
+                    .contains("runtime-related-surface-compare-not-enabled");
+            JsonNode targetRefinementDiagnostics = bundle.path("runtimeRelatedSurfaceResolution").path("targetRefinementDiagnostics");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("initialKind").asText())
+                    .isEqualTo("runtime_surface_disambiguation");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("refinedKind").asText())
+                    .isEqualTo("runtime_related_surface_compare");
+            org.assertj.core.api.Assertions.assertThat(targetRefinementDiagnostics.path("accepted").asBoolean())
+                    .isTrue();
+	        } finally {
+	            server.stop(0);
+	        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyRejectsDetailWhenSemanticTargetIsNotReconciled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(
+                    providerManagementService,
+                    "runtime_related_surface_detail",
+                    "",
+                    "missionBudget");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Mostre o detalhe do orçamento da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("readMode").asText())
+                    .isEqualTo("none");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").path("failureCode").asText())
+                    .isEqualTo("runtime-related-surface-detail-target-not-reconciled");
+	            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("detailTargetDiagnostics").toString())
+	                    .contains("\"requestedSurfaceRef\":\"missionBudget\"")
+	                    .contains("runtime-related-surface-detail-target-not-reconciled");
+	            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("targetRefinementDiagnostics").isMissingNode())
+	                    .isTrue();
+	            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyExecutesDetailFromReconciledDisambiguationSelection() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger teamRequestCount = new AtomicInteger();
+        AtomicInteger timelineRequestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            teamRequestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            timelineRequestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndActiveDecision(
+                            "Detalhe esta opção.",
+                            contextHints,
+                            runtimeRelatedSurfaceDetailDecisionWithDisambiguationSelection(
+                                    "missionTimeline",
+                                    "runtime-surface-candidate:missionSummary->missionTimeline")),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(teamRequestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(timelineRequestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+                    .contains("runtime-tool-step:missionTimeline")
+                    .doesNotContain("runtime-tool-step:missionTeam");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("detailTarget").toString())
+                    .contains("\"source\":\"runtime_related_surface_disambiguation_selection\"")
+                    .contains("\"optionRef\":\"runtime-surface-option:missionTimeline\"")
+                    .contains("\"provenance\":\"backend_reconciled\"");
+            Mockito.verifyNoInteractions(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyRejectsDisambiguationSelectionWhenCandidateRefDiverges() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndActiveDecision(
+                            "Detalhe esta opção.",
+                            contextHints,
+                            runtimeRelatedSurfaceDetailDecisionWithDisambiguationSelection(
+                                    "missionTimeline",
+                                    "runtime-surface-candidate:missionSummary->missionTeam")),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").path("failureCode").asText())
+                    .isEqualTo("runtime-related-surface-detail-target-not-reconciled");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceDisambiguation").path("options").size())
+                    .isEqualTo(2);
+            Mockito.verifyNoInteractions(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyRejectsDisambiguationSelectionWhenOptionRefDiverges() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHintsAndActiveDecision(
+                            "Detalhe esta opção.",
+                            contextHints,
+                            runtimeRelatedSurfaceDecisionWithDisambiguationSelection(
+                                    "runtime_related_surface_detail",
+                                    "missionTimeline",
+                                    "runtime-surface-candidate:missionSummary->missionTimeline",
+                                    "runtime-surface-option:missionTeam")),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").path("failureCode").asText())
+                    .isEqualTo("runtime-related-surface-detail-target-not-reconciled");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("detailTargetDiagnostics").toString())
+                    .contains("\"requestedOptionRef\":\"__invalid__\"")
+                    .contains("runtime-related-surface-detail-target-not-reconciled");
+            Mockito.verifyNoInteractions(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyIgnoresDisambiguationSelectionFromContextHints() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_detail");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.putObject("runtimeRelatedSurfaceDisambiguationSelection")
+                    .put("optionRef", "runtime-surface-option:missionTimeline")
+                    .put("surfaceRef", "missionTimeline")
+                    .put("candidateRef", "runtime-surface-candidate:missionSummary->missionTimeline");
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Detalhe esta opção.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode bundle = answer.get().evidenceBundle();
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            JsonNode toolPlan = bundle.path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_detail");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").path("failureCode").asText())
+                    .isEqualTo("runtime-related-surface-detail-target-ambiguous");
+            org.assertj.core.api.Assertions.assertThat(bundle.path("runtimeRelatedSurfaceResolution").path("detailTarget").isMissingNode())
+                    .isTrue();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyExecutesGovernedSummaryAggregate() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 20, "evento": "Briefing", "status": "PLANEJADO"},
+                          {"id": 21, "evento": "Execucao", "status": "EM_ANDAMENTO"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_summary");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Resuma os dados relacionados da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("Resumo governado")
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("Ana Torres")
+                    .contains("Briefing");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .contains("runtime-related-surface-summary-aggregate-used")
+                    .doesNotContain("runtime-related-surface-intent-not-supported")
+                    .doesNotContain("runtime-related-surface-readonly-beta-planning-only");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            JsonNode summary = answer.get().evidenceBundle().path("runtimeRelatedSurfaceSummary");
+            org.assertj.core.api.Assertions.assertThat(summary.path("schemaVersion").asText())
+                    .isEqualTo("praxis-runtime-related-surface-summary.v1");
+            org.assertj.core.api.Assertions.assertThat(summary.path("intentKind").asText())
+                    .isEqualTo("runtime_related_surface_summary");
+            org.assertj.core.api.Assertions.assertThat(summary.path("aggregationMode").asText())
+                    .isEqualTo("governed_summary");
+            org.assertj.core.api.Assertions.assertThat(summary.path("sourceReadRefs").toString())
+                    .contains("runtime-tool-step:missionTeam")
+                    .contains("runtime-tool-step:missionTimeline");
+            org.assertj.core.api.Assertions.assertThat(summary.path("recordCountsBySurface").toString())
+                    .contains("\"missionTeam\":1")
+                    .contains("\"missionTimeline\":2");
+            org.assertj.core.api.Assertions.assertThat(summary.path("totalRecordCount").asInt())
+                    .isEqualTo(3);
+            org.assertj.core.api.Assertions.assertThat(summary.path("facts").toString())
+                    .contains("record_group_summary")
+                    .contains("missionTeam")
+                    .contains("missionTimeline");
+            org.assertj.core.api.Assertions.assertThat(summary.path("rawRuntimeValuesCopied").asBoolean(true))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(summary.path("redactionApplied").asBoolean(false))
+                    .isTrue();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").toString())
+                    .contains("runtime-tool-policy:multi-tool-readonly-beta")
+                    .contains("\"executionMode\":\"read_only\"")
+                    .contains("\"planningOnlyForUnsupportedIntents\":false")
+                    .contains("\"planningOnlyForPolicySkeleton\":false");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("multiToolAuthorization").toString())
+                    .contains("runtime-tool-policy:multi-tool-readonly-beta")
+                    .contains("runtime-multi-tool-readonly-beta")
+                    .contains("\"allowed\":true");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").toString())
+                    .contains("planned_for_read_only_execution")
+                    .contains("\"maxToolCalls\":1");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("aggregationPolicy").toString())
+                    .contains("\"mode\":\"governed_summary\"")
+                    .contains("\"maxInputReads\":2");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("usedToolCalls").asInt(-1))
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"aggregateStatus\":\"success\"")
+                    .contains("\"usedToolCalls\":2")
+                    .contains("\"backendReadsPerformed\":true");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceResolution")
+                            .path("targetRefinementDiagnostics").isMissingNode())
+                    .isTrue();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+            verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyFailClosesWithoutPartialReadsWhenAPlannedStepFails() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/operations/missao-eventos/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"error\":\"boom\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(500, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Liste os dados relacionados da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("Registros encontrados");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().toString())
+                    .doesNotContain("Ana Torres")
+                    .doesNotContain("\"records\"");
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("executionDiagnostics").toString())
+                    .contains("\"aggregateStatus\":\"failed\"")
+                    .contains("runtime-related-surface-http-error")
+                    .contains("\"usedToolCalls\":2")
+                    .contains("\"backendReadsPerformed\":true");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").toString())
+                    .contains("\"usedToolCalls\":2")
+                    .contains("\"usedReads\":0");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").toString())
+                    .contains("\"status\":\"executed\"")
+                    .contains("\"status\":\"failed\"")
+                    .contains("runtime-related-surface-http-error");
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanReadonlyPolicyRejectsCandidateWithMissingEssentialClaimWithoutStep() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[{\"funcionarioNome\":\"Ana Torres\"}]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                    AgenticAuthoringConsultativeAnswerService.RuntimeToolPlannerPolicy.readonlyMultiToolBetaSkeleton());
+            com.fasterxml.jackson.databind.node.ObjectNode mission =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) missionRuntimeObservationWithTeamAndTimeline().deepCopy();
+            com.fasterxml.jackson.databind.node.ArrayNode relations =
+                    (com.fasterxml.jackson.databind.node.ArrayNode) mission.path("snapshot").path("stateDigest").path("relationSurfaceRefs");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) relations.get(1).path("queryMapping"))
+                    .put("targetPath", "filters.outroCampo");
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    mission,
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Liste os dados relacionados da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").toString())
+                    .contains("missionTeam")
+                    .contains("missionTimeline")
+                    .contains("\"candidateStatus\":\"accepted\"")
+                    .contains("\"candidateStatus\":\"rejected\"")
+                    .contains("runtime-surface-target-path-filter-mismatch");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("blockedCandidates")
+                            .toString())
+                    .contains("missionTimeline")
+                    .contains("runtime-surface-target-path-filter-mismatch");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void runtimeToolPlanIgnoresFrontendRuntimeToolPolicyHintsWithoutBackendPolicy() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = "{\"success\":true,\"data\":{\"content\":[]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_summary");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.put("runtimeToolPolicyRef", "runtime-tool-policy:multi-tool-dry-run-beta");
+            contextHints.put("runtimeToolPlannerPolicyRef", "runtime-tool-policy:multi-tool-dry-run-beta");
+            contextHints.put("runtimeToolReadonlyPolicyRef", "runtime-tool-policy:multi-tool-readonly-beta");
+            contextHints.putObject("runtimeToolPlan")
+                    .putObject("planner")
+                    .put("backendPolicyRef", "runtime-tool-policy:multi-tool-readonly-beta")
+                    .put("multiToolExecutionEnabled", true);
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(
+                                    missionRuntimeObservationWithTeamAndTimeline(),
+                                    missionTeamRuntimeObservation(),
+                                    missionTimelineRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Resuma os dados relacionados da missão selecionada.", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            JsonNode toolPlan = answer.get().evidenceBundle().path("runtimeToolPlan");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("planner").toString())
+                    .contains("runtime-tool-policy:single-read-beta")
+                    .contains("\"multiToolExecutionEnabled\":false")
+                    .contains("\"maxToolCallsMayExceedOne\":false")
+                    .contains("\"executionMode\":\"single_read\"");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("multiToolAuthorization").toString())
+                    .contains("runtime-tool-policy:single-read-beta")
+                    .contains("runtime-multi-tool-policy-not-enabled")
+                    .contains("\"allowed\":false");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("maxToolCalls").asInt())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("budget").path("globalMaxToolCalls").asInt())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("steps").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("blockedSteps").size())
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").size())
+                    .isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(toolPlan.path("candidateSteps").toString())
+                    .doesNotContain("dry_run_planned")
+                    .contains("blocked_by_intent");
+            org.assertj.core.api.Assertions.assertThat(toolPlan.has("multiToolGuardrail"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().path("runtimeRelatedSurfaceReads").size())
+                    .isZero();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceRead"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceSummary"))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle().has("runtimeRelatedSurfaceCompare"))
+                    .isFalse();
+            verifyRuntimeRelatedSurfaceIntentResolved(providerManagementService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void consultativeAnswerDoesNotReadRelatedRuntimeSurfaceWhenRuntimeObservationIsStale() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            com.fasterxml.jackson.databind.node.ObjectNode staleMission =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) missionRuntimeObservation().deepCopy();
+            staleMission.withObject("/lifecycle").put("capturedAt", "2000-01-01T00:00:00.000Z");
+            com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set(
+                    "groundedRuntimeComponentContext",
+                    new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                            List.of(staleMission, missionTeamRuntimeObservation()),
+                            AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION));
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quem participa da missão selecionada?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isZero();
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .doesNotContain("Ana Torres");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-required")
+                    .doesNotContain("runtime-related-surface-read-tool-used");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("blockedCandidates")
+                            .toString())
+                    .contains("runtime-surface-candidate:none")
+                    .contains("runtime-surface-observation-stale");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeToolPlan")
+                            .path("budget")
+                            .path("usedToolCalls")
+                            .asInt(-1))
+                    .isZero();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void consultativeAnswerUsesGroundingAdmissionTimeForRuntimeFreshnessDuringTurn() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestCount.incrementAndGet();
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+            stubRuntimeRelatedSurfaceIntent(providerManagementService, "runtime_related_surface_list");
+            AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                    providerManagementService,
+                    objectMapper,
+                    null,
+                    new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+            ObjectNode groundedContext = new AgenticAuthoringRuntimeComponentGroundingService(objectMapper).ground(
+                    List.of(missionRuntimeObservation(), missionTeamRuntimeObservation()),
+                    AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION);
+            groundedContext.put("generatedAt", "2000-01-01T00:00:00.500Z");
+            for (JsonNode component : groundedContext.path("components")) {
+                ObjectNode lifecycle = (ObjectNode) component.path("lifecycle");
+                lifecycle.put("capturedAt", "2000-01-01T00:00:00.000Z");
+                lifecycle.put("ttlMs", 1000);
+            }
+            ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("requestBaseUrl", "http://localhost:" + server.getAddress().getPort());
+            contextHints.set("groundedRuntimeComponentContext", groundedContext);
+
+            Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                    requestWithContextHints("Quem participa da missão selecionada?", contextHints),
+                    new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                    "tenant",
+                    "user",
+                    "local");
+
+            org.assertj.core.api.Assertions.assertThat(requestCount.get()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+            org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                    .contains("Ana Torres");
+            org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
+                    .contains("runtime-related-surface-read-tool-used")
+                    .doesNotContain("runtime-related-surface-read-tool-required");
+            org.assertj.core.api.Assertions.assertThat(answer.get().evidenceBundle()
+                            .path("runtimeRelatedSurfaceResolution")
+                            .path("acceptedCandidates")
+                            .toString())
+                    .doesNotContain("runtime-surface-observation-stale");
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -2999,7 +8529,7 @@ class AgenticAuthoringTurnEngineTest {
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
                 "/page-builder-ia",
-                objectMapper.createObjectNode(),
+                currentMissionPage(),
                 null,
                 "openai",
                 "gpt-test",
@@ -3011,6 +8541,139 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 contextHints,
                 null);
+    }
+
+    private AgenticAuthoringTurnStreamRequest requestWithContextHintsAndDiagnostics(
+            String userPrompt,
+            JsonNode contextHints,
+            JsonNode diagnostics) {
+        return new AgenticAuthoringTurnStreamRequest(
+                userPrompt,
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                currentMissionPage(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                null,
+                null,
+                diagnostics,
+                null,
+                null);
+    }
+
+    private JsonNode previousRuntimeSurfaceDisambiguationDiagnostics() {
+        com.fasterxml.jackson.databind.node.ObjectNode diagnostics = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode context =
+                diagnostics.putObject("runtimeRelatedSurfaceDisambiguationContext");
+        context.put("schemaVersion", "praxis-runtime-related-surface-disambiguation-context.v1");
+        context.put("source", "runtimeRelatedSurfaceDisambiguation");
+        context.put("authority", "grounding_only");
+        context.put("sessionId", "session-1");
+        context.put("sourceTurnId", "previous-turn-1");
+        context.put("pageId", "mission-command-center");
+        context.put("capturedAt", "2099-01-01T00:00:00.000Z");
+        context.put("ttlMs", 300000);
+        context.put("optionCount", 2);
+        context.put("rawRuntimeValuesCopied", false);
+        com.fasterxml.jackson.databind.node.ArrayNode options = context.putArray("options");
+        com.fasterxml.jackson.databind.node.ObjectNode team = options.addObject();
+        team.put("surfaceRef", "missionTeam");
+        team.put("optionRef", "runtime-surface-option:missionTeam");
+        team.put("candidateRef", "runtime-surface-candidate:missionSummary->missionTeam");
+        team.put("label", "Equipe da missão");
+        com.fasterxml.jackson.databind.node.ObjectNode timeline = options.addObject();
+        timeline.put("surfaceRef", "missionTimeline");
+        timeline.put("optionRef", "runtime-surface-option:missionTimeline");
+        timeline.put("candidateRef", "runtime-surface-candidate:missionSummary->missionTimeline");
+        timeline.put("label", "Linha do tempo e eventos");
+        return diagnostics;
+    }
+
+    private AgenticAuthoringTurnStreamRequest requestWithContextHintsAndActiveDecision(
+            String userPrompt,
+            JsonNode contextHints,
+            AgenticAuthoringSemanticDecision activeSemanticDecision) {
+        return new AgenticAuthoringTurnStreamRequest(
+                userPrompt,
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                currentMissionPage(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                null,
+                activeSemanticDecision);
+    }
+
+    private ObjectNode currentMissionPage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        page.put("pageId", "mission-command-center");
+        return page;
+    }
+
+    private AgenticAuthoringSemanticDecision runtimeRelatedSurfaceDetailDecisionWithDisambiguationSelection(
+            String surfaceRef,
+            String candidateRef) {
+        return runtimeRelatedSurfaceDecisionWithDisambiguationSelection(
+                "runtime_related_surface_detail",
+                surfaceRef,
+                candidateRef,
+                "runtime-surface-option:" + surfaceRef);
+    }
+
+    private AgenticAuthoringSemanticDecision runtimeRelatedSurfaceDecisionWithDisambiguationSelection(
+            String intentKind,
+            String surfaceRef,
+            String candidateRef,
+            String optionRef) {
+        com.fasterxml.jackson.databind.node.ObjectNode constraints = objectMapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode selection =
+                constraints.putObject("runtimeRelatedSurfaceDisambiguationSelection");
+        selection.put("optionRef", optionRef);
+        selection.put("surfaceRef", surfaceRef);
+        selection.put("candidateRef", candidateRef);
+        return new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-runtime-detail-option-" + surfaceRef,
+                "consult",
+                "runtime_related_surface",
+                intentKind,
+                null,
+                null,
+                null,
+                null,
+                false,
+                "",
+                "",
+                "",
+                "session-1",
+                "turn-client-1",
+                "Detalhe a opção escolhida.",
+                "Consultar superfície relacionada escolhida.",
+                intentKind,
+                "",
+                constraints,
+                null,
+                "",
+                "Disambiguation option selected by governed assistant evidence.",
+                0.99d);
     }
 
     private AgenticAuthoringTurnStreamRequest requestWithContextHintsAndConversation(
@@ -3034,6 +8697,570 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 contextHints,
                 null);
+    }
+
+    private void stubRuntimeRelatedSurfaceIntent(
+            AiProviderManagementService providerManagementService,
+            String intentKind) {
+        stubRuntimeRelatedSurfaceIntent(providerManagementService, intentKind, "");
+    }
+
+    private void stubRuntimeRelatedSurfaceIntent(
+            AiProviderManagementService providerManagementService,
+            String intentKind,
+            String comparisonDimensionFieldRef) {
+        stubRuntimeRelatedSurfaceIntent(providerManagementService, intentKind, comparisonDimensionFieldRef, "");
+    }
+
+    private void stubRuntimeRelatedSurfaceIntent(
+            AiProviderManagementService providerManagementService,
+            String intentKind,
+            String comparisonDimensionFieldRef,
+            String detailTargetSurfaceRef) {
+        stubRuntimeRelatedSurfaceIntent(
+                providerManagementService,
+                intentKind,
+                comparisonDimensionFieldRef,
+                "",
+                "",
+                detailTargetSurfaceRef);
+    }
+
+    private void stubRuntimeRelatedSurfaceIntent(
+            AiProviderManagementService providerManagementService,
+            String intentKind,
+            String comparisonDimensionFieldRef,
+            String listTargetSurfaceRef,
+            String detailTargetSurfaceRef) {
+        stubRuntimeRelatedSurfaceIntent(
+                providerManagementService,
+                intentKind,
+                comparisonDimensionFieldRef,
+                listTargetSurfaceRef,
+                "",
+                detailTargetSurfaceRef);
+    }
+
+    private void stubRuntimeRelatedSurfaceIntent(
+            AiProviderManagementService providerManagementService,
+            String intentKind,
+            String comparisonDimensionFieldRef,
+            String listTargetSurfaceRef,
+            String summaryTargetSurfaceRef,
+            String detailTargetSurfaceRef) {
+        when(providerManagementService.generateText(
+                argThat(prompt -> prompt != null
+                        && prompt.contains("classifying a consultative runtime-related surface intent")),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("""
+                        KIND: %s
+                        CONFIDENCE: 0.91
+                        TARGET_RESOLUTION_MODE: %s
+                        COMPARISON_DIMENSION_FIELD: %s
+                        LIST_TARGET_SURFACE_REF: %s
+                        SUMMARY_TARGET_SURFACE_REF: %s
+                        DETAIL_TARGET_SURFACE_REF: %s
+                        REASON: Governed runtime evidence supports this consultative intent.
+                        """.formatted(
+                                intentKind,
+                                stubRuntimeRelatedSurfaceTargetResolutionMode(
+                                        intentKind,
+                                        listTargetSurfaceRef,
+                                        summaryTargetSurfaceRef,
+                                        detailTargetSurfaceRef),
+                                comparisonDimensionFieldRef == null ? "" : comparisonDimensionFieldRef,
+                                listTargetSurfaceRef == null ? "" : listTargetSurfaceRef,
+                                summaryTargetSurfaceRef == null ? "" : summaryTargetSurfaceRef,
+                                detailTargetSurfaceRef == null ? "" : detailTargetSurfaceRef));
+    }
+
+    private String stubRuntimeRelatedSurfaceTargetResolutionMode(
+            String intentKind,
+            String listTargetSurfaceRef,
+            String summaryTargetSurfaceRef,
+            String detailTargetSurfaceRef) {
+        if (org.springframework.util.StringUtils.hasText(listTargetSurfaceRef)
+                || org.springframework.util.StringUtils.hasText(summaryTargetSurfaceRef)
+                || org.springframework.util.StringUtils.hasText(detailTargetSurfaceRef)) {
+            return "none";
+        }
+        return switch (intentKind) {
+            case "runtime_related_surface_detail" -> "required";
+            case "runtime_surface_disambiguation" -> "optional";
+            default -> "none";
+        };
+    }
+
+    private void verifyRuntimeRelatedSurfaceIntentResolved(
+            AiProviderManagementService providerManagementService) {
+        verify(providerManagementService).generateText(
+                argThat(prompt -> prompt != null
+                        && prompt.contains("classifying a consultative runtime-related surface intent")
+                        && prompt.contains("Governed runtime evidence, sanitized:")
+                        && prompt.contains("TARGET_RESOLUTION_MODE")
+                        && prompt.contains("COMPARISON_DIMENSION_FIELD")
+                        && prompt.contains("LIST_TARGET_SURFACE_REF")
+                        && prompt.contains("SUMMARY_TARGET_SURFACE_REF")
+                        && prompt.contains("DETAIL_TARGET_SURFACE_REF")
+                        && prompt.contains("schemaFieldRefs")
+                        && prompt.contains("missionTeam")
+                        && !prompt.contains("Ana Torres")
+                        && !prompt.contains("Operacao Aurora")
+                        && !prompt.contains("sampleRows")
+                        && !prompt.contains("rawRows")),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    private void verifyRuntimeRelatedSurfaceTargetRefinementNotAttempted(
+            AiProviderManagementService providerManagementService) {
+        verify(providerManagementService, never()).generateText(
+                argThat(prompt -> prompt != null
+                        && prompt.contains("resolving a governed runtime-related surface target")),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    private AgenticAuthoringTurnStreamRequest requestWithRuntimeObservation(
+            String userPrompt,
+            JsonNode runtimeObservation) {
+        return new AgenticAuthoringTurnStreamRequest(
+                userPrompt,
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                List.of(runtimeObservation),
+                AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION);
+    }
+
+    private JsonNode missionRuntimeObservation() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-runtime-component-observation.v1",
+                  "identity": {
+                    "instanceId": "table:missionSummary",
+                    "componentId": "praxis-table",
+                    "componentType": "table",
+                    "widgetKey": "missionSummary",
+                    "ownerPackage": "@praxisui/table"
+                  },
+                  "refs": {
+                    "componentMetadataId": "praxis-table",
+                    "resourcePath": "/api/missions",
+                    "resourceKey": "missions"
+                  },
+                  "lifecycle": {
+                    "active": true,
+                    "visible": true,
+                    "capturedAt": "2099-01-01T00:00:00.000Z",
+                    "ttlMs": 30000
+                  },
+                  "snapshot": {
+	                    "selectionDigest": {
+	                      "selectedCount": 1,
+	                      "selectedIds": ["1"],
+	                      "idField": "missaoId",
+	                      "sampleRows": [{"participante": "Ana Torres"}]
+	                    },
+                    "schemaFieldRefs": ["titulo", "status", "prioridade", "ameaca"],
+                    "stateDigest": {
+                      "relationSurfaceRefs": [
+	                        {
+	                          "id": "missionTeam",
+	                          "source": {
+	                            "widget": "missionSummary",
+	                            "componentType": "praxis-table",
+	                            "port": "rowClick"
+	                          },
+	                          "target": {
+	                            "widget": "missionTeam",
+	                            "componentType": "praxis-table",
+	                            "port": "queryContext",
+	                            "resourcePath": "operations/missao-participantes"
+		                          },
+		                          "targetSurface": "missionTeam",
+		                          "label": "Equipe da missão",
+		                          "semanticAliases": ["participantes", "equipe"],
+		                          "queryContextPath": "queryContext",
+	                          "queryMapping": {
+	                            "sourceField": "missaoId",
+	                            "targetFilterField": "missaoId",
+	                            "targetPath": "filters.missaoId",
+	                            "valueSource": "selectionDigest.selectedIds[0]"
+	                          },
+	                          "operationId": "dynamicPage.surface.open"
+	                        }
+                      ],
+                      "rawRows": [{"titulo": "Operacao Aurora"}]
+                    }
+                  },
+                  "affordances": {
+                    "activeSurfaceRefs": ["missionTeam"],
+                    "activeActionRefs": ["table.selection", "dynamicPage.surface.open"]
+                  },
+                  "claims": [
+                    {"kind": "surface", "ref": "missionTeam", "observed": true},
+                    {"kind": "selection", "ref": "table-row-selection", "observed": true}
+                  ],
+                  "diagnostics": {
+                    "redactionApplied": true,
+                    "snapshotHash": "hash-1"
+                  }
+                }
+                """);
+    }
+
+    private JsonNode missionTeamRuntimeObservation() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-runtime-component-observation.v1",
+                  "identity": {
+                    "instanceId": "table:missionTeam",
+                    "componentId": "praxis-table",
+                    "componentType": "table",
+                    "widgetKey": "missionTeam",
+                    "ownerPackage": "@praxisui/table"
+                  },
+                  "refs": {
+                    "componentMetadataId": "praxis-table",
+                    "resourcePath": "operations/missao-participantes",
+                    "resourceKey": "missionParticipants"
+                  },
+                  "lifecycle": {
+                    "active": true,
+                    "visible": true,
+                    "capturedAt": "2099-01-01T00:00:00.000Z",
+                    "ttlMs": 30000
+                  },
+                  "snapshot": {
+                    "schemaFieldRefs": ["missaoId", "funcionarioNome", "papel", "principal", "resultado", "ordem"]
+                  },
+                  "affordances": {
+                    "activeSurfaceRefs": ["missionTeam"]
+                  },
+                  "diagnostics": {
+                    "redactionApplied": true,
+                    "snapshotHash": "hash-mission-team"
+                  }
+                }
+                """);
+    }
+
+    private JsonNode missionRuntimeObservationWithTeamAndTimeline() throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode mission =
+                (com.fasterxml.jackson.databind.node.ObjectNode) missionRuntimeObservation().deepCopy();
+        com.fasterxml.jackson.databind.node.ArrayNode activeSurfaceRefs =
+                (com.fasterxml.jackson.databind.node.ArrayNode) mission.path("affordances").path("activeSurfaceRefs");
+        activeSurfaceRefs.add("missionTimeline");
+        com.fasterxml.jackson.databind.node.ArrayNode relationSurfaceRefs =
+                (com.fasterxml.jackson.databind.node.ArrayNode) mission.path("snapshot").path("stateDigest").path("relationSurfaceRefs");
+        relationSurfaceRefs.add(objectMapper.readTree("""
+                {
+                  "id": "missionTimeline",
+                  "source": {
+                    "widget": "missionSummary",
+                    "componentType": "praxis-table",
+                    "port": "rowClick"
+                  },
+                  "target": {
+                    "widget": "missionTimeline",
+                    "componentType": "praxis-table",
+                    "port": "queryContext",
+                    "resourcePath": "operations/missao-eventos"
+	                  },
+	                  "targetSurface": "missionTimeline",
+	                  "label": "Linha do tempo e eventos",
+	                  "semanticAliases": ["eventos", "linha do tempo"],
+	                  "queryContextPath": "queryContext",
+                  "queryMapping": {
+                    "sourceField": "missaoId",
+                    "targetFilterField": "missaoId",
+                    "targetPath": "filters.missaoId",
+                    "valueSource": "selectionDigest.selectedIds[0]"
+                  },
+                  "operationId": "dynamicPage.surface.open"
+                }
+                """));
+        return mission;
+    }
+
+    private JsonNode missionRuntimeObservationWithTeamAndTimelineSelection(String... selectedIds) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode mission =
+                (com.fasterxml.jackson.databind.node.ObjectNode) missionRuntimeObservationWithTeamAndTimeline().deepCopy();
+        com.fasterxml.jackson.databind.node.ObjectNode selectionDigest =
+                (com.fasterxml.jackson.databind.node.ObjectNode) mission.path("snapshot").path("selectionDigest");
+        selectionDigest.put("selectedCount", selectedIds.length);
+        com.fasterxml.jackson.databind.node.ArrayNode ids = objectMapper.createArrayNode();
+        for (String selectedId : selectedIds) {
+            ids.add(selectedId);
+        }
+        selectionDigest.set("selectedIds", ids);
+        return mission;
+    }
+
+    private JsonNode missionTimelineRuntimeObservation() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-runtime-component-observation.v1",
+                  "identity": {
+                    "instanceId": "table:missionTimeline",
+                    "componentId": "praxis-table",
+                    "componentType": "table",
+                    "widgetKey": "missionTimeline",
+                    "ownerPackage": "@praxisui/table"
+                  },
+                  "refs": {
+                    "componentMetadataId": "praxis-table",
+                    "resourcePath": "operations/missao-eventos",
+                    "resourceKey": "missionEvents"
+                  },
+                  "lifecycle": {
+                    "active": true,
+                    "visible": true,
+                    "capturedAt": "2099-01-01T00:00:00.000Z",
+                    "ttlMs": 30000
+                  },
+                  "snapshot": {
+                    "schemaFieldRefs": ["missaoId", "evento", "data", "status", "ordem"]
+                  },
+                  "affordances": {
+                    "activeSurfaceRefs": ["missionTimeline"]
+                  },
+                  "diagnostics": {
+                    "redactionApplied": true,
+                    "snapshotHash": "hash-mission-timeline"
+                  }
+                }
+                """);
+    }
+
+    private JsonNode runtimeObservationWithSchemaFields(JsonNode observation, String... schemaFieldRefs) {
+        com.fasterxml.jackson.databind.node.ObjectNode copy =
+                (com.fasterxml.jackson.databind.node.ObjectNode) observation.deepCopy();
+        com.fasterxml.jackson.databind.node.ArrayNode fields = objectMapper.createArrayNode();
+        for (String schemaFieldRef : schemaFieldRefs) {
+            fields.add(schemaFieldRef);
+        }
+        ((com.fasterxml.jackson.databind.node.ObjectNode) copy.path("snapshot")).set("schemaFieldRefs", fields);
+        return copy;
+    }
+
+    private JsonNode runtimeObservationWithSchemaFieldDescriptors(
+            JsonNode observation,
+            String fieldRef,
+            String fieldType) {
+        com.fasterxml.jackson.databind.node.ObjectNode copy =
+                (com.fasterxml.jackson.databind.node.ObjectNode) runtimeObservationWithSchemaFields(observation, fieldRef).deepCopy();
+        com.fasterxml.jackson.databind.node.ArrayNode descriptors = objectMapper.createArrayNode();
+        com.fasterxml.jackson.databind.node.ObjectNode descriptor = descriptors.addObject();
+        descriptor.put("fieldRef", fieldRef);
+        descriptor.put("fieldType", fieldType);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) copy.path("snapshot")).set("schemaFieldDescriptors", descriptors);
+        return copy;
+    }
+
+    private JsonNode runtimeObservationWithRedactedFields(JsonNode observation, String... redactedFieldRefs) {
+        com.fasterxml.jackson.databind.node.ObjectNode copy =
+                (com.fasterxml.jackson.databind.node.ObjectNode) observation.deepCopy();
+        com.fasterxml.jackson.databind.node.ObjectNode diagnostics =
+                (com.fasterxml.jackson.databind.node.ObjectNode) copy.path("diagnostics");
+        com.fasterxml.jackson.databind.node.ArrayNode fields = objectMapper.createArrayNode();
+        for (String redactedFieldRef : redactedFieldRefs) {
+            fields.add(redactedFieldRef);
+        }
+        ((com.fasterxml.jackson.databind.node.ObjectNode) copy.path("snapshot")).set("omittedFields", fields.deepCopy());
+        diagnostics.set("omittedFields", fields);
+        return copy;
+    }
+
+    private JsonNode runtimeObservationWithWidgetKey(JsonNode observation, String widgetKey) {
+        com.fasterxml.jackson.databind.node.ObjectNode copy =
+                (com.fasterxml.jackson.databind.node.ObjectNode) observation.deepCopy();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) copy.path("identity")).put("widgetKey", widgetKey);
+        return copy;
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode acceptedCompareDimension(String fieldRef) {
+        com.fasterxml.jackson.databind.node.ObjectNode dimension = objectMapper.createObjectNode();
+        dimension.put("fieldRef", fieldRef);
+        dimension.put("source", "semantic_decision");
+        dimension.put("provenance", "backend_reconciled");
+        dimension.putArray("allowedFactKinds")
+                .add("surface_record_count")
+                .add("categorical_distribution")
+                .add("projection_redaction_coverage")
+                .add("record_count_delta")
+                .add("category_overlap")
+                .add("record_presence_matrix");
+        dimension.put("requiresBothSurfaces", true);
+        dimension.put("redactionRequired", true);
+        return dimension;
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode acceptedCompareDimensionWithoutPresenceMatrix(String fieldRef) {
+        com.fasterxml.jackson.databind.node.ObjectNode dimension = objectMapper.createObjectNode();
+        dimension.put("fieldRef", fieldRef);
+        dimension.put("source", "semantic_decision");
+        dimension.put("provenance", "backend_reconciled");
+        dimension.putArray("allowedFactKinds")
+                .add("surface_record_count")
+                .add("categorical_distribution")
+                .add("projection_redaction_coverage")
+                .add("record_count_delta")
+                .add("category_overlap");
+        dimension.put("requiresBothSurfaces", true);
+        dimension.put("redactionRequired", true);
+        return dimension;
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode acceptedCompareDimensionTemporal(String fieldRef) {
+        com.fasterxml.jackson.databind.node.ObjectNode dimension = acceptedCompareDimension(fieldRef);
+        dimension.put("fieldType", "date-time");
+        ((com.fasterxml.jackson.databind.node.ArrayNode) dimension.path("allowedFactKinds"))
+                .add("temporal_coverage");
+        return dimension;
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode acceptedCompareDimensionWithTemporalCoverageButNoTemporalType(
+            String fieldRef) {
+        com.fasterxml.jackson.databind.node.ObjectNode dimension = acceptedCompareDimension(fieldRef);
+        ((com.fasterxml.jackson.databind.node.ArrayNode) dimension.path("allowedFactKinds"))
+                .add("temporal_coverage");
+        return dimension;
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode compareRead(
+            String surfaceRef,
+            String stepRef,
+            List<String> projectionFields,
+            List<Integer> ordemValues) {
+        com.fasterxml.jackson.databind.node.ObjectNode read = objectMapper.createObjectNode();
+        read.put("surfaceRef", surfaceRef);
+        read.put("stepRef", stepRef);
+        read.put("recordCount", ordemValues.size());
+        read.put("redactionApplied", true);
+        read.put("rawRuntimeValuesCopied", false);
+        read.put("truncated", false);
+        com.fasterxml.jackson.databind.node.ArrayNode projected = read.putArray("projectionFields");
+        projectionFields.forEach(projected::add);
+        read.putArray("omittedFields").add("cpf");
+        com.fasterxml.jackson.databind.node.ArrayNode records = read.putArray("records");
+        for (Integer ordem : ordemValues) {
+            records.addObject().put("ordem", ordem);
+        }
+        return read;
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode compareTemporalRead(
+            String surfaceRef,
+            String stepRef,
+            List<String> projectionFields,
+            List<String> temporalValues) {
+        com.fasterxml.jackson.databind.node.ObjectNode read = objectMapper.createObjectNode();
+        read.put("surfaceRef", surfaceRef);
+        read.put("stepRef", stepRef);
+        read.put("recordCount", temporalValues.size());
+        read.put("redactionApplied", true);
+        read.put("rawRuntimeValuesCopied", false);
+        read.put("truncated", false);
+        com.fasterxml.jackson.databind.node.ArrayNode projected = read.putArray("projectionFields");
+        projectionFields.forEach(projected::add);
+        read.putArray("omittedFields").add("cpf");
+        com.fasterxml.jackson.databind.node.ArrayNode records = read.putArray("records");
+        for (String value : temporalValues) {
+            com.fasterxml.jackson.databind.node.ObjectNode record = records.addObject();
+            if (value == null) {
+                record.putNull("data");
+            } else {
+                record.put("data", value);
+            }
+        }
+        return read;
+    }
+
+    private JsonNode missionPageRuntimeObservationWithEmptySelection() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-runtime-component-observation.v1",
+                  "identity": {
+                    "instanceId": "page:mission-command-center",
+                    "componentId": "praxis-dynamic-page",
+                    "componentType": "dynamic-page",
+                    "widgetKey": "mission-page",
+                    "ownerPackage": "@praxisui/core"
+                  },
+                  "refs": {
+                    "componentMetadataId": "praxis-dynamic-page",
+                    "pageId": "mission-command-center"
+                  },
+                  "lifecycle": {
+                    "active": true,
+                    "visible": true,
+                    "capturedAt": "2099-01-01T00:00:00.000Z",
+                    "ttlMs": 30000
+                  },
+                  "snapshot": {
+                    "selectionDigest": {
+                      "selectedCount": 0,
+                      "selectedIds": [],
+                      "idField": "missaoId"
+                    },
+                    "stateDigest": {
+                      "pageId": "mission-command-center",
+                      "activeWidgetKeys": ["missionSummary", "missionTeam"],
+                      "selectedWidgetKey": "missionSummary",
+                      "relationSurfaceRefs": [
+                        {
+                          "id": "missionTeam",
+                          "sourceWidget": "missionSummary",
+                          "targetWidget": "missionTeam",
+                          "targetResourcePath": "operations/missao-participantes",
+                          "targetSurface": "missionTeam",
+                          "queryContextPath": "queryContext",
+                          "queryMapping": {
+                            "sourceField": "missaoId",
+                            "targetFilterField": "missaoId",
+                            "targetPath": "filters.missaoId",
+                            "valueSource": "selectionDigest.selectedIds[0]"
+                          },
+                          "operationId": "dynamicPage.surface.open"
+                        }
+                      ]
+                    }
+                  },
+                  "affordances": {
+                    "activeSurfaceRefs": ["missionTeam"],
+                    "activeActionRefs": ["dynamicPage.surface.open"]
+                  },
+                  "claims": [
+                    {"kind": "surface", "ref": "missionTeam", "observed": true}
+                  ],
+                  "diagnostics": {
+                    "redactionApplied": true,
+                    "snapshotHash": "page-hash-1"
+                  }
+                }
+                """);
     }
 
     private com.fasterxml.jackson.databind.node.ObjectNode uiCompositionPlanWithSemanticAxis(

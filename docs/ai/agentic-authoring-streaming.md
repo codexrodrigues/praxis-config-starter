@@ -66,7 +66,270 @@ O endpoint `start` recebe um request de turno agentic que contenha, no minimo:
 - `pendingClarification`
 - `attachmentSummaries`
 - `contextHints`
+- `runtimeComponentObservations`
+- `runtimeComponentObservationTrustBoundary`
 - `provider`, `model` e `apiKey` quando aplicavel
+
+`runtimeComponentObservations` e um envelope opcional de evidencia de runtime
+enviado por componentes do cockpit. O backend aceita essa evidencia somente com
+`runtimeComponentObservationTrustBoundary=untrusted_frontend_observation`, copia
+apenas campos permitidos para `contextHints.groundedRuntimeComponentContext`
+(`GroundedRuntimeComponentContext`) e nunca promove observacoes de frontend a
+capabilities, permissoes ou execucao de actions. Dados crus de linhas, valores
+completos, `sampleRows`, `rawRows`, `dataSource`, segredos e decisoes de intencao
+nao fazem parte do contexto aterrado.
+Quando esse contexto confirma uma superficie relacionada consultavel, o fluxo
+consultivo pode reconhecer a superficie e a selecao como evidencia governada,
+mas deve declarar a ausencia de uma tool backend read-only antes de listar dados
+relacionados. Confirmar `missionTeam` e diferente de inventar nomes de
+participantes.
+Quando `resolveRuntimeRelatedSurface` conseguir reconciliar `relationSurfaceRefs`,
+`queryMapping`, `selectionDigest` e um `resourcePath` backend governado, a
+resposta pode listar os registros relacionados retornados por essa leitura
+read-only. O filtro enviado ao backend deve vir de
+`relationSurfaceRefs[].queryMapping.targetFilterField`; `selectionDigest.idField`
+apenas confirma o campo de origem selecionado e `selectedIds[0]` fornece o valor.
+Sem `queryMapping` declarado, sem `idField`, com selecao multipla ou com
+`targetWidget` divergente quando ele for necessario para descobrir o recurso, a
+tool deve falhar antes do HTTP. Quando a composicao publicar
+`runtimeSurfaceInstanceRef`/`targetRuntimeSurfaceInstanceRef`, essa identidade
+canonica governa a escolha da superficie alvo; se varias superficies runtime
+compartilharem o mesmo `resourcePath` e nao houver `runtimeSurfaceInstanceRef`
+nem `targetWidget` reconciliavel, o backend deve bloquear com diagnostico de
+ambiguidade em vez de escolher a primeira ocorrencia por recurso.
+Quando a superficie alvo estiver presente no contexto runtime aterrado,
+`targetFilterField` tambem deve estar em `schemaFieldRefs` desse alvo ou
+declarado como filtro/queryContext canonico por
+`queryMapping.targetPath=filters.<campo>`; registros retornados sao projetados por
+campos declarados e por redaction de escalares sensíveis. O endurecimento
+seguinte deve reconciliar esses campos contra o schema backend governado, nao
+apenas contra observacao frontend aterrada.
+Quando componentes publicam `snapshot.schemaFieldDescriptors[]`, o grounding
+preserva somente `fieldRef`, tipos/formats/controlType seguros. Esses descritores
+podem informar a reconciliacao backend-owned de dimensoes temporais, mas nao
+autorizam reads sem a mesma validacao de superficie, projection e redaction.
+Nessas respostas consultivas guardadas, o `result` terminal pode incluir
+`evidenceBundle.runtimeConsultableContext`, uma projecao sanitizada do contexto
+runtime aterrado com refs seguras de superficies, actions, campos e claims
+aceitas/rejeitadas. Quando a leitura relacionada ocorrer, o `result` tambem pode
+incluir `evidenceBundle.runtimeRelatedSurfaceReads[]`, com registros projetados
+por allowlist e `rawRuntimeValuesCopied=false`; durante o beta,
+`evidenceBundle.runtimeRelatedSurfaceRead` permanece apenas como alias derivado
+de `runtimeRelatedSurfaceReads[0]`. O mesmo bundle pode incluir
+`evidenceBundle.runtimeToolPlan`, com `schemaVersion=praxis-runtime-tool-plan.v1`,
+budget, steps e aggregate diagnostics. O plano tambem pode incluir
+`planner.schemaVersion=praxis-runtime-tool-planner.v1` como cabecalho/politica
+do planejador. `steps[]`, `candidateSteps[]` e `blockedSteps[]` sao arrays irmaos
+diretamente sob `runtimeToolPlan`: `steps[]` descreve o que pode executar no
+policy atual, `candidateSteps[]` audita candidatos/ranking sem autorizar execucao
+e `blockedSteps[]` explica intents ou candidatos bloqueados. O plano tambem pode
+carregar `aggregationPolicy`, `stepBudget`, `projectionPolicyRef` e
+`redactionPolicyRef` por step/candidato. O plano deve declarar
+`multiToolAuthorization.source=backend_policy`. A policy default
+`runtime-tool-policy:single-read-beta` preserva no maximo uma tool read-only. A
+intencao `runtime_related_surface_availability` deve gerar plano
+`readMode=none`, `maxToolCalls=0`, sem step executavel e sem chamada HTTP, e
+`runtime_surface_disambiguation` deve aparecer como
+`blockedSteps[]`/`candidateSteps[]` com orcamento zero. O resultado terminal
+pode incluir `runtimeRelatedSurfaceDisambiguation` com `options[]` sanitizados
+para superficies aceitas, `readMode=none`, `backendReadsPerformed=false` e sem
+`runtimeRelatedSurfaceReads[]`, para que o cliente peca escolha de alvo sem
+executar tool. Nesses casos, o `result.quickReplies[]` pode projetar cada
+opcao como chip clicavel com `semanticDecision.constraints.runtimeRelatedSurfaceDisambiguationSelection`
+e `value` derivados do backend; o cliente deve reenviar essa decisao como
+`activeSemanticDecision`, nao recriar refs localmente nem trata-la como
+`contextHints` autoritativo. `runtime_related_surface_detail` continua read-free quando o
+alvo estiver ausente ou ambiguo, mas sob `runtime-tool-policy:multi-tool-readonly-beta`
+pode executar exatamente um read governado quando houver uma unica superficie
+relacionada aceita ou quando a decisao semantica retornar
+`DETAIL_TARGET_SURFACE_REF` e o backend reconciliar esse surfaceRef contra um
+candidato aceito. Um follow-up de desambiguacao tambem pode carregar
+`activeSemanticDecision.constraints.runtimeRelatedSurfaceDisambiguationSelection`
+com `optionRef`, `candidateRef` e `surfaceRef` emitidos anteriormente; essa
+selecao so vira alvo quando o backend reconciliar os tres refs contra um
+candidato aceito no contexto runtime atual. Em todos os casos aceitos, o plano
+usa `readMode=detail`,
+`aggregationPolicy.mode=governed_detail` e `detailTarget.provenance=backend_reconciled`.
+O cliente tambem pode preservar uma projecao sanitizada de
+`runtimeRelatedSurfaceDisambiguation` em
+`diagnostics.runtimeRelatedSurfaceDisambiguationContext` para o turno seguinte.
+Esse contexto historico e grounding read-free para o classificador semantico:
+ele pode ajudar a interpretar follow-ups naturais como "mostre os eventos",
+mas nao autoriza leitura, nao substitui `activeSemanticDecision` e nao pode
+carregar dados de registros. Para entrar no prompt do turno seguinte, esse
+contexto precisa declarar `sessionId`, `sourceTurnId`, `pageId`, `capturedAt` e
+`ttlMs`; o backend descarta o bloco se ele estiver expirado, vier do mesmo
+`clientTurnId`, pertencer a outra sessao/pagina ou se qualquer opcao deixar de
+reconciliar contra candidatos aceitos no contexto runtime atual. Para executar
+detalhe, o backend ainda precisa de uma decisao semantica ativa ou resolvida por
+LLM que produza `DETAIL_TARGET_SURFACE_REF`, seguida de reconciliacao contra
+candidatos aceitos no contexto runtime atual. Para executar uma lista direcionada, a decisao
+semantica deve produzir `LIST_TARGET_SURFACE_REF`; quando reconciliado, o
+terminal pode expor `runtimeRelatedSurfaceResolution.listTarget` com
+`source=semantic_decision`, `provenance=backend_reconciled`,
+`runtimeToolPlan.readMode=list_targeted` e
+`aggregationPolicy.mode=governed_list_targeted`, executando exatamente um read
+governado na superficie alvo. Se o alvo de listagem for ausente, divergente ou
+forjado, o backend bloqueia antes de HTTP com diagnostics fail-closed; se nao
+houver alvo, `runtime_related_surface_list` preserva o comportamento multi-read
+governado existente. Para executar um resumo direcionado, vale a mesma fronteira:
+a decisao semantica deve produzir `SUMMARY_TARGET_SURFACE_REF`; quando
+reconciliado, o terminal pode expor
+`runtimeRelatedSurfaceResolution.summaryTarget` com `source=semantic_decision`,
+`provenance=backend_reconciled`, `runtimeToolPlan.readMode=summary_targeted` e
+`aggregationPolicy.mode=governed_summary_targeted`, executando exatamente um read
+governado e derivando `runtimeRelatedSurfaceSummary` apenas desse read
+sanitizado. Se o alvo de resumo for ausente, `runtime_related_surface_summary`
+preserva o resumo multi-superficie governado existente; se for divergente ou
+forjado, bloqueia antes de HTTP com diagnostics fail-closed.
+Quando a classificacao semantica inicial ficar conservadora em
+`runtime_surface_disambiguation`, resolver uma intent direcionavel sem alvo, ou
+quando o classificador falhar e o fallback conservador detectar um pedido de
+detalhe/foco, o backend pode primeiro reconciliar o alvo contra um catalogo
+backend-owned dos candidatos aceitos, usando apenas `surfaceRef`,
+`candidateRef`, `runtimeSurfaceInstanceRef`, `label` e `semanticAliases`
+sanitizados como grounding. Esse passo so roda depois de uma intent semantica
+targetable (`list`, `summary` ou `detail`) com
+`TARGET_RESOLUTION_MODE=optional|required`, ou depois do fallback
+`runtime_surface_disambiguation` com `TARGET_RESOLUTION_MODE=optional` para
+detalhe focado; ele nao decide a intencao primaria, nao usa hints de frontend
+como autorizacao e nao executa tool. Termos de alvo encontrados em escopo
+simples de negacao do prompt, como `nao detalhe participantes`, nao pontuam no
+ranking do catalogo. Quando aceito, o terminal pode expor
+`runtimeRelatedSurfaceResolution.targetCandidateResolution` com
+`schemaVersion=praxis-runtime-related-surface-target-candidate-resolution.v1`,
+`source=backend_runtime_target_catalog`, `targetResolutionMode`, `intentKind`,
+`targetSurfaceRef`, `candidateRef`, `runtimeSurfaceInstanceRef`, `matchedTermKind`,
+`provenance=backend_reconciled`, `accepted=true` e `score`. Quando rejeitado ou
+ambiguo, o mesmo diagnostico pode declarar `provenance=backend_rejected`,
+`failureCode` e `evaluatedCandidates[]`, com itens sanitizados contendo apenas
+`surfaceRef`, `candidateRef`, `runtimeSurfaceInstanceRef`, `matched`, `score`,
+`matchedTermKind`, `ignoredNegatedTermCount` e `failureCode`, sem termo cru do
+prompt nem valores de registros. O caminho `accepted=true` deve permanecer
+enxuto e nao precisa emitir `evaluatedCandidates[]`.
+
+Quando a primeira decisao ficar em `runtime_surface_disambiguation` com
+`TARGET_RESOLUTION_MODE=required`, ou com `optional` e objetivo explicitamente de
+detalhe/foco, o catalogo tambem pode resolver somente o alvo e materializar
+`runtime_related_surface_detail`, porque a classificacao semantica ja declarou
+que ha um alvo runtime-related a reconciliar antes da leitura. Esse caminho
+continua proibido para disponibilidade, compare, listagem ou resumo sem kind
+semanticamente resolvido. Se o catalogo nao aceitar um unico alvo, o backend so
+pode fazer a segunda decisao semantica focada em
+`KIND + TARGET_SURFACE_REF` se a primeira decisao declarar
+`TARGET_RESOLUTION_MODE=optional|required`. O modo `none` e canonico para
+multi-read e resumo multi-superficie naturais, portanto nao deve disparar
+refinamento nem emitir `targetRefinementDiagnostics`. A segunda decisao usa
+candidatos aceitos, labels e aliases sanitizados como grounding, nao executa
+tool e nao autoriza leitura por si so: o alvo ainda precisa reconciliar contra
+os candidatos runtime atuais antes de qualquer HTTP. Quando esse refinamento for
+tentado, o terminal pode expor
+`runtimeRelatedSurfaceResolution.targetRefinementDiagnostics` com
+`schemaVersion=praxis-runtime-related-surface-target-refinement.v1`,
+`targetResolutionMode`, `initialKind`, `refinedKind`, `targetSurfaceRef`,
+`provenance`, `confidence`, `accepted` e `failureCode` quando rejeitado. O
+diagnostico e sanitizado e serve apenas para auditoria; `accepted=true` exige
+`provenance=backend_reconciled`, e rejeicoes continuam fail-closed sem HTTP.
+`runtime_related_surface_compare`, sem dimensao
+comparavel canonica aceita, mesmo sob readonly-beta, deve emitir
+`aggregationPolicy.mode=compare_planning_only`,
+`failureCode=runtime-related-surface-compare-not-enabled`, `steps[]=[]`,
+`runtimeRelatedSurfaceReads[]=[]` e `executionDiagnostics.planningOnly=true`.
+Com `runtime-tool-policy:multi-tool-readonly-beta`, se a decisao semantica
+retornar `COMPARISON_DIMENSION_FIELD` e o backend reconciliar esse campo contra
+as superficies aceitas, ou se o backend inferir exatamente uma dimensao comum
+nao sensivel a partir de contratos reconciliados, o backend pode executar o
+compare governado: ate dois reads governados, `readMode=compare`,
+`aggregationPolicy.mode=governed_compare`,
+`aggregationPolicy.comparisonDimension.source=semantic_decision|backend_contract`,
+`provenance=backend_reconciled`,
+`executionDiagnostics.compareEvidenceEmitted=true`,
+`runtimeRelatedSurfaceCompare` presente com fatos de contagem por superficie,
+distribuicao categorica, cobertura de projection/redaction, delta de contagem,
+overlap categorico, matriz de presenca de registros e `temporal_coverage`
+apenas quando a dimensao aceita for temporal por tipo reconciliado
+(`fieldType=date|date-time`), e sem alias singular em multi-read.
+O starter tambem pode ser iniciado, exclusivamente em ambiente de smoke, com
+`praxis.ai.authoring.runtime-related-surface.intent-policy-ref=runtime-related-surface-intent-policy:temporal-compare-smoke`
+e `praxis.ai.authoring.runtime-related-surface.temporal-comparison-field-ref=<fieldRef>`
+para substituir o classificador LLM por uma decisao backend-owned deterministica
+de compare temporal. Essa policy so produz `runtime_related_surface_compare`
+quando o campo configurado aparece em pelo menos duas superficies aterradas e nao
+redigidas, exige `fieldType=date|date-time` backend-reconciled antes de qualquer
+read, e valores desconhecidos voltam para `runtime-related-surface-intent-policy:llm`.
+`contextHints.runtimeRelatedSurfaceComparisonDimension` e hints equivalentes de
+frontend nao autorizam a dimensao. Campos nao declarados, ambiguos,
+omitidos/redigidos, sensiveis ou com tipo temporal divergente/incompleto
+bloqueiam antes de qualquer read.
+Se a resolucao semantica LLM da intencao runtime-related falhar e nao houver
+decisao semantica ativa governada, o fallback deve ser read-free
+(`runtime_surface_disambiguation`), sem `steps[]`, sem chamada HTTP e sem
+`runtimeRelatedSurfaceReads[]`; quando houver mais de uma superficie aceita,
+pode emitir `runtimeRelatedSurfaceDisambiguation.options[]` com refs,
+projection/redaction policy refs e claim refs aceitas, mas sem dados de
+registros. O backend nao deve converter falha do classificador em `list`
+executavel.
+`summary` tambem fica bloqueado/read-free por padrao, mas pode executar como
+agregacao governada quando a policy backend
+`runtime-tool-policy:multi-tool-readonly-beta` estiver ativa e todos os reads
+relacionados forem aceitos. `maxToolCalls > 1` so pode existir quando
+`planner.multiToolExecutionEnabled=true`, `planner.maxToolCallsMayExceedOne=true`
+e `multiToolAuthorization.allowed=true`; enquanto qualquer desses valores for
+`false`, o backend deve clamp/arrecusar o plano multi-tool e registrar
+`multiToolGuardrail.failureCode=runtime-multi-tool-policy-not-enabled`.
+Uma politica backend de preparacao pode ser selecionada apenas por configuracao
+do starter (`praxis.ai.authoring.runtime-tool.policy-ref`) usando
+`policyRef=runtime-tool-policy:multi-tool-dry-run-beta` com
+`planner.executionMode=dry_run`: nesse modo o plano pode apresentar multiplos
+`candidateSteps[]` e `aggregationPolicy.mode=dry_run_multi_read`, mas
+`budget.maxToolCalls=0`, `steps[]=[]` e `runtimeRelatedSurfaceReads[]=[]`.
+Dry-run autoriza simulacao/auditoria do plano, nao chamadas HTTP nem evidencia
+agregada real. `runtimeToolPlan.executionDiagnostics` deve declarar
+`dryRun=true`, `multiToolExecutionEnabled=false`, `authorizedCandidateCount`,
+`maxPlannedSteps`, `maxExecutableSteps=0`, `usedToolCalls=0`,
+`backendReadsPerformed=false` e o motivo de nao execucao. Hints de frontend nao
+podem ativar essa politica. A politica backend
+`runtime-tool-policy:multi-tool-readonly-beta` libera execucao read-only limitada
+somente quando selecionada por configuracao backend. Nesse modo,
+`planner.backendPolicyRef=runtime-tool-policy:multi-tool-readonly-beta`,
+`planner.executionMode=read_only`, `planner.multiToolExecutionEnabled=true` e
+as intencoes semanticas `runtime_related_surface_list` e
+`runtime_related_surface_summary` podem executar ate dois `steps[]` governados,
+enquanto `runtime_related_surface_detail` pode executar exatamente um step
+governado quando houver uma unica superficie aceita ou um `DETAIL_TARGET_SURFACE_REF`
+semanticamente resolvido e backend-reconciled. Cada step carrega
+`toolName`, `stepBudget`, `projectionPolicyRef`, `redactionPolicyRef` e
+`acceptedClaimRefs`. Cada leitura gera uma entrada em
+`runtimeRelatedSurfaceReads[]`; `usedToolCalls` deve ser igual ao numero de
+steps executados. Para `summary`, `aggregationPolicy.mode=governed_summary` e o
+resultado terminal pode incluir `runtimeRelatedSurfaceSummary`, derivado apenas
+dos reads sanitizados; quando houver `SUMMARY_TARGET_SURFACE_REF`
+backend-reconciled, `readMode=summary_targeted`,
+`aggregationPolicy.mode=governed_summary_targeted` e exatamente um step/read sao
+usados. Para `detail`, `aggregationPolicy.mode=governed_detail`
+e o alias beta singular pode apontar para `runtimeRelatedSurfaceReads[0]`.
+Se qualquer step falhar, a agregacao falha fechada e
+`runtimeRelatedSurfaceReads[]` terminal fica vazio. O alias beta singular
+`runtimeRelatedSurfaceRead` nao deve ser emitido quando houver mais de uma
+leitura. `runtime_related_surface_compare` entra nessa lista quando houver
+`comparisonDimension` aceita; ele chama os mesmos reads governados e emite
+`runtimeRelatedSurfaceCompare` terminal derivado apenas dos reads sanitizados.
+
+Quando `runtimeToolPlan` existir, o stream pode emitir fases tecnicas
+`runtime.tool-plan.intent`, `runtime.tool-plan.candidates`,
+`runtime.tool-plan.created`, `runtime.tool-plan.step` e
+`runtime.tool-plan.aggregate` antes de `consultative.answer`. Esses eventos nao
+devem carregar `records`, `sampleRows`, `rawRows`, `dataSource`, CPF, email,
+segredos ou valores runtime crus; registros sanitizados permanecem apenas no
+`evidenceBundle` terminal. Eventos tecnicos podem aparecer mais de uma vez no
+transporte SSE por replay/reconexao ou por envelopes intermediarios do stream,
+mas isso nao implica nova execucao. Quando o evento carregar
+`streamEventDiagnostics.schemaVersion=praxis-authoring-stream-event-diagnostics.v1`,
+consumidores devem agrupar por `streamEventDiagnostics.dedupeKey` ou
+`eventUniquenessKey`, e validar execucao por `stepRef`, `budget.usedToolCalls`,
+`runtimeRelatedSurfaceReads.length` e `aggregateStatus`, nao por contagem bruta
+de `phase`. O campo `duplicatesDoNotIndicateExecution=true` declara
+explicitamente que duplicatas tecnicas sao replay-safe.
 
 `conversationMessages` e usado apenas como evidencia de continuidade
 conversacional: referencias curtas como "1" ou "primeira opcao" podem ser
@@ -101,9 +364,9 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 | Tipo | Payload recomendado |
 |------|---------------------|
 | `status` | `state`, `phase`, `message` |
-| `thought.step` | `phase`, `tool`, `summary`, `diagnostics` seguro |
+| `thought.step` | `phase`, `tool`, `summary`, `diagnostics` seguro, `streamEventDiagnostics` quando houver dedupe auditavel |
 | `heartbeat` | metadados de keep-alive |
-| `result` | `intentResolution`, `preview`, `assistantMessage`, `quickReplies`, `canApply`, `decisionDiagnostics` |
+| `result` | `intentResolution`, `preview`, `assistantMessage`, `quickReplies`, `canApply`, `decisionDiagnostics`, `streamEventDiagnostics` quando houver dedupe auditavel |
 | `error` | `code`, `assistantMessage`, `message`, `phase` |
 | `cancelled` | `message`, `phase` |
 
@@ -113,6 +376,9 @@ emitir fases conversacionais suficientes para evitar uma UI parada em um unico
 estado generico. As fases canonicas atuais de `thought.step` incluem:
 
 - `context.bundle`: contexto do turno recebido e normalizado.
+- `runtime.context.grounding`: observacoes runtime aterradas como evidencia nao
+  confiavel, com contagens, claims aceitas/rejeitadas, superficies e refs
+  seguros.
 - `intent.resolve`: preparacao da resolucao semantica.
 - `intent.resolve.llm`: chamada ou revisao da LLM sobre a intencao do usuario.
 - `intent.resolve.grounding`: checagem da decisao contra evidencias governadas.
@@ -272,6 +538,8 @@ O Page Builder deve:
 - apresentar eventos de progresso como estado tecnico/operacional, sem misturar
   payload de diagnostico com mensagens conversacionais;
 - preservar `quickReplies[].contextHints` em todos os caminhos;
+- preservar `quickReplies[].semanticDecision` e, quando presente, reenviar a
+  decisao selecionada como `activeSemanticDecision` no turno seguinte;
 - cancelar o stream quando o usuario cancelar o turno ou fechar o painel, se o stream
   ainda estiver ativo;
 - tratar `result` como a unica fonte para aplicar preview local;

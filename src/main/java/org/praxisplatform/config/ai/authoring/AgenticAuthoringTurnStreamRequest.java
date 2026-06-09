@@ -20,8 +20,95 @@ public record AgenticAuthoringTurnStreamRequest(
         List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
         JsonNode contextHints,
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
-        AgenticAuthoringSemanticDecision activeSemanticDecision
+        AgenticAuthoringSemanticDecision activeSemanticDecision,
+        JsonNode diagnostics,
+        List<JsonNode> runtimeComponentObservations,
+        String runtimeComponentObservationTrustBoundary
 ) {
+    public AgenticAuthoringTurnStreamRequest(
+            String userPrompt,
+            String targetApp,
+            String targetComponentId,
+            String currentRoute,
+            JsonNode currentPage,
+            String selectedWidgetKey,
+            String provider,
+            String model,
+            String apiKey,
+            String sessionId,
+            String clientTurnId,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            AgenticAuthoringPendingClarification pendingClarification,
+            List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
+            JsonNode contextHints,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            AgenticAuthoringSemanticDecision activeSemanticDecision) {
+        this(
+                userPrompt,
+                targetApp,
+                targetComponentId,
+                currentRoute,
+                currentPage,
+                selectedWidgetKey,
+                provider,
+                model,
+                apiKey,
+                sessionId,
+                clientTurnId,
+                conversationMessages,
+                pendingClarification,
+                attachmentSummaries,
+                contextHints,
+                componentCapabilities,
+                activeSemanticDecision,
+                null,
+                null,
+                null);
+    }
+
+    public AgenticAuthoringTurnStreamRequest(
+            String userPrompt,
+            String targetApp,
+            String targetComponentId,
+            String currentRoute,
+            JsonNode currentPage,
+            String selectedWidgetKey,
+            String provider,
+            String model,
+            String apiKey,
+            String sessionId,
+            String clientTurnId,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            AgenticAuthoringPendingClarification pendingClarification,
+            List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
+            JsonNode contextHints,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            AgenticAuthoringSemanticDecision activeSemanticDecision,
+            List<JsonNode> runtimeComponentObservations,
+            String runtimeComponentObservationTrustBoundary) {
+        this(
+                userPrompt,
+                targetApp,
+                targetComponentId,
+                currentRoute,
+                currentPage,
+                selectedWidgetKey,
+                provider,
+                model,
+                apiKey,
+                sessionId,
+                clientTurnId,
+                conversationMessages,
+                pendingClarification,
+                attachmentSummaries,
+                contextHints,
+                componentCapabilities,
+                activeSemanticDecision,
+                null,
+                runtimeComponentObservations,
+                runtimeComponentObservationTrustBoundary);
+    }
+
     public AgenticAuthoringTurnStreamRequest(
             String userPrompt,
             String targetApp,
@@ -56,6 +143,9 @@ public record AgenticAuthoringTurnStreamRequest(
                 attachmentSummaries,
                 contextHints,
                 componentCapabilities,
+                null,
+                null,
+                null,
                 null);
     }
 }

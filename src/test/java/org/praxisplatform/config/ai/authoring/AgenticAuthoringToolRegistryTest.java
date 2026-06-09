@@ -7,12 +7,17 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
@@ -27,7 +32,7 @@ class AgenticAuthoringToolRegistryTest {
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
 
         assertThat(registry.definitions())
-                .hasSize(8)
+                .hasSize(9)
                 .anySatisfy(definition -> {
                     assertThat(definition.name()).isEqualTo("searchApiResources");
                     assertThat(definition.allowedRoutes())
@@ -45,6 +50,22 @@ class AgenticAuthoringToolRegistryTest {
                     assertThat(definition.governanceLevel()).isEqualTo("safe_grounding");
                     assertThat(definition.auditRedactionPolicy()).isEqualTo("safe_event_projection_only");
                 })
+                .anySatisfy(definition -> {
+                    assertThat(definition.name()).isEqualTo("resolveRuntimeRelatedSurface");
+                    assertThat(definition.allowedRoutes())
+                            .containsExactlyInAnyOrder(
+                                    "component_authoring",
+                                    "mixed",
+                                    "needs_clarification",
+                                    "advisory_authoring");
+                    assertThat(definition.ownerSurface())
+                            .isEqualTo("praxis-config-starter:runtime-related-surface-read");
+                    assertThat(definition.allowedPhases())
+                            .containsExactly("retrieveEvidence");
+                    assertThat(definition.sideEffectClass()).isEqualTo("read_only");
+                    assertThat(definition.governanceLevel()).isEqualTo("governed_runtime_context_reconciliation");
+                    assertThat(definition.auditRedactionPolicy()).isEqualTo("safe_event_projection_only");
+                })
                 .extracting(AgenticAuthoringToolDefinition::name)
                 .containsExactlyInAnyOrder(
                         "searchApiResources",
@@ -54,7 +75,8 @@ class AgenticAuthoringToolRegistryTest {
                         "searchConfigPathDocs",
                         "searchExamples",
                         "searchSchemaFields",
-                        "presentationAffordanceDiscovery");
+                        "presentationAffordanceDiscovery",
+                        "resolveRuntimeRelatedSurface");
     }
 
     @Test
@@ -528,6 +550,910 @@ class AgenticAuthoringToolRegistryTest {
         assertThat(result.valid()).isFalse();
         assertThat(result.errorCode()).isEqualTo("tool-phase-not-allowed");
         assertThat(result.errorMessage()).contains("proposeDecision");
+    }
+
+    @Test
+    void resolvesRuntimeRelatedSurfaceResourceFromTargetWidgetComponent() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {
+                            "id": 10,
+                            "funcionarioNome": "Ana Torres",
+                            "papel": "LIDER",
+                            "principal": true,
+                            "missaoTitulo": "Operacao Aurora",
+                            "cpf": "123.456.789-00",
+                            "email": "ana@example.test",
+                            "salario": 999999
+                          }
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                    new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+            JsonNode runtimeContext = objectMapper.readTree("""
+                    {
+                      "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                      "availableSurfaces": ["missionTeam"],
+                      "components": [
+                        {
+                          "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                          "refs": {"pageId": "page-builder-ia"},
+                          "snapshot": {
+                            "selectionDigest": {},
+                            "relationSurfaceRefs": [
+                              {
+                                "id": "missionTeam",
+                                "sourceWidget": "missionSummary",
+                                "targetWidget": "missionTeam",
+                                "targetResourcePath": "operations/missao-participantes",
+                                "statePath": "selection.missionId",
+                                "queryMapping": {
+                                  "sourceField": "missaoId",
+                                  "targetFilterField": "missaoId",
+                                  "targetPath": "filters.missaoId",
+                                  "valueSource": "selectionDigest.selectedIds[0]"
+                                },
+                                "operationId": "dynamicPage.surface.open"
+                              }
+                            ]
+                          },
+                          "affordances": {
+                            "activeSurfaceRefs": ["missionTeam"],
+                            "activeActionRefs": ["dynamicPage.surface.open"]
+                          }
+                        },
+                        {
+                          "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                          "refs": {"resourcePath": "operations/vw-resumo-missoes"},
+                          "snapshot": {
+                            "selectionDigest": {
+                              "selectedCount": 1,
+                              "selectedIds": ["1"],
+                              "idField": "missaoId"
+                            }
+                          },
+                          "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                        },
+                        {
+                          "identity": {"componentId": "praxis-table", "widgetKey": "missionTeam"},
+                          "refs": {"resourcePath": "operations/missao-participantes"},
+                          "snapshot": {"schemaFieldRefs": ["funcionarioNome", "papel", "resultado"]}
+                        }
+                      ]
+                    }
+                    """);
+
+            AgenticAuthoringToolResult result = registry.execute(
+                    new AgenticAuthoringToolCall(
+                            AgenticAuthoringToolRegistry.RESOLVE_RUNTIME_RELATED_SURFACE,
+                            "advisory_authoring",
+                            new RuntimeRelatedSurfaceReadToolRequest(
+                                    runtimeContext,
+                                    "missionTeam",
+                                    null,
+                                    null,
+                                    "http://localhost:" + server.getAddress().getPort(),
+                                    8)),
+                    new AiPrincipalContext("tenant", "user", "local", true),
+                    "retrieveEvidence");
+
+            assertThat(result.valid())
+                    .as("errorCode=%s errorMessage=%s", result.errorCode(), result.errorMessage())
+                    .isTrue();
+            assertThat(requestBody.get()).contains("\"missaoId\":1");
+            JsonNode payload = (JsonNode) result.payload();
+            assertThat(payload.path("resourcePath").asText()).isEqualTo("operations/missao-participantes");
+            assertThat(payload.path("recordCount").asInt()).isEqualTo(1);
+            assertThat(payload.path("queryMapping").path("targetPath").asText()).isEqualTo("filters.missaoId");
+            assertThat(payload.path("projectionFields").toString()).contains("funcionarioNome", "papel");
+            assertThat(payload.path("redactionApplied").asBoolean()).isTrue();
+            assertThat(payload.path("records").toString())
+                    .contains("Ana Torres")
+                    .doesNotContain("Operacao Aurora")
+                    .doesNotContain("123.456.789-00")
+                    .doesNotContain("ana@example.test")
+                    .doesNotContain("salario");
+            assertThat(payload.path("rawRuntimeValuesCopied").asBoolean()).isFalse();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void readsGenericRuntimeRelatedSurfaceThroughDeclaredQueryMapping() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        server.createContext("/api/sales/order-items/filter", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {
+                            "id": 301,
+                            "orderId": 42,
+                            "sku": "SKU-42-A",
+                            "quantity": 3,
+                            "email": "buyer@example.test",
+                            "token": "hidden"
+                          }
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                    new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+            JsonNode runtimeContext = objectMapper.readTree("""
+                    {
+                      "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                      "availableSurfaces": ["orderItems"],
+                      "components": [
+                        {
+                          "identity": {"componentId": "praxis-dynamic-page", "instanceId": "orders-page"},
+                          "snapshot": {
+                            "relationSurfaceRefs": [
+                              {
+                                "id": "orderItems",
+                                "sourceWidget": "ordersTable",
+                                "targetWidget": "orderItems",
+                                "targetResourcePath": "sales/order-items",
+                                "queryMapping": {
+                                  "sourceField": "orderId",
+                                  "targetFilterField": "orderId",
+                                  "targetPath": "filters.orderId",
+                                  "valueSource": "selectionDigest.selectedIds[0]"
+                                },
+                                "operationId": "dynamicPage.surface.open"
+                              }
+                            ]
+                          },
+                          "affordances": {
+                            "activeSurfaceRefs": ["orderItems"],
+                            "activeActionRefs": ["dynamicPage.surface.open"]
+                          }
+                        },
+                        {
+                          "identity": {"componentId": "praxis-table", "widgetKey": "ordersTable"},
+                          "refs": {"resourcePath": "sales/orders"},
+                          "snapshot": {
+                            "selectionDigest": {
+                              "selectedCount": 1,
+                              "selectedIds": ["42"],
+                              "idField": "orderId"
+                            }
+                          },
+                          "affordances": {"activeSurfaceRefs": ["orderItems"]}
+                        },
+                        {
+                          "identity": {"componentId": "praxis-table", "widgetKey": "orderItems"},
+                          "refs": {"resourcePath": "sales/order-items"},
+                          "snapshot": {"schemaFieldRefs": ["orderId", "sku", "quantity"]}
+                        }
+                      ]
+                    }
+                    """);
+
+            AgenticAuthoringToolResult result = registry.execute(
+                    new AgenticAuthoringToolCall(
+                            AgenticAuthoringToolRegistry.RESOLVE_RUNTIME_RELATED_SURFACE,
+                            "advisory_authoring",
+                            new RuntimeRelatedSurfaceReadToolRequest(
+                                    runtimeContext,
+                                    "orderItems",
+                                    null,
+                                    null,
+                                    "http://localhost:" + server.getAddress().getPort(),
+                                    8)),
+                    new AiPrincipalContext("tenant", "user", "local", true),
+                    "retrieveEvidence");
+
+            assertThat(result.valid()).isTrue();
+            assertThat(requestBody.get()).contains("\"orderId\":42");
+            JsonNode payload = (JsonNode) result.payload();
+            assertThat(payload.path("resourcePath").asText()).isEqualTo("sales/order-items");
+            assertThat(payload.path("records").toString())
+                    .contains("SKU-42-A")
+                    .contains("quantity")
+                    .doesNotContain("buyer@example.test")
+                    .doesNotContain("hidden");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenRelationIsForged() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["payroll"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.missaoId",
+                              "valueSource": "selectionDigest.selectedIds[0]"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["payroll"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    }
+                  ]
+                }
+                """, "payroll", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-relation-not-declared");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWithoutSelection() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.missaoId",
+                              "valueSource": "selectionDigest.selectedIds[0]"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 0, "selectedIds": [], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-selection-required");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWithoutDeclaredQueryMapping() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, "missaoId");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-query-mapping-required");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenSelectionIdFieldIsMissing() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.missaoId"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"]}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, "missaoId");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-selection-id-required");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenSelectionHasMultipleIds() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.missaoId"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 2, "selectedIds": ["1", "2"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-multiple-selection-unsupported");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenQueryMappingSourceFieldDiffersFromSelectionIdField() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missionId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.missaoId"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-source-field-mismatch");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWithoutGovernedTargetResourcePathEvenWhenRequestSuggestsOne() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", "operations/missao-participantes", null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-resource-not-declared");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenDeclaredTargetWidgetIsMissing() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetWidget": "missingMissionTeam",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-target-widget-not-found");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenTargetFilterFieldIsNotDeclaredByTargetSurface() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetWidget": "missionTeam",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "cpf"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionTeam"},
+                      "refs": {"resourcePath": "operations/missao-participantes"},
+                      "snapshot": {"schemaFieldRefs": ["missaoId", "funcionarioNome", "papel"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-target-filter-field-not-declared");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenTargetPathIsNotSafeFilterIdentifier() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.missao-id"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-target-path-invalid");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenTargetPathDiffersFromTargetFilterField() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.outraCoisa"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-target-path-filter-mismatch");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenTargetWidgetIsMissingEvenWithResourcePathAndQueryMappingDeclared() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        server.createContext("/api/operations/missao-participantes/filter", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = """
+                    {
+                      "success": true,
+                      "data": {
+                        "content": [
+                          {"id": 10, "missaoId": 1, "funcionarioNome": "Ana Torres", "papel": "LIDER"}
+                        ]
+                      }
+                    }
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                    new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+            JsonNode runtimeContext = objectMapper.readTree("""
+                    {
+                      "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                      "availableSurfaces": ["missionTeam"],
+                      "components": [
+                        {
+                          "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                          "snapshot": {
+                            "relationSurfaceRefs": [
+                              {
+                                "id": "missionTeam",
+                                "sourceWidget": "missionSummary",
+                                "targetWidget": "missingMissionTeam",
+                                "targetResourcePath": "operations/missao-participantes",
+                                "queryMapping": {
+                                  "sourceField": "missaoId",
+                                  "targetFilterField": "missaoId",
+                                  "targetPath": "filters.missaoId"
+                                },
+                                "operationId": "dynamicPage.surface.open"
+                              }
+                            ]
+                          },
+                          "affordances": {
+                            "activeSurfaceRefs": ["missionTeam"],
+                            "activeActionRefs": ["dynamicPage.surface.open"]
+                          }
+                        },
+                        {
+                          "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                          "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                          "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                        }
+                      ]
+                    }
+                    """);
+
+            AgenticAuthoringToolResult result = registry.execute(
+                    new AgenticAuthoringToolCall(
+                            AgenticAuthoringToolRegistry.RESOLVE_RUNTIME_RELATED_SURFACE,
+                            "advisory_authoring",
+                            new RuntimeRelatedSurfaceReadToolRequest(
+                                    runtimeContext,
+                                    "missionTeam",
+                                    null,
+                                    null,
+                                    "http://localhost:" + server.getAddress().getPort(),
+                                    8)),
+                    new AiPrincipalContext("tenant", "user", "local", true),
+                    "retrieveEvidence");
+
+            assertThat(result.valid()).isFalse();
+            assertThat(result.errorCode()).isEqualTo("runtime-surface-target-widget-not-found");
+            assertThat(requestBody.get()).isBlank();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenSurfaceCapabilityIsNotActive() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {"activeActionRefs": ["dynamicPage.surface.open"]}
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-not-active");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenOperationCapabilityIsNotActive() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-operation-not-active");
+    }
+
+    @Test
+    void rejectsRuntimeRelatedSurfaceWhenResourcePathMatchesMultipleRuntimeSurfacesWithoutCanonicalIdentity() throws Exception {
+        AgenticAuthoringToolResult result = executeRuntimeRelatedSurfaceRead("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-runtime-consultable-context.v1",
+                  "availableSurfaces": ["missionTeam"],
+                  "components": [
+                    {
+                      "identity": {"componentId": "praxis-dynamic-page", "instanceId": "page-builder-ia"},
+                      "snapshot": {
+                        "relationSurfaceRefs": [
+                          {
+                            "id": "missionTeam",
+                            "sourceWidget": "missionSummary",
+                            "targetResourcePath": "operations/missao-participantes",
+                            "queryMapping": {
+                              "sourceField": "missaoId",
+                              "targetFilterField": "missaoId",
+                              "targetPath": "filters.missaoId"
+                            },
+                            "operationId": "dynamicPage.surface.open"
+                          }
+                        ]
+                      },
+                      "affordances": {
+                        "activeSurfaceRefs": ["missionTeam"],
+                        "activeActionRefs": ["dynamicPage.surface.open"]
+                      }
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionSummary"},
+                      "snapshot": {"selectionDigest": {"selectedCount": 1, "selectedIds": ["1"], "idField": "missaoId"}},
+                      "affordances": {"activeSurfaceRefs": ["missionTeam"]}
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionTeamA"},
+                      "refs": {"resourcePath": "operations/missao-participantes"},
+                      "snapshot": {"schemaFieldRefs": ["funcionarioNome", "papel"]}
+                    },
+                    {
+                      "identity": {"componentId": "praxis-table", "widgetKey": "missionTeamB"},
+                      "refs": {"resourcePath": "operations/missao-participantes"},
+                      "snapshot": {"schemaFieldRefs": ["funcionarioNome", "papel"]}
+                    }
+                  ]
+                }
+                """, "missionTeam", null, null);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("runtime-surface-resource-path-ambiguous");
+    }
+
+    private AgenticAuthoringToolResult executeRuntimeRelatedSurfaceRead(
+            String runtimeContextJson,
+            String surfaceRef,
+            String requestResourcePath,
+            String filterField) throws Exception {
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+        return registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.RESOLVE_RUNTIME_RELATED_SURFACE,
+                        "advisory_authoring",
+                        new RuntimeRelatedSurfaceReadToolRequest(
+                                objectMapper.readTree(runtimeContextJson),
+                                surfaceRef,
+                                requestResourcePath,
+                                filterField,
+                                "http://localhost:1",
+                                8)),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                "retrieveEvidence");
     }
 
     @Test

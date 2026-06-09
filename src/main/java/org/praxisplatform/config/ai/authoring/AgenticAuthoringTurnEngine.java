@@ -36,6 +36,7 @@ public class AgenticAuthoringTurnEngine {
     private final SchemaRetrievalService schemaRetrievalService;
     private final AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService;
     private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
+    private final AgenticAuthoringRuntimeComponentGroundingService runtimeComponentGroundingService;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
     public AgenticAuthoringTurnEngine(
@@ -163,6 +164,7 @@ public class AgenticAuthoringTurnEngine {
         this.schemaRetrievalService = schemaRetrievalService;
         this.componentCapabilitiesService = componentCapabilitiesService;
         this.consultativeAnswerService = consultativeAnswerService;
+        this.runtimeComponentGroundingService = new AgenticAuthoringRuntimeComponentGroundingService(objectMapper);
     }
 
     AgenticAuthoringTurnOutcome execute(
@@ -178,6 +180,7 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnEventSink eventSink,
             String schemaBaseUrl) {
         request = withServerComponentCapabilities(request);
+        request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         request = withActiveDecisionContext(request, state.activeSemanticDecision());
         try {
@@ -185,6 +188,7 @@ public class AgenticAuthoringTurnEngine {
                     "phase", "context.bundle",
                     "summary", "Authoring context received.",
                     "diagnostics", safeDiagnostics(request)));
+            emitRuntimeComponentGroundingStep(request, eventSink);
             AgenticAuthoringTurnOutcome fastConsultativeOutcome = maybeAnswerConsultativeFastPath(
                     request,
                     principalContext,
@@ -417,6 +421,122 @@ public class AgenticAuthoringTurnEngine {
                 "summary", safeText(message)));
     }
 
+    private void emitRuntimeComponentGroundingStep(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringTurnEventSink eventSink) {
+        if (eventSink == null || eventSink.terminalReached()) {
+            return;
+        }
+        JsonNode context = request == null || request.contextHints() == null
+                ? null
+                : request.contextHints().path("groundedRuntimeComponentContext");
+        if (context == null || !context.isObject()) {
+            return;
+        }
+        eventSink.append("thought.step", Map.of(
+                "phase", "runtime.context.grounding",
+                "summary", "Grounded runtime component observations as untrusted evidence.",
+                "diagnostics", safeRuntimeGroundingDiagnostics(context)));
+    }
+
+    private Map<String, Object> safeRuntimeGroundingDiagnostics(JsonNode context) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        JsonNode contextDiagnostics = context == null ? null : context.path("diagnostics");
+        diagnostics.put("canonicalContext", context == null ? "" : safeText(context.path("canonicalContext").asText("")));
+        diagnostics.put("trustLevel", context == null ? "" : safeText(context.path("trustLevel").asText("")));
+        diagnostics.put("acceptedComponentCount", contextDiagnostics == null
+                ? 0
+                : contextDiagnostics.path("acceptedComponentCount").asInt(0));
+        diagnostics.put("acceptedClaimCount", contextDiagnostics == null
+                ? 0
+                : contextDiagnostics.path("acceptedClaimCount").asInt(0));
+        diagnostics.put("rejectedClaimCount", contextDiagnostics == null
+                ? 0
+                : contextDiagnostics.path("rejectedClaimCount").asInt(0));
+        diagnostics.put("availableSurfaces", safeTextValues(context.path("availableSurfaces"), 12));
+        diagnostics.put("allowedOperations", safeTextValues(context.path("allowedOperations"), 16));
+        diagnostics.put("acceptedClaims", safeRuntimeClaims(context.path("acceptedClaims"), 24));
+        diagnostics.put("rejectedClaims", safeRejectedRuntimeClaims(context.path("rejectedClaims"), 12));
+        diagnostics.put("evidenceRefs", safeRuntimeEvidenceRefs(context.path("evidenceRefs"), 12));
+        diagnostics.put("rawRuntimeValuesCopied", false);
+        return diagnostics;
+    }
+
+    private List<String> safeTextValues(JsonNode source, int limit) {
+        List<String> values = new ArrayList<>();
+        if (source == null || !source.isArray()) {
+            return values;
+        }
+        for (JsonNode item : source) {
+            if (values.size() >= limit) {
+                break;
+            }
+            String text = item.asText("");
+            if (StringUtils.hasText(text)) {
+                values.add(text);
+            }
+        }
+        return values;
+    }
+
+    private List<Map<String, Object>> safeRuntimeClaims(JsonNode claims, int limit) {
+        List<Map<String, Object>> values = new ArrayList<>();
+        if (claims == null || !claims.isArray()) {
+            return values;
+        }
+        for (JsonNode claim : claims) {
+            if (values.size() >= limit || !claim.isObject()) {
+                break;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("kind", safeText(claim.path("kind").asText("")));
+            item.put("ref", safeText(claim.path("ref").asText("")));
+            if (claim.path("observed").isBoolean()) {
+                item.put("observed", claim.path("observed").asBoolean());
+            }
+            values.add(item);
+        }
+        return values;
+    }
+
+    private List<Map<String, Object>> safeRejectedRuntimeClaims(JsonNode claims, int limit) {
+        List<Map<String, Object>> values = new ArrayList<>();
+        if (claims == null || !claims.isArray()) {
+            return values;
+        }
+        for (JsonNode claim : claims) {
+            if (values.size() >= limit || !claim.isObject()) {
+                break;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("reason", safeText(claim.path("reason").asText("")));
+            item.put("componentId", safeText(claim.path("componentId").asText("")));
+            item.put("schemaVersion", safeText(claim.path("schemaVersion").asText("")));
+            values.add(item);
+        }
+        return values;
+    }
+
+    private List<Map<String, Object>> safeRuntimeEvidenceRefs(JsonNode refs, int limit) {
+        List<Map<String, Object>> values = new ArrayList<>();
+        if (refs == null || !refs.isArray()) {
+            return values;
+        }
+        for (JsonNode ref : refs) {
+            if (values.size() >= limit || !ref.isObject()) {
+                break;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("source", safeText(ref.path("source").asText("")));
+            item.put("componentId", safeText(ref.path("componentId").asText("")));
+            item.put("instanceId", safeText(ref.path("instanceId").asText("")));
+            item.put("resourceKey", safeText(ref.path("resourceKey").asText("")));
+            item.put("pageId", safeText(ref.path("pageId").asText("")));
+            values.add(item);
+        }
+        return values;
+    }
+
     private AgenticAuthoringTurnOutcome maybeAnswerConsultativeFastPath(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
@@ -464,13 +584,17 @@ public class AgenticAuthoringTurnEngine {
         if (answer == null || eventSink.terminalReached()) {
             return null;
         }
-        eventSink.append("thought.step", Map.of(
-                "phase", "consultative.answer",
-                "summary", "Answered consultative turn through the fast grounded path.",
-                "diagnostics", Map.of(
+        emitRuntimeRelatedSurfaceEvidenceSteps(answer, eventSink);
+        eventSink.append("thought.step", streamEventPayload(
+                "consultative.answer",
+                "Answered consultative turn through the fast grounded path.",
+                Map.of(
                         "category", safeText(answer.category()),
                         "hasApiCatalogProjection", answer.apiCatalogProjection() != null
-                                && answer.apiCatalogProjection().hasResources())));
+                                && answer.apiCatalogProjection().hasResources(),
+                        "hasRuntimeConsultableContext", answer.evidenceBundle() != null
+                                && answer.evidenceBundle().path("runtimeConsultableContext").isObject()),
+                "consultative.answer:" + safeText(answer.category())));
         AgenticAuthoringIntentResolutionResult intentResolution =
                 consultativeIntentResolution(request, state, answer);
         Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null);
@@ -482,13 +606,152 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("assistantMessage", safeText(answer.assistantMessage()));
         resultPayload.put("assistantContent",
                 AgenticAuthoringAssistantContentFactory.fromConsultativeProjection(answer.apiCatalogProjection()));
-        resultPayload.put("quickReplies", List.of());
+        if (answer.evidenceBundle() != null && !answer.evidenceBundle().isNull()) {
+            resultPayload.put("evidenceBundle", answer.evidenceBundle());
+        }
+        resultPayload.put("quickReplies", answer.quickReplies() == null ? List.of() : answer.quickReplies());
         resultPayload.put("canApply", false);
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+        resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
+                "result:consultative_fast_path:" + safeText(answer.category()),
+                false));
         AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass("consultative_fast_path"))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private void emitRuntimeRelatedSurfaceEvidenceSteps(
+            AgenticAuthoringConsultativeAnswer answer,
+            AgenticAuthoringTurnEventSink eventSink) {
+        if (answer == null || answer.evidenceBundle() == null || eventSink == null || eventSink.terminalReached()) {
+            return;
+        }
+        JsonNode resolution = answer.evidenceBundle().path("runtimeRelatedSurfaceResolution");
+        if (!resolution.isObject()) {
+            return;
+        }
+        String semanticDecisionRef = safeText(resolution.path("semanticDecisionRef").asText(""));
+        eventSink.append("thought.step", streamEventPayload(
+                "runtime.related-surface.intent",
+                "Runtime related surface read authorized by consultative semantic decision.",
+                Map.of("semanticDecisionRef", semanticDecisionRef),
+                "runtime.related-surface.intent:" + semanticDecisionRef));
+        eventSink.append("thought.step", streamEventPayload(
+                "runtime.related-surface.candidates",
+                "Runtime related surface candidates ranked with accepted and rejected claims.",
+                resolution,
+                "runtime.related-surface.candidates:" + semanticDecisionRef));
+        JsonNode reads = answer.evidenceBundle().path("runtimeRelatedSurfaceReads");
+        eventSink.append("thought.step", streamEventPayload(
+                "runtime.related-surface.read",
+                reads.isArray() && !reads.isEmpty()
+                        ? "Runtime related surface read completed through read-only backend tool."
+                        : "Runtime related surface read was blocked or returned no governed records.",
+                Map.of(
+                        "readCount", reads.isArray() ? reads.size() : 0,
+                        "selectedCandidateRef", safeText(resolution.path("selectedCandidateRef").asText(""))),
+                "runtime.related-surface.read:" + semanticDecisionRef + ":"
+                        + (reads.isArray() ? reads.size() : 0)));
+        emitRuntimeToolPlanEvidenceSteps(answer.evidenceBundle(), eventSink);
+    }
+
+    private void emitRuntimeToolPlanEvidenceSteps(JsonNode evidenceBundle, AgenticAuthoringTurnEventSink eventSink) {
+        if (evidenceBundle == null || eventSink == null || eventSink.terminalReached()) {
+            return;
+        }
+        JsonNode plan = evidenceBundle.path("runtimeToolPlan");
+        if (!plan.isObject()) {
+            return;
+        }
+        String semanticDecisionRef = safeText(plan.path("semanticDecisionRef").asText(""));
+        String intentKind = safeText(plan.path("intentKind").asText(""));
+        String policyRef = safeText(plan.path("multiToolAuthorization").path("policyRef").asText(""));
+        eventSink.append("thought.step", streamEventPayload(
+                "runtime.tool-plan.intent",
+                "Runtime tool plan authorized by consultative semantic decision.",
+                Map.of(
+                        "semanticDecisionRef", safeText(plan.path("semanticDecisionRef").asText("")),
+                        "intentKind", safeText(plan.path("intentKind").asText("")),
+                        "readMode", safeText(plan.path("readMode").asText(""))),
+                "runtime.tool-plan.intent:" + semanticDecisionRef));
+        JsonNode resolution = evidenceBundle.path("runtimeRelatedSurfaceResolution");
+        if (resolution.isObject()) {
+            eventSink.append("thought.step", streamEventPayload(
+                    "runtime.tool-plan.candidates",
+                    "Runtime tool plan candidates derived from governed related surface resolution.",
+                    resolution,
+                    "runtime.tool-plan.candidates:" + semanticDecisionRef));
+        }
+        eventSink.append("thought.step", streamEventPayload(
+                "runtime.tool-plan.created",
+                "Runtime tool plan created with explicit budget and governed steps.",
+                plan,
+                "runtime.tool-plan.created:" + semanticDecisionRef + ":" + intentKind + ":" + policyRef));
+        JsonNode steps = plan.path("steps");
+        if (steps.isArray()) {
+            for (JsonNode step : steps) {
+                String stepRef = safeText(step.path("stepRef").asText(""));
+                eventSink.append("thought.step", streamEventPayload(
+                        "runtime.tool-plan.step",
+                        "Runtime tool plan step status recorded.",
+                        step,
+                        "runtime.tool-plan.step:" + semanticDecisionRef + ":" + firstNonBlank(stepRef, "unknown")));
+            }
+        }
+        JsonNode reads = evidenceBundle.path("runtimeRelatedSurfaceReads");
+        JsonNode executionDiagnostics = plan.path("executionDiagnostics");
+        Map<String, Object> aggregateDiagnostics = new LinkedHashMap<>();
+        aggregateDiagnostics.put("policyRef", safeText(plan.path("multiToolAuthorization").path("policyRef").asText("")));
+        aggregateDiagnostics.put("dryRun", executionDiagnostics.path("dryRun").asBoolean(false));
+        aggregateDiagnostics.put("multiToolExecutionEnabled", executionDiagnostics.path("multiToolExecutionEnabled").asBoolean(
+                plan.path("planner").path("multiToolExecutionEnabled").asBoolean(false)));
+        aggregateDiagnostics.put("authorizedCandidateCount", executionDiagnostics.path("authorizedCandidateCount").asInt(
+                plan.path("candidateSteps").isArray() ? plan.path("candidateSteps").size() : 0));
+        aggregateDiagnostics.put("candidateStepCount", plan.path("candidateSteps").isArray() ? plan.path("candidateSteps").size() : 0);
+        aggregateDiagnostics.put("blockedStepCount", plan.path("blockedSteps").isArray() ? plan.path("blockedSteps").size() : 0);
+        aggregateDiagnostics.put("maxPlannedSteps", executionDiagnostics.path("maxPlannedSteps").asInt(0));
+        aggregateDiagnostics.put("maxExecutableSteps", executionDiagnostics.path("maxExecutableSteps").asInt(
+                plan.path("steps").isArray() ? plan.path("steps").size() : 0));
+        aggregateDiagnostics.put("nonExecutionReason", safeText(executionDiagnostics.path("nonExecutionReason").asText("")));
+        aggregateDiagnostics.put("backendReadsPerformed", reads.isArray() && !reads.isEmpty());
+        aggregateDiagnostics.put("readCount", reads.isArray() ? reads.size() : 0);
+        aggregateDiagnostics.put("usedToolCalls", plan.path("budget").path("usedToolCalls").asInt(0));
+        aggregateDiagnostics.put("maxToolCalls", plan.path("budget").path("maxToolCalls").asInt(0));
+        aggregateDiagnostics.put("readMode", safeText(plan.path("readMode").asText("")));
+        eventSink.append("thought.step", streamEventPayload(
+                "runtime.tool-plan.aggregate",
+                "Runtime tool plan aggregate recorded.",
+                aggregateDiagnostics,
+                "runtime.tool-plan.aggregate:" + semanticDecisionRef + ":" + intentKind + ":"
+                        + safeText(executionDiagnostics.path("aggregateStatus").asText("")) + ":"
+                        + aggregateDiagnostics.get("usedToolCalls") + ":"
+                        + aggregateDiagnostics.get("readCount")));
+    }
+
+    private Map<String, Object> streamEventPayload(
+            String phase,
+            String summary,
+            Object diagnostics,
+            String dedupeKey) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("phase", phase);
+        payload.put("summary", summary);
+        payload.put("diagnostics", diagnostics);
+        payload.put("streamEventDiagnostics", streamEventDiagnostics(dedupeKey, false));
+        return payload;
+    }
+
+    private Map<String, Object> streamEventDiagnostics(String dedupeKey, boolean technicalDuplicate) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("schemaVersion", "praxis-authoring-stream-event-diagnostics.v1");
+        diagnostics.put("dedupeKey", safeText(dedupeKey));
+        diagnostics.put("eventUniquenessKey", safeText(dedupeKey));
+        diagnostics.put("technicalDuplicate", technicalDuplicate);
+        diagnostics.put("technicalDuplicateOf", "");
+        diagnostics.put("replaySafe", true);
+        diagnostics.put("duplicatesDoNotIndicateExecution", true);
+        return diagnostics;
     }
 
     private boolean shouldBypassConsultativeFastPathForCurrentPageMaterialization(
@@ -633,7 +896,7 @@ public class AgenticAuthoringTurnEngine {
                 answer.apiCatalogProjection() == null
                         ? objectMapper.createObjectNode()
                         : objectMapper.valueToTree(answer.apiCatalogProjection()),
-                List.of(),
+                answer.quickReplies() == null ? List.of() : answer.quickReplies(),
                 null,
                 List.of(),
                 answer.warnings(),
@@ -670,7 +933,30 @@ public class AgenticAuthoringTurnEngine {
                 request.attachmentSummaries(),
                 request.contextHints(),
                 componentCapabilities,
-                request.activeSemanticDecision());
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null
+                || request.contextHints() != null
+                && request.contextHints().path("groundedRuntimeComponentContext").isObject()) {
+            return request;
+        }
+        ObjectNode groundedContext = runtimeComponentGroundingService.ground(
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+        if (groundedContext == null || groundedContext.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("groundedRuntimeComponentContext", groundedContext);
+        return copyWithContextHints(request, contextHints);
     }
 
     private AgenticAuthoringResourceCandidatesResult maybePreDiscoverResourcesForMaterialization(
@@ -1513,7 +1799,10 @@ public class AgenticAuthoringTurnEngine {
                 request.attachmentSummaries(),
                 contextHints,
                 request.componentCapabilities(),
-                request.activeSemanticDecision());
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
     }
 
     private AgenticAuthoringTurnStreamRequest withImplicitChartDetailModalActionContext(
@@ -1633,7 +1922,10 @@ public class AgenticAuthoringTurnEngine {
                 request.attachmentSummaries(),
                 contextHints,
                 request.componentCapabilities(),
-                request.activeSemanticDecision());
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
     }
 
     private AgenticAuthoringProjectKnowledgeQuery projectKnowledgeQuery(
@@ -2202,7 +2494,10 @@ public class AgenticAuthoringTurnEngine {
                 request.attachmentSummaries(),
                 contextHints,
                 request.componentCapabilities(),
-                request.activeSemanticDecision());
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
     }
 
     private String domainCatalogHint(AgenticAuthoringTurnStreamRequest request, String fieldName) {
@@ -2304,7 +2599,10 @@ public class AgenticAuthoringTurnEngine {
                 request.attachmentSummaries(),
                 contextHints,
                 request.componentCapabilities(),
-                activeDecision);
+                activeDecision,
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
     }
 
     private AgenticAuthoringIntentResolutionRequest toIntentRequest(AgenticAuthoringTurnStreamRequest request) {
@@ -2985,6 +3283,11 @@ public class AgenticAuthoringTurnEngine {
                 "targetComponentId", nonBlank(request.targetComponentId(), ""),
                 "selectedWidgetKey", nonBlank(request.selectedWidgetKey(), ""),
                 "hasContextHints", request.contextHints() != null && !request.contextHints().isNull(),
+                "runtimeComponentObservationCount", request.runtimeComponentObservations() == null
+                        ? 0
+                        : request.runtimeComponentObservations().size(),
+                "hasGroundedRuntimeComponentContext", request.contextHints() != null
+                        && request.contextHints().path("groundedRuntimeComponentContext").isObject(),
                 "hasActiveSemanticDecision", request.activeSemanticDecision() != null,
                 "componentCapabilityCatalogs", request.componentCapabilities() != null
                         && request.componentCapabilities().catalogs() != null

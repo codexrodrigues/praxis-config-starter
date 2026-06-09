@@ -807,7 +807,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                     nullableText(item, "description"),
                     nullableText(item, "icon"),
                     nullableText(item, "tone"),
-                    item.path("contextHints").isObject() ? item.path("contextHints") : null));
+                    item.path("contextHints").isObject() ? item.path("contextHints") : null,
+                    item.path("semanticDecision").isObject() ? item.path("semanticDecision") : null,
+                    item.path("value").isMissingNode() ? null : item.path("value")));
         }
         return List.copyOf(replies);
     }
