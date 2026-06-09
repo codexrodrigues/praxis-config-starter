@@ -2,6 +2,7 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -51,6 +52,8 @@ public class AgenticAuthoringTurnStreamService {
     private final AiTurnEventService turnEventService;
     private final AiStreamAccessTokenService streamAccessTokenService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final AgenticAuthoringRuntimeComponentGroundingService runtimeComponentGroundingService =
+            new AgenticAuthoringRuntimeComponentGroundingService(objectMapper);
 
     @Autowired(required = false)
     private AiAssistantObservationService assistantObservationService;
@@ -92,6 +95,8 @@ public class AgenticAuthoringTurnStreamService {
             String baseUrl,
             AiPrincipalContext principalContext) {
         validate(request);
+        request = withGroundedRuntimeComponentContext(request);
+        request = withRequestBaseUrl(request, baseUrl);
         UUID turnId = stableUuid("agentic-authoring-turn", request.clientTurnId());
         AiOrchestratorRequest threadRequest = AiOrchestratorRequest.builder()
                 .componentId(nonBlank(request.targetComponentId(), "praxis-dynamic-page-builder"))
@@ -181,7 +186,86 @@ public class AgenticAuthoringTurnStreamService {
                 request.attachmentSummaries(),
                 request.contextHints(),
                 request.componentCapabilities(),
-                activeSemanticDecision);
+                activeSemanticDecision,
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null
+                || request.contextHints() != null
+                && request.contextHints().path("groundedRuntimeComponentContext").isObject()) {
+            return request;
+        }
+        ObjectNode groundedContext = runtimeComponentGroundingService.ground(
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+        if (groundedContext == null || groundedContext.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("groundedRuntimeComponentContext", groundedContext);
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                contextHints,
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withRequestBaseUrl(
+            AgenticAuthoringTurnStreamRequest request,
+            String baseUrl) {
+        if (request == null || baseUrl == null || baseUrl.isBlank()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        if (!contextHints.path("requestBaseUrl").asText("").isBlank()) {
+            return request;
+        }
+        contextHints.put("requestBaseUrl", baseUrl.replaceAll("/+$", ""));
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                contextHints,
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
     }
 
     public SseEmitter connect(UUID streamId, String lastEventId, AiPrincipalContext principalContext) {
@@ -349,17 +433,20 @@ public class AgenticAuthoringTurnStreamService {
                 }
                 AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
                 String phase = heartbeatPhase(tail);
-                appendAndEmit(principalContext, streamId, threadId, turnId, "status", Map.of(
-                        "state", "in_progress",
-                        "phase", phase,
-                        "message", heartbeatSummary(tail),
-                        "summary", heartbeatSummary(tail),
-                        "diagnostics", Map.of(
-                                "source", "backend-processing-progress-watchdog",
-                                "intervalSeconds", progressSeconds,
-                                "elapsedSeconds", streamElapsedSeconds(streamId),
-                                "lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""),
-                                "lastPhase", phase)));
+                Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
+                diagnostics.put("source", "backend-processing-progress-watchdog");
+                diagnostics.put("intervalSeconds", progressSeconds);
+                diagnostics.put("elapsedSeconds", streamElapsedSeconds(streamId));
+                diagnostics.put("lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""));
+                diagnostics.put("lastPhase", phase);
+                Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                payload.put("state", "in_progress");
+                payload.put("phase", phase);
+                payload.put("message", heartbeatSummary(tail));
+                payload.put("summary", heartbeatSummary(tail));
+                payload.put("diagnostics", diagnostics);
+                putTechnicalDuplicateDiagnostics(payload, "status", streamId, phase, tail);
+                appendAndEmit(principalContext, streamId, threadId, turnId, "status", payload);
             } catch (Exception ex) {
                 log.debug("[AgenticAuthoringTurnStreamService] Processing progress skipped for stream {}: {}",
                         streamId,
@@ -426,6 +513,14 @@ public class AgenticAuthoringTurnStreamService {
         if (emitters == null || emitters.isEmpty()) {
             return;
         }
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        String phase = heartbeatPhase(tail);
+        payload.put("state", "alive");
+        payload.put("phase", phase);
+        payload.put("message", heartbeatSummary(tail));
+        payload.put("summary", heartbeatSummary(tail));
+        payload.put("lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""));
+        putTechnicalDuplicateDiagnostics(payload, "heartbeat", streamId, phase, tail);
         AiTurnEventEnvelope heartbeatEnvelope = AiTurnEventEnvelope.builder()
                 .eventId(null)
                 .streamId(streamId)
@@ -435,12 +530,7 @@ public class AgenticAuthoringTurnStreamService {
                 .eventSchemaVersion(eventSchemaVersion)
                 .timestamp(Instant.now())
                 .type("heartbeat")
-                .payload(objectMapper.valueToTree(Map.of(
-                        "state", "alive",
-                        "phase", heartbeatPhase(tail),
-                        "message", heartbeatSummary(tail),
-                        "summary", heartbeatSummary(tail),
-                        "lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""))))
+                .payload(objectMapper.valueToTree(payload))
                 .build();
         List<SseEmitter> failed = new ArrayList<>();
         for (SseEmitter emitter : emitters) {
@@ -459,6 +549,51 @@ public class AgenticAuthoringTurnStreamService {
         JsonNode payload = tail == null ? null : tail.getPayload();
         String phase = payload == null ? "" : payload.path("phase").asText("");
         return phase == null || phase.isBlank() ? "agentic-authoring" : phase;
+    }
+
+    private void putTechnicalDuplicateDiagnostics(
+            Map<String, Object> payload,
+            String eventType,
+            UUID streamId,
+            String phase,
+            AiTurnEventEnvelope tail) {
+        Map<String, Object> diagnostics = technicalDuplicateStreamEventDiagnostics(eventType, streamId, phase, tail);
+        if (!diagnostics.isEmpty()) {
+            payload.put("streamEventDiagnostics", diagnostics);
+        }
+    }
+
+    private Map<String, Object> technicalDuplicateStreamEventDiagnostics(
+            String eventType,
+            UUID streamId,
+            String phase,
+            AiTurnEventEnvelope tail) {
+        JsonNode tailDiagnostics = tail == null || tail.getPayload() == null
+                ? null
+                : tail.getPayload().path("streamEventDiagnostics");
+        if (tailDiagnostics == null || !tailDiagnostics.isObject()) {
+            return Map.of();
+        }
+        String dedupeKey = tailDiagnostics.path("dedupeKey").asText("");
+        if (dedupeKey == null || dedupeKey.isBlank()) {
+            return Map.of();
+        }
+        Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
+        diagnostics.put("schemaVersion", "praxis-authoring-stream-event-diagnostics.v1");
+        diagnostics.put("dedupeKey", dedupeKey);
+        diagnostics.put("eventUniquenessKey", safeDiagnosticText(eventType) + ":"
+                + (streamId == null ? "" : streamId) + ":"
+                + safeDiagnosticText(phase) + ":"
+                + Instant.now().toEpochMilli());
+        diagnostics.put("technicalDuplicate", true);
+        diagnostics.put("technicalDuplicateOf", dedupeKey);
+        diagnostics.put("replaySafe", true);
+        diagnostics.put("duplicatesDoNotIndicateExecution", true);
+        return diagnostics;
+    }
+
+    private String safeDiagnosticText(String value) {
+        return value == null ? "" : value.replaceAll("[^A-Za-z0-9_.:-]", "_");
     }
 
     private String heartbeatSummary(AiTurnEventEnvelope tail) {

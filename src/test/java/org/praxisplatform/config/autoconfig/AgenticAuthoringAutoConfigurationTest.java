@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositionPlanProvider;
@@ -168,6 +169,86 @@ class AgenticAuthoringAutoConfigurationTest {
     }
 
     @Test
+    void shouldBindRuntimeToolPlannerPolicyFromBackendOwnedProperty() throws Exception {
+        AiProviderManagementService providerManagementService = org.mockito.Mockito.mock(AiProviderManagementService.class);
+        contextRunner
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withPropertyValues(
+                        "praxis.ai.authoring.runtime-tool.policy-ref=runtime-tool-policy:multi-tool-dry-run-beta")
+                .run(context -> {
+                    AgenticAuthoringConsultativeAnswerService service =
+                            context.getBean(AgenticAuthoringConsultativeAnswerService.class);
+                    assertThat(runtimeToolPlannerPolicyRef(service))
+                            .isEqualTo("runtime-tool-policy:multi-tool-dry-run-beta");
+                });
+    }
+
+    @Test
+    void shouldBindReadonlyRuntimeToolPlannerPolicyFromBackendOwnedProperty() throws Exception {
+        AiProviderManagementService providerManagementService = org.mockito.Mockito.mock(AiProviderManagementService.class);
+        contextRunner
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withPropertyValues(
+                        "praxis.ai.authoring.runtime-tool.policy-ref=runtime-tool-policy:multi-tool-readonly-beta")
+                .run(context -> {
+                    AgenticAuthoringConsultativeAnswerService service =
+                            context.getBean(AgenticAuthoringConsultativeAnswerService.class);
+                    assertThat(runtimeToolPlannerPolicyRef(service))
+                            .isEqualTo("runtime-tool-policy:multi-tool-readonly-beta");
+                });
+    }
+
+    @Test
+    void shouldFailClosedRuntimeToolPlannerPolicyForUnknownBackendValue() throws Exception {
+        AiProviderManagementService providerManagementService = org.mockito.Mockito.mock(AiProviderManagementService.class);
+        contextRunner
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withPropertyValues("praxis.ai.authoring.runtime-tool.policy-ref=frontend-says-multi-tool")
+                .run(context -> {
+                    AgenticAuthoringConsultativeAnswerService service =
+                            context.getBean(AgenticAuthoringConsultativeAnswerService.class);
+                    assertThat(runtimeToolPlannerPolicyRef(service))
+                            .isEqualTo("runtime-tool-policy:single-read-beta");
+                });
+    }
+
+    @Test
+    void shouldBindRuntimeRelatedSurfaceIntentPolicyFromBackendOwnedProperty() throws Exception {
+        AiProviderManagementService providerManagementService = org.mockito.Mockito.mock(AiProviderManagementService.class);
+        contextRunner
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withPropertyValues(
+                        "praxis.ai.authoring.runtime-related-surface.intent-policy-ref=runtime-related-surface-intent-policy:temporal-compare-smoke",
+                        "praxis.ai.authoring.runtime-related-surface.temporal-comparison-field-ref=ocorridoEm")
+                .run(context -> {
+                    AgenticAuthoringConsultativeAnswerService service =
+                            context.getBean(AgenticAuthoringConsultativeAnswerService.class);
+                    assertThat(runtimeRelatedSurfaceIntentPolicyRef(service))
+                            .isEqualTo("runtime-related-surface-intent-policy:temporal-compare-smoke");
+                    assertThat(runtimeRelatedSurfaceTemporalComparisonFieldRef(service))
+                            .isEqualTo("ocorridoEm");
+                });
+    }
+
+    @Test
+    void shouldFailClosedRuntimeRelatedSurfaceIntentPolicyForUnknownBackendValue() throws Exception {
+        AiProviderManagementService providerManagementService = org.mockito.Mockito.mock(AiProviderManagementService.class);
+        contextRunner
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withPropertyValues(
+                        "praxis.ai.authoring.runtime-related-surface.intent-policy-ref=frontend-says-compare",
+                        "praxis.ai.authoring.runtime-related-surface.temporal-comparison-field-ref=ocorridoEm")
+                .run(context -> {
+                    AgenticAuthoringConsultativeAnswerService service =
+                            context.getBean(AgenticAuthoringConsultativeAnswerService.class);
+                    assertThat(runtimeRelatedSurfaceIntentPolicyRef(service))
+                            .isEqualTo("runtime-related-surface-intent-policy:llm");
+                    assertThat(runtimeRelatedSurfaceTemporalComparisonFieldRef(service))
+                            .isEmpty();
+                });
+    }
+
+    @Test
     void shouldRegisterApplyServiceWhenUserConfigServiceExists() {
         UserConfigService userConfigService = org.mockito.Mockito.mock(UserConfigService.class);
         AiApiKeyProtectionService apiKeyProtectionService = org.mockito.Mockito.mock(AiApiKeyProtectionService.class);
@@ -175,5 +256,43 @@ class AgenticAuthoringAutoConfigurationTest {
                 .withBean(UserConfigService.class, () -> userConfigService)
                 .withBean(AiApiKeyProtectionService.class, () -> apiKeyProtectionService)
                 .run(context -> assertThat(context).hasSingleBean(AgenticAuthoringApplyService.class));
+    }
+
+    private String runtimeToolPlannerPolicyRef(AgenticAuthoringConsultativeAnswerService service) {
+        try {
+            java.lang.reflect.Field field = AgenticAuthoringConsultativeAnswerService.class
+                    .getDeclaredField("runtimeToolPlannerPolicy");
+            field.setAccessible(true);
+            Object policy = field.get(service);
+            java.lang.reflect.Method policyRef = policy.getClass().getDeclaredMethod("policyRef");
+            policyRef.setAccessible(true);
+            return String.valueOf(policyRef.invoke(policy));
+        } catch (ReflectiveOperationException ex) {
+            throw new AssertionError("Could not inspect runtime tool planner policy", ex);
+        }
+    }
+
+    private String runtimeRelatedSurfaceIntentPolicyRef(AgenticAuthoringConsultativeAnswerService service) {
+        return runtimeRelatedSurfaceIntentPolicyValue(service, "policyRef");
+    }
+
+    private String runtimeRelatedSurfaceTemporalComparisonFieldRef(AgenticAuthoringConsultativeAnswerService service) {
+        return runtimeRelatedSurfaceIntentPolicyValue(service, "temporalComparisonFieldRef");
+    }
+
+    private String runtimeRelatedSurfaceIntentPolicyValue(
+            AgenticAuthoringConsultativeAnswerService service,
+            String methodName) {
+        try {
+            java.lang.reflect.Field field = AgenticAuthoringConsultativeAnswerService.class
+                    .getDeclaredField("runtimeRelatedSurfaceIntentPolicy");
+            field.setAccessible(true);
+            Object policy = field.get(service);
+            java.lang.reflect.Method accessor = policy.getClass().getDeclaredMethod(methodName);
+            accessor.setAccessible(true);
+            return String.valueOf(accessor.invoke(policy));
+        } catch (ReflectiveOperationException ex) {
+            throw new AssertionError("Could not inspect runtime related surface intent policy", ex);
+        }
     }
 }

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Release-hardening checkpoint for the governed runtime related surface preview,
+  covering runtime observations, backend grounding, `runtimeToolPlan`,
+  multi-read, summary, compare, detail, quick replies, governed multi-turn
+  follow-up and the official short real smoke battery.
 - Governed table runtime authoring now projects `dynamicPage.surface.open` from
   `runtimeOperations`, allowing selected-record related surfaces such as
   timelines or teams to be materialized as canonical runtime operations.
@@ -60,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
+- Official runtime tool plan readonly-beta smoke battery passed locally against
+  real Angular, real Quickstart and Neon/Postgres with `15/15` scenarios,
+  `0` retries, no raw leaks, no partial terminal reads on fail-closed paths,
+  and no leftover `4003`/`8088` listeners or smoke/Chromium processes.
 - Focal `AiOrchestratorServiceContextHintsTest` passed after adding
   `dynamicPage.surface.open` runtime-operation coverage.
 - Focal agentic authoring tests passed for filter capability catalog loading,

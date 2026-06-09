@@ -96,9 +96,14 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 21. [17-semantic-intent-routing-guardrails.md](./17-semantic-intent-routing-guardrails.md)
 22. [18-intent-routing-legacy-inventory.md](./18-intent-routing-legacy-inventory.md)
 23. [19-authoring-flow-hygiene-before-affordance-discovery.md](./19-authoring-flow-hygiene-before-affordance-discovery.md)
-24. [01-current-state-and-target.md](./01-current-state-and-target.md)
-25. [02-implementation-backlog.md](./02-implementation-backlog.md)
-26. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+24. [20-runtime-related-surface-controlled-multi-tool-execution.md](./20-runtime-related-surface-controlled-multi-tool-execution.md)
+25. [21-runtime-related-surface-summary-contract.md](./21-runtime-related-surface-summary-contract.md)
+26. [22-runtime-related-surface-compare-contract.md](./22-runtime-related-surface-compare-contract.md)
+27. [23-runtime-related-surface-preview-release-hardening.md](./23-runtime-related-surface-preview-release-hardening.md)
+28. [24-runtime-related-surface-demo-operator-playbook.md](./24-runtime-related-surface-demo-operator-playbook.md)
+29. [01-current-state-and-target.md](./01-current-state-and-target.md)
+30. [02-implementation-backlog.md](./02-implementation-backlog.md)
+31. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -153,6 +158,24 @@ devem seguir por revert/supersede governado, e ranking RAG deve permanecer uma
 projecao derivada revalidada contra o estado canonico. A partir do plano 14,
 exemplos de quickstart podem continuar como prova/corpus, mas nao como
 preferencias hardcoded de ranking, planejamento ou resposta.
+`20-runtime-related-surface-controlled-multi-tool-execution.md` registra o
+desenho ativo depois do dry-run multi-tool verde: uma politica backend-owned
+para executar no maximo duas leituras read-only de superficies relacionadas,
+com budget global, steps auditaveis, aggregation fail-closed e redaction por
+leitura. `21-runtime-related-surface-summary-contract.md` registra o proximo
+contrato implementado localmente: summary e uma agregacao governada sobre reads
+sanitizados, sem nova tool, sem hint frontend e sem partial records em falhas.
+`22-runtime-related-surface-compare-contract.md` registra o contrato de compare:
+o baseline planning-only ja foi validado por smoke real, e o compare governado
+agora permite reads governados quando ha `comparisonDimension` aceita, emitindo
+`runtimeRelatedSurfaceCompare` terminal minimo a partir dos reads sanitizados.
+`23-runtime-related-surface-preview-release-hardening.md` congela o estado
+validado para preview tecnico: runtime observations, grounding, runtimeToolPlan,
+multi-read, summary, compare, detail, quick replies e follow-up multi-turn
+governado passam pelo gate real oficial sem abrir nova capacidade funcional.
+`24-runtime-related-surface-demo-operator-playbook.md` transforma esse estado em
+um roteiro operacional de apresentacao, com setup, prompts copiaveis, criterios
+visuais de sucesso e contingencia para oscilacao do provider.
 
 ## Baseline de reaproveitamento
 
