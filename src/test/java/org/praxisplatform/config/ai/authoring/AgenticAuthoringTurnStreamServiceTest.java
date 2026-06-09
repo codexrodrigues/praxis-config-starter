@@ -431,7 +431,8 @@ class AgenticAuthoringTurnStreamServiceTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
                             .isEqualTo("provider quota exhausted");
                 });
-        verify(turnService).expireTurn(eq(threadId), any(UUID.class));
+        org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
+                .expireTurn(eq(threadId), any(UUID.class));
         verify(turnService, never()).completeTurn(eq(threadId), any(UUID.class));
     }
 

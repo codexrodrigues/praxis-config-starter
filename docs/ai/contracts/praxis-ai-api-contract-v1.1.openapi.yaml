@@ -2259,61 +2259,61 @@ components:
             desambiguacao tambem pode enviar
             activeSemanticDecision.constraints.runtimeRelatedSurfaceDisambiguationSelection
             com optionRef, candidateRef e surfaceRef emitidos anteriormente; o
-		            backend so executa detail quando esses refs forem reconciliados
-		            contra um candidato aceito no contexto runtime atual. Alvo ausente,
-		            ambiguo, divergente ou nao reconciliado bloqueia antes de qualquer
-		            read. Quando a primeira classificacao semantica runtime-related
-		            deixar uma intent targetable sem alvo, o backend pode primeiro
-		            reconciliar o alvo contra um catalogo backend-owned dos candidatos
-		            aceitos, usando somente surfaceRef, candidateRef,
-		            runtimeSurfaceInstanceRef, label e semanticAliases sanitizados como
-		            grounding. Esse passo so roda depois de list, summary ou detail
-		            semanticamente resolvido e TARGET_RESOLUTION_MODE=optional|required;
-		            nao decide intencao primaria, nao usa hints de frontend como
-		            autorizacao e nao executa tool. Quando a primeira decisao ficar
-			            em runtime_surface_disambiguation com
-			            TARGET_RESOLUTION_MODE=required, ou com optional e objetivo
-			            explicitamente de detalhe/foco, o catalogo tambem pode resolver
-			            somente o alvo e materializar runtime_related_surface_detail,
-			            porque a classificacao semantica ja declarou que ha um alvo
-			            runtime-related a reconciliar antes da leitura; esse caminho
-			            continua proibido para availability, compare, list ou summary
-			            sem kind semanticamente resolvido. Quando o classificador falhar
-			            e o fallback conservador detectar detalhe/foco, o fallback pode
-			            declarar runtime_surface_disambiguation com
-			            TARGET_RESOLUTION_MODE=optional e permitir que o mesmo catalogo
-			            reconcilie somente o alvo; sem alvo unico aceito, o turno
-			            continua read-free/fail-closed. Termos de alvo em escopo
-			            simples de negacao do prompt, como nao detalhe participantes,
-			            nao pontuam no ranking do catalogo. Quando aceito,
-			            runtimeRelatedSurfaceResolution pode expor targetCandidateResolution
-		            com schemaVersion
-		            praxis-runtime-related-surface-target-candidate-resolution.v1,
-		            source=backend_runtime_target_catalog, targetResolutionMode,
-		            intentKind, targetSurfaceRef, candidateRef,
-			            runtimeSurfaceInstanceRef, matchedTermKind,
-			            provenance=backend_reconciled, accepted=true e score. Quando
-			            rejeitado ou ambiguo, o mesmo diagnostico pode declarar
-			            provenance=backend_rejected, failureCode e
-			            evaluatedCandidates[]; cada item e sanitizado e carrega apenas
-			            surfaceRef, candidateRef, runtimeSurfaceInstanceRef, matched,
-			            score, matchedTermKind, ignoredNegatedTermCount e failureCode,
-			            sem termo cru do prompt nem valores de registros. O caminho
-			            accepted=true permanece enxuto e nao precisa emitir
-			            evaluatedCandidates[].
-		            Se esse catalogo nao aceitar um unico alvo, ou se a primeira
-		            classificacao ficar conservadora, o backend so pode fazer uma
-		            segunda decisao semantica focada em KIND + TARGET_SURFACE_REF
-		            quando a primeira decisao declarar
-		            TARGET_RESOLUTION_MODE=optional|required;
-		            TARGET_RESOLUTION_MODE=none preserva multi-read e summary
-		            multi-superficie sem segunda LLM. Se tentada,
-		            runtimeRelatedSurfaceResolution pode expor targetRefinementDiagnostics
-		            com schemaVersion praxis-runtime-related-surface-target-refinement.v1,
-		            targetResolutionMode, initialKind, refinedKind, targetSurfaceRef,
-		            provenance, confidence, accepted e failureCode quando rejeitado.
-		            Esse diagnostico e sanitizado e nao autoriza leitura por si so.
-	            List direcionado pode executar exatamente um read governado com
+            backend so executa detail quando esses refs forem reconciliados
+            contra um candidato aceito no contexto runtime atual. Alvo ausente,
+            ambiguo, divergente ou nao reconciliado bloqueia antes de qualquer
+            read. Quando a primeira classificacao semantica runtime-related
+            deixar uma intent targetable sem alvo, o backend pode primeiro
+            reconciliar o alvo contra um catalogo backend-owned dos candidatos
+            aceitos, usando somente surfaceRef, candidateRef,
+            runtimeSurfaceInstanceRef, label e semanticAliases sanitizados como
+            grounding. Esse passo so roda depois de list, summary ou detail
+            semanticamente resolvido e TARGET_RESOLUTION_MODE=optional|required;
+            nao decide intencao primaria, nao usa hints de frontend como
+                autorizacao e nao executa tool. Quando a primeira decisao ficar
+                  em runtime_surface_disambiguation com
+                  TARGET_RESOLUTION_MODE=required, ou com optional e objetivo
+                  explicitamente de detalhe/foco, o catalogo tambem pode resolver
+                  somente o alvo e materializar runtime_related_surface_detail,
+                  porque a classificacao semantica ja declarou que ha um alvo
+                  runtime-related a reconciliar antes da leitura; esse caminho
+                  continua proibido para availability, compare, list ou summary
+                  sem kind semanticamente resolvido. Quando o classificador falhar
+                  e o fallback conservador detectar detalhe/foco, o fallback pode
+                  declarar runtime_surface_disambiguation com
+                  TARGET_RESOLUTION_MODE=optional e permitir que o mesmo catalogo
+                  reconcilie somente o alvo; sem alvo unico aceito, o turno
+                  continua read-free/fail-closed. Termos de alvo em escopo
+                  simples de negacao do prompt, como nao detalhe participantes,
+                  nao pontuam no ranking do catalogo. Quando aceito,
+                  runtimeRelatedSurfaceResolution pode expor targetCandidateResolution
+                com schemaVersion
+                praxis-runtime-related-surface-target-candidate-resolution.v1,
+                source=backend_runtime_target_catalog, targetResolutionMode,
+                intentKind, targetSurfaceRef, candidateRef,
+                  runtimeSurfaceInstanceRef, matchedTermKind,
+                  provenance=backend_reconciled, accepted=true e score. Quando
+                  rejeitado ou ambiguo, o mesmo diagnostico pode declarar
+                  provenance=backend_rejected, failureCode e
+                  evaluatedCandidates[]; cada item e sanitizado e carrega apenas
+                  surfaceRef, candidateRef, runtimeSurfaceInstanceRef, matched,
+                  score, matchedTermKind, ignoredNegatedTermCount e failureCode,
+                  sem termo cru do prompt nem valores de registros. O caminho
+                  accepted=true permanece enxuto e nao precisa emitir
+                  evaluatedCandidates[].
+                Se esse catalogo nao aceitar um unico alvo, ou se a primeira
+                classificacao ficar conservadora, o backend so pode fazer uma
+                segunda decisao semantica focada em KIND + TARGET_SURFACE_REF
+                quando a primeira decisao declarar
+                TARGET_RESOLUTION_MODE=optional|required;
+                TARGET_RESOLUTION_MODE=none preserva multi-read e summary
+                multi-superficie sem segunda LLM. Se tentada,
+                runtimeRelatedSurfaceResolution pode expor targetRefinementDiagnostics
+                com schemaVersion praxis-runtime-related-surface-target-refinement.v1,
+                targetResolutionMode, initialKind, refinedKind, targetSurfaceRef,
+                provenance, confidence, accepted e failureCode quando rejeitado.
+                Esse diagnostico e sanitizado e nao autoriza leitura por si so.
+              List direcionado pode executar exatamente um read governado com
             governed_list_targeted quando a decisao semantica retornar
             LIST_TARGET_SURFACE_REF e o backend reconciliar esse surfaceRef
             contra um candidato aceito. O terminal pode expor
