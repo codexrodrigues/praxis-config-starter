@@ -61,6 +61,9 @@ final class AgenticAuthoringDomainCatalogHints {
         if (!nodeType.isBlank()) {
             domainCatalog.put("nodeType", nodeType);
         }
+        if (requiresGovernanceContext(userPrompt)) {
+            domainCatalog.put("recommendedAuthoringFlow", "shared_rule_authoring");
+        }
     }
 
     private static String contextKey(String resourcePath) {

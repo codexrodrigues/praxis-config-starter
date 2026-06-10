@@ -50,8 +50,8 @@ class AgenticAuthoringDomainCatalogHintsTest {
                 .isEqualTo("node");
         assertThat(contextHints.path("domainCatalog").path("itemTypes").path(1).asText())
                 .isEqualTo("governance");
-        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").isMissingNode())
-                .isTrue();
+        assertThat(contextHints.path("domainCatalog").path("recommendedAuthoringFlow").asText())
+                .isEqualTo("shared_rule_authoring");
         assertThat(contextHints.path("domainCatalog").path("recommendedRuleType").isMissingNode())
                 .isTrue();
         assertThat(contextHints.path("domainCatalog").path("relationships").path("enabled").asBoolean())
