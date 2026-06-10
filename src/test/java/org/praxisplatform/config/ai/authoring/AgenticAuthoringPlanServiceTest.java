@@ -1,7 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -642,13 +641,23 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
-    void generateMinimalFormPlanRequiresConfiguredContractsDir() {
+    void generateMinimalFormPlanFallsBackToBundledContractWhenContractsDirIsNotConfigured() throws Exception {
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        ObjectNode plan = minimalPlan();
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
+        when(providerManagementService.generateJson(
+                any(),
+                schemaCaptor.capture(),
+                any(),
+                any(),
+                any(),
+                any())).thenReturn(plan);
 
-        assertThatThrownBy(() -> service(properties)
-                .generateMinimalFormPlan(new AgenticAuthoringPlanRequest("Crie um formulario", null, null, null), null, null, null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("contracts-dir");
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(new AgenticAuthoringPlanRequest("Crie um formulario", null, null, null), null, null, null);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(schemaCaptor.getValue().jsonSchema()).contains("\"title\": \"MinimalFormPlan v1\"");
     }
 
     private AgenticAuthoringPlanService service(AgenticAuthoringArtifactProperties properties) {

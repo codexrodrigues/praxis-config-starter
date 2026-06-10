@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,6 +18,8 @@ import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
 
 public class AgenticAuthoringPlanService {
+
+    private static final String AUTHORING_CONTRACTS_CLASSPATH_ROOT = "ai-authoring/contracts/";
 
     private final AiProviderManagementService providerManagementService;
     private final AgenticAuthoringArtifactProperties properties;
@@ -655,26 +659,39 @@ public class AgenticAuthoringPlanService {
     }
 
     private String readMinimalFormPlanSchema() throws IOException {
-        Path contractsDir = properties.getContractsDir();
-        if (contractsDir == null) {
-            throw new IllegalStateException("praxis.ai.authoring.contracts-dir must be configured before generating MinimalFormPlan.");
-        }
-        Path root = contractsDir.toAbsolutePath().normalize();
-        if (!Files.isDirectory(root)) {
-            throw new IllegalStateException("praxis.ai.authoring.contracts-dir does not exist or is not a directory: " + root);
-        }
         String fileName = properties.getMinimalFormPlanSchema();
         if (fileName == null || fileName.isBlank()) {
             throw new IllegalStateException("praxis.ai.authoring.minimal-form-plan-schema must not be blank.");
         }
-        Path schema = root.resolve(fileName).toAbsolutePath().normalize();
-        if (!schema.startsWith(root)) {
-            throw new IllegalStateException("praxis.ai.authoring.minimal-form-plan-schema must resolve inside contracts-dir.");
+        Path contractsDir = properties.getContractsDir();
+        if (contractsDir != null) {
+            Path root = contractsDir.toAbsolutePath().normalize();
+            if (Files.isDirectory(root)) {
+                Path schema = root.resolve(fileName).toAbsolutePath().normalize();
+                if (!schema.startsWith(root)) {
+                    throw new IllegalStateException("praxis.ai.authoring.minimal-form-plan-schema must resolve inside contracts-dir.");
+                }
+                if (!Files.isRegularFile(schema)) {
+                    throw new IllegalStateException("MinimalFormPlan schema not found: " + schema);
+                }
+                return Files.readString(schema);
+            }
         }
-        if (!Files.isRegularFile(schema)) {
-            throw new IllegalStateException("MinimalFormPlan schema not found: " + schema);
+        return readBundledAuthoringContract(fileName);
+    }
+
+    private String readBundledAuthoringContract(String fileName) throws IOException {
+        String normalizedFileName = Path.of(fileName).normalize().toString().replace('\\', '/');
+        if (normalizedFileName.startsWith("../") || normalizedFileName.startsWith("/") || normalizedFileName.contains("/../")) {
+            throw new IllegalStateException("praxis.ai.authoring.minimal-form-plan-schema must resolve inside bundled contracts.");
         }
-        return Files.readString(schema);
+        String resourceName = AUTHORING_CONTRACTS_CLASSPATH_ROOT + normalizedFileName;
+        try (InputStream stream = AgenticAuthoringPlanService.class.getClassLoader().getResourceAsStream(resourceName)) {
+            if (stream == null) {
+                throw new IllegalStateException("Bundled MinimalFormPlan schema not found: classpath:" + resourceName);
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private String normalizeForMatch(String value) {
