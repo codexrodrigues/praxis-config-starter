@@ -10,6 +10,13 @@ Premissa Local
 - Neste starter, assumir como direcao preferencial que o Praxis e uma plataforma de decisoes semanticas authoradas por IA.
 - Sempre que uma necessidade de authoring, explainability, preview, governance ou runtime decision surgir, preferir modelar o problema como decisao canônica governada em `/api/praxis/config/**`, e nao como patch solto, editor local ou mero artefato de componente.
 
+Inventario Local de Aderencia Antes de Novo Contrato
+- Antes de criar ou alterar contrato em `/api/praxis/config/**`, contratos AI, DTOs, eventos SSE, validators, compilers, manifests ou payloads, auditar primeiro o fluxo existente do starter e dos consumidores.
+- A pergunta obrigatoria e: o que o `praxis-config-starter` ja sabe por `ai_registry`, `api_metadata`, templates, contexto, diagnostics, quick replies, previews, warnings, headers, ETag ou historico, mas ainda nao esta sendo bem materializado?
+- Classificar cada melhoria como `ja-suportado-so-ux`, `ja-suportado-mal-nomeado-ou-mal-materializado`, `suportado-parcialmente` ou `lacuna-real-de-contrato`.
+- So `lacuna-real-de-contrato` autoriza novo contrato. Nesse caso, explicitar dado faltante, fonte canonica, consumidores impactados, artefatos derivados e validacao minima antes de implementar.
+- Nao criar uma camada paralela de authoring ou status apenas porque um consumidor ainda nao esta projetando corretamente a semantica que o starter ja publica.
+
 Classificacao Padrao da Mudanca
 - `docs-apenas`: mudancas restritas a `AGENTS.md`, `README.md`, `RELEASING.md`, `docs/**` ou comentarios/Javadoc sem efeito em contrato ou comportamento.
 - `local-pequena`: mudanca confinada ao starter, sem alterar endpoints, headers, ETag, entidades persistidas, contratos AI ou artefatos de release.
