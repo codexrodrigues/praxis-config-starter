@@ -34,6 +34,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringCandidate;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationText;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.prompts.AiPromptTemplates;
@@ -2107,8 +2108,10 @@ public class AiOrchestratorService {
         if (response == null) {
             return null;
         }
-        response.setExplanation(polishComponentEditPlanExplanation(response.getExplanation()));
-        response.setMessage(polishComponentEditPlanExplanation(response.getMessage()));
+        response.setExplanation(publicAssistantText(
+                polishComponentEditPlanExplanation(response.getExplanation())));
+        response.setMessage(publicAssistantText(
+                polishComponentEditPlanExplanation(response.getMessage())));
         if (response.getMessage() == null) {
             response.setMessage("");
         }
@@ -2120,6 +2123,10 @@ public class AiOrchestratorService {
         linkObservation(observationId, memoryContext);
         markObservationCompleted(observationId, response, 0L);
         return response;
+    }
+
+    private String publicAssistantText(String value) {
+        return AgenticAuthoringPresentationText.assistantReply(value);
     }
 
     private UUID captureObservation(

@@ -617,8 +617,8 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("selectedCandidate").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(body.path("assistantMessage").asText())
-                .contains("painel analitico")
-                .contains("fonte de negocio");
+                .contains("painel analítico")
+                .contains("fonte de negócio");
         assertThat(body.path("quickReplies")).extracting(reply -> reply.path("id").asText())
                 .containsExactly("confirm-dashboard", "revise", "cancel");
         assertThat(body.path("pendingClarification").path("questions")).extracting(JsonNode::asText)

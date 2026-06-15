@@ -122,11 +122,17 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringConsultativeApiCatalogProjectionService agenticAuthoringConsultativeApiCatalogProjectionService(
             ObjectProvider<DomainCatalogIngestionService> domainCatalogIngestionService,
             ObjectProvider<ApiMetadataRepository> apiMetadataRepository,
-            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey) {
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
+            @Value("${praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms:60000}") long compactProjectionCacheTtlMs,
+            @Value("${praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries:256}") int compactProjectionCacheMaxEntries,
+            @Value("${praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms:60000}") long apiMetadataCacheTtlMs) {
         return new AgenticAuthoringConsultativeApiCatalogProjectionService(
                 domainCatalogIngestionService::getIfAvailable,
                 apiMetadataRepository.getIfAvailable(),
-                domainCatalogServiceKey);
+                domainCatalogServiceKey,
+                compactProjectionCacheTtlMs,
+                compactProjectionCacheMaxEntries,
+                apiMetadataCacheTtlMs);
     }
 
     @Bean
@@ -151,10 +157,12 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnMissingBean
     public AgenticAuthoringComponentCapabilitiesService agenticAuthoringComponentCapabilitiesService(
             ObjectProvider<AiRegistryRepository> aiRegistryRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            @Value("${praxis.ai.authoring.component-capabilities.cache-ttl-ms:60000}") long cacheTtlMs) {
         return new AgenticAuthoringComponentCapabilitiesService(
                 aiRegistryRepository.getIfAvailable(),
-                objectMapper);
+                objectMapper,
+                cacheTtlMs);
     }
 
     @Bean

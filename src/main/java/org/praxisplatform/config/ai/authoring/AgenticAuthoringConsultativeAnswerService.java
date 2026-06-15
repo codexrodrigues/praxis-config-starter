@@ -11,9 +11,11 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -129,20 +131,24 @@ public class AgenticAuthoringConsultativeAnswerService {
         boolean explicitNoMaterialization = explicitlyForbidsMaterialization(request.userPrompt());
         AgenticAuthoringConsultativeApiCatalogProjection projection = null;
         try {
-            Optional<AgenticAuthoringConsultativeAnswer> earlyRuntimeContextAnswer =
-                    runtimeContextConsultativeAnswer(request, null, tenantId, userId, environment);
-            if (earlyRuntimeContextAnswer.isPresent()) {
-                return earlyRuntimeContextAnswer;
+            if (!domainAvailabilityQuestion || pendingRuntimeDisambiguationContext) {
+                Optional<AgenticAuthoringConsultativeAnswer> earlyRuntimeContextAnswer =
+                        runtimeContextConsultativeAnswer(request, null, tenantId, userId, environment);
+                if (earlyRuntimeContextAnswer.isPresent()) {
+                    return earlyRuntimeContextAnswer;
+                }
             }
             if (domainAvailabilityQuestion) {
                 projection = apiCatalogProjection(
                         request.userPrompt(),
                         tenantId,
                         environment);
-                Optional<AgenticAuthoringConsultativeAnswer> runtimeContextAnswer =
-                        runtimeContextConsultativeAnswer(request, projection, tenantId, userId, environment);
-                if (runtimeContextAnswer.isPresent()) {
-                    return runtimeContextAnswer;
+                if (pendingRuntimeDisambiguationContext) {
+                    Optional<AgenticAuthoringConsultativeAnswer> runtimeContextAnswer =
+                            runtimeContextConsultativeAnswer(request, projection, tenantId, userId, environment);
+                    if (runtimeContextAnswer.isPresent()) {
+                        return runtimeContextAnswer;
+                    }
                 }
                 String unsupportedDomainMessage = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
                         request.userPrompt(),
@@ -618,46 +624,50 @@ public class AgenticAuthoringConsultativeAnswerService {
         boolean compareIntent = "runtime_related_surface_compare".equals(normalizeRuntimeRelatedSurfaceIntentKind(intentKind));
         boolean disambiguationIntent = "runtime_surface_disambiguation".equals(normalizeRuntimeRelatedSurfaceIntentKind(intentKind));
         boolean unsupportedIntent = runtimeRelatedSurfaceIntentBlocksRead(intentKind);
+        boolean ambiguousRuntimeSurfaceChoice =
+                acceptedRuntimeRelatedSurfaceCandidateCount(relatedSurfaceAttempt.resolution()) > 1;
         boolean dryRunReadFree = runtimeToolPlannerDryRunEnabled() && !availabilityIntent;
         boolean readonlySkeletonReadFree = runtimeToolPlannerReadonlySkeletonEnabled() && !availabilityIntent && !unsupportedIntent;
-        List<String> surfaces = texts(runtimeContext.path("availableSurfaces"), 4);
+        List<RuntimeSurfaceOption> surfaceOptions = runtimeSurfaceOptions(runtimeContext, 4);
+        List<String> surfaces = !surfaceOptions.isEmpty()
+                ? surfaceOptions.stream().map(RuntimeSurfaceOption::label).toList()
+                : texts(runtimeContext.path("availableSurfaces"), 4).stream()
+                .map(this::humanizeRuntimeSurfaceLabel)
+                .filter(StringUtils::hasText)
+                .toList();
         List<String> selectedIds = selectedIds(runtimeContext);
-        List<String> operations = texts(runtimeContext.path("allowedOperations"), 6);
         StringBuilder message = new StringBuilder();
         if (availabilityIntent) {
-            message.append("O contexto runtime aterrado expõe superfícies consultáveis");
+            message.append("Posso usar dados já governados nesta tela para criar novas experiências");
         } else {
-            message.append("A seleção atual já expõe uma superfície runtime consultável");
+            message.append("Posso usar a seleção atual para criar ou abrir visões relacionadas");
         }
         if (!surfaces.isEmpty()) {
-            message.append(": ").append(humanJoin(surfaces)).append(".");
+            message.append(". As opções confirmadas agora são: ").append(humanJoin(surfaces)).append(".");
         } else {
             message.append(".");
         }
         if (!selectedIds.isEmpty()) {
-            message.append(" O contexto recebido confirma ")
-                    .append(selectedIds.size() == 1 ? "um registro selecionado" : selectedIds.size() + " registros selecionados")
-                    .append(" por identificador, sem carregar valores crus da linha.");
-        }
-        if (!operations.isEmpty()) {
-            message.append(" As operações disponíveis incluem ")
-                    .append(humanJoin(operations))
-                    .append(".");
+            message.append(" Como há ")
+                    .append(selectedIds.size() == 1 ? "uma linha selecionada" : selectedIds.size() + " linhas selecionadas")
+                    .append(", consigo manter a próxima criação contextual sem expor dados brutos da linha.");
         }
         if (availabilityIntent) {
-            message.append(" Este turno pediu disponibilidade, entao nenhuma leitura backend read-only foi executada.");
+            message.append(" Escolha uma dessas opções ou peça em linguagem natural o tipo de tela que você quer montar.");
         } else if (dryRunReadFree) {
-            message.append(" A política backend atual está em dry-run multi-tool: os candidatos foram planejados, mas nenhuma leitura backend read-only foi executada neste turno.");
+            message.append(" Eu ainda não consultei os registros neste turno; antes de criar, vou validar a fonte governada e preparar uma prévia para revisão.");
         } else if (readonlySkeletonReadFree) {
-            message.append(" A política backend runtime-tool-policy:multi-tool-readonly-beta está registrada, mas neste corte ela opera como skeleton planning-only: os candidatos foram planejados sem executar leituras backend read-only.");
+            message.append(" Eu consigo planejar a próxima tela com segurança, mas ainda preciso confirmar a leitura governada antes de listar dados ou montar a prévia.");
         } else if (compareIntent) {
-            message.append(" A intenção consultiva resolvida pede comparação entre superfícies relacionadas, mas compare ainda está em modo planning-only governado: os candidatos foram auditados sem executar leituras backend read-only.");
-        } else if (disambiguationIntent && acceptedRuntimeRelatedSurfaceCandidateCount(relatedSurfaceAttempt.resolution()) > 1) {
-            message.append(" A intenção consultiva precisa escolher uma superfície relacionada antes de consultar dados. As opções governadas foram auditadas sem executar leituras backend read-only.");
+            message.append(" Para comparar informações, preciso que você escolha o recorte principal; depois eu preparo uma prévia com evidência governada.");
+        } else if (ambiguousRuntimeSurfaceChoice) {
+            message.append(" Preciso que você escolha qual visão quer usar antes de consultar ou criar a próxima tela.");
         } else if (unsupportedIntent) {
-            message.append(" A intenção consultiva resolvida exige uma leitura runtime-related ainda não habilitada neste corte; por isso nenhuma tool backend read-only foi executada.");
+            message.append(" Para criar uma tabela, formulário ou painel, escolha uma opção abaixo ou diga algo como: crie uma tabela com ")
+                    .append(surfaces.isEmpty() ? "esses dados" : surfaces.get(0))
+                    .append(".");
         } else {
-            message.append(" Ainda falta executar uma tool backend read-only para consultar essa superfície relacionada; por isso eu posso confirmar que há contexto governado para participantes, mas não devo inventar ou listar nomes neste turno.");
+            message.append(" Posso confirmar o contexto governado, mas não vou inventar registros; quando você pedir para criar, eu valido a fonte antes da prévia.");
         }
         List<String> warnings = new ArrayList<>(warnings("runtime_component_context", projection));
         warnings.add("runtime-component-context-consultative-answer-used");
@@ -684,7 +694,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                 projection,
                 warnings.stream().distinct().toList(),
                 evidenceBundle,
-                runtimeRelatedSurfaceDisambiguationQuickReplies(evidenceBundle)));
+                runtimeRelatedSurfaceQuickReplies(evidenceBundle, surfaceOptions)));
     }
 
     private RuntimeRelatedSurfaceReadAttempt resolveRuntimeRelatedSurface(
@@ -1213,6 +1223,137 @@ public class AgenticAuthoringConsultativeAnswerService {
         return disambiguation;
     }
 
+    private List<AgenticAuthoringQuickReply> runtimeRelatedSurfaceQuickReplies(
+            JsonNode evidenceBundle,
+            List<RuntimeSurfaceOption> surfaceOptions) {
+        List<AgenticAuthoringQuickReply> disambiguationReplies =
+                runtimeRelatedSurfaceDisambiguationQuickReplies(evidenceBundle);
+        if (!disambiguationReplies.isEmpty()) {
+            return disambiguationReplies;
+        }
+        if (surfaceOptions == null || surfaceOptions.isEmpty()) {
+            return List.of();
+        }
+        List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (RuntimeSurfaceOption option : surfaceOptions) {
+            if (option == null || !StringUtils.hasText(option.surfaceRef()) || !seen.add(option.surfaceRef())) {
+                continue;
+            }
+            String label = runtimeSurfaceUserLabel(option.surfaceRef(), option.label());
+            if (!StringUtils.hasText(label)) {
+                continue;
+            }
+            ObjectNode contextHints = objectMapper.createObjectNode();
+            contextHints.put("schemaVersion", "praxis-runtime-related-surface-create-quick-reply-context.v1");
+            contextHints.put("source", "groundedRuntimeComponentContext.relationSurfaceRefs");
+            contextHints.put("surfaceRef", option.surfaceRef());
+            String resourceLabel = runtimeSurfaceResourceUserLabel(option.surfaceRef(), option.resourcePath());
+            if (StringUtils.hasText(resourceLabel)) {
+                contextHints.put("resourceLabel", resourceLabel);
+            }
+            if (StringUtils.hasText(option.resourcePath())) {
+                contextHints.put("resourcePath", option.resourcePath());
+            }
+            contextHints.put("artifactKind", "table");
+            ObjectNode presentation = objectMapper.createObjectNode();
+            presentation.put(
+                    "bestFor",
+                    "Boa quando você quer navegar, filtrar e comparar registros de " + label);
+            presentation.put(
+                    "returns",
+                    "Pré-visualização com colunas, filtros e fonte semântica preservada");
+            presentation.put(
+                    "nextStep",
+                    "Criar a tabela e revisar antes de salvar");
+            contextHints.set("presentation", presentation);
+            replies.add(new AgenticAuthoringQuickReply(
+                    "runtime-related-surface-create-table:" + option.surfaceRef(),
+                    "runtime_related_surface_create",
+                    "Criar tabela: " + label,
+                    "Crie uma tabela usando " + label + ".",
+                    "Usa a fonte governada já presente nesta tela para preparar uma prévia de tabela.",
+                    "table_view",
+                    "resource",
+                    contextHints));
+            if (replies.size() >= 3) {
+                break;
+            }
+        }
+        return List.copyOf(replies);
+    }
+
+    private List<RuntimeSurfaceOption> runtimeSurfaceOptions(ObjectNode runtimeContext, int limit) {
+        if (runtimeContext == null || limit <= 0) {
+            return List.of();
+        }
+        List<RuntimeSurfaceOption> options = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonNode relation : relationSurfaceRefs(runtimeContext)) {
+            String surfaceRef = firstNonBlank(
+                    text(relation, "surfaceRef"),
+                    text(relation, "targetSurface"),
+                    text(relation, "id"));
+            if (!StringUtils.hasText(surfaceRef) || !seen.add(surfaceRef)) {
+                continue;
+            }
+            String label = runtimeSurfaceUserLabel(surfaceRef, text(relation, "label"));
+            String resourcePath = firstNonBlank(
+                    text(relation, "targetResourcePath"),
+                    text(relation.path("target"), "resourcePath"));
+            options.add(new RuntimeSurfaceOption(surfaceRef, label, resourcePath));
+            if (options.size() >= limit) {
+                break;
+            }
+        }
+        if (!options.isEmpty()) {
+            return List.copyOf(options);
+        }
+        for (String surface : texts(runtimeContext.path("availableSurfaces"), limit)) {
+            if (!StringUtils.hasText(surface) || !seen.add(surface)) {
+                continue;
+            }
+            options.add(new RuntimeSurfaceOption(surface, humanizeRuntimeSurfaceLabel(surface), ""));
+        }
+        return List.copyOf(options);
+    }
+
+    private String humanizeRuntimeSurfaceLabel(String value) {
+        String text = value(value);
+        if (text.isBlank()) {
+            return "";
+        }
+        String separated = text
+                .replace('-', ' ')
+                .replace('_', ' ')
+                .replaceAll("(?<=[a-z])(?=[A-Z])", " ")
+                .trim();
+        if (text.contains(" ")) {
+            return text;
+        }
+        if (separated.isBlank()) {
+            return text;
+        }
+        return separated.substring(0, 1).toUpperCase(Locale.ROOT) + separated.substring(1);
+    }
+
+    private String runtimeSurfaceUserLabel(String surfaceRef, String publishedLabel) {
+        return firstNonBlank(publishedLabel, humanizeRuntimeSurfaceLabel(surfaceRef));
+    }
+
+    private String runtimeSurfaceResourceUserLabel(String surfaceRef, String resourcePath) {
+        return humanizeRuntimeSurfaceLabel(lastPathSegment(resourcePath));
+    }
+
+    private String lastPathSegment(String value) {
+        String text = value(value).replaceAll("/+$", "");
+        if (text.isBlank()) {
+            return "";
+        }
+        int slash = text.lastIndexOf('/');
+        return slash >= 0 ? text.substring(slash + 1) : text;
+    }
+
     private List<AgenticAuthoringQuickReply> runtimeRelatedSurfaceDisambiguationQuickReplies(JsonNode evidenceBundle) {
         JsonNode disambiguation = evidenceBundle == null
                 ? null
@@ -1249,12 +1390,13 @@ public class AgenticAuthoringConsultativeAnswerService {
                     optionRef,
                     candidateRef,
                     surfaceRef);
+            String label = runtimeSurfaceUserLabel(surfaceRef, text(option, "label"));
             replies.add(new AgenticAuthoringQuickReply(
                     "runtime-related-surface-detail:" + surfaceRef,
                     "runtime_related_surface_detail",
-                    "Detalhar " + surfaceRef,
-                    "Detalhe " + surfaceRef + ".",
-                    "Seleciona esta superficie relacionada usando decisao semantica governada pelo backend.",
+                    "Detalhar " + label,
+                    "Detalhe " + label + ".",
+                    "Seleciona esta visão relacionada usando decisão semântica governada pelo backend.",
                     "list",
                     "resource",
                     contextHints,
@@ -1265,6 +1407,9 @@ public class AgenticAuthoringConsultativeAnswerService {
             }
         }
         return List.copyOf(replies);
+    }
+
+    private record RuntimeSurfaceOption(String surfaceRef, String label, String resourcePath) {
     }
 
     private ObjectNode runtimeRelatedSurfaceDisambiguationSemanticDecision(
@@ -2086,13 +2231,18 @@ public class AgenticAuthoringConsultativeAnswerService {
                 "not_found",
                 "runtime-related-surface-target-candidate-not-found");
         ArrayNode evaluatedCandidates = objectMapper.createArrayNode();
+        Map<String, Integer> acceptedTermCardinality = runtimeRelatedSurfaceAcceptedTermCardinality(
+                resolution.path("candidates"));
         boolean ambiguous = false;
         for (JsonNode candidate : resolution.path("candidates")) {
             if (!candidate.isObject() || !"accepted".equals(text(candidate, "status"))) {
                 continue;
             }
             RuntimeRelatedSurfaceTargetCatalogMatch match =
-                    runtimeRelatedSurfaceTargetCatalogMatchForCandidate(normalizedPrompt, candidate);
+                    runtimeRelatedSurfaceTargetCatalogMatchForCandidate(
+                            normalizedPrompt,
+                            candidate,
+                            acceptedTermCardinality);
             evaluatedCandidates.add(runtimeRelatedSurfaceTargetCatalogCandidateDiagnostic(candidate, match, normalizedPrompt));
             if (match.score() <= 0) {
                 continue;
@@ -2146,18 +2296,19 @@ public class AgenticAuthoringConsultativeAnswerService {
 
     private RuntimeRelatedSurfaceTargetCatalogMatch runtimeRelatedSurfaceTargetCatalogMatchForCandidate(
             String normalizedPrompt,
-            JsonNode candidate) {
+            JsonNode candidate,
+            Map<String, Integer> acceptedTermCardinality) {
         RuntimeRelatedSurfaceTargetCatalogMatch best = RuntimeRelatedSurfaceTargetCatalogMatch.rejected(
                 "not_found",
                 "runtime-related-surface-target-candidate-not-found");
-        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, "surfaceRef", text(candidate, "surfaceRef"), 100);
-        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, "candidateRef", text(candidate, "candidateRef"), 100);
-        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, "runtimeSurfaceInstanceRef", text(candidate, "runtimeSurfaceInstanceRef"), 100);
-        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, "label", text(candidate, "label"), 80);
+        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, acceptedTermCardinality, "surfaceRef", text(candidate, "surfaceRef"), 100);
+        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, acceptedTermCardinality, "candidateRef", text(candidate, "candidateRef"), 100);
+        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, acceptedTermCardinality, "runtimeSurfaceInstanceRef", text(candidate, "runtimeSurfaceInstanceRef"), 100);
+        best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, acceptedTermCardinality, "label", text(candidate, "label"), 80);
         if (candidate.path("semanticAliases").isArray()) {
             for (JsonNode alias : candidate.path("semanticAliases")) {
                 if (alias.isTextual()) {
-                    best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, "semanticAlias", alias.asText(), 70);
+                    best = strongerRuntimeRelatedSurfaceTargetCatalogMatch(best, normalizedPrompt, candidate, acceptedTermCardinality, "semanticAlias", alias.asText(), 70);
                 }
             }
         }
@@ -2172,11 +2323,15 @@ public class AgenticAuthoringConsultativeAnswerService {
             RuntimeRelatedSurfaceTargetCatalogMatch current,
             String normalizedPrompt,
             JsonNode candidate,
+            Map<String, Integer> acceptedTermCardinality,
             String termKind,
             String term,
             int score) {
         String normalizedTerm = normalizedTargetCatalogText(term);
         if (!safeRuntimeRelatedSurfaceTargetTerm(normalizedTerm)) {
+            return current;
+        }
+        if (acceptedTermCardinality != null && acceptedTermCardinality.getOrDefault(normalizedTerm, 0) > 1) {
             return current;
         }
         if (!normalizedPromptContainsAffirmedTargetTerm(normalizedPrompt, normalizedTerm)) {
@@ -2192,6 +2347,34 @@ public class AgenticAuthoringConsultativeAnswerService {
                 termKind,
                 normalizedTerm,
                 score);
+    }
+
+    private Map<String, Integer> runtimeRelatedSurfaceAcceptedTermCardinality(JsonNode candidates) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        if (candidates == null || !candidates.isArray()) {
+            return counts;
+        }
+        for (JsonNode candidate : candidates) {
+            if (!candidate.isObject() || !"accepted".equals(text(candidate, "status"))) {
+                continue;
+            }
+            Set<String> terms = new LinkedHashSet<>();
+            addRuntimeRelatedSurfaceTargetCatalogTerm(terms, text(candidate, "surfaceRef"));
+            addRuntimeRelatedSurfaceTargetCatalogTerm(terms, text(candidate, "candidateRef"));
+            addRuntimeRelatedSurfaceTargetCatalogTerm(terms, text(candidate, "runtimeSurfaceInstanceRef"));
+            addRuntimeRelatedSurfaceTargetCatalogTerm(terms, text(candidate, "label"));
+            if (candidate.path("semanticAliases").isArray()) {
+                for (JsonNode alias : candidate.path("semanticAliases")) {
+                    if (alias.isTextual()) {
+                        addRuntimeRelatedSurfaceTargetCatalogTerm(terms, alias.asText());
+                    }
+                }
+            }
+            for (String term : terms) {
+                counts.merge(term, 1, Integer::sum);
+            }
+        }
+        return counts;
     }
 
     private boolean normalizedPromptContainsTargetTerm(String normalizedPrompt, String normalizedTerm) {
@@ -2313,8 +2496,6 @@ public class AgenticAuthoringConsultativeAnswerService {
         return !Set.of(
                 "dados",
                 "relacionados",
-                "missao",
-                "missao selecionada",
                 "selecionada",
                 "superficie",
                 "detalhe",
@@ -5923,10 +6104,17 @@ public class AgenticAuthoringConsultativeAnswerService {
                 || text.contains(" quais dados e apis existem ")
                 || text.contains(" que recursos existem ")
                 || text.contains(" quais recursos existem ")
+                || text.contains(" dados que existem ")
+                || text.contains(" dados disponiveis ")
+                || text.contains(" dados disponíveis ")
+                || text.contains(" fontes de dados ")
                 || text.contains(" existe api ")
                 || text.contains(" existem api ")
                 || text.contains(" existe dados ")
                 || text.contains(" existem dados ");
+        if (!asksAvailability && asksWhichGovernedDataCanFeedAuthoring(text)) {
+            asksAvailability = true;
+        }
         if (!asksAvailability) {
             return false;
         }
@@ -5939,6 +6127,41 @@ public class AgenticAuthoringConsultativeAnswerService {
                 || text.contains(" recurso ")
                 || text.contains(" recursos ")
                 || mentionsAuthorableArtifact(text);
+    }
+
+    boolean shouldPreferGovernedCatalogAvailabilityAnswer(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || clearlyRequestsMaterialization(request.userPrompt())) {
+            return false;
+        }
+        return isDomainAvailabilityQuestion(request.userPrompt());
+    }
+
+    private boolean asksWhichGovernedDataCanFeedAuthoring(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        boolean asksWhichData = text.contains(" quais dados ")
+                || text.contains(" que dados ")
+                || text.contains(" quais tipos de dados ")
+                || text.contains(" que tipos de dados ")
+                || text.contains(" com quais dados ")
+                || text.contains(" usando quais dados ");
+        if (!asksWhichData) {
+            return false;
+        }
+        boolean asksUseOrFit = text.contains(" posso usar ")
+                || text.contains(" posso utilizar ")
+                || text.contains(" posso aproveitar ")
+                || text.contains(" podem usar ")
+                || text.contains(" podem utilizar ")
+                || text.contains(" podem ter ")
+                || text.contains(" pode ter ")
+                || text.contains(" da para usar ")
+                || text.contains(" da pra usar ")
+                || text.contains(" consigo usar ")
+                || text.contains(" existem para ")
+                || text.contains(" tem para ");
+        return asksUseOrFit && mentionsAuthorableArtifact(text);
     }
 
     private boolean isComponentCatalogQuestion(String prompt) {

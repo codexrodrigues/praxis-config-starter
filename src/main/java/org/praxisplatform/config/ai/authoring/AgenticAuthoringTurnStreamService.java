@@ -66,6 +66,7 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, ScheduledFuture<?>> processingProgressTasks = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> streamStartedAtByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
+    private final Map<UUID, AiTurnEventEnvelope> latestEventByStream = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
@@ -279,10 +280,13 @@ public class AgenticAuthoringTurnStreamService {
         for (AiTurnEventEnvelope event : replay.events()) {
             send(emitter, event);
             replayCursorByStream.get(streamId).set(Math.max(replayCursorByStream.get(streamId).get(), event.getSeq()));
+            rememberLatestEvent(streamId, event);
         }
-        ensureReplay(streamId, principalContext);
+        if (!isLocalActiveStream(streamId)) {
+            ensureReplay(streamId, principalContext);
+        }
         ensureHeartbeat(streamId, replay.ownership());
-        AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+        AiTurnEventEnvelope tail = latestEvent(streamId, true);
         if (tail != null && turnEventService.isTerminalType(tail.getType())) {
             complete(streamId);
         }
@@ -367,18 +371,20 @@ public class AgenticAuthoringTurnStreamService {
             UUID turnId,
             String type,
             Object payload) {
-        AiTurnEventEnvelope lastEvent = turnEventService.findLastEvent(streamId).orElse(null);
+        AiTurnEventEnvelope lastEvent = latestEvent(streamId, true);
         if (lastEvent != null && turnEventService.isTerminalType(lastEvent.getType())) {
+            terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false)).set(true);
             return new StreamAppendResult(lastEvent, false);
         }
         AtomicBoolean terminal = terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
         if (terminal.get()) {
-            return new StreamAppendResult(turnEventService.findLastEvent(streamId).orElse(null), false);
+            return new StreamAppendResult(latestEvent(streamId, true), false);
         }
         if (turnEventService.isTerminalType(type) && !terminal.compareAndSet(false, true)) {
-            return new StreamAppendResult(turnEventService.findLastEvent(streamId).orElse(null), false);
+            return new StreamAppendResult(latestEvent(streamId, true), false);
         }
         AiTurnEventEnvelope event = turnEventService.appendEvent(principalContext, streamId, threadId, turnId, type, payload);
+        rememberLatestEvent(streamId, event);
         replayCursorByStream
                 .computeIfAbsent(streamId, ignored -> new AtomicLong(0))
                 .updateAndGet(current -> Math.max(current, event.getSeq()));
@@ -431,7 +437,7 @@ public class AgenticAuthoringTurnStreamService {
                     complete(streamId);
                     return;
                 }
-                AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+                AiTurnEventEnvelope tail = latestEvent(streamId, true);
                 String phase = heartbeatPhase(tail);
                 Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
                 diagnostics.put("source", "backend-processing-progress-watchdog");
@@ -464,6 +470,7 @@ public class AgenticAuthoringTurnStreamService {
                 for (AiTurnEventEnvelope event : replay.events()) {
                     emittersByStream.getOrDefault(streamId, Set.of()).forEach(emitter -> send(emitter, event));
                     cursor.set(Math.max(cursor.get(), event.getSeq()));
+                    rememberLatestEvent(streamId, event);
                     if (turnEventService.isTerminalType(event.getType())) {
                         complete(streamId);
                     }
@@ -492,7 +499,7 @@ public class AgenticAuthoringTurnStreamService {
                 stopHeartbeat(streamId);
                 return;
             }
-            AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+            AiTurnEventEnvelope tail = latestEvent(streamId, true);
             if (tail != null && turnEventService.isTerminalType(tail.getType())) {
                 stopHeartbeat(streamId);
                 return;
@@ -669,6 +676,7 @@ public class AgenticAuthoringTurnStreamService {
         replayCursorByStream.remove(streamId);
         streamStartedAtByStream.remove(streamId);
         terminalByStream.remove(streamId);
+        latestEventByStream.remove(streamId);
     }
 
     private long streamElapsedSeconds(UUID streamId) {
@@ -694,9 +702,41 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private boolean terminalReached(UUID streamId) {
-        return turnEventService.findLastEvent(streamId)
-                .map(event -> turnEventService.isTerminalType(event.getType()))
-                .orElse(false);
+        AiTurnEventEnvelope latestEvent = latestEvent(streamId, true);
+        return latestEvent != null && turnEventService.isTerminalType(latestEvent.getType());
+    }
+
+    private AiTurnEventEnvelope latestEvent(UUID streamId) {
+        return latestEvent(streamId, false);
+    }
+
+    private AiTurnEventEnvelope latestEvent(UUID streamId, boolean reconcilePersisted) {
+        if (streamId == null) {
+            return null;
+        }
+        AiTurnEventEnvelope cached = latestEventByStream.get(streamId);
+        if (cached != null && !reconcilePersisted) {
+            return cached;
+        }
+        AiTurnEventEnvelope persisted = turnEventService.findLastEvent(streamId).orElse(null);
+        rememberLatestEvent(streamId, persisted);
+        AiTurnEventEnvelope reconciled = latestEventByStream.get(streamId);
+        return reconciled != null ? reconciled : persisted;
+    }
+
+    private void rememberLatestEvent(UUID streamId, AiTurnEventEnvelope event) {
+        if (streamId == null || event == null) {
+            return;
+        }
+        latestEventByStream.merge(streamId, event, (current, candidate) -> {
+            long currentSeq = current.getSeq();
+            long candidateSeq = candidate.getSeq();
+            return candidateSeq >= currentSeq ? candidate : current;
+        });
+    }
+
+    private boolean isLocalActiveStream(UUID streamId) {
+        return streamId != null && streamStartedAtByStream.containsKey(streamId);
     }
 
     private UUID captureObservation(

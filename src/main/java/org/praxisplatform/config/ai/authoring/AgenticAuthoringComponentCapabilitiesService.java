@@ -25,6 +25,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final String SYSTEM_SCOPE_KEY = "GLOBAL";
     private static final int MAX_TRIGGER_TERMS = 18;
     private static final int MAX_OPERATION_CAPABILITIES = 16;
+    private static final long DEFAULT_CACHE_TTL_MS = 60_000L;
 
     private final AgenticAuthoringFormCapabilityCatalog formCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringTableCapabilityCatalog tableCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
@@ -32,6 +33,8 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private final AgenticAuthoringFilterCapabilityCatalog filterCatalog = AgenticAuthoringFilterCapabilityCatalog.INSTANCE;
     private final AiRegistryRepository aiRegistryRepository;
     private final ObjectMapper objectMapper;
+    private final long cacheTtlMs;
+    private volatile CachedCapabilities cachedCapabilities;
 
     public AgenticAuthoringComponentCapabilitiesService() {
         this(null, new ObjectMapper());
@@ -40,11 +43,45 @@ public class AgenticAuthoringComponentCapabilitiesService {
     public AgenticAuthoringComponentCapabilitiesService(
             AiRegistryRepository aiRegistryRepository,
             ObjectMapper objectMapper) {
+        this(aiRegistryRepository, objectMapper, DEFAULT_CACHE_TTL_MS);
+    }
+
+    public AgenticAuthoringComponentCapabilitiesService(
+            AiRegistryRepository aiRegistryRepository,
+            ObjectMapper objectMapper,
+            long cacheTtlMs) {
         this.aiRegistryRepository = aiRegistryRepository;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.cacheTtlMs = Math.max(0L, cacheTtlMs);
     }
 
     public AgenticAuthoringComponentCapabilitiesResult listCapabilities() {
+        if (cacheTtlMs <= 0L) {
+            return buildCapabilities();
+        }
+        CachedCapabilities cached = cachedCapabilities;
+        long now = System.currentTimeMillis();
+        if (cached != null && cached.expiresAtEpochMs() >= now) {
+            return cached.result();
+        }
+        synchronized (this) {
+            cached = cachedCapabilities;
+            now = System.currentTimeMillis();
+            if (cached == null || cached.expiresAtEpochMs() < now) {
+                cached = new CachedCapabilities(
+                        buildCapabilities(),
+                        now + cacheTtlMs);
+                cachedCapabilities = cached;
+            }
+            return cached.result();
+        }
+    }
+
+    public void invalidateCapabilitiesCache() {
+        cachedCapabilities = null;
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult buildCapabilities() {
         Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs =
                 new LinkedHashMap<>();
         putCatalog(catalogs, toCatalog(formCatalog.componentId(), formCatalog.version(), formCatalog.capabilities()));
@@ -249,8 +286,9 @@ public class AgenticAuthoringComponentCapabilitiesService {
     }
 
     private void addTerm(Set<String> terms, String value) {
-        if (StringUtils.hasText(value)) {
-            terms.add(value.trim());
+        String term = AgenticAuthoringPresentationText.display(value);
+        if (StringUtils.hasText(term)) {
+            terms.add(term.trim());
         }
     }
 
@@ -279,5 +317,10 @@ public class AgenticAuthoringComponentCapabilitiesService {
                 .filter(StringUtils::hasText)
                 .limit(limit)
                 .toList();
+    }
+
+    private record CachedCapabilities(
+            AgenticAuthoringComponentCapabilitiesResult result,
+            long expiresAtEpochMs) {
     }
 }

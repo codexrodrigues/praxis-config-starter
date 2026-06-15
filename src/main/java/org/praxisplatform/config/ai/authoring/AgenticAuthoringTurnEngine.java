@@ -179,7 +179,6 @@ public class AgenticAuthoringTurnEngine {
             AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink,
             String schemaBaseUrl) {
-        request = withServerComponentCapabilities(request);
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         request = withActiveDecisionContext(request, state.activeSemanticDecision());
@@ -196,6 +195,15 @@ public class AgenticAuthoringTurnEngine {
                     state);
             if (fastConsultativeOutcome != null) {
                 return fastConsultativeOutcome;
+            }
+            request = withServerComponentCapabilities(request);
+            AgenticAuthoringTurnOutcome capabilityBackedConsultativeOutcome = maybeAnswerConsultativeFastPath(
+                    request,
+                    principalContext,
+                    eventSink,
+                    state);
+            if (capabilityBackedConsultativeOutcome != null) {
+                return capabilityBackedConsultativeOutcome;
             }
             emitStatus(
                     eventSink,
@@ -374,7 +382,7 @@ public class AgenticAuthoringTurnEngine {
             Map<String, Object> resultPayload = new LinkedHashMap<>();
             resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
-            resultPayload.put("assistantMessage", safeText(assistantMessage));
+            resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage));
             resultPayload.put("assistantContent", assistantContent(
                     terminalIntentResolution,
                     businessCatalogDiscovery,
@@ -603,13 +611,13 @@ public class AgenticAuthoringTurnEngine {
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
         resultPayload.put("preview", objectMapper.createObjectNode());
-        resultPayload.put("assistantMessage", safeText(answer.assistantMessage()));
+        resultPayload.put("assistantMessage", publicAssistantMessage(answer.assistantMessage()));
         resultPayload.put("assistantContent",
                 AgenticAuthoringAssistantContentFactory.fromConsultativeProjection(answer.apiCatalogProjection()));
         if (answer.evidenceBundle() != null && !answer.evidenceBundle().isNull()) {
             resultPayload.put("evidenceBundle", answer.evidenceBundle());
         }
-        resultPayload.put("quickReplies", answer.quickReplies() == null ? List.of() : answer.quickReplies());
+        resultPayload.put("quickReplies", consultativeQuickReplies(answer));
         resultPayload.put("canApply", false);
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
@@ -619,6 +627,225 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass("consultative_fast_path"))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private List<AgenticAuthoringQuickReply> consultativeQuickReplies(AgenticAuthoringConsultativeAnswer answer) {
+        if (answer == null) {
+            return List.of();
+        }
+        if (answer.quickReplies() != null && !answer.quickReplies().isEmpty()) {
+            return answer.quickReplies();
+        }
+        AgenticAuthoringConsultativeApiCatalogProjection projection = answer.apiCatalogProjection();
+        if (projection == null || !projection.hasResources()) {
+            return List.of();
+        }
+        List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
+        AgenticAuthoringConsultativeApiCatalogProjection.Resource primary = firstResource(projection.resources());
+        if (primary != null) {
+            replies.add(consultativeResourceQuickReply(
+                    "consultative-show-fields:" + safeResourceId(primary),
+                    "Ver campos",
+                    "Quais campos confirmados existem em " + resourceLabel(primary) + "?",
+                    "Mostra os campos confirmados antes de escolher tabela, formulário ou gráfico.",
+                    "view_list",
+                    "resource",
+                    primary,
+                    quickReplyPresentation(
+                            "Boa para entender se essa fonte cobre os dados que você precisa.",
+                            "Retorna campos confirmados e pistas de uso para colunas, filtros, formulários ou gráficos.",
+                            "Clique para explorar os campos dessa fonte.")));
+            replies.add(consultativeResourceQuickReply(
+                    "consultative-create-table:" + safeResourceId(primary),
+                    "Criar tabela",
+                    "Crie uma tabela filtrável usando " + resourceLabel(primary) + ".",
+                    "Transforma a fonte confirmada em uma primeira tabela governada para revisão.",
+                    "table_chart",
+                    "primary",
+                    primary,
+                    quickReplyPresentation(
+                            "Boa para listas operacionais, auditoria e navegação por registros.",
+                            "Retorna uma prévia de tabela com colunas, paginação, filtros e formatação governada.",
+                            "Clique para pedir uma tabela inicial com essa fonte.")));
+        }
+        AgenticAuthoringConsultativeApiCatalogProjection.Resource analytical = firstAnalyticalResource(projection.resources());
+        if (analytical != null) {
+            replies.add(consultativeResourceQuickReply(
+                    "consultative-create-chart:" + safeResourceId(analytical),
+                    "Criar gráfico",
+                    "Crie uma visão com gráficos usando " + resourceLabel(analytical) + ".",
+                    "Usa uma fonte analítica confirmada para propor indicadores e visualizações.",
+                    "query_stats",
+                    "analytics",
+                    analytical,
+                    quickReplyPresentation(
+                            "Boa para indicadores, tendências, comparação e visão executiva.",
+                            "Retorna uma prévia com gráficos compatíveis com os campos confirmados.",
+                            "Clique para pedir uma composição analítica inicial.")));
+        }
+        AgenticAuthoringConsultativeApiCatalogProjection.Resource writable = firstWritableResource(projection.resources());
+        if (writable != null) {
+            replies.add(consultativeResourceQuickReply(
+                    "consultative-create-form:" + safeResourceId(writable),
+                    "Criar formulário",
+                    "Crie um formulário governado usando " + resourceLabel(writable) + ".",
+                    "Usa uma operação confirmada de escrita para capturar ou atualizar dados com governança.",
+                    "dynamic_form",
+                    "resource",
+                    writable,
+                    quickReplyPresentation(
+                            "Boa quando a fonte confirma uma ação de cadastro ou atualização.",
+                            "Retorna uma prévia de formulário conectada à operação permitida pelo catálogo.",
+                            "Clique para pedir um formulário inicial com essa fonte.")));
+        }
+        return replies.stream()
+                .filter(Objects::nonNull)
+                .limit(4)
+                .toList();
+    }
+
+    private AgenticAuthoringQuickReply consultativeResourceQuickReply(
+            String id,
+            String label,
+            String prompt,
+            String description,
+            String icon,
+            String tone,
+            AgenticAuthoringConsultativeApiCatalogProjection.Resource resource,
+            ObjectNode presentation) {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("schemaVersion", "praxis-agentic-authoring-consultative-resource-choice.v1");
+        contextHints.put("source", "consultative-api-catalog-projection");
+        putText(contextHints, "resourceKey", resource.resourceKey());
+        putText(contextHints, "resourcePath", resource.resourcePath());
+        putText(contextHints, "resourceLabel", resourceLabel(resource));
+        putText(contextHints, "resourceRole", resource.role());
+        if (presentation != null) {
+            contextHints.set("presentation", presentation);
+        }
+        return new AgenticAuthoringQuickReply(
+                id,
+                "resource",
+                label,
+                prompt,
+                description,
+                icon,
+                tone,
+                contextHints,
+                consultativeResourceSemanticDecision(id, resource),
+                consultativeResourceChoiceValue(resource));
+    }
+
+    private ObjectNode consultativeResourceSemanticDecision(
+            String id,
+            AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
+        ObjectNode decision = objectMapper.createObjectNode();
+        decision.put("schemaVersion", "praxis-agentic-authoring-semantic-decision.v1");
+        decision.put("decisionId", id);
+        decision.put("artifactKind", "api_catalog");
+        decision.put("changeKind", "answer_api_catalog_question");
+        decision.put("source", "consultative-api-catalog-projection");
+        putText(decision, "selectedResourcePath", resource.resourcePath());
+        putText(decision, "selectedResourceKey", resource.resourceKey());
+        putText(decision, "selectedResourceLabel", resourceLabel(resource));
+        return decision;
+    }
+
+    private ObjectNode consultativeResourceChoiceValue(
+            AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
+        ObjectNode value = objectMapper.createObjectNode();
+        putText(value, "resourcePath", resource.resourcePath());
+        putText(value, "resourceKey", resource.resourceKey());
+        putText(value, "label", resourceLabel(resource));
+        putText(value, "role", resource.role());
+        return value;
+    }
+
+    private ObjectNode quickReplyPresentation(String bestFor, String returns, String nextStep) {
+        ObjectNode presentation = objectMapper.createObjectNode();
+        presentation.put("bestFor", bestFor);
+        presentation.put("returns", returns);
+        presentation.put("nextStep", nextStep);
+        return presentation;
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection.Resource firstResource(
+            List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources) {
+        if (resources == null) {
+            return null;
+        }
+        return resources.stream().filter(Objects::nonNull).findFirst().orElse(null);
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection.Resource firstAnalyticalResource(
+            List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources) {
+        if (resources == null) {
+            return null;
+        }
+        return resources.stream()
+                .filter(Objects::nonNull)
+                .filter(resource -> {
+                    String role = safeText(resource.role()).toLowerCase(Locale.ROOT);
+                    return role.contains("analytic") || role.contains("indicator") || role.contains("metric");
+                })
+                .findFirst()
+                .orElse(null);
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection.Resource firstWritableResource(
+            List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources) {
+        if (resources == null) {
+            return null;
+        }
+        return resources.stream()
+                .filter(Objects::nonNull)
+                .filter(resource -> hasWriteAffordance(resource.actions()) || hasWriteEndpoint(resource.endpoints()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean hasWriteAffordance(List<AgenticAuthoringConsultativeApiCatalogProjection.Action> actions) {
+        if (actions == null) {
+            return false;
+        }
+        return actions.stream()
+                .filter(Objects::nonNull)
+                .map(action -> safeText(action.name()) + " " + safeText(action.label()))
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .anyMatch(value -> value.contains("create")
+                        || value.contains("update")
+                        || value.contains("save")
+                        || value.contains("cadastro")
+                        || value.contains("atualizar"));
+    }
+
+    private boolean hasWriteEndpoint(List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints) {
+        if (endpoints == null) {
+            return false;
+        }
+        return endpoints.stream()
+                .filter(Objects::nonNull)
+                .map(endpoint -> safeText(endpoint.method()).toUpperCase(Locale.ROOT))
+                .anyMatch(method -> method.equals("POST") || method.equals("PUT") || method.equals("PATCH"));
+    }
+
+    private String resourceLabel(AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
+        return AgenticAuthoringPresentationText.display(
+                firstNonBlank(resource.label(), resource.resourceKey(), resource.resourcePath(), "fonte confirmada"));
+    }
+
+    private String safeResourceId(AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
+        String value = firstNonBlank(resource.resourceKey(), resource.label(), resource.resourcePath(), "resource");
+        String normalized = value.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-|-$)", "");
+        return normalized.isBlank() ? "resource" : normalized;
+    }
+
+    private void putText(ObjectNode node, String field, String value) {
+        if (node != null && StringUtils.hasText(value)) {
+            node.put(field, value.trim());
+        }
     }
 
     private void emitRuntimeRelatedSurfaceEvidenceSteps(
@@ -798,6 +1025,13 @@ public class AgenticAuthoringTurnEngine {
                 "item selecionado", "selecionado",
                 "drill", "drilldown", "drill-down",
                 "filtro", "filtrar", "filtre", "conectado", "vinculado");
+        if (referencesCurrentChart
+                && requestsPageChange
+                && asksForMaterializedDetail
+                && consultativeAnswerService != null
+                && consultativeAnswerService.shouldPreferGovernedCatalogAvailabilityAnswer(request)) {
+            return "";
+        }
         return referencesCurrentChart && requestsPageChange && asksForMaterializedDetail
                 ? "current-page-materialization-refinement"
                 : "";
@@ -3313,6 +3547,10 @@ public class AgenticAuthoringTurnEngine {
 
     private String safeText(String value) {
         return value != null ? value : "";
+    }
+
+    private String publicAssistantMessage(String value) {
+        return AgenticAuthoringPresentationText.assistantReply(safeText(value));
     }
 
     private String toSnippet(String value) {

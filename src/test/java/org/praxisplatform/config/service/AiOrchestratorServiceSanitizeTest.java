@@ -10,6 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.AiCapability;
+import org.praxisplatform.config.dto.AiOrchestratorResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
@@ -170,5 +171,40 @@ class AiOrchestratorServiceSanitizeTest {
             }
         }
         assertThat(deps).containsExactly("dataNascimento", "dataAdmissao", "null", "dataDemissao");
+    }
+
+    @Test
+    void shouldSanitizeUserFacingAssistantTextBeforeReturningFinalResponse() {
+        AiOrchestratorResponse response = AiOrchestratorResponse.builder()
+                .type("info")
+                .message("""
+                        Mission team — Fonte: surface declarado; destino como tabela (praxis-table) consultando operations/missao-participantes.
+                        A surface "detail" usa resource-surface e target para abrir operations/vw-resumo-missoes. Escopo: registro (ITEM).
+                        """)
+                .explanation("canonicalOperations.create = false para operations/missao-eventos.")
+                .build();
+
+        AiOrchestratorResponse finalized = ReflectionTestUtils.invokeMethod(
+                service,
+                "finalizeResponse",
+                response,
+                null);
+
+        assertThat(finalized.getMessage())
+                .contains("Mission team")
+                .contains("visão de detalhe")
+                .contains("fonte confirmada")
+                .contains("Escopo: registro")
+                .doesNotContain("surface")
+                .doesNotContain("resource-surface")
+                .doesNotContain("praxis-table")
+                .doesNotContain("target")
+                .doesNotContain("(ITEM)")
+                .doesNotContain("operations/");
+        assertThat(finalized.getExplanation())
+                .contains("criação direta não publicada nesta visão")
+                .contains("fonte confirmada")
+                .doesNotContain("canonicalOperations")
+                .doesNotContain("operations/");
     }
 }

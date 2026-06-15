@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
@@ -26,29 +27,62 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
     private static final int SUFFICIENT_PROJECTED_RESOURCES = 4;
     private static final int MAX_DISCOVERY_QUERIES = 5;
     private static final int MAX_DISCOVERY_ITEMS = 8;
+    private static final int MAX_BROAD_DISCOVERY_ITEMS = 80;
     private static final int MAX_CONTEXT_ITEMS_PER_RESOURCE = 80;
+    private static final long DEFAULT_COMPACT_PROJECTION_CACHE_TTL_MS = 60_000L;
+    private static final int DEFAULT_COMPACT_PROJECTION_CACHE_MAX_ENTRIES = 256;
+    private static final long DEFAULT_API_METADATA_CACHE_TTL_MS = 60_000L;
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "ao", "aos", "as", "com", "como", "da", "das", "de", "do", "dos", "e", "em", "o", "os",
-            "para", "por", "que", "quais", "qual", "sobre", "um", "uma", "uns", "umas", "api", "apis",
+            "entre", "para", "por", "que", "quais", "qual", "sobre", "um", "uma", "uns", "umas", "api", "apis",
             "dado", "dados", "existe", "existem", "relacionado", "relacionados", "tela", "telas", "posso",
-            "fazer", "criar", "aqui", "explique", "explicar", "consultar", "consulta", "consultas",
+            "fazer", "criar", "aqui", "explique", "explicar", "consultar", "consulta", "consultas", "gerar",
+            "incluir", "tipo", "tipos", "usar", "uso",
             "recomenda", "recomendar", "recomendacao", "recomendacoes", "recomendações", "criada", "criadas",
             "esta", "estao", "estão", "sem", "ainda");
+    private static final Set<String> AUTHORING_ARTIFACT_TERMS = Set.of(
+            "cadastro", "cadastros", "dashboard", "dashboards", "form", "forms", "formulario", "formularios",
+            "grafico", "graficos", "painel", "paineis", "table", "tables", "tabela", "tabelas");
 
     private final Supplier<DomainCatalogIngestionService> domainCatalogIngestionServiceSupplier;
     private final ApiMetadataRepository apiMetadataRepository;
     private final String domainCatalogServiceKey;
+    private final long compactProjectionCacheTtlMs;
+    private final int compactProjectionCacheMaxEntries;
+    private final long apiMetadataCacheTtlMs;
+    private final Map<CompactProjectionCacheKey, CompactProjectionCacheEntry> compactProjectionCache =
+            new ConcurrentHashMap<>();
+    private volatile ApiMetadataCacheEntry apiMetadataCache;
 
     public AgenticAuthoringConsultativeApiCatalogProjectionService(
             Supplier<DomainCatalogIngestionService> domainCatalogIngestionServiceSupplier,
             ApiMetadataRepository apiMetadataRepository,
             String domainCatalogServiceKey) {
+        this(
+                domainCatalogIngestionServiceSupplier,
+                apiMetadataRepository,
+                domainCatalogServiceKey,
+                DEFAULT_COMPACT_PROJECTION_CACHE_TTL_MS,
+                DEFAULT_COMPACT_PROJECTION_CACHE_MAX_ENTRIES,
+                DEFAULT_API_METADATA_CACHE_TTL_MS);
+    }
+
+    public AgenticAuthoringConsultativeApiCatalogProjectionService(
+            Supplier<DomainCatalogIngestionService> domainCatalogIngestionServiceSupplier,
+            ApiMetadataRepository apiMetadataRepository,
+            String domainCatalogServiceKey,
+            long compactProjectionCacheTtlMs,
+            int compactProjectionCacheMaxEntries,
+            long apiMetadataCacheTtlMs) {
         this.domainCatalogIngestionServiceSupplier = domainCatalogIngestionServiceSupplier;
         this.apiMetadataRepository = apiMetadataRepository;
         this.domainCatalogServiceKey = StringUtils.hasText(domainCatalogServiceKey)
                 ? domainCatalogServiceKey
                 : AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY;
+        this.compactProjectionCacheTtlMs = Math.max(0L, compactProjectionCacheTtlMs);
+        this.compactProjectionCacheMaxEntries = Math.max(0, compactProjectionCacheMaxEntries);
+        this.apiMetadataCacheTtlMs = Math.max(0L, apiMetadataCacheTtlMs);
     }
 
     public AgenticAuthoringConsultativeApiCatalogProjection project(
@@ -63,7 +97,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             return null;
         }
         Set<String> queryTokens = significantTokens(query);
-        List<ApiMetadata> apiMetadata = apiMetadataRepository == null ? List.of() : apiMetadataRepository.findAll();
+        List<ApiMetadata> apiMetadata = apiMetadata();
         Map<String, AgenticAuthoringCandidate> candidatesByResourceKey =
                 candidateResources(candidates == null ? List.of() : candidates);
         for (String resourceKey : domainCatalogResourceKeys(domainCatalogIngestionService, query, tenantId, environment)) {
@@ -111,6 +145,11 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             String query,
             String tenantId,
             String environment) {
+        CompactProjectionCacheKey cacheKey = new CompactProjectionCacheKey(safe(query), safe(tenantId), safe(environment));
+        AgenticAuthoringConsultativeApiCatalogProjection cached = compactProjectionCache(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
         DomainCatalogIngestionService domainCatalogIngestionService = domainCatalogIngestionServiceSupplier == null
                 ? null
                 : domainCatalogIngestionServiceSupplier.get();
@@ -123,12 +162,13 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             return null;
         }
         Map<String, AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources = new LinkedHashMap<>();
-        collectCompactResources(domainCatalogIngestionService, domainCatalogServiceKey, queries, blankToNull(tenantId), blankToNull(environment), resources);
+        boolean broadInventory = queryTokens.isEmpty();
+        collectCompactResources(domainCatalogIngestionService, domainCatalogServiceKey, queries, blankToNull(tenantId), blankToNull(environment), resources, broadInventory);
         if (resources.isEmpty()) {
-            collectCompactResources(domainCatalogIngestionService, domainCatalogServiceKey, queries, null, null, resources);
+            collectCompactResources(domainCatalogIngestionService, domainCatalogServiceKey, queries, null, null, resources, broadInventory);
         }
         if (resources.isEmpty()) {
-            collectCompactResources(domainCatalogIngestionService, null, queries, blankToNull(tenantId), blankToNull(environment), resources);
+            collectCompactResources(domainCatalogIngestionService, null, queries, blankToNull(tenantId), blankToNull(environment), resources, broadInventory);
         }
         if (resources.isEmpty()) {
             return null;
@@ -161,15 +201,83 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             }
             return null;
         }
-        List<ApiMetadata> apiMetadata = apiMetadataRepository == null ? List.of() : apiMetadataRepository.findAll();
+        List<ApiMetadata> apiMetadata = apiMetadata();
         List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> enriched = projected.stream()
                 .map(resource -> enrichCompactResource(domainCatalogIngestionService, resource, apiMetadata, tenantId, environment))
                 .toList();
-        return new AgenticAuthoringConsultativeApiCatalogProjection(
+        AgenticAuthoringConsultativeApiCatalogProjection projection = new AgenticAuthoringConsultativeApiCatalogProjection(
                 safe(query),
                 assistantMessage(query, enriched),
                 enriched,
                 List.of("domain-api-consultative-compact-projection-used"));
+        putCompactProjectionCache(cacheKey, projection);
+        return projection;
+    }
+
+    int compactProjectionCacheSize() {
+        return compactProjectionCache.size();
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection compactProjectionCache(CompactProjectionCacheKey key) {
+        if (compactProjectionCacheTtlMs <= 0L || compactProjectionCacheMaxEntries <= 0) {
+            return null;
+        }
+        CompactProjectionCacheEntry entry = compactProjectionCache.get(key);
+        if (entry == null) {
+            return null;
+        }
+        if (entry.expiresAtEpochMs() < System.currentTimeMillis()) {
+            compactProjectionCache.remove(key, entry);
+            return null;
+        }
+        return entry.projection();
+    }
+
+    private void putCompactProjectionCache(
+            CompactProjectionCacheKey key,
+            AgenticAuthoringConsultativeApiCatalogProjection projection) {
+        if (key == null || projection == null || compactProjectionCacheTtlMs <= 0L || compactProjectionCacheMaxEntries <= 0) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        evictExpiredCompactProjectionCache(now);
+        compactProjectionCache.put(key, new CompactProjectionCacheEntry(
+                projection,
+                now + compactProjectionCacheTtlMs));
+        trimCompactProjectionCache();
+    }
+
+    private void evictExpiredCompactProjectionCache(long now) {
+        compactProjectionCache.entrySet().removeIf(entry -> entry.getValue().expiresAtEpochMs() < now);
+    }
+
+    private void trimCompactProjectionCache() {
+        while (compactProjectionCache.size() > compactProjectionCacheMaxEntries) {
+            CompactProjectionCacheKey oldest = compactProjectionCache.entrySet().stream()
+                    .min(Comparator.comparingLong(entry -> entry.getValue().expiresAtEpochMs()))
+                    .map(Map.Entry::getKey)
+                    .orElse(null);
+            if (oldest == null) {
+                return;
+            }
+            compactProjectionCache.remove(oldest);
+        }
+    }
+
+    private List<ApiMetadata> apiMetadata() {
+        if (apiMetadataRepository == null) {
+            return List.of();
+        }
+        ApiMetadataCacheEntry cached = apiMetadataCache;
+        long now = System.currentTimeMillis();
+        if (apiMetadataCacheTtlMs > 0L && cached != null && cached.expiresAtEpochMs() >= now) {
+            return cached.apiMetadata();
+        }
+        List<ApiMetadata> loaded = apiMetadataRepository.findAll();
+        apiMetadataCache = new ApiMetadataCacheEntry(
+                loaded == null ? List.of() : List.copyOf(loaded),
+                now + apiMetadataCacheTtlMs);
+        return apiMetadataCache.apiMetadata();
     }
 
     private AgenticAuthoringConsultativeApiCatalogProjection.Resource enrichCompactResource(
@@ -181,6 +289,11 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         if (compactResource == null) {
             return null;
         }
+        List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints =
+                endpoints(compactResource.resourcePath(), apiMetadata);
+        if (StringUtils.hasText(compactResource.description())) {
+            return compactResourceWithEndpoints(compactResource, endpoints);
+        }
         DomainCatalogContextResponse context = latestContext(
                 domainCatalogIngestionService,
                 compactResource.resourceKey(),
@@ -189,9 +302,13 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         if (context != null && context.items() != null && !context.items().isEmpty()) {
             return resource(compactResource.resourceKey(), null, context.items(), apiMetadata);
         }
-        List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints =
-                endpoints(compactResource.resourcePath(), apiMetadata);
-        if (endpoints.isEmpty()) {
+        return compactResourceWithEndpoints(compactResource, endpoints);
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection.Resource compactResourceWithEndpoints(
+            AgenticAuthoringConsultativeApiCatalogProjection.Resource compactResource,
+            List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints) {
+        if (compactResource == null || endpoints == null || endpoints.isEmpty()) {
             return compactResource;
         }
         List<String> evidence = new ArrayList<>(compactResource.evidence() == null
@@ -216,10 +333,12 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             List<String> queries,
             String tenantId,
             String environment,
-            Map<String, AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources) {
+            Map<String, AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources,
+            boolean broadInventory) {
         if (resources.size() >= MAX_COMPACT_CANDIDATE_RESOURCES) {
             return;
         }
+        int discoveryLimit = broadInventory ? MAX_BROAD_DISCOVERY_ITEMS : MAX_DISCOVERY_ITEMS;
         for (String catalogQuery : queries) {
             try {
                 DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
@@ -231,7 +350,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                         null,
                         null,
                         catalogQuery,
-                        MAX_DISCOVERY_ITEMS);
+                        discoveryLimit);
                 if (context == null || context.items() == null) {
                     continue;
                 }
@@ -320,9 +439,10 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             String query,
             String tenantId,
             String environment) {
-        if (domainCatalogIngestionService == null || significantTokens(query).isEmpty()) {
+        if (domainCatalogIngestionService == null) {
             return List.of();
         }
+        boolean broadInventory = significantTokens(query).isEmpty();
         List<String> queries = catalogDiscoveryQueries(query);
         Set<String> resourceKeys = discoverDomainCatalogResourceKeys(
                 domainCatalogIngestionService,
@@ -330,7 +450,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                 queries,
                 tenantId,
                 environment,
-                new LinkedHashSet<>());
+                new LinkedHashSet<>(),
+                broadInventory);
         if (resourceKeys.isEmpty()) {
             resourceKeys = discoverDomainCatalogResourceKeys(
                     domainCatalogIngestionService,
@@ -338,7 +459,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                     queries,
                     tenantId,
                     environment,
-                    resourceKeys);
+                    resourceKeys,
+                    broadInventory);
         }
         return resourceKeys.stream().limit(MAX_PROJECTED_RESOURCES).toList();
     }
@@ -349,7 +471,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             List<String> catalogQueries,
             String tenantId,
             String environment,
-            Set<String> initialResourceKeys) {
+            Set<String> initialResourceKeys,
+            boolean broadInventory) {
         Set<String> resourceKeys = new LinkedHashSet<>(initialResourceKeys);
         List<Scope> scopes = discoveryScopes(tenantId, environment);
         List<Scope> primaryScopes = scopes.stream()
@@ -365,7 +488,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                         serviceKey,
                         catalogQuery,
                         scope,
-                        resourceKeys);
+                        resourceKeys,
+                        broadInventory);
                 if (resourceKeys.size() >= sufficientResourceTarget(catalogQueries)) {
                     return resourceKeys;
                 }
@@ -384,7 +508,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                         serviceKey,
                         catalogQuery,
                         scope,
-                        resourceKeys);
+                        resourceKeys,
+                        broadInventory);
                 if (resourceKeys.size() >= sufficientResourceTarget(catalogQueries)) {
                     return resourceKeys;
                 }
@@ -398,7 +523,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             String serviceKey,
             String catalogQuery,
             Scope scope,
-            Set<String> resourceKeys) {
+            Set<String> resourceKeys,
+            boolean broadInventory) {
         try {
             DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
                     serviceKey,
@@ -409,7 +535,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                     null,
                     null,
                     catalogQuery,
-                    MAX_DISCOVERY_ITEMS);
+                    broadInventory ? MAX_BROAD_DISCOVERY_ITEMS : MAX_DISCOVERY_ITEMS);
             if (context == null || context.items() == null || context.items().isEmpty()) {
                 return;
             }
@@ -430,10 +556,14 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
     private List<String> catalogDiscoveryQueries(String query) {
         Set<String> queries = new LinkedHashSet<>();
         String safeQuery = safe(query);
+        Set<String> tokens = significantTokens(query);
+        if (tokens.isEmpty()) {
+            return List.of("");
+        }
         if (!safeQuery.isBlank()) {
             queries.add(safeQuery);
         }
-        queries.addAll(significantTokens(query));
+        queries.addAll(tokens);
         return queries.stream().limit(MAX_DISCOVERY_QUERIES).toList();
     }
 
@@ -449,9 +579,17 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         JsonNode payload = item.payload();
         String resourceKey = payload == null ? "" : firstText(payload, "resourceKey");
         if (StringUtils.hasText(resourceKey)) {
-            return resourceKey;
+            return resourceKeyFromNodeKey(resourceKey);
         }
         String itemKey = safe(item.itemKey());
+        resourceKey = resourceKeyFromNodeKey(firstText(payload, "nodeKey", "sourceNodeKey", "targetNodeKey"));
+        if (StringUtils.hasText(resourceKey)) {
+            return resourceKey;
+        }
+        resourceKey = resourceKeyFromNodeKey(itemKey);
+        if (StringUtils.hasText(resourceKey)) {
+            return resourceKey;
+        }
         if (itemKey.isBlank()) {
             return "";
         }
@@ -461,7 +599,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         }
         int end = parts.length;
         for (int i = 0; i < parts.length; i++) {
-            if (Set.of("concept", "field", "surface", "action", "policy", "binding", "alias").contains(parts[i])) {
+            if (resourceKeyBoundaryTerms().contains(parts[i])) {
                 end = i;
                 break;
             }
@@ -470,6 +608,44 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             return "";
         }
         return String.join(".", java.util.Arrays.copyOfRange(parts, 0, end));
+    }
+
+    private String resourceKeyFromNodeKey(String nodeKey) {
+        String value = safe(nodeKey);
+        if (value.isBlank()) {
+            return "";
+        }
+        if (value.startsWith("alias:")) {
+            value = value.substring("alias:".length());
+        }
+        int aliasSuffix = value.indexOf(':');
+        if (aliasSuffix >= 0) {
+            value = value.substring(0, aliasSuffix);
+        }
+        String[] parts = value.split("\\.");
+        if (parts.length < 2) {
+            return "";
+        }
+        int end = parts.length;
+        for (int i = 0; i < parts.length; i++) {
+            if (resourceKeyBoundaryTerms().contains(parts[i])) {
+                end = i;
+                break;
+            }
+        }
+        if (end < 2) {
+            return "";
+        }
+        return String.join(".", java.util.Arrays.copyOfRange(parts, 0, end));
+    }
+
+    private Set<String> resourceKeyBoundaryTerms() {
+        return Set.of(
+                "concept", "field", "surface", "action", "policy", "binding", "alias",
+                "state", "estado", "status", "option", "options", "option-source", "enum", "value",
+                "stat", "stats", "metric", "metrics", "operation", "aggregation",
+                "distribution", "group-by", "timeseries", "time-series",
+                "has-field", "has-surface", "has-action", "has-workflow", "has-option-source", "has-stat");
     }
 
     private DomainCatalogContextResponse latestContext(
@@ -512,6 +688,17 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
     }
 
     private record Scope(String tenantId, String environment) {
+    }
+
+    private record CompactProjectionCacheKey(String query, String tenantId, String environment) {
+    }
+
+    private record CompactProjectionCacheEntry(
+            AgenticAuthoringConsultativeApiCatalogProjection projection,
+            long expiresAtEpochMs) {
+    }
+
+    private record ApiMetadataCacheEntry(List<ApiMetadata> apiMetadata, long expiresAtEpochMs) {
     }
 
     private List<Scope> discoveryScopes(String tenantId, String environment) {
@@ -725,7 +912,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
     private Set<String> significantTokens(String text) {
         Set<String> tokens = new LinkedHashSet<>();
         for (String token : normalizedText(text).split("[^a-z0-9]+")) {
-            if (token.length() < 3 || STOP_WORDS.contains(token)) {
+            if (token.length() < 3 || STOP_WORDS.contains(token) || AUTHORING_ARTIFACT_TERMS.contains(token)) {
                 continue;
             }
             tokens.add(token);
@@ -748,7 +935,9 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         } else {
             message.append(visible.size()).append(" fontes de dados confirmadas para esse recorte: ");
         }
-        message.append(humanJoin(visible.stream().map(AgenticAuthoringConsultativeApiCatalogProjection.Resource::label).toList()));
+        message.append(humanJoin(visible.stream()
+                .map(resource -> AgenticAuthoringPresentationText.display(resource.label()))
+                .toList()));
         message.append(". ");
         List<String> summaries = visible.stream()
                 .map(this::resourceSummary)
@@ -759,24 +948,54 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         }
         boolean hasConfirmedFields = visible.stream().anyMatch(resource ->
                 resource.fields() != null && !resource.fields().isEmpty());
-        if (hasConfirmedFields) {
-            message.append("Para uma tela administrativa, eu começaria por uma lista filtrável com esses campos confirmados");
-        } else {
-            message.append("Para uma tela administrativa, eu começaria confirmando quais campos dessa fonte devem aparecer");
-        }
         boolean hasAnalytics = visible.stream().anyMatch(resource -> "analytical".equals(resource.role()));
-        if (hasAnalytics) {
-            message.append(" e, quando o objetivo for acompanhamento, usaria a visão analítica para indicadores e gráficos");
+        boolean chartIntent = mentionsChartIntent(query);
+        boolean formIntent = mentionsFormIntent(query);
+        if (chartIntent && hasAnalytics) {
+            message.append("Para gráficos, eu começaria pelas fontes analíticas confirmadas, usando agregações, séries ou campos numéricos publicados no catálogo");
+        } else if (chartIntent) {
+            message.append("Para gráficos, estas fontes podem orientar o recorte, mas ainda não encontrei uma fonte analítica ou agregação confirmada para materializar o gráfico com segurança");
+        } else if (formIntent) {
+            message.append("Para formulário, eu começaria pelas operações de criação ou atualização confirmadas e pelos campos expostos pelo schema do recurso");
+        } else if (hasConfirmedFields) {
+            message.append("Para tabela, eu começaria por uma lista filtrável com esses campos confirmados");
+        } else {
+            message.append("Para tabela, eu começaria confirmando quais campos dessa fonte devem aparecer");
         }
         message.append(". Quando você pedir para criar, eu materializo usando apenas o que estiver confirmado no catálogo.");
         return message.toString();
     }
 
+    private boolean mentionsChartIntent(String query) {
+        String text = normalizedText(query);
+        return text.contains("grafico")
+                || text.contains("graficos")
+                || text.contains("chart")
+                || text.contains("charts")
+                || text.contains("indicador")
+                || text.contains("indicadores")
+                || text.contains("kpi")
+                || text.contains("dashboard")
+                || text.contains("painel");
+    }
+
+    private boolean mentionsFormIntent(String query) {
+        String text = normalizedText(query);
+        return text.contains("formulario")
+                || text.contains("formularios")
+                || text.contains("cadastro")
+                || text.contains("cadastrar")
+                || text.contains("incluir")
+                || text.contains("edicao")
+                || text.contains("editar")
+                || text.contains("form ");
+    }
+
     private String resourceSummary(AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
         StringBuilder summary = new StringBuilder();
-        summary.append(resource.label()).append(": ");
+        summary.append(AgenticAuthoringPresentationText.display(resource.label())).append(": ");
         if (StringUtils.hasText(resource.description())) {
-            summary.append(resource.description());
+            summary.append(AgenticAuthoringPresentationText.display(resource.description()));
         } else if ("analytical".equals(resource.role())) {
             summary.append("boa para análises, indicadores e gráficos");
         } else {
@@ -785,6 +1004,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         List<String> fields = resource.fields().stream()
                 .map(AgenticAuthoringConsultativeApiCatalogProjection.Field::label)
                 .filter(StringUtils::hasText)
+                .map(AgenticAuthoringPresentationText::display)
                 .limit(5)
                 .toList();
         if (!fields.isEmpty()) {
@@ -822,13 +1042,13 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             return "carregar opções para filtros e seletores";
         }
         return switch (safe(endpoint.kind())) {
-            case "groupByStats" -> firstNonBlank(label, "agrupar dados para gráficos");
-            case "timeSeriesStats" -> firstNonBlank(label, "montar série histórica");
-            case "cursorFilter", "filter" -> firstNonBlank(label, "filtrar registros");
-            case "listAll", "list" -> firstNonBlank(label, "listar registros");
-            case "create" -> firstNonBlank(label, "criar registro");
-            case "detail" -> firstNonBlank(label, "consultar detalhe");
-            default -> label;
+            case "groupByStats" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "agrupar dados para gráficos"));
+            case "timeSeriesStats" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "montar série histórica"));
+            case "cursorFilter", "filter" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "filtrar registros"));
+            case "listAll", "list" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "listar registros"));
+            case "create" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "criar registro"));
+            case "detail" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "consultar detalhe"));
+            default -> AgenticAuthoringPresentationText.display(label);
         };
     }
 
@@ -884,10 +1104,10 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         if (dot >= 0) {
             key = key.substring(dot + 1);
         }
-        return key
+        return AgenticAuthoringPresentationText.titleCase(key
                 .replace("vw-", "")
                 .replace("-", " ")
-                .trim();
+                .trim());
     }
 
     private String firstText(JsonNode node, String... fields) {

@@ -2,6 +2,8 @@ package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -92,5 +94,173 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                 .contains("component.author", "tab.add");
         assertThat(tabsCatalog.capabilities().get(0).triggerTerms())
                 .contains("praxis-tabs", "Praxis Tabs", "tabs");
+    }
+
+    @Test
+    void normalizesGovernedCapabilityTermsBeforePublishingCatalog() {
+        AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(List.of(AiRegistry.builder()
+                        .registryType("component_definition")
+                        .registryKey("praxis-table")
+                        .componentType("component-definition")
+                        .scope(Scope.SYSTEM)
+                        .scopeKey("GLOBAL")
+                        .payload("""
+                                {
+                                  "componentDefinition": {
+                                    "description": "Tabela governada.",
+                                    "jsonSchema": {
+                                      "friendlyName": "Praxis Table",
+                                      "selector": "praxis-table",
+                                      "authoringManifest": {
+                                        "manifestVersion": "1.0.0",
+                                        "componentId": "praxis-table",
+                                        "operations": [
+                                          {
+                                            "operationId": "column.sortable.set",
+                                            "title": "Definir ordenaÃ§Ã£o da coluna",
+                                            "target": {"kind": "column"},
+                                            "effects": [{"kind": "merge-by-key", "handler": "sortable"}]
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  }
+                                }
+                                """)
+                        .build()));
+
+        AgenticAuthoringComponentCapabilitiesResult result =
+                new AgenticAuthoringComponentCapabilitiesService(repository, new ObjectMapper()).listCapabilities();
+
+        AgenticAuthoringComponentCapabilitiesResult.ComponentCapability sortable = result.catalogs().stream()
+                .filter(catalog -> "praxis-table".equals(catalog.componentId()))
+                .flatMap(catalog -> catalog.capabilities().stream())
+                .filter(capability -> "column.sortable.set".equals(capability.id()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(sortable.triggerTerms())
+                .contains("Definir ordenação da coluna")
+                .doesNotContain("Definir ordenaÃ§Ã£o da coluna");
+    }
+
+    @Test
+    void reusesCapabilitiesSnapshotWithinServiceInstance() {
+        AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(List.of());
+
+        AgenticAuthoringComponentCapabilitiesService service =
+                new AgenticAuthoringComponentCapabilitiesService(repository, new ObjectMapper());
+
+        AgenticAuthoringComponentCapabilitiesResult first = service.listCapabilities();
+        AgenticAuthoringComponentCapabilitiesResult second = service.listCapabilities();
+
+        assertThat(second).isSameAs(first);
+        verify(repository, times(1)).findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL");
+    }
+
+    @Test
+    void refreshesGovernedCapabilitiesAfterCacheTtl() throws Exception {
+        AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(List.of())
+                .thenReturn(List.of(AiRegistry.builder()
+                        .registryType("component_definition")
+                        .registryKey("praxis-tabs")
+                        .componentType("component-definition")
+                        .scope(Scope.SYSTEM)
+                        .scopeKey("GLOBAL")
+                        .payload("""
+                                {
+                                  "componentDefinition": {
+                                    "jsonSchema": {
+                                      "friendlyName": "Praxis Tabs",
+                                      "authoringManifest": {
+                                        "manifestVersion": "1.0.0",
+                                        "componentId": "praxis-tabs"
+                                      }
+                                    }
+                                  }
+                                }
+                                """)
+                        .build()));
+        AgenticAuthoringComponentCapabilitiesService service =
+                new AgenticAuthoringComponentCapabilitiesService(repository, new ObjectMapper(), 1L);
+
+        assertThat(service.listCapabilities().catalogs())
+                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
+                .doesNotContain("praxis-tabs");
+        Thread.sleep(5L);
+
+        assertThat(service.listCapabilities().catalogs())
+                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
+                .contains("praxis-tabs");
+        verify(repository, times(2)).findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL");
+    }
+
+    @Test
+    void explicitInvalidationReloadsGovernedCapabilities() {
+        AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(List.of())
+                .thenReturn(List.of(AiRegistry.builder()
+                        .registryType("component_definition")
+                        .registryKey("praxis-tabs")
+                        .componentType("component-definition")
+                        .scope(Scope.SYSTEM)
+                        .scopeKey("GLOBAL")
+                        .payload("""
+                                {
+                                  "componentDefinition": {
+                                    "jsonSchema": {
+                                      "authoringManifest": {
+                                        "manifestVersion": "1.0.0",
+                                        "componentId": "praxis-tabs"
+                                      }
+                                    }
+                                  }
+                                }
+                                """)
+                        .build()));
+        AgenticAuthoringComponentCapabilitiesService service =
+                new AgenticAuthoringComponentCapabilitiesService(repository, new ObjectMapper());
+
+        service.listCapabilities();
+        service.invalidateCapabilitiesCache();
+
+        assertThat(service.listCapabilities().catalogs())
+                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
+                .contains("praxis-tabs");
+        verify(repository, times(2)).findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL");
     }
 }

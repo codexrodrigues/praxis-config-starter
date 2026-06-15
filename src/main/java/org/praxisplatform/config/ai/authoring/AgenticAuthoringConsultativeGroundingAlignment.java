@@ -11,14 +11,17 @@ final class AgenticAuthoringConsultativeGroundingAlignment {
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "agora", "ai", "ainda", "ao", "aos", "as", "assim", "atrasado", "atrasados", "aqui", "com", "como", "consigo",
-            "consegue", "conseguimos", "criar", "da", "das", "de", "deve", "do", "dos", "e", "em", "esse",
-            "esses", "esta", "estao", "faca", "fazer", "faz", "host", "me", "nao", "nesse",
-            "neste", "o", "os", "ou", "para", "por", "pra", "quais", "qual", "quando", "que", "quero",
-            "sobre", "tem", "tenho", "um", "uma", "voce",
+            "consegue", "conseguimos", "criar", "da", "das", "de", "deve", "do", "dos", "e", "em", "entre", "esse",
+            "esses", "esta", "estao", "faca", "fazer", "faz", "gerar", "host", "incluir", "me", "nao", "nesse",
+            "neste", "o", "os", "ou", "para", "por", "posso", "pra", "quais", "qual", "quando", "que", "quero",
+            "sobre", "tem", "tenho", "tipo", "tipos", "um", "uma", "usar", "uso", "voce",
             "api", "apis", "dado", "dados", "fonte", "fontes", "informacao", "informacoes", "recurso", "recursos",
-            "administrativo", "dashboard", "grafico", "graficos", "painel", "paineis", "tela", "telas",
+            "administrativo", "tela", "telas",
             "consultar", "consulta", "consultas", "existe", "existem", "recomenda", "recomendar",
             "recomendacao", "recomendacoes");
+    private static final Set<String> AUTHORING_ARTIFACT_TERMS = Set.of(
+            "cadastro", "cadastros", "dashboard", "dashboards", "form", "forms", "formulario", "formularios",
+            "grafico", "graficos", "painel", "paineis", "table", "tables", "tabela", "tabelas");
 
     private AgenticAuthoringConsultativeGroundingAlignment() {
     }
@@ -26,7 +29,7 @@ final class AgenticAuthoringConsultativeGroundingAlignment {
     static List<String> requestedConcepts(String prompt) {
         Set<String> concepts = new LinkedHashSet<>();
         for (String token : normalized(prompt).split("[^a-z0-9]+")) {
-            if (token.length() < 3 || STOP_WORDS.contains(token)) {
+            if (token.length() < 3 || STOP_WORDS.contains(token) || AUTHORING_ARTIFACT_TERMS.contains(token)) {
                 continue;
             }
             concepts.add(token);

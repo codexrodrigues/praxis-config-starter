@@ -230,6 +230,18 @@ praxis.ai.stream.auth.token-secret=${PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET}
 
 Use a production-grade secret in deployed environments and rotate it through the host's normal secret process.
 
+## Authoring Cache Configuration
+
+Agentic authoring keeps short-lived caches only for host-local performance. These caches must not be treated as a
+source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted turn events remain canonical.
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `praxis.ai.authoring.component-capabilities.cache-ttl-ms` | `60000` | TTL for component capability discovery. Use `0` to disable local caching when validating registry changes without restarting the host. |
+| `praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms` | `60000` | TTL for compact API catalog projections used during consultative answers. Use `0` to force fresh projection per request. |
+| `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Maximum compact projection entries retained per starter instance. Older entries are evicted before expired entries can accumulate unbounded. |
+| `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL for `api_metadata` lookups used by the consultative catalog projection. Use `0` when validating metadata ingestion changes interactively. |
+
 ## Key HTTP Surfaces
 
 | Surface | Purpose |

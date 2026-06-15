@@ -53,8 +53,8 @@ public final class AgenticAuthoringAssistantContentFactory {
         for (AgenticAuthoringConsultativeApiCatalogProjection.Resource resource : visible) {
             ObjectNode node = resourceNodes.addObject();
             putText(node, "id", resource.resourceKey());
-            putText(node, "label", resource.label());
-            putText(node, "description", resource.description());
+            putText(node, "label", AgenticAuthoringPresentationText.display(resource.label()));
+            putText(node, "description", AgenticAuthoringPresentationText.display(resource.description()));
             putText(node, "role", resource.role());
             putText(node, "resourcePath", resource.resourcePath());
             addFields(node, resource.fields());
@@ -75,8 +75,8 @@ public final class AgenticAuthoringAssistantContentFactory {
         for (AgenticAuthoringConsultativeApiCatalogProjection.Field field : visible) {
             ObjectNode node = fieldNodes.addObject();
             putText(node, "name", field.name());
-            putText(node, "label", firstNonBlank(field.label(), field.name()));
-            putText(node, "description", field.description());
+            putText(node, "label", AgenticAuthoringPresentationText.display(firstNonBlank(field.label(), field.name())));
+            putText(node, "description", AgenticAuthoringPresentationText.display(field.description()));
         }
     }
 

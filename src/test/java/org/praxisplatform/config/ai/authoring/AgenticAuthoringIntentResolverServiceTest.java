@@ -3190,7 +3190,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.assistantMessage())
                 .contains("consulta")
-                .doesNotContain("fonte de negocio selecionada", "preparar uma previa");
+                .doesNotContain("fonte de negócio selecionada", "preparar uma previa");
         assertThat(result.warnings())
                 .contains(
                         "llm-intent-resolution-used",
@@ -3705,7 +3705,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate()).isNull();
         assertThat(result.assistantMessage())
                 .contains("fonte", "Posso comparar")
-                .doesNotContain("operacoes fazem sentido", "fonte de negocio e posso verificar");
+                .doesNotContain("operacoes fazem sentido", "fonte de negócio e posso verificar");
         assertThat(result.warnings())
                 .contains("llm-intent-resolution-fallback-deterministic")
                 .doesNotContain("resource-selection-lexical-fallback-selected");
@@ -3825,7 +3825,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                         List.of("platform_capabilities", "component_registry", "domain_catalog", "api_resources"),
                                         List.of("pessoas funcionarios painel administrativo formulario"),
                                         "Responder como guia de plataforma sem criar preview.",
-                                        List.of("componentes", "fontes de negocio")),
+                                        List.of("componentes", "fontes de negócio")),
                                 null)),
                         Optional.of(new AgenticAuthoringLlmIntentResolution(
                                 true,
@@ -3835,7 +3835,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 null,
                                 null,
                                 "none",
-                                "Aqui voce pode criar paineis, tabelas e formularios governados usando a fonte de pessoas quando fizer sentido.",
+                                "Aqui você pode criar painéis, tabelas e formularios governados usando a fonte de pessoas quando fizer sentido.",
                                 List.of(),
                                 List.of(),
                                 List.of("consultative-retrieval-second-pass"))));
@@ -3861,8 +3861,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.assistantMessage())
-                .contains("Aqui voce pode criar paineis")
-                .doesNotContain("fonte de negocio selecionada");
+                .contains("Aqui você pode criar painéis")
+                .doesNotContain("fonte de negócio selecionada");
         assertThat(result.candidates())
                 .anySatisfy(candidate ->
                         assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios"));
@@ -4823,7 +4823,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).containsExactly("intent-confirmation-required");
         assertThat(result.assistantMessage())
                 .contains("Consigo montar essa tabela")
-                .contains("confirmar a fonte de negocio");
+                .contains("confirmar a fonte de negócio");
         assertThat(result.clarificationQuestions())
                 .containsExactly("Posso criar uma tabela usando o recurso de negocio selecionado?");
     }
@@ -5208,7 +5208,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.assistantMessage())
                 .contains("Atualizei o grafico selecionado")
-                .doesNotContain("Entendi o que voce quer criar", "fonte de negocio selecionada");
+                .doesNotContain("Entendi o que voce quer criar", "fonte de negócio selecionada");
         Mockito.verifyNoInteractions(llmIntentResolver);
     }
 
@@ -5499,7 +5499,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertApiCatalogAnswer(result);
-        assertThat(result.assistantMessage()).contains("fontes de negocio");
+        assertThat(result.assistantMessage()).contains("fontes de negócio");
         assertThat(result.assistantMessage())
                 .doesNotContain("/api/", "/schemas/", "POST", "GET", "schema", "endpoint", "actions");
         assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::id)
@@ -5638,8 +5638,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 null,
                                 "folha de pagamento",
                                 null,
-                                "Para folha de pagamento, eu olharia primeiro as fontes operacionais e depois as visoes analiticas. "
-                                        + "As operacoes disponiveis ajudam a separar consulta, conferencia e analise antes de criar uma tela.",
+                                "Para folha de pagamento, eu olharia primeiro as fontes operacionais e depois as visões analíticas. "
+                                        + "As operações disponíveis ajudam a separar consulta, conferencia e analise antes de criar uma tela.",
                                 List.of(),
                                 List.of(),
                                 List.of("llm-natural-answer"))));
@@ -5663,7 +5663,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertApiCatalogAnswer(result);
         assertThat(result.assistantMessage())
-                .contains("fontes operacionais", "visoes analiticas", "operacoes disponiveis")
+                .contains("fontes operacionais", "visões analíticas", "operações disponíveis")
                 .doesNotContain("Encontrei ");
         assertThat(result.warnings())
                 .contains("llm-intent-resolution-used", "llm-natural-answer")
@@ -6130,7 +6130,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).containsExactly("resource-candidate-ambiguous");
         assertThat(result.assistantMessage())
                 .contains("Encontrei mais de uma fonte de dados possivel para este dashboard")
-                .contains("Escolha a fonte que melhor representa o recorte de negocio")
+                .contains("Escolha a fonte que melhor representa o recorte de negócio")
                 .contains("analytics folha pagamento")
                 .contains("analytics incidentes")
                 .doesNotContain("/api/");
@@ -7159,12 +7159,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                         new AgenticAuthoringConversationMessage(
                                 "m2",
                                 "assistant",
-                                "Encontrei uma fonte de negocio aderente. Posso gerar a pre-visualizacao governada?",
+                                "Encontrei uma fonte de negócio aderente. Posso gerar a pre-visualizacao governada?",
                                 null)),
                 new AgenticAuthoringPendingClarification(
                         "Quero um dashboard para acompanhar fornecedores",
                         List.of("Posso gerar a pre-visualizacao governada?"),
-                        "Encontrei uma fonte de negocio aderente. Posso gerar a pre-visualizacao governada?",
+                        "Encontrei uma fonte de negócio aderente. Posso gerar a pre-visualizacao governada?",
                         "turn-1",
                         null),
                 null,
@@ -7234,7 +7234,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         new AgenticAuthoringConversationMessage(
                                 "m2",
                                 "assistant",
-                                "Encontrei uma fonte de negocio aderente. Posso gerar a pre-visualizacao governada?",
+                                "Encontrei uma fonte de negócio aderente. Posso gerar a pre-visualizacao governada?",
                                 null),
                         new AgenticAuthoringConversationMessage(
                                 "m2b",
