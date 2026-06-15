@@ -656,7 +656,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         double adjustment = 0d;
         boolean analyticalMetadata = containsAny(endpointText,
                 "analytics", "analit", "metric", "metrica", "indicador", "indicadores", "kpi", "dashboard");
-        if ("dashboard".equals(artifactKind)) {
+        if ("dashboard".equals(artifactKind) || "chart".equals(artifactKind)) {
             if (analyticalMetadata) {
                 adjustment += 0.18d;
             }

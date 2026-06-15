@@ -769,6 +769,48 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void visualMaterializationPrefersCatalogGroundedProjectionOverHigherScoredOperationalRecord() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate operationalRecord = richCandidate(
+                "/api/human-resources/funcionarios",
+                0.99d,
+                "Funcionarios",
+                "Cadastro governado de funcionarios, cargos, departamentos e dados cadastrais.");
+        AgenticAuthoringCandidate analyticalProjection = richCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                0.80d,
+                "Analytics de folha",
+                "Projecao governada de folha, pagamento, pagamentos e salario para visualizacao executiva.");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(operationalRecord, analyticalProjection));
+        AgenticAuthoringIntentResolverService resolver =
+                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "quero uma tela pra ver os pagamentos, tipo um painel bonito",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.semanticDecision().artifactKind()).isEqualTo("dashboard");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
     void llmCannotClassifyTargetlessTableCreationAsAddField() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);

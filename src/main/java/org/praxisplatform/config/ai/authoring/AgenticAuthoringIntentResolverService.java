@@ -571,6 +571,16 @@ public class AgenticAuthoringIntentResolverService {
                 && shouldExposeAsChartArtifact(prompt, operationKind, artifactKind, changeKind, llmIntent)) {
             artifactKind = "chart";
         }
+        AgenticAuthoringCandidate visualMaterializationCandidate = visualMaterializationCandidate(
+                prompt,
+                operationKind,
+                artifactKind,
+                candidates);
+        if (visualMaterializationCandidate != null
+                && !sameCandidate(visualMaterializationCandidate, selectedCandidate)) {
+            selectedCandidate = visualMaterializationCandidate;
+            candidates = withPriorityCandidate(candidates, selectedCandidate);
+        }
         if (contextualPreviewAction && !currentPageDrilldownRefinement) {
             operationKind = contextualPreviewOperationKind(request);
             artifactKind = contextualPreviewArtifactKind(request, artifactKind);
@@ -1403,15 +1413,61 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(Objects::nonNull)
                 .map(candidate -> new CandidatePromptAlignment(
                         candidate,
-                        Math.max(
-                                candidatePathDomainTokenScore(prompt, candidate),
-                                promptCandidateAlignmentScore(prompt, candidate))))
+                        preLlmDashboardCandidateAlignmentScore(prompt, artifactKind, candidate)))
                 .filter(alignment -> alignment.score() > 0)
                 .max(Comparator
                         .comparingInt(CandidatePromptAlignment::score)
                         .thenComparingDouble(alignment -> alignment.candidate().score()))
                 .map(CandidatePromptAlignment::candidate)
                 .orElse(null);
+    }
+
+    private int preLlmDashboardCandidateAlignmentScore(
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringCandidate candidate) {
+        List<String> evidenceTerms = candidateGovernedTextTerms(candidate);
+        if (evidenceTerms.isEmpty()) {
+            return 0;
+        }
+        int score = 0;
+        for (String token : promptSpecificTokens(prompt)) {
+            if (termListMatchesToken(evidenceTerms, token)) {
+                score += 3;
+            }
+        }
+        score = Math.max(score, candidatePathDomainTokenScore(prompt, candidate));
+        if (score <= 0) {
+            return 0;
+        }
+        if (isVisualMaterializationArtifact(artifactKind) && termListMatchesToken(evidenceTerms, artifactKind)) {
+            score += 2;
+        }
+        if ("chart".equals(artifactKind) && isStatsProjectionOperation(candidate)) {
+            score += 2;
+        }
+        return score;
+    }
+
+    private boolean isStatsProjectionOperation(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        return normalizePath(candidate.submitUrl()).contains("/stats/");
+    }
+
+    private List<String> candidateGovernedTextTerms(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || candidate.evidenceBundle() == null || candidate.evidenceBundle().evidence() == null) {
+            return List.of();
+        }
+        return candidate.evidenceBundle().evidence().stream()
+                .flatMap(evidence -> Stream.of(evidence.ref(), evidence.summary()))
+                .map(this::normalize)
+                .flatMap(value -> Stream.of(value.replaceAll("[^a-z0-9]+", " ").split("\\s+")))
+                .map(String::trim)
+                .filter(token -> !token.isBlank())
+                .distinct()
+                .toList();
     }
 
     private int candidatePathDomainTokenScore(String prompt, AgenticAuthoringCandidate candidate) {
@@ -1474,8 +1530,20 @@ public class AgenticAuthoringIntentResolverService {
                 "visao geral",
                 "visão geral",
                 "overview");
+        boolean hasPageSurface = containsAny(normalized, "tela", "pagina", "página", "page");
+        boolean hasAuthoringIntent = containsAny(normalized,
+                "quero",
+                "preciso",
+                "gostaria",
+                "crie",
+                "criar",
+                "monte",
+                "montar",
+                "gere",
+                "gerar");
         return containsAny(normalized, "360", "visao 360", "visão 360")
                 || hasOverviewDashboard
+                || (hasPageSurface && hasAuthoringIntent)
                 || (hasChart && hasFilter && hasDetails);
     }
 
@@ -3186,6 +3254,14 @@ public class AgenticAuthoringIntentResolverService {
                 && strongestPromptCandidateAlignmentScore(prompt, candidates) < 6) {
             return null;
         }
+        AgenticAuthoringCandidate visualProjectionCandidate = visualMaterializationCandidate(
+                prompt,
+                operationKind,
+                artifactKind,
+                candidates);
+        if (visualProjectionCandidate != null) {
+            return visualProjectionCandidate;
+        }
         AgenticAuthoringCandidate promptAlignedCandidate = promptAlignedBusinessCandidate(prompt, candidates);
         if (promptAlignedCandidate != null && shouldPreferPromptAlignedCandidate(promptAlignedCandidate, candidates)) {
             return promptAlignedCandidate;
@@ -3234,6 +3310,39 @@ public class AgenticAuthoringIntentResolverService {
             return candidates.get(0);
         }
         return null;
+    }
+
+    private AgenticAuthoringCandidate visualMaterializationCandidate(
+            String prompt,
+            String operationKind,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        if ((!isVisualMaterializationArtifact(artifactKind)
+                && !isConcreteDashboardMaterializationPrompt(prompt))
+                || candidates == null
+                || candidates.size() <= 1) {
+            return null;
+        }
+        List<CandidatePromptAlignment> alignments = candidates.stream()
+                .filter(Objects::nonNull)
+                .map(candidate -> new CandidatePromptAlignment(
+                        candidate,
+                        preLlmDashboardCandidateAlignmentScore(prompt, artifactKind, candidate)))
+                .filter(candidateAlignment -> candidateAlignment.score() > 0)
+                .toList();
+        CandidatePromptAlignment bestAlignment = alignments.stream()
+                .max(Comparator
+                        .comparingInt(CandidatePromptAlignment::score)
+                        .thenComparingDouble(candidateAlignment -> candidateAlignment.candidate().score()))
+                .orElse(null);
+        if (bestAlignment == null) {
+            return null;
+        }
+        return bestAlignment.candidate();
+    }
+
+    private boolean isVisualMaterializationArtifact(String artifactKind) {
+        return "dashboard".equals(artifactKind) || "chart".equals(artifactKind);
     }
 
     private boolean isDataSourceRefinement(AgenticAuthoringSemanticRefinement semanticRefinement) {
@@ -3381,8 +3490,9 @@ public class AgenticAuthoringIntentResolverService {
     private boolean isPromptAlignmentStopword(String token) {
         return Set.of(
                 "uma", "um", "de", "do", "da", "dos", "das", "para", "por", "com",
+                "quero", "preciso", "gostaria", "tipo", "bonito", "ver", "ve",
                 "crie", "criar", "monte", "montar", "gere", "gerar",
-                "tabela", "table", "lista", "listagem", "dashboard", "painel",
+                "tela", "pagina", "page", "tabela", "table", "lista", "listagem", "dashboard", "painel",
                 "grafico", "graficos", "campos", "colunas", "somente", "apenas",
                 "regra", "regras", "poder", "posso", "pode", "podem", "ser")
                 .contains(valueOrDefault(token, ""));
