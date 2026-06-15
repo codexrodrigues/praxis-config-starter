@@ -188,23 +188,7 @@ public class AgenticAuthoringTurnEngine {
                     "summary", "Authoring context received.",
                     "diagnostics", safeDiagnostics(request)));
             emitRuntimeComponentGroundingStep(request, eventSink);
-            AgenticAuthoringTurnOutcome fastConsultativeOutcome = maybeAnswerConsultativeFastPath(
-                    request,
-                    principalContext,
-                    eventSink,
-                    state);
-            if (fastConsultativeOutcome != null) {
-                return fastConsultativeOutcome;
-            }
             request = withServerComponentCapabilities(request);
-            AgenticAuthoringTurnOutcome capabilityBackedConsultativeOutcome = maybeAnswerConsultativeFastPath(
-                    request,
-                    principalContext,
-                    eventSink,
-                    state);
-            if (capabilityBackedConsultativeOutcome != null) {
-                return capabilityBackedConsultativeOutcome;
-            }
             emitStatus(
                     eventSink,
                     "intent.resolve",
@@ -213,6 +197,14 @@ public class AgenticAuthoringTurnEngine {
                     "phase", "intent.resolve",
                     "summary", "Preparing semantic intent resolution."));
             request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
+            AgenticAuthoringTurnOutcome capabilityBackedConsultativeOutcome = maybeAnswerConsultativeFastPath(
+                    request,
+                    principalContext,
+                    eventSink,
+                    state);
+            if (capabilityBackedConsultativeOutcome != null) {
+                return capabilityBackedConsultativeOutcome;
+            }
             AgenticAuthoringResourceCandidatesResult earlyResourceDiscovery =
                     maybePreDiscoverResourcesForMaterialization(request, principalContext, eventSink);
             if (earlyResourceDiscovery != null
@@ -569,6 +561,15 @@ public class AgenticAuthoringTurnEngine {
                     "phase", "consultative.fast-path.skipped",
                     "summary", "Consultative fast path service unavailable.",
                     "diagnostics", Map.of("serviceAvailable", false)));
+            return null;
+        }
+        if (!consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(request)) {
+            eventSink.append("thought.step", Map.of(
+                    "phase", "consultative.fast-path.skipped",
+                    "summary", "Primary intent requires governed semantic resolution before any consultative answer.",
+                    "diagnostics", Map.of(
+                            "serviceAvailable", true,
+                            "reason", "pre-resolution-consultative-not-preferred")));
             return null;
         }
         emitStatus(

@@ -62,6 +62,9 @@ class AgenticAuthoringTurnEngineTest {
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
+                any(AgenticAuthoringTurnStreamRequest.class)))
+                .thenReturn(true);
         when(consultativeAnswerService.answer(
                 any(AgenticAuthoringTurnStreamRequest.class),
                 any(),
@@ -120,7 +123,7 @@ class AgenticAuthoringTurnEngineTest {
                 sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
-        verify(componentCapabilitiesService, never()).listCapabilities();
+        verify(componentCapabilitiesService).listCapabilities();
         verify(intentResolverService, never()).resolve(any(), any(), any(), any());
         verify(previewService, never()).preview(any(), any(), any(), any());
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
@@ -147,6 +150,9 @@ class AgenticAuthoringTurnEngineTest {
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
+                any(AgenticAuthoringTurnStreamRequest.class)))
+                .thenReturn(true);
         com.fasterxml.jackson.databind.node.ObjectNode evidenceBundle = objectMapper.createObjectNode();
         com.fasterxml.jackson.databind.node.ObjectNode resolution = evidenceBundle.putObject("runtimeRelatedSurfaceResolution");
         resolution.put("schemaVersion", "praxis-runtime-related-surface-resolution.v1");
@@ -377,6 +383,9 @@ class AgenticAuthoringTurnEngineTest {
                 .put("usedToolCalls", 0)
                 .put("backendReadsPerformed", false)
                 .put("nonExecutionReason", "runtime-multi-tool-dry-run-read-free");
+        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
+                any(AgenticAuthoringTurnStreamRequest.class)))
+                .thenReturn(true);
         when(consultativeAnswerService.answer(
                 any(AgenticAuthoringTurnStreamRequest.class),
                 any(),
@@ -530,6 +539,63 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void routesImperfectCreationPromptThroughSemanticResolutionBeforeConsultativeAnswer() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
+                any(AgenticAuthoringTurnStreamRequest.class)))
+                .thenReturn(false);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                null,
+                null,
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                request("preciso monta uma ficha pra cadastra funsionario"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                any(),
+                any(),
+                any());
+        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("consultative.fast-path.skipped");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("reason").asText())
+                            .isEqualTo("pre-resolution-consultative-not-preferred");
+                });
+    }
+
+    @Test
     void bypassesConsultativeFastPathForCurrentChartDetailTableMaterialization() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -594,6 +660,9 @@ class AgenticAuthoringTurnEngineTest {
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
         when(consultativeAnswerService.shouldPreferGovernedCatalogAvailabilityAnswer(
+                any(AgenticAuthoringTurnStreamRequest.class)))
+                .thenReturn(true);
+        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
                 any(AgenticAuthoringTurnStreamRequest.class)))
                 .thenReturn(true);
         when(consultativeAnswerService.answer(
@@ -820,6 +889,28 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
                 .contains("Tabela", "Gráfico", "Formulário", "Filtro");
         Mockito.verifyNoInteractions(providerManagementService);
+    }
+
+    @Test
+    void preResolutionConsultativePolicyKeepsOpenCatalogQuestionsButNotImperfectCreationPrompts() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                null);
+
+        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
+                        request("posso criar tabelas com quais dados aqui?")))
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
+                        request("quais dados posso usar pra gerar gráficos?")))
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
+                        request("preciso monta uma ficha pra cadastra funsionario")))
+                .isFalse();
+        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
+                        request("quero um dashboard de pagamentos por departamento")))
+                .isFalse();
     }
 
     @Test

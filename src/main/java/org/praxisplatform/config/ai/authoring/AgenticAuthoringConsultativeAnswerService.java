@@ -407,6 +407,26 @@ public class AgenticAuthoringConsultativeAnswerService {
                 environment);
     }
 
+    boolean shouldPreferPreResolutionConsultativeAnswer(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || !StringUtils.hasText(request.userPrompt())) {
+            return false;
+        }
+        String prompt = request.userPrompt();
+        if (clearlyRequestsMaterialization(prompt)) {
+            return false;
+        }
+        ObjectNode initialRuntimeContext = runtimeConsultableContext(request);
+        boolean pendingRuntimeDisambiguationContext =
+                safePendingRuntimeRelatedSurfaceDisambiguationContext(request, initialRuntimeContext) != null;
+        return pendingRuntimeDisambiguationContext
+                || isDomainAvailabilityQuestion(prompt)
+                || isComponentCatalogQuestion(prompt)
+                || explicitlyForbidsMaterialization(prompt)
+                || (initialRuntimeContext != null
+                && !initialRuntimeContext.isEmpty()
+                && startsLikeConsultativeQuestion(normalizeForIntentConstraint(prompt)));
+    }
+
     private String directAnswerPrompt(AgenticAuthoringTurnStreamRequest request, JsonNode evidence) {
         String userPrompt = request == null ? "" : request.userPrompt();
         return """
