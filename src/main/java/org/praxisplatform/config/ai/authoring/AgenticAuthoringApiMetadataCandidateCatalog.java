@@ -299,6 +299,13 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(result.getPath());
         double score = Math.max(0.45d, Math.min(0.98d, result.getSimilarityScore()));
+        String evidenceText = String.join(" ",
+                valueOrEmpty(result.getPath()),
+                valueOrEmpty(result.getTags()),
+                valueOrEmpty(result.getSummary()),
+                valueOrEmpty(result.getRequestSchema()),
+                valueOrEmpty(result.getResponseSchema()),
+                valueOrEmpty(result.getParameters()));
         return new AgenticAuthoringCandidate(
                 resourcePath,
                 submitMethod,
@@ -315,7 +322,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                         submitMethod,
                         valueOrEmpty(result.getSummary()),
                         score,
-                        meaningfulTokens(normalize(valueOrEmpty(normalizedPrompt))),
+                        meaningfulTokens(normalize(evidenceText)),
                         tenantId,
                         environment,
                         releaseId,

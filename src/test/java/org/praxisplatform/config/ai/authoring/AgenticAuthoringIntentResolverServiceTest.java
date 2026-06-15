@@ -8960,6 +8960,72 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void businessRulePromptPrefersOwnedEntityOverRelationalSemanticNeighbor() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadata(
+                        "/api/procurement/suppliers",
+                        "POST",
+                        "procurement,fornecedor,fornecedores,supplier,suppliers,compras,elegibilidade,bloqueado,inativo",
+                        "Fornecedores",
+                        "Cadastro e selecao de fornecedores usados em compras."),
+                apiMetadata(
+                        "/api/procurement/contracts",
+                        "POST",
+                        "procurement,contratos,compras",
+                        "Contratos de compra",
+                        "Contratos vinculam empresa, fornecedor, vigencia e bloqueio operacional.")));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        ApiSearchResult relationalSemanticNeighbor = new ApiSearchResult();
+        relationalSemanticNeighbor.setPath("/api/procurement/contracts");
+        relationalSemanticNeighbor.setMethod("POST");
+        relationalSemanticNeighbor.setTags("procurement contratos compras");
+        relationalSemanticNeighbor.setSummary("Contratos vinculam empresa, fornecedor, vigencia e bloqueio operacional.");
+        relationalSemanticNeighbor.setSimilarityScore(0.98d);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(relationalSemanticNeighbor));
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+    }
+
+    @Test
     void businessRulePromptKeepsPromptAlignedLexicalCandidateWhenDomainGroundingHitsDifferentResource() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
