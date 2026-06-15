@@ -187,7 +187,22 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:TENANT_ID = "desenv"
         $env:ENVIRONMENT = "local"
         $env:RELEASE_ID = "v1"
-        $env:CHUNK_SIZE = "20"
+        if ($ValidationMode -eq "smoke") {
+            $smokeCatalogPathPrefixes = @(
+                "/api/human-resources/funcionarios",
+                "/api/human-resources/departamentos",
+                "/api/human-resources/folhas-pagamento",
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "/api/human-resources/eventos-folha",
+                "/api/human-resources/historicos-salariais"
+            )
+            $env:API_CATALOG_PATH_PREFIXES = ($smokeCatalogPathPrefixes -join ",")
+            $env:CHUNK_SIZE = "100"
+            Write-Phase "Smoke mode: API catalog upload scoped to $($smokeCatalogPathPrefixes.Count) human-resources path prefixes."
+        } else {
+            Remove-Item Env:\API_CATALOG_PATH_PREFIXES -ErrorAction SilentlyContinue
+            $env:CHUNK_SIZE = "20"
+        }
         $env:PAUSE_MS = "0"
         & cmd.exe /c "npx.cmd ts-node --project tools/tsconfig.tools.json tools/ai-registry/upload-api-catalog.ts"
         if ($LASTEXITCODE -ne 0) { throw "API catalog ingest failed with exit code $LASTEXITCODE." }
