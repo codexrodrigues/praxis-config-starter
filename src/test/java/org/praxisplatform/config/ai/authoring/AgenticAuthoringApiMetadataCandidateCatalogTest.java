@@ -15,7 +15,7 @@ import org.praxisplatform.config.dto.ApiSearchResult;
 class AgenticAuthoringApiMetadataCandidateCatalogTest {
 
     @Test
-    void discoversEnglishProcurementSuppliersFromPortugueseGovernedRulePrompt() {
+    void discoversCandidateFromGovernedMultilingualCatalogText() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
                 apiMetadata(
@@ -27,9 +27,9 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 apiMetadata(
                         "/api/procurement/suppliers",
                         "POST",
-                        "procurement suppliers",
-                        "Suppliers",
-                        "Supplier records used by purchase flows.")));
+                        "procurement suppliers fornecedores compras",
+                        "Fornecedores",
+                        "Registros de fornecedores usados por fluxos de compras.")));
         AgenticAuthoringApiMetadataCandidateCatalog catalog =
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository);
 
@@ -44,7 +44,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     }
 
     @Test
-    void keepsLexicalAliasCandidateWhenSemanticRetrievalReturnsDifferentStrongResource() {
+    void keepsCatalogGroundedCandidateWhenSemanticRetrievalReturnsDifferentStrongResource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
                 apiMetadata(
@@ -56,9 +56,9 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 apiMetadata(
                         "/api/procurement/suppliers",
                         "POST",
-                        "procurement suppliers",
-                        "Suppliers",
-                        "Supplier records used by purchase flows.")));
+                        "procurement suppliers fornecedores compras",
+                        "Fornecedores",
+                        "Registros de fornecedores usados por fluxos de compras.")));
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
         ApiSearchResult semanticResult = new ApiSearchResult();
         semanticResult.setPath("/api/human-resources/habilidades");

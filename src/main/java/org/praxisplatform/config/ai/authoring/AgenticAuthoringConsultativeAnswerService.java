@@ -5031,10 +5031,32 @@ public class AgenticAuthoringConsultativeAnswerService {
     }
 
     private String firstRecordDisplayValue(JsonNode record) {
-        for (String field : List.of("funcionarioNome", "nome", "name", "label", "titulo", "title", "evento", "event", "sku", "papel", "status")) {
+        for (String field : List.of(
+                "nome",
+                "name",
+                "label",
+                "titulo",
+                "title",
+                "evento",
+                "event",
+                "descricao",
+                "description",
+                "id",
+                "status")) {
             String value = text(record, field);
             if (StringUtils.hasText(value)) {
                 return value;
+            }
+        }
+        if (record != null && record.isObject()) {
+            for (Map.Entry<String, JsonNode> entry : record.properties()) {
+                JsonNode value = entry.getValue();
+                if (value != null && value.isValueNode() && value.asText("").length() <= 120) {
+                    String text = value.asText("");
+                    if (StringUtils.hasText(text)) {
+                        return text;
+                    }
+                }
             }
         }
         return "";

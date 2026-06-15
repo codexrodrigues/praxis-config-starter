@@ -44,20 +44,6 @@ public class AgenticAuthoringIntentResolverService {
             new AgenticAuthoringSemanticDecisionPolicy();
     private final AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService;
 
-    private static final Map<String, List<String>> PROMPT_ALIGNMENT_ALIASES = Map.ofEntries(
-            Map.entry("compra", List.of("procurement", "purchase", "purchases")),
-            Map.entry("compras", List.of("procurement", "purchase", "purchases")),
-            Map.entry("fornecedor", List.of("supplier", "suppliers", "vendor", "vendors")),
-            Map.entry("fornecedores", List.of("supplier", "suppliers", "vendor", "vendors")),
-            Map.entry("funcionario", List.of("employee", "employees", "funcionarios")),
-            Map.entry("funcionarios", List.of("employee", "employees")),
-            Map.entry("empregado", List.of("employee", "employees", "funcionario", "funcionarios")),
-            Map.entry("empregados", List.of("employee", "employees", "funcionario", "funcionarios")),
-            Map.entry("missao", List.of("mission", "missions", "missoes")),
-            Map.entry("missoes", List.of("mission", "missions")),
-            Map.entry("pagamento", List.of("payment", "payments", "payroll")),
-            Map.entry("pagamentos", List.of("payment", "payments", "payroll")));
-
     public AgenticAuthoringIntentResolverService(ObjectMapper objectMapper) {
         this(objectMapper, null, null, null);
     }
@@ -1440,11 +1426,15 @@ public class AgenticAuthoringIntentResolverService {
         if (score <= 0) {
             return 0;
         }
-        if (isVisualMaterializationArtifact(artifactKind) && termListMatchesToken(evidenceTerms, artifactKind)) {
+        if ((isVisualMaterializationArtifact(artifactKind) || isConcreteDashboardMaterializationPrompt(prompt))
+                && isVisualProjectionCandidate(candidate)) {
             score += 2;
         }
         if ("chart".equals(artifactKind) && isStatsProjectionOperation(candidate)) {
             score += 2;
+        }
+        if (isOperationalRecordCandidate(candidate) && !isReadProjectionCandidate(candidate)) {
+            score = Math.max(1, score - 1);
         }
         return score;
     }
@@ -3335,14 +3325,71 @@ public class AgenticAuthoringIntentResolverService {
                         .comparingInt(CandidatePromptAlignment::score)
                         .thenComparingDouble(candidateAlignment -> candidateAlignment.candidate().score()))
                 .orElse(null);
-        if (bestAlignment == null) {
+        CandidatePromptAlignment bestVisualAlignment = alignments.stream()
+                .filter(candidateAlignment -> isVisualProjectionCandidate(candidateAlignment.candidate()))
+                .max(Comparator
+                        .comparingInt(CandidatePromptAlignment::score)
+                        .thenComparingDouble(candidateAlignment -> candidateAlignment.candidate().score()))
+                .orElse(null);
+        if (bestAlignment == null || bestVisualAlignment == null) {
             return null;
         }
-        return bestAlignment.candidate();
+        return bestVisualAlignment.score() >= bestAlignment.score() - 1
+                ? bestVisualAlignment.candidate()
+                : bestAlignment.candidate();
     }
 
     private boolean isVisualMaterializationArtifact(String artifactKind) {
         return "dashboard".equals(artifactKind) || "chart".equals(artifactKind);
+    }
+
+    private boolean isVisualProjectionCandidate(AgenticAuthoringCandidate candidate) {
+        String semanticText = directCandidateSemanticText(candidate);
+        return isReadProjectionCandidate(candidate)
+                || containsAny(
+                semanticText,
+                "analytics",
+                "analitica",
+                "analitico",
+                "metric",
+                "metrica",
+                "metricas",
+                "indicador",
+                "indicadores",
+                "kpi",
+                "dashboard",
+                "ranking",
+                "comparacao",
+                "comparacoes",
+                "grafico",
+                "graficos");
+    }
+
+    private boolean isReadProjectionCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        return isReadProjectionOperation(candidate.submitUrl(), candidate.submitMethod())
+                || isReadProjectionOperation(candidate.submitUrl(), candidate.operation())
+                || containsAny(normalizePath(candidate.submitUrl()),
+                "/stats/group-by",
+                "/stats/timeseries",
+                "/stats/distribution")
+                || containsAny(normalizePath(candidate.resourcePath()), "/vw-", "/analytics/");
+    }
+
+    private boolean isOperationalRecordCandidate(AgenticAuthoringCandidate candidate) {
+        String semanticText = directCandidateSemanticText(candidate);
+        return containsAny(
+                semanticText,
+                "cadastro",
+                "cadastrar",
+                "formulario",
+                "operacional",
+                "registro",
+                "registros",
+                "listagem",
+                "tabela");
     }
 
     private boolean isDataSourceRefinement(AgenticAuthoringSemanticRefinement semanticRefinement) {
@@ -3437,11 +3484,6 @@ public class AgenticAuthoringIntentResolverService {
         String paddedText = " " + candidateText.replaceAll("[^a-z0-9]+", " ") + " ";
         if (paddedText.contains(" " + normalizedToken + " ")) {
             return true;
-        }
-        for (String alias : PROMPT_ALIGNMENT_ALIASES.getOrDefault(normalizedToken, List.of())) {
-            if (paddedText.contains(" " + alias + " ")) {
-                return true;
-            }
         }
         if (normalizedToken.endsWith("s") && normalizedToken.length() > 4
                 && paddedText.contains(" " + normalizedToken.substring(0, normalizedToken.length() - 1) + " ")) {
