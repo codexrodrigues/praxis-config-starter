@@ -10,6 +10,7 @@ param(
     [int] $BackendPort = 8088,
     [int] $UiPort = 4003,
     [int] $StartupTimeoutSec = 180,
+    [int] $UiStartupTimeoutSec = 600,
     [int] $StreamProcessingTimeoutSeconds = 180,
     [ValidateSet("smoke", "full")]
     [string] $ValidationMode = "smoke",
@@ -215,8 +216,23 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
 
     $cmd = "set PAX_PROXY_TARGET=$backendUrl&& set PLAYWRIGHT_BASE_URL=$uiUrl&& npx.cmd ng serve praxis-ui-workspace --port $UiPort --host localhost --proxy-config proxy.conf.js"
     Write-Phase "Starting Angular dev server on $uiUrl."
-    $uiProcess = Start-Process cmd.exe -ArgumentList @("/c", $cmd) -WorkingDirectory $UiRoot -RedirectStandardOutput (Join-Path $artifactRoot "angular.out.log") -RedirectStandardError (Join-Path $artifactRoot "angular.err.log") -PassThru -WindowStyle Hidden
-    Wait-Url $uiUrl $StartupTimeoutSec "Angular dev server"
+    $angularOutLog = Join-Path $artifactRoot "angular.out.log"
+    $angularErrLog = Join-Path $artifactRoot "angular.err.log"
+    $uiProcess = Start-Process cmd.exe -ArgumentList @("/c", $cmd) -WorkingDirectory $UiRoot -RedirectStandardOutput $angularOutLog -RedirectStandardError $angularErrLog -PassThru -WindowStyle Hidden
+    try {
+        Wait-Url $uiUrl $UiStartupTimeoutSec "Angular dev server"
+    } catch {
+        Write-Phase "Angular dev server did not become reachable. Last stdout/stderr lines follow."
+        if (Test-Path -LiteralPath $angularOutLog) {
+            Write-Host "--- angular.out.log tail ---"
+            Get-Content -LiteralPath $angularOutLog -Tail 120 -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $angularErrLog) {
+            Write-Host "--- angular.err.log tail ---"
+            Get-Content -LiteralPath $angularErrLog -Tail 120 -ErrorAction SilentlyContinue
+        }
+        throw
+    }
     Write-Phase "Angular dev server is reachable."
 
     Push-Location $UiRoot

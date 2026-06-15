@@ -79,6 +79,11 @@ on:
         required: false
         default: '180'
         type: string
+      page_builder_ui_startup_timeout_seconds:
+        description: 'Angular dev server startup timeout used by the page-builder E2E gate.'
+        required: false
+        default: '600'
+        type: string
 
 concurrency:
   group: agentic-authoring-smoke-${{ github.ref }}
@@ -265,6 +270,7 @@ jobs:
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
+            -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `
             -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}') `
             -ValidationMode '${{ inputs.page_builder_e2e_mode }}' `
             -PlaywrightTestTimeoutMs ([int]'${{ inputs.page_builder_playwright_test_timeout_ms }}')
@@ -278,6 +284,7 @@ jobs:
             artifacts/ai-sse-smoke/**
             praxis-config-starter/target/agentic-authoring/**
             artifacts/page-builder-agentic-e2e/**
+            praxis-config-starter/artifacts/page-builder-agentic-e2e/**
             praxis-api-quickstart/logs/**
             praxis-ui-angular/test-results/**
             praxis-ui-angular/tools/e2e/playwright/playwright-agentic-report/**
