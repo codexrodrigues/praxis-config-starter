@@ -1426,15 +1426,11 @@ public class AgenticAuthoringIntentResolverService {
         if (score <= 0) {
             return 0;
         }
-        if ((isVisualMaterializationArtifact(artifactKind) || isConcreteDashboardMaterializationPrompt(prompt))
-                && isVisualProjectionCandidate(candidate)) {
+        if (isVisualMaterializationArtifact(artifactKind) && termListMatchesToken(evidenceTerms, artifactKind)) {
             score += 2;
         }
         if ("chart".equals(artifactKind) && isStatsProjectionOperation(candidate)) {
             score += 2;
-        }
-        if (isOperationalRecordCandidate(candidate) && !isReadProjectionCandidate(candidate)) {
-            score = Math.max(1, score - 1);
         }
         return score;
     }
@@ -3325,71 +3321,14 @@ public class AgenticAuthoringIntentResolverService {
                         .comparingInt(CandidatePromptAlignment::score)
                         .thenComparingDouble(candidateAlignment -> candidateAlignment.candidate().score()))
                 .orElse(null);
-        CandidatePromptAlignment bestVisualAlignment = alignments.stream()
-                .filter(candidateAlignment -> isVisualProjectionCandidate(candidateAlignment.candidate()))
-                .max(Comparator
-                        .comparingInt(CandidatePromptAlignment::score)
-                        .thenComparingDouble(candidateAlignment -> candidateAlignment.candidate().score()))
-                .orElse(null);
-        if (bestAlignment == null || bestVisualAlignment == null) {
+        if (bestAlignment == null) {
             return null;
         }
-        return bestVisualAlignment.score() >= bestAlignment.score() - 1
-                ? bestVisualAlignment.candidate()
-                : bestAlignment.candidate();
+        return bestAlignment.candidate();
     }
 
     private boolean isVisualMaterializationArtifact(String artifactKind) {
         return "dashboard".equals(artifactKind) || "chart".equals(artifactKind);
-    }
-
-    private boolean isVisualProjectionCandidate(AgenticAuthoringCandidate candidate) {
-        String semanticText = directCandidateSemanticText(candidate);
-        return isReadProjectionCandidate(candidate)
-                || containsAny(
-                semanticText,
-                "analytics",
-                "analitica",
-                "analitico",
-                "metric",
-                "metrica",
-                "metricas",
-                "indicador",
-                "indicadores",
-                "kpi",
-                "dashboard",
-                "ranking",
-                "comparacao",
-                "comparacoes",
-                "grafico",
-                "graficos");
-    }
-
-    private boolean isReadProjectionCandidate(AgenticAuthoringCandidate candidate) {
-        if (candidate == null) {
-            return false;
-        }
-        return isReadProjectionOperation(candidate.submitUrl(), candidate.submitMethod())
-                || isReadProjectionOperation(candidate.submitUrl(), candidate.operation())
-                || containsAny(normalizePath(candidate.submitUrl()),
-                "/stats/group-by",
-                "/stats/timeseries",
-                "/stats/distribution")
-                || containsAny(normalizePath(candidate.resourcePath()), "/vw-", "/analytics/");
-    }
-
-    private boolean isOperationalRecordCandidate(AgenticAuthoringCandidate candidate) {
-        String semanticText = directCandidateSemanticText(candidate);
-        return containsAny(
-                semanticText,
-                "cadastro",
-                "cadastrar",
-                "formulario",
-                "operacional",
-                "registro",
-                "registros",
-                "listagem",
-                "tabela");
     }
 
     private boolean isDataSourceRefinement(AgenticAuthoringSemanticRefinement semanticRefinement) {
