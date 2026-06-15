@@ -19,7 +19,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
 
     static final String DOMAIN_CATALOG_GROUNDING = "domain-catalog-grounding";
     private static final int CONTEXT_LIMIT = 8;
-    private static final int MAX_CANDIDATES_TO_GROUND = 6;
+    private static final int MAX_CANDIDATES_TO_GROUND = 16;
     private static final int MAX_CONTEXT_QUERIES = 3;
 
     private final Supplier<DomainCatalogIngestionService> domainCatalogIngestionService;

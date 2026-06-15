@@ -409,7 +409,7 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                         List.of()));
         AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
                 new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
-        List<AgenticAuthoringCandidate> candidates = java.util.stream.IntStream.range(0, 12)
+        List<AgenticAuthoringCandidate> candidates = java.util.stream.IntStream.range(0, 20)
                 .mapToObj(index -> new AgenticAuthoringCandidate(
                         "/api/domain/resource-" + index,
                         "get",
@@ -424,8 +424,8 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
         List<AgenticAuthoringCandidate> enhanced =
                 enhancer.enhance("folha pagamento pessoas cargos", candidates, "default", "dev");
 
-        assertThat(enhanced).hasSize(12);
-        Mockito.verify(domainCatalogIngestionService, Mockito.times(18)).contextLatest(
+        assertThat(enhanced).hasSize(20);
+        Mockito.verify(domainCatalogIngestionService, Mockito.times(48)).contextLatest(
                 Mockito.eq("praxis-service"),
                 Mockito.anyString(),
                 Mockito.eq("default"),
@@ -435,6 +435,89 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.eq(8));
+    }
+
+    @Test
+    void stillGroundsGovernedCandidateWhenItAppearsAfterInitialCatalogWindow() {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.anyString(),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of()));
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("procurement.suppliers"),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "fornecedor bloqueado compras",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(
+                                item("node", "procurement.suppliers", "Fornecedores de compras"),
+                                item(
+                                        "governance",
+                                        "procurement.suppliers.rule.blocked",
+                                        "Fornecedor bloqueado não pode ser selecionado em compras"))));
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        List<AgenticAuthoringCandidate> candidates = new java.util.ArrayList<>();
+        for (int index = 0; index < 10; index++) {
+            candidates.add(new AgenticAuthoringCandidate(
+                    "/api/human-resources/habilidades-" + index,
+                    "post",
+                    "",
+                    "/api/human-resources/habilidades-" + index + "/filter",
+                    "post",
+                    0.91d - index * 0.01d,
+                    "api_metadata semantic retrieval",
+                    List.of("api-metadata", "semantic-retrieval")));
+        }
+        candidates.add(new AgenticAuthoringCandidate(
+                "/api/procurement/suppliers",
+                "post",
+                "",
+                "/api/procurement/suppliers/filter",
+                "post",
+                0.70d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval")));
+
+        List<AgenticAuthoringCandidate> enhanced = enhancer.enhance(
+                "Crie uma regra para fornecedor bloqueado não poder ser selecionado em compras",
+                candidates,
+                "default",
+                "dev");
+
+        assertThat(enhanced)
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .startsWith("/api/procurement/suppliers");
+        assertThat(enhanced.get(0).evidence())
+                .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING);
     }
 
     @Test
