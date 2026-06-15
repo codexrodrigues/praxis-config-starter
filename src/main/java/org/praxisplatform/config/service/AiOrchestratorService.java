@@ -2108,10 +2108,12 @@ public class AiOrchestratorService {
         if (response == null) {
             return null;
         }
-        response.setExplanation(publicAssistantText(
-                polishComponentEditPlanExplanation(response.getExplanation())));
-        response.setMessage(publicAssistantText(
-                polishComponentEditPlanExplanation(response.getMessage())));
+        if (!isSchemaContractError(response)) {
+            response.setExplanation(publicAssistantText(
+                    polishComponentEditPlanExplanation(response.getExplanation())));
+            response.setMessage(publicAssistantText(
+                    polishComponentEditPlanExplanation(response.getMessage())));
+        }
         if (response.getMessage() == null) {
             response.setMessage("");
         }
@@ -2127,6 +2129,14 @@ public class AiOrchestratorService {
 
     private String publicAssistantText(String value) {
         return AgenticAuthoringPresentationText.assistantReply(value);
+    }
+
+    private boolean isSchemaContractError(AiOrchestratorResponse response) {
+        String type = response != null && response.getType() != null ? response.getType() : "";
+        String code = response != null && response.getCode() != null ? response.getCode() : "";
+        return response != null
+                && "error".equalsIgnoreCase(type)
+                && code.startsWith("SCHEMA_");
     }
 
     private UUID captureObservation(

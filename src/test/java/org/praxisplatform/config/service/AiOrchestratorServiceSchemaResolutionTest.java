@@ -7,6 +7,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -21,10 +23,12 @@ class AiOrchestratorServiceSchemaResolutionTest {
 
     private AiOrchestratorService service;
     private SchemaRetrievalService schemaRetrievalService;
+    private AiMessageService messageService;
 
     @BeforeEach
     void setUp() {
         schemaRetrievalService = mock(SchemaRetrievalService.class);
+        messageService = mock(AiMessageService.class);
         service = new AiOrchestratorService(
                 mock(AiContextService.class),
                 mock(AiProvider.class),
@@ -37,7 +41,7 @@ class AiOrchestratorServiceSchemaResolutionTest {
                 new ObjectMapper(),
                 mock(AiApiKeyCryptoService.class),
                 mock(AiThreadService.class),
-                mock(AiMessageService.class));
+                messageService);
     }
 
     @Test
@@ -76,6 +80,39 @@ class AiOrchestratorServiceSchemaResolutionTest {
         assertThat(response.getCode()).isEqualTo("SCHEMA_PLATFORM_UNAVAILABLE");
         assertThat(response.getMessage()).contains("plataforma de metadata");
         assertThat(response.getExplanation()).contains("retryable=true");
+    }
+
+    @Test
+    void finalizeResponsePreservesSchemaContractErrorFields() {
+        AiOrchestratorResponse response = AiOrchestratorResponse.builder()
+                .type("error")
+                .code("SCHEMA_NOT_FOUND")
+                .message("Schema estrutural nao encontrado para o endpoint informado.")
+                .explanation("code=SCHEMA_NOT_FOUND, status=404, retryable=false, path=/api/users, "
+                        + "operation=get, schemaType=response, fonte=http://localhost:8080/schemas/filtered"
+                        + "?path=/api/users&operation=get&schemaType=response")
+                .build();
+        AiMemoryContext memoryContext = new AiMemoryContext(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null,
+                List.of(),
+                0,
+                false,
+                null);
+
+        AiOrchestratorResponse finalized = ReflectionTestUtils.invokeMethod(
+                service,
+                "finalizeResponse",
+                response,
+                memoryContext);
+
+        assertThat(finalized.getMessage()).contains("Schema estrutural");
+        assertThat(finalized.getMessage()).contains("endpoint informado");
+        assertThat(finalized.getExplanation()).contains("path=/api/users");
+        assertThat(finalized.getExplanation()).contains("/schemas/filtered?path=/api/users");
+        assertThat(finalized.getExplanation()).doesNotContain("fonte confirmada");
+        assertThat(finalized.getExplanation()).doesNotContain("campos confirmados");
     }
 
     private AiOrchestratorResponse resolveSchemaResponse() {
