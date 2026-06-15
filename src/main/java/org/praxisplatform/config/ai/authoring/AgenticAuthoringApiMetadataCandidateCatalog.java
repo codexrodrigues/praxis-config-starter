@@ -555,10 +555,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     private String compactReasonText(String value) {
         String normalized = value == null ? "" : value.replaceAll("\\s+", " ").trim();
-        if (normalized.length() <= 240) {
+        if (normalized.length() <= 900) {
             return normalized;
         }
-        return normalized.substring(0, 240).trim();
+        return normalized.substring(0, 900).trim();
     }
 
     private boolean isRenderableBusinessEndpoint(String path) {

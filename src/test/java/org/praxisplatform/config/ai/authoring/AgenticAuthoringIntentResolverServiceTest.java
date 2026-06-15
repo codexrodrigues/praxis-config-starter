@@ -112,6 +112,17 @@ class AgenticAuthoringIntentResolverServiceTest {
         return new ApiMetadata(path, method, tags, summary, description, null, null, null, "[]", "{}", null);
     }
 
+    private ApiMetadata apiMetadataWithSchemas(
+            String path,
+            String method,
+            String tags,
+            String summary,
+            String description,
+            String operationId,
+            String requestSchema) {
+        return new ApiMetadata(path, method, tags, summary, description, operationId, requestSchema, "{}", "[]", "{}", null);
+    }
+
     private ObjectNode resourcePathContextHints(String resourcePath) {
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("resourcePath", resourcePath);
@@ -9010,6 +9021,72 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+    }
+
+    @Test
+    void businessRulePromptUsesCanonicalSchemaEvidenceWhenWeakLexicalScoresFavorRelationshipEndpoint() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadataWithSchemas(
+                        "/api/procurement/contracts",
+                        "POST",
+                        "procurement-contract-controller",
+                        "Criar item",
+                        "Endpoint para criar item.",
+                        "create_4",
+                        """
+                                {"name":"CreateProcurementContractDTO","fields":[
+                                  {"name":"companyId","description":"Empresa compradora."},
+                                  {"name":"supplierId","description":"FK; fornecedor contratado."},
+                                  {"name":"supplierName","description":"Nome do fornecedor denormalizado para listagem e busca."},
+                                  {"name":"status","description":"Ciclo de vida do contrato: ativo, inativo, bloqueado."}
+                                ]}
+                                """),
+                apiMetadataWithSchemas(
+                        "/api/procurement/suppliers",
+                        "POST",
+                        "procurement-supplier-controller",
+                        "Criar item",
+                        "Endpoint para criar item.",
+                        "create_1",
+                        """
+                                {"name":"CreateProcurementSupplierDTO","description":"Fornecedor homologavel para compras: risco e bloqueio.",
+                                 "fields":[
+                                  {"name":"companyId","description":"Empresa a que o cadastro de fornecedor se subordina em compras."},
+                                  {"name":"status","description":"Status que governa elegibilidade do fornecedor para compras."},
+                                  {"name":"blockedReason","description":"Motivo documental para bloqueio do fornecedor."},
+                                  {"name":"qualificationStatus","description":"Homologacao necessaria para compras governadas."}
+                                ]}
+                                """)));
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
                 llmIntentResolver,
                 null);
 

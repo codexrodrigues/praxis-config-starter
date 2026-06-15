@@ -661,7 +661,9 @@ public class AgenticAuthoringIntentResolverService {
                 && !candidates.isEmpty()) {
             AgenticAuthoringCandidate promptAlignedGovernedRuleCandidate =
                     promptAlignedGovernedRuleCandidate(prompt, candidates);
-            if (promptAlignedGovernedRuleCandidate != null) {
+            if (selectedCandidate != null && hasEvidence(selectedCandidate, "explicit-resource-path")) {
+                candidates = withPriorityCandidate(candidates, selectedCandidate);
+            } else if (promptAlignedGovernedRuleCandidate != null) {
                 selectedCandidate = promptAlignedGovernedRuleCandidate;
             } else if (selectedCandidate == null) {
                 selectedCandidate = selectCandidate(
@@ -2494,7 +2496,20 @@ public class AgenticAuthoringIntentResolverService {
         if (existing.isPresent()) {
             AgenticAuthoringCandidate candidate = existing.get();
             if (submitUrl.isBlank() || normalizePath(submitUrl).equals(normalizePath(candidate.submitUrl()))) {
-                return candidate;
+                return new AgenticAuthoringCandidate(
+                        candidate.resourcePath(),
+                        candidate.operation(),
+                        candidate.schemaUrl(),
+                        candidate.submitUrl(),
+                        candidate.submitMethod(),
+                        Math.max(candidate.score(), 0.99d),
+                        candidate.reason(),
+                        Stream.concat(
+                                        candidate.evidence().stream(),
+                                        Stream.of("explicit-resource-path"))
+                                .distinct()
+                                .toList(),
+                        candidate.evidenceBundle());
             }
             AgenticAuthoringCandidate explicitSubmitCandidate = candidate(
                     candidate.resourcePath(),
@@ -3408,11 +3423,42 @@ public class AgenticAuthoringIntentResolverService {
         }
         int score = 0;
         for (String token : promptSpecificTokens(prompt)) {
-            if (tokenMatchesCandidateText(token, candidateText)) {
-                score += 1;
-            }
+            score += Math.min(3, tokenOccurrenceCount(token, candidateText));
         }
         return score;
+    }
+
+    private int tokenOccurrenceCount(String token, String candidateText) {
+        if (token == null || token.isBlank() || candidateText == null || candidateText.isBlank()) {
+            return 0;
+        }
+        String normalizedToken = normalize(token);
+        if (normalizedToken.isBlank()) {
+            return 0;
+        }
+        String paddedText = " " + candidateText.replaceAll("[^a-z0-9]+", " ") + " ";
+        int count = countWholeToken(paddedText, normalizedToken);
+        if (normalizedToken.endsWith("s") && normalizedToken.length() > 4) {
+            count += countWholeToken(paddedText, normalizedToken.substring(0, normalizedToken.length() - 1));
+        }
+        if (normalizedToken.length() > 4) {
+            count += countWholeToken(paddedText, normalizedToken + "s");
+        }
+        return count;
+    }
+
+    private int countWholeToken(String paddedText, String token) {
+        if (paddedText == null || token == null || token.isBlank()) {
+            return 0;
+        }
+        String needle = " " + token + " ";
+        int count = 0;
+        int index = paddedText.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = paddedText.indexOf(needle, index + needle.length() - 1);
+        }
+        return count;
     }
 
     private boolean tokenMatchesCandidateText(String token, String candidateText) {
@@ -3484,9 +3530,14 @@ public class AgenticAuthoringIntentResolverService {
             return List.of();
         }
         return candidate.evidenceBundle().evidence().stream()
-                .flatMap(evidence -> Stream.concat(
-                        evidence.matchedTerms() == null ? Stream.empty() : evidence.matchedTerms().stream(),
-                        Stream.of(evidence.ref(), evidence.summary())))
+                .flatMap(evidence -> {
+                    Stream<String> matchedTerms =
+                            evidence.matchedTerms() == null ? Stream.empty() : evidence.matchedTerms().stream();
+                    Stream<String> structuralTerms = "weak_lexical_match".equals(valueOrDefault(evidence.kind(), ""))
+                            ? Stream.of(evidence.ref())
+                            : Stream.of(evidence.ref(), evidence.summary());
+                    return Stream.concat(matchedTerms, structuralTerms);
+                })
                 .map(this::normalize)
                 .flatMap(value -> Stream.of(value.replaceAll("[^a-z0-9]+", " ").split("\\s+")))
                 .map(String::trim)
