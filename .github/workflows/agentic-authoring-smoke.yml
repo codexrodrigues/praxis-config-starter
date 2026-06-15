@@ -22,15 +22,33 @@ on:
         default: main
         type: string
       ui_ref:
-        description: 'praxis-ui-angular ref to test against when the page-builder full E2E gate is enabled.'
+        description: 'praxis-ui-angular ref to test against when the page-builder E2E gate is enabled.'
         required: false
         default: main
         type: string
       run_page_builder_full_e2e:
-        description: 'Run the full page-builder agentic Playwright gate after the HTTP/SSE smoke.'
+        description: 'Run the page-builder agentic Playwright gate after the HTTP/SSE smoke.'
         required: false
         default: false
         type: boolean
+      page_builder_e2e_mode:
+        description: 'Page Builder browser gate depth. Use smoke for release gate, full for deliberate matrix investigation.'
+        required: false
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - full
+      page_builder_e2e_timeout_minutes:
+        description: 'Timeout for the Page Builder Playwright gate step.'
+        required: false
+        default: '30'
+        type: string
+      page_builder_playwright_test_timeout_ms:
+        description: 'Per-test timeout passed to the Page Builder Playwright gate. Use 0 to keep the spec default.'
+        required: false
+        default: '600000'
+        type: string
       run_quickstart_http_smoke:
         description: 'Run the quickstart agentic authoring HTTP/SSE smoke.'
         required: false
@@ -68,7 +86,7 @@ concurrency:
 
 jobs:
   quickstart-http-smoke:
-    name: Quickstart HTTP/SSE smoke and optional page-builder full E2E
+    name: Quickstart HTTP/SSE smoke and optional page-builder E2E
     runs-on: windows-latest
     timeout-minutes: 75
     permissions:
@@ -234,10 +252,11 @@ jobs:
           PRAXIS_AI_PROVIDER: ${{ inputs.provider }}
         run: mvn -B "-Dtest=AgenticAuthoringLlmCompliancePolicyIntegrationTest" test
 
-      - name: Run page-builder agentic full E2E gate
+      - name: Run page-builder agentic E2E gate
         if: inputs.run_page_builder_full_e2e == true
         shell: pwsh
         working-directory: praxis-config-starter
+        timeout-minutes: ${{ fromJSON(inputs.page_builder_e2e_timeout_minutes) }}
         run: |
           .\tools\Invoke-PbAgenticFullE2E.ps1 `
             -Provider '${{ inputs.provider }}' `
@@ -246,7 +265,9 @@ jobs:
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
-            -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
+            -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}') `
+            -ValidationMode '${{ inputs.page_builder_e2e_mode }}' `
+            -PlaywrightTestTimeoutMs ([int]'${{ inputs.page_builder_playwright_test_timeout_ms }}')
 
       - name: Upload smoke artifacts
         if: always()
@@ -256,7 +277,7 @@ jobs:
           path: |
             artifacts/ai-sse-smoke/**
             praxis-config-starter/target/agentic-authoring/**
-            artifacts/page-builder-agentic-full-e2e/**
+            artifacts/page-builder-agentic-e2e/**
             praxis-api-quickstart/logs/**
             praxis-ui-angular/test-results/**
             praxis-ui-angular/tools/e2e/playwright/playwright-agentic-report/**

@@ -11,10 +11,18 @@ param(
     [int] $UiPort = 4003,
     [int] $StartupTimeoutSec = 180,
     [int] $StreamProcessingTimeoutSeconds = 180,
+    [ValidateSet("smoke", "full")]
+    [string] $ValidationMode = "smoke",
+    [int] $PlaywrightTestTimeoutMs = 600000,
     [int] $Retries = 1
 )
 
 $ErrorActionPreference = "Stop"
+
+function Write-Phase([string] $Message) {
+    $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
+    Write-Host "[$timestamp] [page-builder-e2e] $Message"
+}
 
 function Get-ListenPid([int] $Port) {
     $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -62,6 +70,7 @@ function Invoke-DomainCatalogIngest {
     $jsonHeaders = $headers.Clone()
     $jsonHeaders["Content-Type"] = "application/json"
 
+    Write-Phase "Loading governed domain catalog from $BaseUrl/schemas/domain?group=human-resources."
     $catalog = Invoke-RestMethod `
         -Method Get `
         -Uri "$BaseUrl/schemas/domain?group=human-resources" `
@@ -73,12 +82,14 @@ function Invoke-DomainCatalogIngest {
     }
 
     $body = $catalog | ConvertTo-Json -Depth 100
+    Write-Phase "Ingesting governed domain catalog v0.2 into praxis-config-starter."
     Invoke-RestMethod `
         -Method Post `
         -Uri "$BaseUrl/api/praxis/config/domain-catalog/ingest" `
         -Headers $jsonHeaders `
         -Body $body `
         -TimeoutSec 900 | Out-Null
+    Write-Phase "Governed domain catalog ingest completed."
 }
 
 $starterRoot = Split-Path -Parent $PSScriptRoot
@@ -102,13 +113,14 @@ if ([string]::IsNullOrWhiteSpace($JarPath)) {
 
 $backendUrl = "http://localhost:$BackendPort"
 $uiUrl = "http://localhost:$UiPort"
-$artifactRoot = Join-Path $starterRoot ("artifacts\page-builder-agentic-full-e2e\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$artifactRoot = Join-Path $starterRoot ("artifacts\page-builder-agentic-e2e\$ValidationMode\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $quickstartLogs = Join-Path $QuickstartRoot "logs"
 New-Item -ItemType Directory -Force -Path $artifactRoot, $quickstartLogs | Out-Null
 $backendProcess = $null
 $uiProcess = $null
 
 try {
+    Write-Phase "Starting Page Builder agentic E2E gate. provider=$Provider validationMode=$ValidationMode backend=$backendUrl ui=$uiUrl artifactRoot=$artifactRoot."
     if ($null -ne (Get-ListenPid $BackendPort)) { throw "Port $BackendPort is already in use." }
     if ($null -ne (Get-ListenPid $UiPort)) { throw "Port $UiPort is already in use." }
 
@@ -159,13 +171,16 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
 & '$JavaHome\bin\java.exe' -jar '$JarPath'
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($backendScript))
-    $backendProcess = Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded) -RedirectStandardOutput (Join-Path $quickstartLogs "page-builder-agentic-full-e2e.out.log") -RedirectStandardError (Join-Path $quickstartLogs "page-builder-agentic-full-e2e.err.log") -PassThru -WindowStyle Hidden
+    Write-Phase "Starting Quickstart backend on $backendUrl."
+    $backendProcess = Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded) -RedirectStandardOutput (Join-Path $quickstartLogs "page-builder-agentic-e2e.out.log") -RedirectStandardError (Join-Path $quickstartLogs "page-builder-agentic-e2e.err.log") -PassThru -WindowStyle Hidden
     Wait-Url "$backendUrl/actuator/health" $StartupTimeoutSec "Quickstart backend"
+    Write-Phase "Quickstart backend is healthy."
 
     Invoke-DomainCatalogIngest $backendUrl $uiUrl "desenv" "local"
 
     Push-Location $UiRoot
     try {
+        Write-Phase "Uploading API catalog into praxis-config-starter."
         $env:BACKEND_URL = $backendUrl
         $env:CATALOG_URL = "$backendUrl/schemas/catalog"
         $env:CONFIG_ORIGIN = $uiUrl
@@ -176,29 +191,39 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:PAUSE_MS = "0"
         & cmd.exe /c "npx.cmd ts-node --project tools/tsconfig.tools.json tools/ai-registry/upload-api-catalog.ts"
         if ($LASTEXITCODE -ne 0) { throw "API catalog ingest failed with exit code $LASTEXITCODE." }
+        Write-Phase "API catalog upload completed."
     } finally {
         Pop-Location
     }
 
     $cmd = "set PAX_PROXY_TARGET=$backendUrl&& set PLAYWRIGHT_BASE_URL=$uiUrl&& npx.cmd ng serve praxis-ui-workspace --port $UiPort --host localhost --proxy-config proxy.conf.js"
+    Write-Phase "Starting Angular dev server on $uiUrl."
     $uiProcess = Start-Process cmd.exe -ArgumentList @("/c", $cmd) -WorkingDirectory $UiRoot -RedirectStandardOutput (Join-Path $artifactRoot "angular.out.log") -RedirectStandardError (Join-Path $artifactRoot "angular.err.log") -PassThru -WindowStyle Hidden
     Wait-Url $uiUrl $StartupTimeoutSec "Angular dev server"
+    Write-Phase "Angular dev server is reachable."
 
     Push-Location $UiRoot
     try {
+        Write-Phase "Running Playwright Page Builder validation. mode=$ValidationMode retries=$Retries timeoutMs=$PlaywrightTestTimeoutMs."
         $env:PLAYWRIGHT_BASE_URL = $uiUrl
-        $env:PRAXIS_E2E_AGENTIC_VALIDATION_MODE = "full"
-        $env:PRAXIS_E2E_TEST_TIMEOUT_MS = "900000"
+        $env:PRAXIS_E2E_AGENTIC_VALIDATION_MODE = $ValidationMode
+        if ($PlaywrightTestTimeoutMs -gt 0) {
+            $env:PRAXIS_E2E_TEST_TIMEOUT_MS = "$PlaywrightTestTimeoutMs"
+        } else {
+            Remove-Item Env:\PRAXIS_E2E_TEST_TIMEOUT_MS -ErrorAction SilentlyContinue
+        }
         & cmd.exe /c "npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts --retries=$Retries"
-        if ($LASTEXITCODE -ne 0) { throw "Page-builder agentic full E2E failed with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { throw "Page-builder agentic $ValidationMode E2E failed with exit code $LASTEXITCODE." }
+        Write-Phase "Playwright Page Builder validation completed."
     } finally {
         Pop-Location
     }
 
-    [pscustomobject]@{ provider = $Provider; backendBaseUrl = $backendUrl; uiBaseUrl = $uiUrl; artifactRoot = $artifactRoot; fullE2EPassed = $true } |
+    [pscustomobject]@{ provider = $Provider; validationMode = $ValidationMode; backendBaseUrl = $backendUrl; uiBaseUrl = $uiUrl; artifactRoot = $artifactRoot; e2ePassed = $true } |
         ConvertTo-Json -Depth 4 |
         Tee-Object -FilePath (Join-Path $artifactRoot "result.json")
 } finally {
+    Write-Phase "Stopping Page Builder E2E processes."
     Stop-ProcAndPort $uiProcess $UiPort
     Stop-ProcAndPort $backendProcess $BackendPort
 }

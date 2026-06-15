@@ -36,8 +36,8 @@ aplicacao de config e streaming SSE.
 Fluxo recomendado:
 1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
 2) Executar com `provider=openai` e manter o `quickstart_ref` padrao do workflow, salvo quando a validacao exigir explicitamente outro ref.
-3) Para releases que alterem authoring, page-builder, manifestos executaveis, SSE ou compilacao de patches, marcar `run_page_builder_full_e2e=true`.
-4) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso. Quando `run_page_builder_full_e2e=true`, confirmar tambem que o gate Playwright completo do page-builder terminou com sucesso.
+3) Para releases que alterem authoring, page-builder, manifestos executaveis, SSE ou compilacao de patches, marcar `run_page_builder_full_e2e=true` e manter `page_builder_e2e_mode=smoke`.
+4) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso. Quando `run_page_builder_full_e2e=true`, confirmar tambem que o gate Playwright do page-builder terminou com sucesso e publicou artefatos de diagnostico.
 5) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
 
 O smoke manual:
@@ -46,7 +46,7 @@ O smoke manual:
 - usa por padrao um ref pinado do `praxis-api-quickstart` para evitar que releases do starter fiquem bloqueados por dependencias ainda nao publicadas no consumidor;
 - sobe o quickstart empacotado;
 - valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
-- quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic completo do page-builder com browser real;
+- quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic do page-builder com browser real; use `page_builder_e2e_mode=smoke` como gate de release e `page_builder_e2e_mode=full` apenas para investigacoes deliberadas da matriz completa;
 - usa `praxis.ai.stream.processing-timeout-seconds=360` por padrao para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao.
 
 Para reproduzir localmente, primeiro empacote o quickstart e depois rode:

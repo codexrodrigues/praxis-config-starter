@@ -16,7 +16,7 @@ comportamento for provado em navegador real, com:
 
 ## Runners canonicos
 
-### Full local E2E
+### Local E2E
 
 Executa backend Quickstart, Angular dev server e Playwright real:
 
@@ -26,16 +26,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -Provider openai `
   -QuickstartRoot ..\praxis-api-quickstart `
   -UiRoot ..\praxis-ui-angular `
-  -StreamProcessingTimeoutSeconds 180
+  -StreamProcessingTimeoutSeconds 180 `
+  -ValidationMode smoke
 ```
 
 Esse runner:
 
 - sobe o quickstart em `http://localhost:8088`;
 - sobe o Angular em `http://localhost:4003`;
-- executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts`.
+- executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts`;
+- usa `-ValidationMode smoke` como gate de release e reserva `-ValidationMode full` para investigacao deliberada da matriz completa.
 
-### Full gate em GitHub Actions
+### Gate em GitHub Actions
 
 Workflow canonico:
 
@@ -51,6 +53,8 @@ Input obrigatorio quando o PR mexer em:
 Input:
 
 - `run_page_builder_full_e2e=true`
+- `page_builder_e2e_mode=smoke` para release
+- `page_builder_e2e_mode=full` somente para matriz completa deliberada
 
 ## Cenarios obrigatorios por fase
 
@@ -176,7 +180,7 @@ Para marcar uma fase relevante como concluida, anexar ao menos:
 
 - comando executado;
 - resultado final do runner;
-- referencia ao artifact gerado em `artifacts/page-builder-agentic-full-e2e/**`
+- referencia ao artifact gerado em `artifacts/page-builder-agentic-e2e/**`
   quando houver;
 - breve nota dizendo quais cenarios acima foram cobertos.
 

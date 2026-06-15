@@ -10,6 +10,10 @@ param(
     [int] $StreamProcessingTimeoutSeconds = 180,
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
+    [ValidateSet("smoke", "full")]
+    [string] $PageBuilderE2EMode = "smoke",
+    [int] $PageBuilderE2ETimeoutMinutes = 30,
+    [int] $PageBuilderPlaywrightTestTimeoutMs = 600000,
     [string] $Token = "",
     [int] $PollIntervalSec = 15,
     [int] $TimeoutSec = 1800,
@@ -50,6 +54,9 @@ $dispatchBody = @{
         metadata_ref = $MetadataRef
         ui_ref = $UiRef
         run_page_builder_full_e2e = [bool] $RunPageBuilderFullE2E.IsPresent
+        page_builder_e2e_mode = $PageBuilderE2EMode
+        page_builder_e2e_timeout_minutes = [string] $PageBuilderE2ETimeoutMinutes
+        page_builder_playwright_test_timeout_ms = [string] $PageBuilderPlaywrightTestTimeoutMs
         stream_processing_timeout_seconds = [string] $StreamProcessingTimeoutSeconds
         quickstart_startup_timeout_seconds = [string] $QuickstartStartupTimeoutSeconds
     }
@@ -72,6 +79,9 @@ if ($NoWait.IsPresent) {
         metadataRef = $MetadataRef
         uiRef = $UiRef
         runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
+        pageBuilderE2EMode = $PageBuilderE2EMode
+        pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes
+        pageBuilderPlaywrightTestTimeoutMs = $PageBuilderPlaywrightTestTimeoutMs
         quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds
         dispatched = $true
         waiting = $false
@@ -121,6 +131,9 @@ $result = [pscustomobject]@{
     metadataRef = $MetadataRef
     uiRef = $UiRef
     runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
+    pageBuilderE2EMode = $PageBuilderE2EMode
+    pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes
+    pageBuilderPlaywrightTestTimeoutMs = $PageBuilderPlaywrightTestTimeoutMs
     quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds
     status = $run.status
     conclusion = $run.conclusion
