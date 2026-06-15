@@ -16,6 +16,8 @@ import org.praxisplatform.config.service.ContextRetrievalService;
 
 public class AgenticAuthoringApiMetadataCandidateCatalog {
 
+    private static final int CANDIDATE_LIMIT = 16;
+
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "as", "o", "os", "um", "uma", "de", "da", "das", "do", "dos", "para", "por",
             "com", "em", "no", "na", "nos", "nas", "crie", "criar", "gere", "gerar", "monte",
@@ -79,13 +81,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return semanticCandidates;
         }
         boolean explicitSourceReference = hasExplicitSourceReference(normalizedPrompt);
-        if (!explicitSourceReference
-                && !"api_catalog".equals(artifactKind)
-                && !"dashboard".equals(artifactKind)
-                && !semanticCandidates.isEmpty()
-                && strongSemanticRetrieval(semanticCandidates)) {
-            return semanticCandidates;
-        }
         List<String> originalTokens = meaningfulTokens(normalizedPrompt);
         if (originalTokens.isEmpty()) {
             return mergeCandidates(semanticCandidates, new BroadArtifactCandidateRetriever().retrieve(context));
@@ -138,7 +133,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         return candidatesByResource.values().stream()
                 .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
-                .limit(8)
+                .limit(CANDIDATE_LIMIT)
                 .toList();
     }
 
@@ -192,7 +187,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .map(metadata -> toBroadScoredCandidate(metadata, expectedMethod, artifactKind, null, null, null))
                 .filter(scored -> scored.score() >= 0.36d)
                 .sorted(CandidateRankingPolicy.byScoreDescending())
-                .limit(8)
+                .limit(CANDIDATE_LIMIT)
                 .map(ScoredCandidate::candidate)
                 .toList();
     }
@@ -220,7 +215,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             normalizedPrompt,
                             method,
                             null,
-                            8,
+                            CANDIDATE_LIMIT,
                             null,
                             tenantId,
                             environment,
@@ -281,7 +276,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             context.releaseId()))
                     .filter(scored -> scored.score() >= 0.45d)
                     .sorted(CandidateRankingPolicy.byScoreDescending())
-                    .limit(8)
+                    .limit(CANDIDATE_LIMIT)
                     .map(ScoredCandidate::candidate)
                     .toList();
         }

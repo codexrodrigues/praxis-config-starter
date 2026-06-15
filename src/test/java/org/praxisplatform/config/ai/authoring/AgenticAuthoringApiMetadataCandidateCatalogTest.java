@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.dto.ApiSearchResult;
 
 @Tag("unit")
 class AgenticAuthoringApiMetadataCandidateCatalogTest {
@@ -39,6 +41,50 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 .extracting(AgenticAuthoringCandidate::resourcePath)
                 .contains("/api/procurement/suppliers")
                 .doesNotContain("/api/human-resources/habilidades");
+    }
+
+    @Test
+    void keepsLexicalAliasCandidateWhenSemanticRetrievalReturnsDifferentStrongResource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadata(
+                        "/api/human-resources/habilidades",
+                        "POST",
+                        "human resources skills",
+                        "Skills",
+                        "Employee skill records."),
+                apiMetadata(
+                        "/api/procurement/suppliers",
+                        "POST",
+                        "procurement suppliers",
+                        "Suppliers",
+                        "Supplier records used by purchase flows.")));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        ApiSearchResult semanticResult = new ApiSearchResult();
+        semanticResult.setPath("/api/human-resources/habilidades");
+        semanticResult.setMethod("POST");
+        semanticResult.setSummary("Skills with employee capabilities.");
+        semanticResult.setSimilarityScore(0.98d);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(semanticResult));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "form");
+
+        assertThat(candidates)
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .contains("/api/procurement/suppliers", "/api/human-resources/habilidades");
     }
 
     private ApiMetadata apiMetadata(
