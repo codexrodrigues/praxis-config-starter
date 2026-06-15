@@ -153,6 +153,7 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_STREAM_AUTH_MODE = 'signed-url-token'
 `$env:PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET = 'codex-local-e2e-token-secret-20260421'
 `$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
+`$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED = 'false'
 `$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ASYNC_ENABLED = 'true'
 if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = `$env:PRAXIS_AI_OPENAI_MODEL }
 & '$JavaHome\bin\java.exe' -jar '$JarPath'
