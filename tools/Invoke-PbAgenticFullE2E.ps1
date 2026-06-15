@@ -46,6 +46,41 @@ function Stop-ProcAndPort($Process, [int] $Port) {
     }
 }
 
+function Invoke-DomainCatalogIngest {
+    param(
+        [string] $BaseUrl,
+        [string] $Origin,
+        [string] $TenantId,
+        [string] $Environment
+    )
+
+    $headers = @{
+        "Origin" = $Origin
+        "X-Tenant-ID" = $TenantId
+        "X-Env" = $Environment
+    }
+    $jsonHeaders = $headers.Clone()
+    $jsonHeaders["Content-Type"] = "application/json"
+
+    $catalog = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$BaseUrl/schemas/domain?group=human-resources" `
+        -Headers @{ "Origin" = $Origin } `
+        -TimeoutSec 60
+
+    if ($catalog.schemaVersion -ne "praxis.domain-catalog/v0.2") {
+        throw "Expected praxis.domain-catalog/v0.2, got $($catalog.schemaVersion)."
+    }
+
+    $body = $catalog | ConvertTo-Json -Depth 100
+    Invoke-RestMethod `
+        -Method Post `
+        -Uri "$BaseUrl/api/praxis/config/domain-catalog/ingest" `
+        -Headers $jsonHeaders `
+        -Body $body `
+        -TimeoutSec 90 | Out-Null
+}
+
 $starterRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $starterRoot
 if ([string]::IsNullOrWhiteSpace($QuickstartRoot)) { $QuickstartRoot = Join-Path $workspaceRoot "praxis-api-quickstart" }
@@ -124,6 +159,24 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($backendScript))
     $backendProcess = Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded) -RedirectStandardOutput (Join-Path $quickstartLogs "page-builder-agentic-full-e2e.out.log") -RedirectStandardError (Join-Path $quickstartLogs "page-builder-agentic-full-e2e.err.log") -PassThru -WindowStyle Hidden
     Wait-Url "$backendUrl/actuator/health" $StartupTimeoutSec "Quickstart backend"
+
+    Invoke-DomainCatalogIngest $backendUrl $uiUrl "desenv" "local"
+
+    Push-Location $UiRoot
+    try {
+        $env:BACKEND_URL = $backendUrl
+        $env:CATALOG_URL = "$backendUrl/schemas/catalog"
+        $env:CONFIG_ORIGIN = $uiUrl
+        $env:TENANT_ID = "desenv"
+        $env:ENVIRONMENT = "local"
+        $env:RELEASE_ID = "v1"
+        $env:CHUNK_SIZE = "20"
+        $env:PAUSE_MS = "0"
+        & cmd.exe /c "npx.cmd ts-node --project tools/tsconfig.tools.json tools/ai-registry/upload-api-catalog.ts"
+        if ($LASTEXITCODE -ne 0) { throw "API catalog ingest failed with exit code $LASTEXITCODE." }
+    } finally {
+        Pop-Location
+    }
 
     $cmd = "set PAX_PROXY_TARGET=$backendUrl&& set PLAYWRIGHT_BASE_URL=$uiUrl&& npx.cmd ng serve praxis-ui-workspace --port $UiPort --host localhost --proxy-config proxy.conf.js"
     $uiProcess = Start-Process cmd.exe -ArgumentList @("/c", $cmd) -WorkingDirectory $UiRoot -RedirectStandardOutput (Join-Path $artifactRoot "angular.out.log") -RedirectStandardError (Join-Path $artifactRoot "angular.err.log") -PassThru -WindowStyle Hidden
