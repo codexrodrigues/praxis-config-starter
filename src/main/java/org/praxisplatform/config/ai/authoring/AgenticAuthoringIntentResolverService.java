@@ -2820,7 +2820,10 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean hasStrongGroundingEvidence(AgenticAuthoringCandidate candidate) {
         if (candidate == null || candidate.evidenceBundle() == null) {
-            return false;
+            return hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING);
+        }
+        if (hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
+            return true;
         }
         AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
         if ("lexical_fallback".equals(valueOrDefault(bundle.retrievalSource(), ""))) {
@@ -2834,6 +2837,7 @@ public class AgenticAuthoringIntentResolverService {
                 .map(AgenticAuthoringEvidenceBundle.Evidence::kind)
                 .map(kind -> valueOrDefault(kind, ""))
                 .anyMatch(kind -> kind.equals("schema_grounding")
+                        || kind.equals("domain_catalog_grounding")
                         || kind.equals("operation_grounding")
                         || kind.equals("resource_capability_hint")
                         || kind.equals("retrieved_candidate"));

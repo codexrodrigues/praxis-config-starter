@@ -476,6 +476,11 @@ public record AgenticAuthoringSemanticDecision(
         if (weakLexicalEvidence(retrievedEvidence, selectedCandidate)) {
             return false;
         }
+        if (selectedCandidateHasEvidence(
+                selectedCandidate,
+                AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
+            return true;
+        }
         if (retrievedEvidence == null || retrievedEvidence.evidence().isEmpty()) {
             return selectedCandidate != null
                     && selectedCandidate.score() >= 0.85d
@@ -495,6 +500,7 @@ public record AgenticAuthoringSemanticDecision(
                 .map(AgenticAuthoringEvidenceBundle.Evidence::kind)
                 .map(AgenticAuthoringSemanticDecision::safe)
                 .anyMatch(kind -> kind.equals("schema_grounding")
+                        || kind.equals("domain_catalog_grounding")
                         || kind.equals("operation_grounding")
                         || kind.equals("resource_capability_hint")
                         || kind.equals("retrieved_candidate"));

@@ -437,6 +437,89 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 Mockito.eq(8));
     }
 
+    @Test
+    void ranksGovernedCandidateByCatalogEvidenceAlignmentInsteadOfOriginalLexicalOrder() {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("human-resources.funcionarios"),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "folha pagamento",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(item("node", "human-resources.funcionarios", "Funcionários ativos com cargo e departamento"))));
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("human-resources.vw-analytics-folha-pagamento"),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "folha pagamento",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(
+                                item(
+                                        "node",
+                                        "human-resources.vw-analytics-folha-pagamento",
+                                        "Folha de pagamento analítica com salário líquido, bônus, desconto e competência"),
+                                item(
+                                        "binding",
+                                        "binding:human-resources.vw-analytics-folha-pagamento.field.salarioLiquido",
+                                        "Métrica financeira de folha para painéis e gráficos"))));
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        AgenticAuthoringCandidate genericEmployees = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.93d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringCandidate payrollAnalytics = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                "post",
+                0.72d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+
+        List<AgenticAuthoringCandidate> enhanced = enhancer.enhance(
+                "Quero um painel de conferência da folha de pagamento do RH com gráficos e dados financeiros",
+                List.of(genericEmployees, payrollAnalytics),
+                "default",
+                "dev");
+
+        assertThat(enhanced)
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .startsWith("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(enhanced.get(0).evidence())
+                .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING);
+    }
+
     private DomainCatalogItemResponse item(String itemType, String itemKey, String label) {
         return new DomainCatalogItemResponse(
                 UUID.randomUUID(),

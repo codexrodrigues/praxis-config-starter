@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -65,7 +66,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
                 enhanced.add(candidate);
             }
         }
-        return enhanced;
+        return rankGroundedCandidates(query, enhanced);
     }
 
     public boolean hasResourceKey(String resourceKey, String tenantId, String environment) {
@@ -122,11 +123,12 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         AgenticAuthoringEvidenceBundle evidenceBundle = promotedEvidenceBundle(
                 candidate,
                 resourceKey,
+                query,
                 items,
                 tenantId,
                 environment,
                 context == null || context.release() == null ? "" : context.release().releaseKey());
-        double score = Math.max(candidate.score(), score(items));
+        double score = Math.max(candidate.score(), score(items, query));
         return new AgenticAuthoringCandidate(
                 candidate.resourcePath(),
                 candidate.operation(),
@@ -253,6 +255,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
     private AgenticAuthoringEvidenceBundle promotedEvidenceBundle(
             AgenticAuthoringCandidate candidate,
             String resourceKey,
+            String query,
             List<DomainCatalogItemResponse> items,
             String tenantId,
             String environment,
@@ -263,7 +266,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
                 "domain_catalog_grounding",
                 resourceKey,
                 summary(items),
-                score(items),
+                score(items, query),
                 matchedTerms(resourceKey, items),
                 tenantId,
                 environment,
@@ -296,7 +299,55 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         return List.copyOf(promoted);
     }
 
-    private double score(List<DomainCatalogItemResponse> items) {
+    private List<AgenticAuthoringCandidate> rankGroundedCandidates(
+            String query,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return candidates == null ? List.of() : candidates;
+        }
+        boolean hasGroundedCandidate = candidates.stream()
+                .anyMatch(candidate -> hasEvidence(candidate, DOMAIN_CATALOG_GROUNDING));
+        if (!hasGroundedCandidate) {
+            return candidates;
+        }
+        return candidates.stream()
+                .sorted(Comparator
+                        .comparingDouble((AgenticAuthoringCandidate candidate) ->
+                                governedAlignmentScore(query, candidate)).reversed()
+                        .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()))
+                .toList();
+    }
+
+    private double governedAlignmentScore(String query, AgenticAuthoringCandidate candidate) {
+        if (candidate == null || !hasEvidence(candidate, DOMAIN_CATALOG_GROUNDING)) {
+            return 0d;
+        }
+        List<String> queryTerms = meaningfulQueryTerms(query);
+        if (queryTerms.isEmpty()) {
+            return candidate.score();
+        }
+        Set<String> evidenceTerms = new LinkedHashSet<>();
+        AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+        if (bundle != null && bundle.evidence() != null) {
+            for (AgenticAuthoringEvidenceBundle.Evidence evidence : bundle.evidence()) {
+                if (evidence == null) {
+                    continue;
+                }
+                addNormalizedTerms(evidenceTerms, evidence.ref());
+                addNormalizedTerms(evidenceTerms, evidence.summary());
+                if (evidence.matchedTerms() != null) {
+                    evidence.matchedTerms().forEach(term -> addNormalizedTerms(evidenceTerms, term));
+                }
+            }
+        }
+        double matches = queryTerms.stream()
+                .filter(term -> termMatches(evidenceTerms, term))
+                .count();
+        double coverage = matches / Math.max(1d, queryTerms.size());
+        return candidate.score() + coverage;
+    }
+
+    private double score(List<DomainCatalogItemResponse> items, String query) {
         boolean governance = items.stream()
                 .map(DomainCatalogItemResponse::itemType)
                 .filter(Objects::nonNull)
@@ -308,6 +359,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
                 .map(value -> value.toLowerCase(Locale.ROOT))
                 .anyMatch("node"::equals);
         double score = 0.82d + Math.min(items.size(), CONTEXT_LIMIT) * 0.01d;
+        score += catalogItemQueryCoverage(items, query) * 0.08d;
         if (governance) {
             score += 0.04d;
         }
@@ -315,6 +367,58 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             score += 0.03d;
         }
         return Math.min(0.94d, score);
+    }
+
+    private double catalogItemQueryCoverage(List<DomainCatalogItemResponse> items, String query) {
+        List<String> queryTerms = meaningfulQueryTerms(query);
+        if (items == null || items.isEmpty() || queryTerms.isEmpty()) {
+            return 0d;
+        }
+        Set<String> itemTerms = new LinkedHashSet<>();
+        for (DomainCatalogItemResponse item : items) {
+            if (item == null) {
+                continue;
+            }
+            addNormalizedTerms(itemTerms, item.itemKey());
+            addNormalizedTerms(itemTerms, item.contextKey());
+            addNormalizedTerms(itemTerms, item.nodeType());
+            addNormalizedTerms(itemTerms, item.bindingType());
+            addNormalizedTerms(itemTerms, item.edgeType());
+            JsonNode payload = item.payload();
+            addNormalizedTerms(itemTerms, text(payload, "label", "name", "title", "summary", "description", "aliases", "synonyms"));
+            addNormalizedTerms(itemTerms, text(path(payload, "target"), "fieldName", "resourceKey", "resourcePath"));
+            addNormalizedTerms(itemTerms, text(path(payload, "metadata"), "fieldName", "resourceKey", "resourcePath"));
+        }
+        long matches = queryTerms.stream()
+                .filter(term -> termMatches(itemTerms, term))
+                .count();
+        return matches / Math.max(1d, queryTerms.size());
+    }
+
+    private void addNormalizedTerms(Set<String> terms, String value) {
+        if (terms == null || value == null || value.isBlank()) {
+            return;
+        }
+        for (String token : normalizePrompt(value.replace('.', ' ')).split("\\s+")) {
+            if (token.length() > 2) {
+                terms.add(token);
+            }
+        }
+    }
+
+    private boolean termMatches(Set<String> terms, String term) {
+        String normalized = valueOrEmpty(term);
+        if (normalized.isBlank() || terms == null || terms.isEmpty()) {
+            return false;
+        }
+        if (terms.contains(normalized)) {
+            return true;
+        }
+        if (normalized.endsWith("s") && normalized.length() > 4
+                && terms.contains(normalized.substring(0, normalized.length() - 1))) {
+            return true;
+        }
+        return normalized.length() > 4 && terms.contains(normalized + "s");
     }
 
     private String summary(List<DomainCatalogItemResponse> items) {

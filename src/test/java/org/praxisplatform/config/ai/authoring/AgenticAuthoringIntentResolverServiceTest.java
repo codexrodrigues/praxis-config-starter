@@ -2902,6 +2902,93 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void treatsDomainAnchorWithDomainCatalogGroundingAsTrustedSelectionEvidence() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate anchoredGovernedCandidate = new AgenticAuthoringCandidate(
+                "/api/example/incidentes",
+                "post",
+                "/schemas/filtered?path=/api/example/incidentes&operation=post&schemaType=response",
+                "/api/example/incidentes",
+                "post",
+                0.95d,
+                "api_metadata domain anchor grounded by domain catalog",
+                List.of(
+                        "api-metadata",
+                        "domain-anchor",
+                        AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING),
+                AgenticAuthoringEvidenceBundle.of("domain_catalog", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "domain_catalog",
+                                "domain_catalog_grounding",
+                                "example.incidentes",
+                                "Incidentes governados pelo catalogo de dominio.",
+                                0.91d,
+                                List.of("incidentes"),
+                                "tenant",
+                                "local",
+                                "v1"))));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class)))
+                .thenReturn(List.of(anchoredGovernedCandidate));
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "table",
+                        "create_artifact",
+                        "/api/example/incidentes",
+                        null,
+                        "none",
+                        "Vou preparar uma tabela usando a fonte governada.",
+                        List.of(),
+                        List.of(),
+                        List.of())));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "crie uma tabela de incidentes",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                null,
+                null));
+
+        assertThat(result.warnings())
+                .contains(
+                        "resource-selection-domain-anchor-selected",
+                        "resource-selection-domain-catalog-grounding-selected");
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("selectedCandidateUsesDomainAnchor").asBoolean()).isFalse();
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("selectedCandidateUsesDomainCatalogGrounding").asBoolean()).isTrue();
+        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+        assertThat(result.semanticDecision().reviewReason()).isBlank();
+    }
+
+    @Test
     void usesResolvedLlmClarificationQuestionsWhenGateStillNeedsBusinessChoice() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
