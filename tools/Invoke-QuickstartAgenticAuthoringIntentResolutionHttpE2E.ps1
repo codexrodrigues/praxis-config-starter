@@ -100,6 +100,14 @@ $result = [pscustomobject]@{
     pagePreviewCompiledFormPatchPresent = $previewCompiledFormPatchPresent
 }
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$artifactDir = Join-Path $repoRoot "target/agentic-authoring/intent-resolution-http-e2e"
+New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+$intent | ConvertTo-Json -Depth 32 | Set-Content -Path (Join-Path $artifactDir "intent-resolution.json") -Encoding UTF8
+$preview | ConvertTo-Json -Depth 32 | Set-Content -Path (Join-Path $artifactDir "page-preview.json") -Encoding UTF8
+$result | ConvertTo-Json -Depth 16 | Set-Content -Path (Join-Path $artifactDir "result.json") -Encoding UTF8
+Write-Host "Intent resolution smoke artifacts written to $artifactDir"
+
 if ($result.health -ne "UP") {
     throw "Quickstart health is not UP."
 }
