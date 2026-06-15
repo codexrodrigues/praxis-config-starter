@@ -783,6 +783,11 @@ class AgenticAuthoringIntentResolverServiceTest {
     void visualMaterializationPrefersCatalogGroundedProjectionOverHigherScoredOperationalRecord() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate auxiliaryRelationshipCandidate = richCandidate(
+                "/api/human-resources/funcionario-habilidades",
+                0.82d,
+                "Habilidades de funcionarios",
+                "Relaciona funcionarios com habilidades e competencias para analises auxiliares.");
         AgenticAuthoringCandidate operationalRecord = richCandidate(
                 "/api/human-resources/funcionarios",
                 0.99d,
@@ -799,12 +804,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(List.of(operationalRecord, analyticalProjection));
+                .thenReturn(List.of(auxiliaryRelationshipCandidate, operationalRecord, analyticalProjection));
         AgenticAuthoringIntentResolverService resolver =
                 new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
 
         AgenticAuthoringIntentResolutionResult result = resolver.resolve(new AgenticAuthoringIntentResolutionRequest(
-                "quero uma tela pra ver os pagamentos, tipo um painel bonito",
+                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
                 "/page-builder-ia",

@@ -1431,10 +1431,56 @@ public class AgenticAuthoringIntentResolverService {
         if (isVisualMaterializationArtifact(artifactKind) && termListMatchesToken(evidenceTerms, artifactKind)) {
             score += 2;
         }
+        if (isVisualMaterializationArtifact(artifactKind)
+                && promptMatchesCandidatePathIdentity(prompt, candidate)
+                && hasAnalyticalProjectionAffordance(candidate, evidenceTerms)) {
+            score += 3;
+        }
         if ("chart".equals(artifactKind) && isStatsProjectionOperation(candidate)) {
             score += 2;
         }
         return score;
+    }
+
+    private boolean hasAnalyticalProjectionAffordance(
+            AgenticAuthoringCandidate candidate,
+            List<String> evidenceTerms) {
+        if (candidate == null) {
+            return false;
+        }
+        String candidateText = normalize(String.join(" ",
+                valueOrDefault(candidate.resourcePath(), ""),
+                valueOrDefault(candidate.submitUrl(), ""),
+                valueOrDefault(candidate.reason(), "")));
+        if (containsAny(candidateText,
+                "vw analytics",
+                "analytics",
+                "analitica",
+                "analitico",
+                "projection",
+                "projecao",
+                "projeção")) {
+            return true;
+        }
+        return termListMatchesToken(evidenceTerms, "analytics")
+                || termListMatchesToken(evidenceTerms, "analitica")
+                || termListMatchesToken(evidenceTerms, "analitico")
+                || termListMatchesToken(evidenceTerms, "projection")
+                || termListMatchesToken(evidenceTerms, "projecao");
+    }
+
+    private boolean promptMatchesCandidatePathIdentity(String prompt, AgenticAuthoringCandidate candidate) {
+        String normalizedPrompt = normalize(prompt);
+        String normalizedPath = normalizePath(candidate == null ? "" : candidate.resourcePath());
+        if (normalizedPrompt.isBlank() || normalizedPath.isBlank()) {
+            return false;
+        }
+        for (String token : candidatePathIdentityTokens(normalizedPath)) {
+            if (!isGenericAnalyticalCandidateToken(token) && tokenMatchesCandidateText(token, normalizedPrompt)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isStatsProjectionOperation(AgenticAuthoringCandidate candidate) {
@@ -1465,15 +1511,17 @@ public class AgenticAuthoringIntentResolverService {
             return 0;
         }
         int score = 0;
-        for (String token : normalizedPath.replaceAll("[^a-z0-9]+", " ").split("\\s+")) {
+        for (String token : candidatePathIdentityTokens(normalizedPath)) {
             if (isGenericAnalyticalCandidateToken(token)) {
                 continue;
             }
             if (tokenMatchesCandidateText(token, normalizedPrompt)) {
                 score += 4;
+            } else {
+                score -= 2;
             }
         }
-        return score;
+        return Math.max(0, score);
     }
 
     private boolean isConcreteDashboardMaterializationPrompt(String prompt) {
@@ -3747,6 +3795,26 @@ public class AgenticAuthoringIntentResolverService {
                 "dashboard", "ranking", "rank", "valor", "valores", "maior", "maiores",
                 "indicador", "indicadores", "empresa", "business")
                 .contains(token);
+    }
+
+    private List<String> candidatePathIdentityTokens(String normalizedPath) {
+        if (normalizedPath == null || normalizedPath.isBlank()) {
+            return List.of();
+        }
+        List<String> segments = Stream.of(normalizedPath.split("/"))
+                .map(String::trim)
+                .filter(segment -> !segment.isBlank())
+                .toList();
+        if (segments.isEmpty()) {
+            return List.of();
+        }
+        int firstIdentitySegment = "api".equals(segments.get(0)) && segments.size() > 2 ? 2 : 0;
+        return segments.stream()
+                .skip(firstIdentitySegment)
+                .flatMap(segment -> Stream.of(segment.replaceAll("[^a-z0-9]+", " ").split("\\s+")))
+                .map(String::trim)
+                .filter(token -> !token.isBlank())
+                .toList();
     }
 
     private boolean isBroadArtifactDiscoveryOnly(List<AgenticAuthoringCandidate> candidates) {
