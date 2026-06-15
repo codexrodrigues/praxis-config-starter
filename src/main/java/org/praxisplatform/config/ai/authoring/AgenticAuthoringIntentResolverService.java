@@ -44,6 +44,20 @@ public class AgenticAuthoringIntentResolverService {
             new AgenticAuthoringSemanticDecisionPolicy();
     private final AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService;
 
+    private static final Map<String, List<String>> PROMPT_ALIGNMENT_ALIASES = Map.ofEntries(
+            Map.entry("compra", List.of("procurement", "purchase", "purchases")),
+            Map.entry("compras", List.of("procurement", "purchase", "purchases")),
+            Map.entry("fornecedor", List.of("supplier", "suppliers", "vendor", "vendors")),
+            Map.entry("fornecedores", List.of("supplier", "suppliers", "vendor", "vendors")),
+            Map.entry("funcionario", List.of("employee", "employees", "funcionarios")),
+            Map.entry("funcionarios", List.of("employee", "employees")),
+            Map.entry("empregado", List.of("employee", "employees", "funcionario", "funcionarios")),
+            Map.entry("empregados", List.of("employee", "employees", "funcionario", "funcionarios")),
+            Map.entry("missao", List.of("mission", "missions", "missoes")),
+            Map.entry("missoes", List.of("mission", "missions")),
+            Map.entry("pagamento", List.of("payment", "payments", "payroll")),
+            Map.entry("pagamentos", List.of("payment", "payments", "payroll")));
+
     public AgenticAuthoringIntentResolverService(ObjectMapper objectMapper) {
         this(objectMapper, null, null, null);
     }
@@ -3315,6 +3329,11 @@ public class AgenticAuthoringIntentResolverService {
         if (paddedText.contains(" " + normalizedToken + " ")) {
             return true;
         }
+        for (String alias : PROMPT_ALIGNMENT_ALIASES.getOrDefault(normalizedToken, List.of())) {
+            if (paddedText.contains(" " + alias + " ")) {
+                return true;
+            }
+        }
         if (normalizedToken.endsWith("s") && normalizedToken.length() > 4
                 && paddedText.contains(" " + normalizedToken.substring(0, normalizedToken.length() - 1) + " ")) {
             return true;
@@ -3364,7 +3383,8 @@ public class AgenticAuthoringIntentResolverService {
                 "uma", "um", "de", "do", "da", "dos", "das", "para", "por", "com",
                 "crie", "criar", "monte", "montar", "gere", "gerar",
                 "tabela", "table", "lista", "listagem", "dashboard", "painel",
-                "grafico", "graficos", "campos", "colunas", "somente", "apenas")
+                "grafico", "graficos", "campos", "colunas", "somente", "apenas",
+                "regra", "regras", "poder", "posso", "pode", "podem", "ser")
                 .contains(valueOrDefault(token, ""));
     }
 

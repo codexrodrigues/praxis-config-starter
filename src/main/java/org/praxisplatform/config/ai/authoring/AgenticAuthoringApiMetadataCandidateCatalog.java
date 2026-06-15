@@ -25,7 +25,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             "lista", "listagem", "dashboard", "dashboards", "painel", "formulario", "form", "grafico", "chart",
             "graficos", "indicador", "indicadores", "kpi", "kpis", "metrica", "metricas",
             "qual", "quais", "outra", "outras", "opcao", "opcoes", "voce", "antes", "indica", "indicar",
-            "indique", "alternativa", "alternativas", "compare", "comparar", "recomende", "recomendar");
+            "indique", "alternativa", "alternativas", "compare", "comparar", "recomende", "recomendar",
+            "regra", "regras", "poder", "posso", "pode", "podem", "ser");
 
     private static final Map<String, List<String>> DOMAIN_TOKEN_ALIASES = Map.ofEntries(
             Map.entry("compra", List.of("procurement", "purchase", "purchases")),
