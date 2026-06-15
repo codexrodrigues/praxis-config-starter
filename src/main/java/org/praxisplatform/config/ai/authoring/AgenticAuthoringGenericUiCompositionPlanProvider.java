@@ -47,15 +47,23 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
         AgenticAuthoringCandidate candidate = selectedCandidate(intent);
+        AgenticAuthoringSemanticDecision semanticDecision = intent == null ? null : intent.semanticDecision();
         AgenticAuthoringVisualizationDecision visualizationDecision =
-                intent == null ? null : intent.visualizationDecision();
+                semanticDecision != null && semanticDecision.visualizationDecision() != null
+                        ? semanticDecision.visualizationDecision()
+                        : intent == null ? null : intent.visualizationDecision();
+        String operationKind = semanticDecision != null && !safe(semanticDecision.operationKind()).isBlank()
+                ? safe(semanticDecision.operationKind())
+                : intent == null ? "" : safe(intent.operationKind());
+        String artifactKind = semanticDecision != null && !safe(semanticDecision.artifactKind()).isBlank()
+                ? safe(semanticDecision.artifactKind())
+                : intent == null ? "" : safe(intent.artifactKind());
         if (intent == null
                 || candidate == null
-                || !"create".equals(intent.operationKind())
+                || !"create".equals(operationKind)
                 || !"eligible".equals(intent.gate() == null ? "" : intent.gate().status())) {
             return Optional.empty();
         }
-        String artifactKind = safe(intent.artifactKind());
         boolean tabsDenied = excludesComponent(visualizationDecision, "praxis-tabs");
         boolean tabsRequested = !tabsDenied
                 && (isPrimaryComponent(visualizationDecision, "praxis-tabs")
@@ -201,13 +209,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (intent == null) {
             return null;
         }
-        if (intent.selectedCandidate() != null) {
-            return intent.selectedCandidate();
-        }
         AgenticAuthoringSemanticDecision semanticDecision = intent.semanticDecision();
         AgenticAuthoringSemanticDecision.SelectedResource resource =
                 semanticDecision == null ? null : semanticDecision.selectedResource();
         if (resource == null || safe(resource.resourcePath()).isBlank()) {
+            if (intent.selectedCandidate() != null) {
+                return intent.selectedCandidate();
+            }
             return null;
         }
         return new AgenticAuthoringCandidate(

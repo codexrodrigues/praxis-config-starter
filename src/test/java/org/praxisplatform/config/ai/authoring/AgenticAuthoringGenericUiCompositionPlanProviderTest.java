@@ -943,6 +943,88 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void materializesCanonicalDashboardWhenLegacyArtifactProjectionIsChart() {
+        AgenticAuthoringCandidate selectedCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                "POST",
+                0.49d,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"));
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-payroll-dashboard",
+                "create",
+                "dashboard",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        selectedCandidate.resourcePath(),
+                        selectedCandidate.operation(),
+                        selectedCandidate.schemaUrl(),
+                        selectedCandidate.submitUrl(),
+                        selectedCandidate.submitMethod()),
+                null,
+                AgenticAuthoringSemanticDecision.RetrievalEvidence.from(selectedCandidate, List.of(selectedCandidate)),
+                null,
+                true,
+                "keyword-fallback-fail-safe",
+                "",
+                "",
+                "conversation-1",
+                "turn-1",
+                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
+                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
+                "create:dashboard:create_artifact",
+                "charts",
+                objectMapper.createObjectNode(),
+                null,
+                "",
+                "Selected resource grounds the semantic authoring decision before materialization.",
+                0.49d);
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "chart",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                selectedCandidate,
+                List.of(selectedCandidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("keyword-fallback-fail-safe-applied"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                semanticDecision);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent)).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-resource-dashboard");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-dashboard");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-rich-content", "praxis-table");
+        assertThat(plan.toString())
+                .contains("\"resourcePath\":\"/api/human-resources/vw-analytics-folha-pagamento\"");
+    }
+
+    @Test
     void honorsSelectedResourceInsteadOfSwitchingToRelatedAnalyticalCandidateForCharts() {
         AgenticAuthoringCandidate selectedPeople = new AgenticAuthoringCandidate(
                 "/api/human-resources/funcionarios",
