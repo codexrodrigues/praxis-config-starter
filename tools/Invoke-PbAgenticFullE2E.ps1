@@ -202,8 +202,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             Write-Phase "Smoke mode: API catalog upload scoped to $($smokeCatalogPathPrefixes.Count) human-resources path prefixes."
         } else {
             Remove-Item Env:\API_CATALOG_PATH_PREFIXES -ErrorAction SilentlyContinue
+            Remove-Item Env:\TIMEOUT_MS -ErrorAction SilentlyContinue
             $env:CHUNK_SIZE = "20"
-            $env:TIMEOUT_MS = "180000"
         }
         $env:PAUSE_MS = "0"
         & cmd.exe /c "npx.cmd ts-node --project tools/tsconfig.tools.json tools/ai-registry/upload-api-catalog.ts"
