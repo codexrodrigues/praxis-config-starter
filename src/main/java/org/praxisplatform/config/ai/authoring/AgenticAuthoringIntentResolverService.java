@@ -3071,9 +3071,9 @@ public class AgenticAuthoringIntentResolverService {
             candidates.stream()
                     .filter(candidate -> !hasEvidence(candidate, "explicit-source-match"))
                     .forEach(merged::add);
-            return pruneWeakLexicalCandidatesWhenGrounded(deduplicateCandidates(merged));
+            return pruneWeakLexicalCandidatesWhenGrounded(prompt, deduplicateCandidates(merged));
         }
-        return pruneWeakLexicalCandidatesWhenGrounded(deduplicateCandidates(
+        return pruneWeakLexicalCandidatesWhenGrounded(prompt, deduplicateCandidates(
                 domainCatalogCandidateEnhancer.enhance(prompt, candidates, tenantId, environment)));
     }
 
@@ -3102,6 +3102,7 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private List<AgenticAuthoringCandidate> pruneWeakLexicalCandidatesWhenGrounded(
+            String prompt,
             List<AgenticAuthoringCandidate> candidates) {
         if (candidates == null || candidates.isEmpty()) {
             return candidates == null ? List.of() : candidates;
@@ -3114,7 +3115,8 @@ public class AgenticAuthoringIntentResolverService {
             return candidates;
         }
         return candidates.stream()
-                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .filter(candidate -> !isWeakLexicalCandidate(candidate)
+                        || promptMentionsSpecificCandidateToken(prompt, candidate))
                 .toList();
     }
 

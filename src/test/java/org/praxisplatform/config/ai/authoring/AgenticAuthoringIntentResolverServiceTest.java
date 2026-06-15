@@ -13,8 +13,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.ContextRetrievalService;
 
 @Tag("unit")
 class AgenticAuthoringIntentResolverServiceTest {
@@ -8845,6 +8847,148 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void businessRulePromptPrefersCanonicalMetadataMatchWhenRagReturnsUnrelatedStrongResource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadata(
+                        "/api/human-resources/habilidades",
+                        "POST",
+                        "human resources skills",
+                        "Habilidades",
+                        "Competencias e habilidades de funcionarios."),
+                apiMetadata(
+                        "/api/procurement/suppliers",
+                        "POST",
+                        "procurement,fornecedor,fornecedores,supplier,suppliers,compras,elegibilidade,bloqueado,inativo",
+                        "Fornecedores",
+                        "Cadastro e selecao de fornecedores usados em compras."),
+                apiMetadata(
+                        "/api/procurement/purchase-orders",
+                        "POST",
+                        "procurement,pedido,pedidos,compra,compras,purchase order,purchase orders",
+                        "Pedidos de compra",
+                        "Pedidos de compra usados em compras.")));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        ApiSearchResult unrelatedStrongResult = new ApiSearchResult();
+        unrelatedStrongResult.setPath("/api/human-resources/habilidades");
+        unrelatedStrongResult.setMethod("POST");
+        unrelatedStrongResult.setSummary("Competencias e habilidades de funcionarios.");
+        unrelatedStrongResult.setSimilarityScore(0.98d);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(unrelatedStrongResult));
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+    }
+
+    @Test
+    void businessRulePromptKeepsPromptAlignedLexicalCandidateWhenDomainGroundingHitsDifferentResource() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringCandidate unrelatedGroundedCandidate = richCandidate(
+                "/api/human-resources/habilidades",
+                0.98d,
+                "Habilidades",
+                "Competencias e habilidades de funcionarios.");
+        AgenticAuthoringCandidate promptAlignedSupplierCandidate = weakLexicalCandidate(
+                "/api/procurement/suppliers",
+                0.64d,
+                "procurement,fornecedor,fornecedores,supplier,suppliers,compras,elegibilidade,bloqueado,inativo",
+                "Cadastro e selecao de fornecedores usados em compras.");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(unrelatedGroundedCandidate, promptAlignedSupplierCandidate));
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                Mockito.mock(AgenticAuthoringDomainCatalogCandidateEnhancer.class);
+        Mockito.when(enhancer.enhance(
+                        Mockito.anyString(),
+                        Mockito.anyList(),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class)))
+                .thenAnswer(invocation -> {
+                    List<AgenticAuthoringCandidate> candidates = invocation.getArgument(1);
+                    return candidates.stream()
+                            .map(candidate -> "/api/human-resources/habilidades".equals(candidate.resourcePath())
+                                    ? withEvidence(
+                                    candidate,
+                                    AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                                    : candidate)
+                            .toList();
+                });
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null,
+                null,
+                enhancer);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+    }
+
+    @Test
     void metadataBackedResourceQuickReplyIdsRemainUniqueWhenResourcePathRepeats() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
@@ -9048,6 +9192,49 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "tenant",
                                 "local",
                                 "release"))));
+    }
+
+    private AgenticAuthoringCandidate weakLexicalCandidate(
+            String resourcePath,
+            double score,
+            String matchedText,
+            String summary) {
+        String submitUrl = resourcePath + "/filter/cursor";
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                "post",
+                "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response",
+                submitUrl,
+                "POST",
+                score,
+                matchedText + " - " + summary,
+                List.of("api-metadata", "lexical-fallback", "weak-evidence", "schema-probe-pending"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                resourcePath,
+                                matchedText + " " + summary,
+                                Math.min(score, 0.49d),
+                                List.of(),
+                                "tenant",
+                                "local",
+                                "release"))));
+    }
+
+    private AgenticAuthoringCandidate withEvidence(AgenticAuthoringCandidate candidate, String evidence) {
+        List<String> nextEvidence = new java.util.ArrayList<>(candidate.evidence());
+        nextEvidence.add(evidence);
+        return new AgenticAuthoringCandidate(
+                candidate.resourcePath(),
+                candidate.operation(),
+                candidate.schemaUrl(),
+                candidate.submitUrl(),
+                candidate.submitMethod(),
+                candidate.score(),
+                candidate.reason(),
+                nextEvidence,
+                candidate.evidenceBundle());
     }
 
     private record RoutingCase(String prompt, String resourcePath) {
