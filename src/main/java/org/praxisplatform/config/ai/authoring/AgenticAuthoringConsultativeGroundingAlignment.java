@@ -18,7 +18,10 @@ final class AgenticAuthoringConsultativeGroundingAlignment {
             "api", "apis", "dado", "dados", "fonte", "fontes", "informacao", "informacoes", "recurso", "recursos",
             "administrativo", "tela", "telas",
             "consultar", "consulta", "consultas", "existe", "existem", "recomenda", "recomendar",
-            "recomendacao", "recomendacoes");
+            "recomendacao", "recomendacoes",
+            "eu", "poder", "pode", "podem", "vou", "ter",
+            "montar", "monte", "montando", "montada", "montadas",
+            "construir", "construa", "construindo", "preparar", "prepare");
     private static final Set<String> AUTHORING_ARTIFACT_TERMS = Set.of(
             "cadastro", "cadastros", "dashboard", "dashboards", "form", "forms", "formulario", "formularios",
             "grafico", "graficos", "painel", "paineis", "table", "tables", "tabela", "tabelas");

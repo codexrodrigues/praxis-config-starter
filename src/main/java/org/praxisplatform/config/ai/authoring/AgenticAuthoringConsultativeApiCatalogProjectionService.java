@@ -40,7 +40,10 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             "fazer", "criar", "aqui", "explique", "explicar", "consultar", "consulta", "consultas", "gerar",
             "incluir", "tipo", "tipos", "usar", "uso",
             "recomenda", "recomendar", "recomendacao", "recomendacoes", "recomendações", "criada", "criadas",
-            "esta", "estao", "estão", "sem", "ainda");
+            "esta", "estao", "estão", "sem", "ainda",
+            "eu", "me", "pra", "poder", "pode", "podem", "vou", "ter",
+            "montar", "monte", "montando", "montada", "montadas",
+            "construir", "construa", "construindo", "preparar", "prepare");
     private static final Set<String> AUTHORING_ARTIFACT_TERMS = Set.of(
             "cadastro", "cadastros", "dashboard", "dashboards", "form", "forms", "formulario", "formularios",
             "grafico", "graficos", "painel", "paineis", "table", "tables", "tabela", "tabelas");

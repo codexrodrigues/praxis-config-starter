@@ -341,7 +341,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         when(repository.findAll()).thenReturn(List.of());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
-        String prompt = "posso criar tabelas com quais dados?";
+        String prompt = "quais dados existem aqui para eu montar uma tabela?";
         when(domainCatalog.contextLatest(
                 Mockito.eq("praxis-service"),
                 Mockito.isNull(),
