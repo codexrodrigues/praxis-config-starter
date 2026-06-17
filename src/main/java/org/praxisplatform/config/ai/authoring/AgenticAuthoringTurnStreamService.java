@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -64,6 +65,7 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, ScheduledFuture<?>> heartbeatTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> processingTimeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> processingProgressTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, Future<?>> processingTasks = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> streamStartedAtByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AiTurnEventEnvelope> latestEventByStream = new ConcurrentHashMap<>();
@@ -141,7 +143,6 @@ public class AgenticAuthoringTurnStreamService {
         }
 
         UUID streamId = UUID.randomUUID();
-        streamStartedAtByStream.put(streamId, Instant.now());
         UUID observationId = captureObservation(
                 threadRequest,
                 principalContext,
@@ -151,16 +152,42 @@ public class AgenticAuthoringTurnStreamService {
                 request.userPrompt());
         Instant expiresAt = Instant.now().plusSeconds(Math.max(streamExpiresSeconds, 60L));
         turnService.reserveTurnForStreaming(threadId, turnId);
-        appendAndEmit(principalContext, streamId, threadId, turnId, "status", Map.of(
+        AiTurnEventService.StreamStartAppendResult startAppend =
+                turnEventService.appendStartEventIfAbsent(principalContext, streamId, threadId, turnId, Map.of(
                 "state", "started",
                 "phase", "context.bundle",
                 "message", "Agentic authoring stream started.",
                 "requestHash", stableUuid("agentic-authoring-request", request.userPrompt() + "|" + request.clientTurnId()).toString(),
                 "activeSemanticDecisionId", activeSemanticDecision == null ? "" : activeSemanticDecision.decisionId(),
                 "expiresAt", expiresAt.toString()));
+        AiTurnEventEnvelope startEvent = startAppend.event();
+        rememberLatestEvent(startEvent.getStreamId(), startEvent);
+        if (!startAppend.appended()) {
+            UUID existingObservationId = captureObservation(
+                    threadRequest,
+                    principalContext,
+                    startEvent.getStreamId(),
+                    startEvent.getThreadId(),
+                    startEvent.getTurnId(),
+                    request.userPrompt());
+            return new StartResult(startResponse(
+                    startEvent.getStreamId(),
+                    existingObservationId,
+                    startEvent.getThreadId(),
+                    startEvent.getTurnId(),
+                    expiresAt(startEvent),
+                    baseUrl,
+                    principalContext), false);
+        }
+        streamStartedAtByStream.put(streamId, Instant.now());
         scheduleProcessingTimeout(principalContext, streamId, threadId, turnId);
         scheduleProcessingProgress(principalContext, streamId, threadId, turnId);
-        executor.submit(() -> process(principalContext, streamId, threadId, turnId, effectiveRequest, baseUrl));
+        Future<?> processingTask =
+                executor.submit(() -> process(principalContext, streamId, threadId, turnId, effectiveRequest, baseUrl));
+        processingTasks.put(streamId, processingTask);
+        if (processingTask.isDone()) {
+            processingTasks.remove(streamId, processingTask);
+        }
         return new StartResult(startResponse(streamId, observationId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
     }
 
@@ -321,6 +348,7 @@ public class AgenticAuthoringTurnStreamService {
                     .message("Stream already reached terminal state.")
                     .build();
         }
+        cancelProcessing(streamId, true);
         turnService.cancelTurn(ownership.threadId(), ownership.turnId());
         return AiPatchStreamCancelResponse.builder()
                 .streamId(streamId)
@@ -411,6 +439,7 @@ public class AgenticAuthoringTurnStreamService {
                         "phase", "agentic-authoring",
                         "timeoutSeconds", timeoutSeconds));
                 if (appendedType(terminalResult, "error")) {
+                    cancelProcessing(streamId, true);
                     turnService.expireTurn(threadId, turnId);
                 }
             } catch (Exception ex) {
@@ -664,6 +693,10 @@ public class AgenticAuthoringTurnStreamService {
         if (processingProgressTask != null) {
             processingProgressTask.cancel(false);
         }
+        Future<?> processingTask = processingTasks.remove(streamId);
+        if (processingTask != null && !processingTask.isDone()) {
+            processingTask.cancel(false);
+        }
         stopHeartbeat(streamId);
         ScheduledFuture<?> replayTask = replayTasks.remove(streamId);
         if (replayTask != null) {
@@ -677,6 +710,20 @@ public class AgenticAuthoringTurnStreamService {
         streamStartedAtByStream.remove(streamId);
         terminalByStream.remove(streamId);
         latestEventByStream.remove(streamId);
+    }
+
+    private void cancelProcessing(UUID streamId, boolean mayInterruptIfRunning) {
+        Future<?> processingTask = processingTasks.remove(streamId);
+        if (processingTask != null && !processingTask.isDone()) {
+            processingTask.cancel(mayInterruptIfRunning);
+        }
+    }
+
+    private Instant expiresAt(AiTurnEventEnvelope startEvent) {
+        Instant timestamp = startEvent != null && startEvent.getTimestamp() != null
+                ? startEvent.getTimestamp()
+                : Instant.now();
+        return timestamp.plusSeconds(Math.max(streamExpiresSeconds, 60L));
     }
 
     private long streamElapsedSeconds(UUID streamId) {

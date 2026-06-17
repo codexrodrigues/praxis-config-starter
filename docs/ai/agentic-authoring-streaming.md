@@ -366,9 +366,16 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 | `status` | `state`, `phase`, `message` |
 | `thought.step` | `phase`, `tool`, `summary`, `diagnostics` seguro, `streamEventDiagnostics` quando houver dedupe auditavel |
 | `heartbeat` | metadados de keep-alive |
+| `intent.resolved` | `schemaVersion`, `semanticDecisionRef`, `routeClass`, `resolved`, `userFacingUnderstanding`, `requiresClarification`, `canMaterialize`, `fallbackKind`, `requiredTools`, `evidenceRefs`, `confidence`, `warnings` |
 | `result` | `intentResolution`, `preview`, `assistantMessage`, `quickReplies`, `canApply`, `decisionDiagnostics`, `streamEventDiagnostics` quando houver dedupe auditavel |
 | `error` | `code`, `assistantMessage`, `message`, `phase` |
 | `cancelled` | `message`, `phase` |
+
+`intent.resolved` e um evento persistido, replay-safe e nao terminal. Ele deve
+alimentar a UI com a interpretacao segura da intencao do usuario, por exemplo
+`userFacingUnderstanding`, sem expor chain-of-thought nem autorizar aplicacao.
+Clientes devem continuar aguardando `result`, `error` ou `cancelled` para
+encerrar o estado de processamento.
 
 Durante turnos longos, especialmente quando a LLM esta resolvendo intencao ou
 revisando recursos recuperados por RAG/catalogos governados, o backend deve
@@ -402,6 +409,28 @@ authoring podem envolver discovery, RAG, multiplas chamadas LLM e materializacao
 no mesmo ciclo. Smokes e hosts podem reduzir esse valor explicitamente quando
 usarem doubles deterministas. Ao estourar esse limite, o backend emite `error`
 terminal com `code=agentic-authoring-timeout` e expira a reserva do turno.
+
+A resolucao semantica de intencao tem timeouts proprios, menores que o timeout
+global do turno, para impedir que a conversa fique aguardando uma classificacao
+LLM lenta antes de conseguir emitir clarificacao ou diagnostico seguro. O passe
+compacto usa `praxis.ai.authoring.intent-resolution.fast-timeout-seconds`
+(`PRAXIS_AI_AUTHORING_INTENT_RESOLUTION_FAST_TIMEOUT_SECONDS`, default `12s`) e
+o passe completo usa
+`praxis.ai.authoring.intent-resolution.full-timeout-seconds`
+(`PRAXIS_AI_AUTHORING_INTENT_RESOLUTION_FULL_TIMEOUT_SECONDS`, default `30s`).
+Esses limites governam apenas a chamada do provider para decidir intencao; eles
+nao encerram o stream por si so. Quando o provider falha ou estoura timeout, o
+backend deve materializar uma resolucao nao aplicada, com warnings como
+`llm-intent-resolution-failed`, `llm-provider-error` e `llm-provider-timeout`,
+preservando terminalidade normal do turno. Essa falha tambem e uma fronteira
+fail-closed de decisao primaria: o backend nao deve promover fallback lexical
+ou keyword para selecionar recurso, nao deve gerar preview e nao deve aplicar
+materializacao. O turno deve terminar com `result` clarificativo
+`canApply=false`, `gate.status=clarification_required`,
+`operationKind=unknown`, `artifactKind=unknown`, `changeKind=provider_error`,
+`selectedCandidate=null` e texto user-facing que confirme se o usuario quer
+consultar dados, criar tabela/formulario/grafico/painel ou seguir outra rota
+canonica.
 
 Erros terminais devem separar texto de usuario e diagnostico tecnico. `code`
 deve ser estavel para i18n e tratamento no cliente; `assistantMessage` deve ser

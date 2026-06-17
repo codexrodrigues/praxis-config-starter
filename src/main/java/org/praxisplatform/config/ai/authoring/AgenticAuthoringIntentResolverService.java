@@ -235,8 +235,10 @@ public class AgenticAuthoringIntentResolverService {
         boolean llmTreatsPendingAsNewInstruction = turn.answeredPendingClarification()
                 && isLlmFollowUpKind(llmIntent, "new_instruction");
         boolean llmSecondPassUsed = false;
+        boolean primaryLlmIntentProviderFailure = isPrimaryLlmIntentProviderFailure(shouldResolveLlmIntent, llmIntent);
         boolean deterministicFallbackApplied = !shouldResolveLlmIntent
-                || (shouldResolveLlmIntent && (llmIntent == null || !llmIntent.resolved()));
+                || (shouldResolveLlmIntent
+                && (llmIntent == null || (!llmIntent.resolved() && !primaryLlmIntentProviderFailure)));
         boolean semanticPolicyRefinedVisualProjection = false;
         boolean visualProjectionRefinement = isVisualProjectionRefinementPrompt(prompt, turn, currentPageSummary);
         boolean currentPageDrilldownRefinement =
@@ -283,7 +285,9 @@ public class AgenticAuthoringIntentResolverService {
             }
             llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
         }
-        if ((llmIntent == null || !llmIntent.resolved()) && consultativeDomainQuestion) {
+        if (!primaryLlmIntentProviderFailure
+                && (llmIntent == null || !llmIntent.resolved())
+                && consultativeDomainQuestion) {
             operationKind = "explore";
             artifactKind = "api_catalog";
             changeKind = "answer_api_catalog_question";
@@ -369,17 +373,24 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
             }
         } else if (llmIntent != null) {
-            operationKind = fallbackResolution.operationKind();
-            artifactKind = fallbackResolution.artifactKind();
-            changeKind = fallbackResolution.changeKind();
-            deterministicFallbackApplied = true;
-            if (candidates.isEmpty()
-                    || isBroadArtifactDiscoveryOnly(candidates)) {
-                candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
-                candidates = withContextHintCandidates(request, candidates);
-                contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
-                if (contextHintCandidate != null) {
-                    candidates = withPriorityCandidate(candidates, contextHintCandidate);
+            if (primaryLlmIntentProviderFailure) {
+                operationKind = "unknown";
+                artifactKind = "unknown";
+                changeKind = "provider_error";
+                deterministicFallbackApplied = false;
+            } else {
+                operationKind = fallbackResolution.operationKind();
+                artifactKind = fallbackResolution.artifactKind();
+                changeKind = fallbackResolution.changeKind();
+                deterministicFallbackApplied = true;
+                if (candidates.isEmpty()
+                        || isBroadArtifactDiscoveryOnly(candidates)) {
+                    candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
+                    candidates = withContextHintCandidates(request, candidates);
+                    contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
+                    if (contextHintCandidate != null) {
+                        candidates = withPriorityCandidate(candidates, contextHintCandidate);
+                    }
                 }
             }
         } else if (shouldResolveLlmIntent && !"unknown".equals(artifactKind)) {
@@ -484,34 +495,36 @@ public class AgenticAuthoringIntentResolverService {
             candidates = deduplicateCandidates(candidates);
         }
         AgenticAuthoringCandidate selectedCandidate = explicitLocalUiComposition
+                || primaryLlmIntentProviderFailure
                 ? null
                 : selectCandidate(candidates, target, operationKind, artifactKind, prompt);
-        selectedCandidate = explicitLocalUiComposition
+        selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
-        selectedCandidate = explicitLocalUiComposition
+        selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectContextHintCandidate(preLlmGovernedResourceChoiceCandidate, candidates, selectedCandidate);
-        selectedCandidate = explicitLocalUiComposition
+        selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectLlmCandidate(llmIntent, candidates, selectedCandidate, artifactKind, prompt);
         boolean llmResourceSelectionOverriddenByPromptAlignment = !explicitLocalUiComposition
+                && !primaryLlmIntentProviderFailure
                 && llmResourceSelectionOverriddenByPromptAlignment(
                         llmIntent,
                         candidates,
                         selectedCandidate,
                         artifactKind,
                         prompt);
-        selectedCandidate = explicitLocalUiComposition
+        selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectContextHintCandidate(contextHintCandidate, candidates, selectedCandidate);
-        selectedCandidate = explicitLocalUiComposition
+        selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectContextHintCandidate(preLlmGovernedResourceChoiceCandidate, candidates, selectedCandidate);
-        selectedCandidate = explicitLocalUiComposition
+        selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectFormWriteCandidate(artifactKind, candidates, selectedCandidate, prompt);
-        selectedCandidate = explicitLocalUiComposition
+        selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectContextHintCandidate(explicitResourcePathCandidate, candidates, selectedCandidate);
         if (shouldSuppressWeakUnresolvedLlmSelection(
@@ -643,7 +656,10 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
-        if (selectedCandidate == null && !explicitLocalUiComposition && !apiCatalogWeakLexicalSelectionDeferred) {
+        if (selectedCandidate == null
+                && !explicitLocalUiComposition
+                && !primaryLlmIntentProviderFailure
+                && !apiCatalogWeakLexicalSelectionDeferred) {
             selectedCandidate = selectCandidate(candidates, target, operationKind, artifactKind, prompt);
             if (selectedCandidate == null) {
                 selectedCandidate = targetCandidate(target);
@@ -683,6 +699,12 @@ public class AgenticAuthoringIntentResolverService {
                 && startsWithConfirmation(rawPrompt)) {
             selectedCandidate = null;
         }
+        if (primaryLlmIntentProviderFailure) {
+            operationKind = "unknown";
+            artifactKind = "unknown";
+            changeKind = "provider_error";
+            selectedCandidate = null;
+        }
         AgenticAuthoringGateResult gate = eligibilityGate.evaluate(
                 operationKind,
                 artifactKind,
@@ -693,6 +715,7 @@ public class AgenticAuthoringIntentResolverService {
         gate = withPromptSpecificGateMessages(gate, rawPrompt, prompt, operationKind, artifactKind, selectedCandidate, turn);
         gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied);
         gate = withExplicitLocalUiCompositionGate(gate, explicitLocalUiComposition, explicitLocalTargetedComposition);
+        gate = withPrimaryLlmProviderFailureGate(gate, primaryLlmIntentProviderFailure);
         List<String> questions = clarificationQuestions(gate, operationKind, artifactKind, selectedCandidate, candidates);
         questions = llmClarificationQuestions(llmIntent, gate, questions);
         boolean answeredBareDomainClarification = turn.answeredPendingClarification()
@@ -720,6 +743,13 @@ public class AgenticAuthoringIntentResolverService {
                         changeKind,
                         selectedCandidate)) {
             assistantMessage = llmIntent.assistantMessage();
+        }
+        if (primaryLlmIntentProviderFailure) {
+            assistantMessage = llmIntent != null
+                    && llmIntent.assistantMessage() != null
+                    && !llmIntent.assistantMessage().isBlank()
+                    ? llmIntent.assistantMessage()
+                    : "Não consegui confirmar a sua intenção com segurança agora. Confirme se você quer consultar dados disponíveis, criar uma tabela, montar um formulário ou gerar uma visualização.";
         }
         if (isConsultativePlatformCapabilityQuestion(prompt)
                 && shouldUsePlatformGuidanceMessage(prompt, assistantMessage)) {
@@ -810,7 +840,7 @@ public class AgenticAuthoringIntentResolverService {
                 changeKind,
                 selectedCandidate);
         boolean keywordFallbackAppliedForGovernance =
-                deterministicFallbackApplied && !governedDeterministicResolution;
+                deterministicFallbackApplied && !governedDeterministicResolution && !primaryLlmIntentProviderFailure;
         List<String> warnings = warnings(llmIntent);
         if (llmTreatsPendingAsNewInstruction) {
             warnings = withWarning(warnings, "llm-follow-up-kind-new-instruction");
@@ -2700,13 +2730,43 @@ public class AgenticAuthoringIntentResolverService {
         } else {
             warnings.add("llm-intent-resolution-used");
             if (!llmIntent.resolved()) {
-                warnings.add("llm-intent-resolution-unresolved-fallback-deterministic");
+                warnings.add(isLlmProviderFailure(llmIntent)
+                        ? "llm-intent-resolution-provider-failed-clarification-required"
+                        : "llm-intent-resolution-unresolved-fallback-deterministic");
             }
             if (llmIntent.warnings() != null) {
                 warnings.addAll(llmIntent.warnings());
             }
         }
         return List.copyOf(warnings);
+    }
+
+    private boolean isPrimaryLlmIntentProviderFailure(
+            boolean shouldResolveLlmIntent,
+            AgenticAuthoringLlmIntentResolution llmIntent) {
+        return shouldResolveLlmIntent
+                && llmIntent != null
+                && !llmIntent.resolved()
+                && isLlmProviderFailure(llmIntent);
+    }
+
+    private boolean isLlmProviderFailure(AgenticAuthoringLlmIntentResolution llmIntent) {
+        if (llmIntent == null) {
+            return false;
+        }
+        if ("provider_error".equals(valueOrDefault(llmIntent.followUpKind(), ""))) {
+            return true;
+        }
+        return hasLlmWarning(llmIntent, "llm-intent-resolution-failed")
+                || hasLlmWarning(llmIntent, "llm-provider-error")
+                || hasLlmWarning(llmIntent, "llm-provider-timeout");
+    }
+
+    private boolean hasLlmWarning(AgenticAuthoringLlmIntentResolution llmIntent, String warning) {
+        return llmIntent != null
+                && warning != null
+                && llmIntent.warnings() != null
+                && llmIntent.warnings().contains(warning);
     }
 
     private List<String> sanitizeConsultativeWarnings(
@@ -2765,7 +2825,7 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringGateResult gate,
             List<String> fallbackQuestions) {
         if (llmIntent == null
-                || !llmIntent.resolved()
+                || (!llmIntent.resolved() && !isLlmProviderFailure(llmIntent))
                 || gate == null
                 || !"clarification_required".equals(gate.status())
                 || llmIntent.clarificationQuestions() == null
@@ -4023,6 +4083,22 @@ public class AgenticAuthoringIntentResolverService {
                 .toList();
         String status = messages.isEmpty() ? "eligible" : gate.status();
         return new AgenticAuthoringGateResult(gate.gateId(), status, messages);
+    }
+
+    private AgenticAuthoringGateResult withPrimaryLlmProviderFailureGate(
+            AgenticAuthoringGateResult gate,
+            boolean primaryLlmIntentProviderFailure) {
+        if (!primaryLlmIntentProviderFailure || gate == null) {
+            return gate;
+        }
+        List<String> messages = new ArrayList<>(gate.messages() == null ? List.of() : gate.messages());
+        if (!messages.contains("llm-intent-resolution-provider-failed")) {
+            messages.add("llm-intent-resolution-provider-failed");
+        }
+        if (!messages.contains("semantic-intent-confirmation-required")) {
+            messages.add("semantic-intent-confirmation-required");
+        }
+        return new AgenticAuthoringGateResult(gate.gateId(), "clarification_required", List.copyOf(messages));
     }
 
     private boolean hasExplicitLocalComponentTarget(

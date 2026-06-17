@@ -3329,21 +3329,27 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("explore");
-        assertThat(result.artifactKind()).isEqualTo("api_catalog");
-        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("provider_error");
         assertThat(result.selectedCandidate()).isNull();
-        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
         assertThat(result.assistantMessage())
-                .contains("consulta")
+                .contains("Não consegui confirmar")
                 .doesNotContain("fonte de negócio selecionada", "preparar uma previa");
+        assertThat(result.failureCodes())
+                .contains("llm-intent-resolution-provider-failed", "semantic-intent-confirmation-required");
         assertThat(result.warnings())
                 .contains(
                         "llm-intent-resolution-used",
                         "llm-provider-error",
-                        "api-catalog-weak-lexical-selection-deferred")
-                .doesNotContain("resource-selection-lexical-fallback-selected");
+                        "llm-intent-resolution-provider-failed-clarification-required")
+                .doesNotContain(
+                        "keyword-fallback-applied",
+                        "keyword-fallback-fail-safe-applied",
+                        "api-catalog-weak-lexical-selection-deferred",
+                        "resource-selection-lexical-fallback-selected");
         Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
@@ -8018,6 +8024,80 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("keyword-fallback-applied", "pre-llm-governed-resource-choice-applied")
                 .doesNotContain("llm-intent-resolution-failed", "llm-provider-timeout");
         Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
+    void openCatalogQuestionRequiresClarificationWhenPrimaryLlmIntentTimesOut() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "unknown",
+                        null,
+                        null,
+                        "provider_error",
+                        "Não consegui confirmar a intenção com segurança agora. Confirme se você quer consultar dados, criar tabela, formulário ou gráfico.",
+                        List.of(),
+                        List.of("Você quer consultar quais dados existem ou já quer criar uma visualização?"),
+                        List.of("llm-intent-resolution-failed", "llm-provider-timeout"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "que dados existem aqui para gerar gráficos?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("provider_error");
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes())
+                .contains("llm-intent-resolution-provider-failed", "semantic-intent-confirmation-required");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.clarificationQuestions())
+                .containsExactly("Você quer consultar quais dados existem ou já quer criar uma visualização?");
+        assertThat(result.assistantMessage())
+                .contains("Não consegui confirmar a intenção com segurança");
+        assertThat(result.warnings())
+                .contains(
+                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-provider-failed-clarification-required",
+                        "llm-intent-resolution-failed",
+                        "llm-provider-timeout")
+                .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test

@@ -31,10 +31,14 @@ public class AgenticAuthoringLlmIntentResolverService {
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
     private static final int MAX_FAST_INTENT_RESOLUTION_TOKENS = 1800;
     private static final int MAX_INTENT_RESOLUTION_TOKENS = 4096;
+    private static final int DEFAULT_FAST_INTENT_TIMEOUT_SECONDS = 12;
+    private static final int DEFAULT_FULL_INTENT_TIMEOUT_SECONDS = 30;
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
     private final DomainCatalogPromptContextService domainCatalogPromptContextService;
+    private final int fastIntentTimeoutSeconds;
+    private final int fullIntentTimeoutSeconds;
 
     public AgenticAuthoringLlmIntentResolverService(
             AiProviderManagementService providerManagementService,
@@ -46,9 +50,29 @@ public class AgenticAuthoringLlmIntentResolverService {
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
             DomainCatalogPromptContextService domainCatalogPromptContextService) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                DEFAULT_FAST_INTENT_TIMEOUT_SECONDS,
+                DEFAULT_FULL_INTENT_TIMEOUT_SECONDS);
+    }
+
+    public AgenticAuthoringLlmIntentResolverService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            int fastIntentTimeoutSeconds,
+            int fullIntentTimeoutSeconds) {
         this.providerManagementService = Objects.requireNonNull(providerManagementService, "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.domainCatalogPromptContextService = domainCatalogPromptContextService;
+        this.fastIntentTimeoutSeconds = positiveOrDefault(
+                fastIntentTimeoutSeconds,
+                DEFAULT_FAST_INTENT_TIMEOUT_SECONDS);
+        this.fullIntentTimeoutSeconds = positiveOrDefault(
+                fullIntentTimeoutSeconds,
+                DEFAULT_FULL_INTENT_TIMEOUT_SECONDS);
     }
 
     public Optional<AgenticAuthoringLlmIntentResolution> resolve(
@@ -98,7 +122,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
                             .maxTokens(MAX_INTENT_RESOLUTION_TOKENS)
-                            .timeoutSeconds(45)
+                            .timeoutSeconds(fullIntentTimeoutSeconds)
                             .build(),
                     tenantId,
                     userId,
@@ -123,9 +147,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 null,
                 null,
                 "provider_error",
-                "Tive um problema para concluir essa leitura agora. Posso continuar com o recurso mais provavel, mas antes de criar algo preciso confirmar se ele representa o dominio certo.",
+                "Não consegui confirmar a sua intenção com segurança agora. Confirme se você quer consultar dados disponíveis, criar uma tabela, montar um formulário ou gerar uma visualização.",
                 List.of(),
-                List.of("Qual recurso de negocio deve orientar esta decisao?"),
+                List.of("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?"),
                 providerFailureWarnings(rootCause),
                 null,
                 null);
@@ -169,7 +193,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
                             .maxTokens(MAX_FAST_INTENT_RESOLUTION_TOKENS)
-                            .timeoutSeconds(45)
+                            .timeoutSeconds(fastIntentTimeoutSeconds)
                             .build(),
                     tenantId,
                     userId,
@@ -196,6 +220,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                     safeProviderFailureSummary(rootCause(ex)));
         }
         return Optional.empty();
+    }
+
+    private int positiveOrDefault(int value, int fallback) {
+        return value > 0 ? value : fallback;
     }
 
     private String fastIntentRejectionReason(AgenticAuthoringLlmIntentResolution resolution) {

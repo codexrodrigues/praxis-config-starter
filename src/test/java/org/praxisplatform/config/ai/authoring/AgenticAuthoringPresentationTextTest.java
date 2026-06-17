@@ -54,6 +54,44 @@ class AgenticAuthoringPresentationTextTest {
     }
 
     @Test
+    void assistantReplyDoesNotTreatHumanSlashPhrasesAsTechnicalPaths() {
+        String message = """
+                Capacidades relevantes para gráficas/estatísticas:
+                O que você pode criar/abrir aqui:
+                distribuições, agrupamentos, série temporal e métricas para dashboards.
+                Use /api/human-resources/funcionarios apenas como referência técnica.
+                """;
+
+        String publicMessage = AgenticAuthoringPresentationText.assistantReply(message);
+
+        assertThat(publicMessage)
+                .contains("gráficas/estatísticas")
+                .contains("criar/abrir")
+                .contains("métricas")
+                .contains("fonte confirmada")
+                .doesNotContain("gráfonte confirmada")
+                .doesNotContain("méfonte confirmada")
+                .doesNotContain("pode fonte confirmada");
+    }
+
+    @Test
+    void assistantReplyTurnsResourcePathEvidenceIntoReadableSourceStatement() {
+        String message = """
+                Campos disponíveis:
+                resourcePath: operations/missao-eventos — fonte deste conjunto de dados.
+                """;
+
+        String publicMessage = AgenticAuthoringPresentationText.assistantReply(message);
+
+        assertThat(publicMessage)
+                .contains("fonte governada confirmada pelo catálogo")
+                .contains("fonte deste conjunto de dados")
+                .doesNotContain("fonte: fonte confirmada")
+                .doesNotContain("resourcePath")
+                .doesNotContain("operations/missao-eventos");
+    }
+
+    @Test
     void assistantReplyRemovesTableAssistantCatalogInternalsFromConsultativeAnswers() {
         String message = """
                 Você pode criar (ou abrir) as seguintes tabelas/surfaces a partir deste contexto:

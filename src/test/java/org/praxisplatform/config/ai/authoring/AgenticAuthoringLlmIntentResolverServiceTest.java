@@ -146,6 +146,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .doesNotContain("/api/human-resources/funcionarios")
                 .doesNotContain("contextBundle:");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(12);
         assertThat(schemaCaptor.getValue().jsonSchema())
                 .contains("\"requiresGovernedAuthoring\"")
                 .contains("\"required\"")
@@ -502,6 +503,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.visualizationDecision().axes()).hasSize(1);
         assertThat(result.visualizationDecision().axes().get(0).field()).isEqualTo("status");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(4096);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(30);
     }
 
     @Test
@@ -927,11 +929,11 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("llm-intent-resolution-failed", "llm-provider-error")
                 .doesNotContain("provider quota exhausted");
         assertThat(resolution.assistantMessage())
-                .contains("Tive um problema")
-                .contains("confirmar")
+                .contains("Não consegui confirmar")
+                .contains("tabela")
                 .doesNotContain("provider quota exhausted");
         assertThat(resolution.clarificationQuestions())
-                .contains("Qual recurso de negocio deve orientar esta decisao?");
+                .contains("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?");
     }
 
     @Test

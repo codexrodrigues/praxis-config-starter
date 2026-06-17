@@ -338,7 +338,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                         warnings(category, projection)));
         } catch (RuntimeException ex) {
             if (domainAvailabilityQuestion || explicitNoMaterialization) {
-                log.warn("[AgenticAuthoring] Consultative fast answer failed; returning grounded no-materialization fallback. reason={}",
+                log.warn("[AgenticAuthoring] Post-intent consultative answer failed; returning grounded no-materialization fallback. reason={}",
                         ex.getClass().getSimpleName());
                 if (explicitNoMaterialization) {
                     Optional<String> capabilityMessage = componentCapabilityFallbackMessage(
@@ -368,7 +368,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                 }
                 return explicitNoMaterializationFallback(request.userPrompt(), componentCapabilities, projection);
             }
-            log.warn("[AgenticAuthoring] Consultative fast answer failed; falling back to regular route. reason={}",
+            log.warn("[AgenticAuthoring] Post-intent consultative answer failed; falling back to regular route. reason={}",
                     ex.getClass().getSimpleName());
             return Optional.empty();
         }
@@ -405,26 +405,6 @@ public class AgenticAuthoringConsultativeAnswerService {
                 tenantId,
                 userId,
                 environment);
-    }
-
-    boolean shouldPreferPreResolutionConsultativeAnswer(AgenticAuthoringTurnStreamRequest request) {
-        if (request == null || !StringUtils.hasText(request.userPrompt())) {
-            return false;
-        }
-        String prompt = request.userPrompt();
-        if (clearlyRequestsMaterialization(prompt)) {
-            return false;
-        }
-        ObjectNode initialRuntimeContext = runtimeConsultableContext(request);
-        boolean pendingRuntimeDisambiguationContext =
-                safePendingRuntimeRelatedSurfaceDisambiguationContext(request, initialRuntimeContext) != null;
-        return pendingRuntimeDisambiguationContext
-                || isDomainAvailabilityQuestion(prompt)
-                || isComponentCatalogQuestion(prompt)
-                || explicitlyForbidsMaterialization(prompt)
-                || (initialRuntimeContext != null
-                && !initialRuntimeContext.isEmpty()
-                && startsLikeConsultativeQuestion(normalizeForIntentConstraint(prompt)));
     }
 
     private String directAnswerPrompt(AgenticAuthoringTurnStreamRequest request, JsonNode evidence) {
@@ -5959,7 +5939,7 @@ public class AgenticAuthoringConsultativeAnswerService {
 
     private List<String> warnings(String category, AgenticAuthoringConsultativeApiCatalogProjection projection) {
         List<String> warnings = new ArrayList<>();
-        warnings.add("consultative-fast-path-used");
+        warnings.add("consultative-post-intent-used");
         warnings.add("llm-consultative-intent-used");
         if (projection != null && projection.hasResources()) {
             warnings.add("domain-api-consultative-projection-used");

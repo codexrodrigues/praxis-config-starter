@@ -1523,7 +1523,7 @@ components:
       required: false
       schema:
         type: string
-        default: daab9623a5c4d660105dfe1c85a6bd1ee1ef1b54ef5981e26d27c44aa82ddb4f
+        default: 39e28310b20a9f2bb5e58df32f4f3f98bb1a4236761dfc7d9ee5d18fb588894c
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1553,7 +1553,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: daab9623a5c4d660105dfe1c85a6bd1ee1ef1b54ef5981e26d27c44aa82ddb4f
+        example: 39e28310b20a9f2bb5e58df32f4f3f98bb1a4236761dfc7d9ee5d18fb588894c
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -3874,7 +3874,7 @@ components:
           format: date-time
         type:
           type: string
-          enum: [status, thought.step, heartbeat, result, error, cancelled]
+          enum: [status, thought.step, heartbeat, intent.resolved, result, error, cancelled]
         payload:
           type: object
           additionalProperties: true

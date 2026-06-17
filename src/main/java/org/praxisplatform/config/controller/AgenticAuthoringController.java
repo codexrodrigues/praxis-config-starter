@@ -381,7 +381,7 @@ public class AgenticAuthoringController {
                 null,
                 List.of(),
                 new org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult(
-                        "consultative-fast-path",
+                        "consultative-post-intent",
                         "eligible",
                         List.of()),
                 request.userPrompt(),

@@ -119,6 +119,60 @@ public class AiTurnEventService {
         }
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public StreamStartAppendResult appendStartEventIfAbsent(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            Object payload) {
+        if (principalContext == null
+                || principalContext.tenantId() == null
+                || principalContext.userId() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Identity context is required.");
+        }
+        if (streamId == null || threadId == null || turnId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "streamId/threadId/turnId are required.");
+        }
+
+        String key = lockKey(threadId, turnId);
+        ReentrantLock lock = turnLocks.computeIfAbsent(key, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            lockTurnForAppend(threadId, turnId);
+            Optional<AiTurnEvent> existingStart =
+                    turnEventRepository.findFirstByThreadIdAndTurnIdOrderBySeqAsc(threadId, turnId);
+            if (existingStart.isPresent()) {
+                return new StreamStartAppendResult(toEnvelope(existingStart.get()), false);
+            }
+            JsonNode payloadNode = toPayloadNode(payload);
+            AiTurnEvent entity = AiTurnEvent.builder()
+                    .tenantId(principalContext.tenantId())
+                    .userId(principalContext.userId())
+                    .environment(principalContext.environment())
+                    .streamId(streamId)
+                    .threadId(threadId)
+                    .turnId(turnId)
+                    .seq(1L)
+                    .eventId(UUID.randomUUID())
+                    .eventType("status")
+                    .payload(serializePayload(payloadNode))
+                    .createdAt(Instant.now())
+                    .build();
+            try {
+                AiTurnEvent saved = turnEventRepository.saveAndFlush(entity);
+                return new StreamStartAppendResult(toEnvelope(saved), true);
+            } catch (DataIntegrityViolationException ex) {
+                throw mapIntegrityViolation(ex);
+            }
+        } finally {
+            lock.unlock();
+            if (!lock.hasQueuedThreads()) {
+                turnLocks.remove(key, lock);
+            }
+        }
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public ReplayResult replay(UUID streamId, String lastEventId, AiPrincipalContext principalContext) {
         StreamOwnership ownership = requireOwnership(streamId, principalContext);
@@ -415,5 +469,8 @@ public class AiTurnEventService {
             Instant expiresAt,
             String requestHash,
             String firstEventType) {
+    }
+
+    public record StreamStartAppendResult(AiTurnEventEnvelope event, boolean appended) {
     }
 }

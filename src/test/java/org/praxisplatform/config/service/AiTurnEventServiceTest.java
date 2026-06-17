@@ -201,6 +201,76 @@ class AiTurnEventServiceTest {
         assertThat(locks).isEmpty();
     }
 
+    @Test
+    void intentResolvedIsNotTerminal() {
+        assertThat(service.isTerminalType("intent.resolved")).isFalse();
+    }
+
+    @Test
+    void shouldAppendStartEventOnlyWhenTurnHasNoExistingStart() {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+
+        when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
+                .thenReturn(Optional.of(turn(threadId, turnId)));
+        when(repository.findFirstByThreadIdAndTurnIdOrderBySeqAsc(threadId, turnId)).thenReturn(Optional.empty());
+        when(repository.saveAndFlush(any(AiTurnEvent.class))).thenAnswer(invocation -> {
+            AiTurnEvent event = invocation.getArgument(0, AiTurnEvent.class);
+            event.setEventId(eventId);
+            if (event.getCreatedAt() == null) {
+                event.setCreatedAt(Instant.now());
+            }
+            return event;
+        });
+
+        AiTurnEventService.StreamStartAppendResult result = service.appendStartEventIfAbsent(
+                new AiPrincipalContext("tenant-a", "user-a", "prod", true),
+                streamId,
+                threadId,
+                turnId,
+                Map.of("state", "started"));
+
+        assertThat(result.appended()).isTrue();
+        assertThat(result.event().getEventId()).isEqualTo(eventId);
+        assertThat(result.event().getStreamId()).isEqualTo(streamId);
+        assertThat(result.event().getThreadId()).isEqualTo(threadId);
+        assertThat(result.event().getTurnId()).isEqualTo(turnId);
+        assertThat(result.event().getSeq()).isEqualTo(1L);
+        assertThat(result.event().getType()).isEqualTo("status");
+    }
+
+    @Test
+    void shouldReturnExistingStartWhenAppendStartAlreadyExists() {
+        UUID streamId = UUID.randomUUID();
+        UUID existingStreamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        AiTurnEvent existingStart = event(existingStreamId, threadId, turnId, 1L, eventId, "tenant-a", "user-a", "prod");
+
+        when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
+                .thenReturn(Optional.of(turn(threadId, turnId)));
+        when(repository.findFirstByThreadIdAndTurnIdOrderBySeqAsc(threadId, turnId))
+                .thenReturn(Optional.of(existingStart));
+
+        AiTurnEventService.StreamStartAppendResult result = service.appendStartEventIfAbsent(
+                new AiPrincipalContext("tenant-a", "user-a", "prod", true),
+                streamId,
+                threadId,
+                turnId,
+                Map.of("state", "started"));
+
+        assertThat(result.appended()).isFalse();
+        assertThat(result.event().getEventId()).isEqualTo(eventId);
+        assertThat(result.event().getStreamId()).isEqualTo(existingStreamId);
+        assertThat(result.event().getThreadId()).isEqualTo(threadId);
+        assertThat(result.event().getTurnId()).isEqualTo(turnId);
+        assertThat(result.event().getSeq()).isEqualTo(1L);
+        verify(repository, never()).saveAndFlush(any(AiTurnEvent.class));
+    }
+
     private AiTurn turn(UUID threadId, UUID turnId) {
         return AiTurn.builder()
                 .threadId(threadId)

@@ -227,7 +227,7 @@ class AgenticAuthoringPagePreviewHttpTest {
     }
 
     @Test
-    void pagePreviewAnswersConsultativeQuestionWithFastPathBeforeMaterialization() throws Exception {
+    void pagePreviewAnswersConsultativeQuestionAfterSemanticIntentBeforeMaterialization() throws Exception {
         AgenticAuthoringIntentResolverService intentResolverService = mock(AgenticAuthoringIntentResolverService.class);
         AgenticAuthoringPreviewService previewService = mock(AgenticAuthoringPreviewService.class);
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =

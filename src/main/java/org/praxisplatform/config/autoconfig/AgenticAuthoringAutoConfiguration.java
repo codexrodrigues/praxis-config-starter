@@ -100,11 +100,15 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringLlmIntentResolverService agenticAuthoringLlmIntentResolverService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
-            ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService) {
+            ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService,
+            @Value("${praxis.ai.authoring.intent-resolution.fast-timeout-seconds:12}") int fastIntentTimeoutSeconds,
+            @Value("${praxis.ai.authoring.intent-resolution.full-timeout-seconds:30}") int fullIntentTimeoutSeconds) {
         return new AgenticAuthoringLlmIntentResolverService(
                 providerManagementService,
                 objectMapper,
-                domainCatalogPromptContextService.getIfAvailable());
+                domainCatalogPromptContextService.getIfAvailable(),
+                fastIntentTimeoutSeconds,
+                fullIntentTimeoutSeconds);
     }
 
     @Bean

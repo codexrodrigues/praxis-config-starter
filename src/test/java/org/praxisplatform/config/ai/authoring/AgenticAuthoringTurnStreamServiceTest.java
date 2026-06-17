@@ -21,6 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +56,29 @@ class AgenticAuthoringTurnStreamServiceTest {
     private AiStreamAccessTokenService streamAccessTokenService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @BeforeEach
+    void stubAtomicStartAppend() {
+        org.mockito.Mockito.lenient()
+                .when(turnEventService.appendStartEventIfAbsent(
+                        any(),
+                        any(UUID.class),
+                        any(UUID.class),
+                        any(UUID.class),
+                        any()))
+                .thenAnswer(invocation -> new AiTurnEventService.StreamStartAppendResult(
+                        AiTurnEventEnvelope.builder()
+                                .eventId(UUID.randomUUID())
+                                .streamId(invocation.getArgument(1, UUID.class))
+                                .threadId(invocation.getArgument(2, UUID.class))
+                                .turnId(invocation.getArgument(3, UUID.class))
+                                .seq(1L)
+                                .type("status")
+                                .timestamp(Instant.now())
+                                .payload(objectMapper.valueToTree(invocation.getArgument(4)))
+                                .build(),
+                        true));
+    }
 
     @Test
     void startEmitsTerminalTimeoutWhenProcessingDoesNotFinish() throws Exception {
@@ -232,26 +256,13 @@ class AgenticAuthoringTurnStreamServiceTest {
         when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Quem participa da missão selecionada?")))
                 .thenReturn(AiThread.builder().threadId(threadId).build());
         when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
-        when(turnEventService.isTerminalType(anyString()))
-                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
-        when(turnEventService.findLastEvent(any(UUID.class))).thenReturn(Optional.empty());
-        when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
-                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
-                        .eventId(UUID.randomUUID())
-                        .streamId(invocation.getArgument(1, UUID.class))
-                        .threadId(invocation.getArgument(2, UUID.class))
-                        .turnId(invocation.getArgument(3, UUID.class))
-                        .type(invocation.getArgument(4, String.class))
-                        .timestamp(Instant.now())
-                        .payload(objectMapper.valueToTree(invocation.getArgument(5)))
-                        .build());
         when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
         when(turnEngine.execute(any(), eq(principalContext), any(), eq("http://localhost")))
                 .thenAnswer(invocation -> {
                     processed.countDown();
                     return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.completed(
                             new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState(
-                                    "consultative_fast_path",
+                                    "advisory_authoring",
                                     null,
                                     null));
                 });
@@ -321,6 +332,56 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void startWithConcurrentStartAppendReplaysExistingStreamWithoutProcessingAgain() {
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = stableUuid("agentic-authoring-turn", "turn-client-1");
+        UUID existingStreamId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = request();
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+        AiTurnEventEnvelope existingStart = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(existingStreamId)
+                .threadId(threadId)
+                .turnId(turnId)
+                .seq(1L)
+                .type("status")
+                .timestamp(Instant.now().minusSeconds(2))
+                .payload(objectMapper.createObjectNode().put("state", "started"))
+                .build();
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.appendStartEventIfAbsent(
+                eq(principalContext),
+                any(UUID.class),
+                eq(threadId),
+                eq(turnId),
+                any()))
+                .thenReturn(new AiTurnEventService.StreamStartAppendResult(existingStart, false));
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+
+        AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
+                turnEngine,
+                threadService,
+                turnService,
+                turnEventService,
+                streamAccessTokenService);
+
+        AgenticAuthoringTurnStreamService.StartResult result =
+                service.start(request, "http://localhost", principalContext);
+        service.shutdown();
+
+        org.assertj.core.api.Assertions.assertThat(result.created()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.response().getStreamId()).isEqualTo(existingStreamId);
+        org.assertj.core.api.Assertions.assertThat(result.response().getTurnId()).isEqualTo(turnId);
+        verify(turnService).reserveTurnForStreaming(threadId, turnId);
+        verify(turnEngine, never()).execute(any(), any(), any(), anyString());
+        verify(turnEventService, never()).appendEvent(any(), any(UUID.class), eq(threadId), eq(turnId), anyString(), any());
+    }
+
+    @Test
     void timeoutTerminalPreventsLateCompletionAndPreview() throws Exception {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
@@ -384,7 +445,6 @@ class AgenticAuthoringTurnStreamServiceTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         AgenticAuthoringTurnStreamRequest request = request();
         AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
-        AtomicReference<UUID> persistedStreamId = new AtomicReference<>();
         AtomicReference<AiTurnEventEnvelope> persistedTail = new AtomicReference<>();
         AtomicReference<Boolean> terminalSeenByEngine = new AtomicReference<>(false);
         CountDownLatch processed = new CountDownLatch(1);
@@ -395,28 +455,13 @@ class AgenticAuthoringTurnStreamServiceTest {
         when(turnEventService.isTerminalType(anyString()))
                 .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
         when(turnEventService.findLastEvent(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(persistedTail.get()));
-        when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
-                .thenAnswer(invocation -> {
-                    UUID streamId = invocation.getArgument(1, UUID.class);
-                    persistedStreamId.set(streamId);
-                    return AiTurnEventEnvelope.builder()
-                            .eventId(UUID.randomUUID())
-                            .streamId(streamId)
-                            .threadId(invocation.getArgument(2, UUID.class))
-                            .turnId(invocation.getArgument(3, UUID.class))
-                            .seq(1L)
-                            .type(invocation.getArgument(4, String.class))
-                            .timestamp(Instant.now())
-                            .payload(objectMapper.valueToTree(invocation.getArgument(5)))
-                            .build();
-                });
         when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
         when(turnEngine.execute(any(), eq(principalContext), any(), eq("http://localhost")))
                 .thenAnswer(invocation -> {
                     AgenticAuthoringTurnEventSink sink = invocation.getArgument(2, AgenticAuthoringTurnEventSink.class);
                     persistedTail.set(AiTurnEventEnvelope.builder()
                             .eventId(UUID.randomUUID())
-                            .streamId(persistedStreamId.get())
+                            .streamId(UUID.randomUUID())
                             .threadId(threadId)
                             .turnId(UUID.randomUUID())
                             .seq(99L)
@@ -929,6 +974,11 @@ class AgenticAuthoringTurnStreamServiceTest {
 
     private boolean isTerminal(String type) {
         return "result".equals(type) || "error".equals(type) || "cancelled".equals(type);
+    }
+
+    private UUID stableUuid(String namespace, String value) {
+        return UUID.nameUUIDFromBytes(
+                (namespace + ":" + value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private AgenticAuthoringTurnStreamService service() {

@@ -117,12 +117,14 @@ public final class AgenticAuthoringPresentationText {
                         "visões relacionadas ao registro")
                 .replaceAll("(?i)\\brecord-related\\b", "relacionadas ao registro")
                 .replaceAll("(?i)\\bscope\\s*:\\s*ITEM\\b", "por registro")
-                .replaceAll("(?i)\\b[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)+\\b", "fonte confirmada")
                 .replaceAll("(?i)\\bstatsGroupBy\\b", "agrupamento")
                 .replaceAll("(?i)\\bstatsDistribution\\b", "distribuição")
                 .replaceAll("(?i)\\bstatsTimeSeries\\b", "série temporal")
                 .replaceAll("(?i)\\boptionSources\\b", "listas de opções")
                 .replaceAll("(?i)\\bcursor/client\\b", "paginação remota ou local")
+                .replaceAll(
+                        "(?i)(?<![\\p{L}\\p{N}_-])(?:/?api/|schemas/|operations/|human-resources/|risk-intelligence/|assets/|procurement/)[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*\\b",
+                        "fonte confirmada")
                 .replaceAll("(?i)\\bcreate\\b", "criação")
                 .replaceAll("(?i)\\bdelete\\b", "exclusão")
                 .replaceAll("(?i)\\bcriação\\s*=\\s*false\\b", "criação desabilitada")
@@ -158,6 +160,8 @@ public final class AgenticAuthoringPresentationText {
                 .replaceAll("(?i)\\btabelas\\\"\\s*/\\s*visões\\b", "tabelas e visões")
                 .replaceAll("(?i)\\btabelas\\s*/\\s*visões\\b", "tabelas e visões")
                 .replaceAll("(?i)\\bFonte disponível:\\s*fonte\\b", "Fonte disponível")
+                .replaceAll("(?i)\\bfonte\\s*:\\s*fonte confirmada\\b",
+                        "fonte governada confirmada pelo catálogo")
                 .replaceAll("(?i)\\bcontrato e runtime\\b", "contrato publicado")
                 .replaceAll("(?i)\\bruntime\\b", "execução")
                 .replaceAll("(?i)tabelas e visões relacionadas por visão",

@@ -57,14 +57,13 @@ class AgenticAuthoringTurnEngineTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void answersConsultativeQuestionThroughFastPathWithoutPreviewPipeline() throws Exception {
+    void answersConsultativeQuestionAfterSemanticIntentWithoutPreviewPipeline() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
-        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
-                any(AgenticAuthoringTurnStreamRequest.class)))
-                .thenReturn(true);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(advisoryCatalogIntent());
         when(consultativeAnswerService.answer(
                 any(AgenticAuthoringTurnStreamRequest.class),
                 any(),
@@ -100,7 +99,7 @@ class AgenticAuthoringTurnEngineTest {
                                                 List.of(),
                                                 List.of("domain_catalog_context"))),
                                 List.of("domain-api-consultative-compact-projection-used")),
-                        List.of("consultative-fast-path-used", "llm-consultative-intent-used"))));
+                        List.of("consultative-post-intent-used", "llm-consultative-intent-used"))));
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
         AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService =
@@ -124,14 +123,18 @@ class AgenticAuthoringTurnEngineTest {
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
         verify(componentCapabilitiesService).listCapabilities();
-        verify(intentResolverService, never()).resolve(any(), any(), any(), any());
+        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService, never()).preview(any(), any(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(sink.types)
+                .containsSubsequence("intent.resolved", "result");
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
                 .contains("dados de folha");
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
-        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("consultativeFastPath").asBoolean())
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("consultativePostIntent").asBoolean())
                 .isTrue();
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("routeClass").asText())
+                .isEqualTo("advisory_authoring");
         org.assertj.core.api.Assertions.assertThat(result.path("intentResolution").path("artifactKind").asText())
                 .isEqualTo("api_catalog");
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
@@ -145,14 +148,13 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void groundsRuntimeComponentObservationsBeforeConsultativeFastPath() throws Exception {
+    void groundsRuntimeComponentObservationsBeforePostIntentConsultativeAnswer() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
-        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
-                any(AgenticAuthoringTurnStreamRequest.class)))
-                .thenReturn(true);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(advisoryCatalogIntent());
         com.fasterxml.jackson.databind.node.ObjectNode evidenceBundle = objectMapper.createObjectNode();
         com.fasterxml.jackson.databind.node.ObjectNode resolution = evidenceBundle.putObject("runtimeRelatedSurfaceResolution");
         resolution.put("schemaVersion", "praxis-runtime-related-surface-resolution.v1");
@@ -194,7 +196,7 @@ class AgenticAuthoringTurnEngineTest {
                         "answer_consultative_question",
                         "A missão selecionada expõe a superfície de participantes como contexto consultável.",
                         null,
-                        List.of("consultative-fast-path-used"),
+                        List.of("consultative-post-intent-used"),
                         evidenceBundle)));
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
@@ -244,8 +246,9 @@ class AgenticAuthoringTurnEngineTest {
                 .containsSubsequence(
                         "context.bundle",
                         "runtime.context.grounding",
+                        "intent.resolve.llm",
                         "consultative.intent",
-                        "consultative.fast-path.probe",
+                        "consultative.post-intent.probe",
                         "runtime.related-surface.intent",
                         "runtime.related-surface.candidates",
                         "runtime.related-surface.read",
@@ -255,6 +258,8 @@ class AgenticAuthoringTurnEngineTest {
                         "runtime.tool-plan.step",
                         "runtime.tool-plan.aggregate",
                         "consultative.answer");
+        org.assertj.core.api.Assertions.assertThat(sink.types)
+                .containsSubsequence("intent.resolved", "result");
         JsonNode runtimeGroundingStep = sink.payloads.stream()
                 .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
                 .filter(payload -> "runtime.context.grounding".equals(payload.path("phase").asText("")))
@@ -310,7 +315,7 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(consultativeAnswer.path("streamEventDiagnostics").toString())
                 .contains("consultative.answer:")
                 .contains("\"replaySafe\":true");
-        verify(intentResolverService, never()).resolve(any(), any(), any(), any());
+        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
     }
 
     @Test
@@ -383,9 +388,8 @@ class AgenticAuthoringTurnEngineTest {
                 .put("usedToolCalls", 0)
                 .put("backendReadsPerformed", false)
                 .put("nonExecutionReason", "runtime-multi-tool-dry-run-read-free");
-        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
-                any(AgenticAuthoringTurnStreamRequest.class)))
-                .thenReturn(true);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(advisoryCatalogIntent());
         when(consultativeAnswerService.answer(
                 any(AgenticAuthoringTurnStreamRequest.class),
                 any(),
@@ -397,7 +401,7 @@ class AgenticAuthoringTurnEngineTest {
                         "answer_consultative_question",
                         "Ha duas superficies relacionadas planejadas, sem leitura neste dry-run.",
                         null,
-                        List.of("consultative-fast-path-used"),
+                        List.of("consultative-post-intent-used"),
                         evidenceBundle)));
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -476,14 +480,14 @@ class AgenticAuthoringTurnEngineTest {
                 .findFirst()
                 .orElse(objectMapper.createObjectNode());
         org.assertj.core.api.Assertions.assertThat(result.path("streamEventDiagnostics").toString())
-                .contains("result:consultative_fast_path")
+                .contains("result:consultative_post_intent")
                 .contains("\"duplicatesDoNotIndicateExecution\":true");
-        verify(intentResolverService, never()).resolve(any(), any(), any(), any());
+        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService, never()).preview(any(), any(), any(), any());
     }
 
     @Test
-    void bypassesConsultativeFastPathForImplicitDashboardMaterializationRequest() throws Exception {
+    void routesImplicitDashboardMaterializationThroughSemanticPreview() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
@@ -528,14 +532,8 @@ class AgenticAuthoringTurnEngineTest {
                 any());
         verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
-        org.assertj.core.api.Assertions.assertThat(sink.payloads)
-                .anySatisfy(payload -> {
-                    JsonNode node = objectMapper.valueToTree(payload);
-                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isEqualTo("consultative.fast-path.skipped");
-                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("reason").asText())
-                            .isEqualTo("implicit-materialization-request");
-                });
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .doesNotContain("consultative.intent");
     }
 
     @Test
@@ -544,9 +542,6 @@ class AgenticAuthoringTurnEngineTest {
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
-        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
-                any(AgenticAuthoringTurnStreamRequest.class)))
-                .thenReturn(false);
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(validIntent());
         when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
@@ -585,18 +580,13 @@ class AgenticAuthoringTurnEngineTest {
                 any());
         verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
-        org.assertj.core.api.Assertions.assertThat(sink.payloads)
-                .anySatisfy(payload -> {
-                    JsonNode node = objectMapper.valueToTree(payload);
-                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isEqualTo("consultative.fast-path.skipped");
-                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("reason").asText())
-                            .isEqualTo("pre-resolution-consultative-not-preferred");
-                });
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .contains("intent.resolve.llm")
+                .doesNotContain("consultative.intent");
     }
 
     @Test
-    void bypassesConsultativeFastPathForCurrentChartDetailTableMaterialization() throws Exception {
+    void routesCurrentChartDetailTableMaterializationThroughSemanticPreview() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
@@ -643,28 +633,19 @@ class AgenticAuthoringTurnEngineTest {
                 any());
         verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
-        org.assertj.core.api.Assertions.assertThat(sink.payloads)
-                .anySatisfy(payload -> {
-                    JsonNode node = objectMapper.valueToTree(payload);
-                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isEqualTo("consultative.fast-path.skipped");
-                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("reason").asText())
-                            .isEqualTo("current-page-materialization-refinement");
-                });
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .contains("intent.resolve.llm")
+                .doesNotContain("consultative.intent");
     }
 
     @Test
-    void openDataAvailabilityQuestionWithCurrentPageStillUsesGovernedCatalogFastPath() throws Exception {
+    void openDataAvailabilityQuestionWithCurrentPageUsesPostIntentGovernedCatalogAnswer() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
-        when(consultativeAnswerService.shouldPreferGovernedCatalogAvailabilityAnswer(
-                any(AgenticAuthoringTurnStreamRequest.class)))
-                .thenReturn(true);
-        when(consultativeAnswerService.shouldPreferPreResolutionConsultativeAnswer(
-                any(AgenticAuthoringTurnStreamRequest.class)))
-                .thenReturn(true);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(advisoryCatalogIntent());
         when(consultativeAnswerService.answer(
                 any(AgenticAuthoringTurnStreamRequest.class),
                 any(),
@@ -689,7 +670,7 @@ class AgenticAuthoringTurnEngineTest {
                                         List.of(),
                                         List.of("domain_catalog_context"))),
                                 List.of("domain-api-consultative-compact-projection-used")),
-                        List.of("consultative-fast-path-used"))));
+                        List.of("consultative-post-intent-used"))));
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
@@ -712,7 +693,7 @@ class AgenticAuthoringTurnEngineTest {
                 sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
-        verify(intentResolverService, never()).resolve(any(), any(), any(), any());
+        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService, never()).preview(any(), any(), any(), any());
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .noneSatisfy(payload -> {
@@ -724,12 +705,14 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
                 .contains("fontes de dados confirmadas");
         org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("routeClass").asText())
-                .isEqualTo("consultative_fast_path");
+                .isEqualTo("advisory_authoring");
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("consultativePostIntent").asBoolean())
+                .isTrue();
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
     }
 
     @Test
-    void bypassesConsultativeFastPathForContextualPreviewAction() throws Exception {
+    void routesContextualPreviewActionThroughSemanticPreview() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
@@ -795,14 +778,9 @@ class AgenticAuthoringTurnEngineTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
-        org.assertj.core.api.Assertions.assertThat(sink.payloads)
-                .anySatisfy(payload -> {
-                    JsonNode node = objectMapper.valueToTree(payload);
-                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isEqualTo("consultative.fast-path.skipped");
-                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("reason").asText())
-                            .isEqualTo("contextual-preview-action");
-                });
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .contains("intent.resolve.llm")
+                .doesNotContain("consultative.intent");
     }
 
     @Test
@@ -889,28 +867,6 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
                 .contains("Tabela", "Gráfico", "Formulário", "Filtro");
         Mockito.verifyNoInteractions(providerManagementService);
-    }
-
-    @Test
-    void preResolutionConsultativePolicyKeepsOpenCatalogQuestionsButNotImperfectCreationPrompts() {
-        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
-        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
-                providerManagementService,
-                objectMapper,
-                null);
-
-        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
-                        request("posso criar tabelas com quais dados aqui?")))
-                .isTrue();
-        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
-                        request("quais dados posso usar pra gerar gráficos?")))
-                .isTrue();
-        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
-                        request("preciso monta uma ficha pra cadastra funsionario")))
-                .isFalse();
-        org.assertj.core.api.Assertions.assertThat(service.shouldPreferPreResolutionConsultativeAnswer(
-                        request("quero um dashboard de pagamentos por departamento")))
-                .isFalse();
     }
 
     @Test
@@ -7074,8 +7030,9 @@ class AgenticAuthoringTurnEngineTest {
                         "thought.step",
                         "status",
                         "thought.step",
+                        "intent.resolved",
                         "result");
-        org.assertj.core.api.Assertions.assertThat(sink.types).contains("status");
+        org.assertj.core.api.Assertions.assertThat(sink.types).contains("status", "intent.resolved");
         org.assertj.core.api.Assertions.assertThat(phases(sink))
                 .containsSubsequence(
                         "context.bundle",
@@ -7084,6 +7041,18 @@ class AgenticAuthoringTurnEngineTest {
                         "intent.resolve.grounding",
                         "preview.plan",
                         "preview.compile");
+        JsonNode intentResolved = firstPayloadOfType(sink, "intent.resolved");
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("schemaVersion").asText())
+                .isEqualTo("praxis-agentic-authoring-intent-resolved-event.v1");
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("routeClass").asText())
+                .isEqualTo("component_authoring");
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("resolved").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("canMaterialize").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("requiresClarification").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("userFacingUnderstanding").asText())
+                .isNotBlank();
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("confidence").asDouble())
+                .isGreaterThan(0.0d);
         org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("component_authoring");
         verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
@@ -8473,7 +8442,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void enrichesStreamRequestWithServerComponentCapabilitiesWhenConsultativeFastPathDoesNotResolve() throws Exception {
+    void enrichesStreamRequestWithServerComponentCapabilitiesBeforePostIntentConsultativeAnswer() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
 
@@ -10332,6 +10301,15 @@ class AgenticAuthoringTurnEngineTest {
                 .map(payload -> objectMapper.valueToTree(payload).path("phase").asText(""))
                 .filter(phase -> !phase.isBlank())
                 .toList();
+    }
+
+    private JsonNode firstPayloadOfType(CapturingSink sink, String type) {
+        for (int i = 0; i < sink.types.size(); i++) {
+            if (type.equals(sink.types.get(i))) {
+                return objectMapper.valueToTree(sink.payloads.get(i));
+            }
+        }
+        return objectMapper.missingNode();
     }
 
     private static final class CapturingSink implements AgenticAuthoringTurnEventSink {
