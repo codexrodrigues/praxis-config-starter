@@ -21,15 +21,25 @@ $headers = @{
     "X-Env" = $Environment
 }
 
-$body = @{
+$model = if ($Provider -eq "openai") {
+    $env:PRAXIS_AI_OPENAI_MODEL
+} else {
+    $env:PRAXIS_AI_GEMINI_MODEL
+}
+
+$bodyObject = @{
     userPrompt = $UserPrompt
     targetApp = "praxis-ui-angular"
     targetComponentId = "praxis-dynamic-page-builder"
     currentRoute = "/page-builder-ia"
     currentPage = @{}
-    # This smoke validates canonical routing, not model quality; force deterministic fallback.
-    provider = "deterministic-smoke-disabled"
-} | ConvertTo-Json -Compress -Depth 8
+    # This smoke validates the LLM-first canonical route. Do not force deterministic intent fallback.
+    provider = $Provider
+}
+if (-not [string]::IsNullOrWhiteSpace($model)) {
+    $bodyObject["model"] = $model
+}
+$body = $bodyObject | ConvertTo-Json -Compress -Depth 8
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
 $intent = Invoke-RestMethod `
@@ -39,15 +49,19 @@ $intent = Invoke-RestMethod `
     -Body $body `
     -TimeoutSec 60
 
-$previewBody = @{
+$previewBodyObject = @{
     userPrompt = $UserPrompt
     targetApp = "praxis-ui-angular"
     targetComponentId = "praxis-dynamic-page-builder"
     currentRoute = "/page-builder-ia"
     currentPage = @{}
-    provider = "deterministic-smoke-disabled"
+    provider = $Provider
     intentResolution = $intent
-} | ConvertTo-Json -Compress -Depth 16
+}
+if (-not [string]::IsNullOrWhiteSpace($model)) {
+    $previewBodyObject["model"] = $model
+}
+$previewBody = $previewBodyObject | ConvertTo-Json -Compress -Depth 16
 
 $preview = Invoke-RestMethod `
     -Method Post `

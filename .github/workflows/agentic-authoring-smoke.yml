@@ -11,6 +11,16 @@ on:
         options:
           - openai
           - gemini
+      openai_model:
+        description: 'Optional OpenAI model override for this smoke run.'
+        required: false
+        default: ''
+        type: string
+      gemini_model:
+        description: 'Optional Gemini model override for this smoke run.'
+        required: false
+        default: ''
+        type: string
       quickstart_ref:
         description: 'praxis-api-quickstart ref to test against.'
         required: false
@@ -98,9 +108,9 @@ jobs:
       contents: read
     env:
       PRAXIS_AI_OPENAI_API_KEY: ${{ secrets.PRAXIS_AI_OPENAI_API_KEY }}
-      PRAXIS_AI_OPENAI_MODEL: ${{ vars.PRAXIS_AI_OPENAI_MODEL || 'gpt-4.1-mini' }}
+      PRAXIS_AI_OPENAI_MODEL: ${{ inputs.openai_model || vars.PRAXIS_AI_OPENAI_MODEL || 'gpt-4.1-mini' }}
       PRAXIS_AI_GEMINI_API_KEY: ${{ secrets.PRAXIS_AI_GEMINI_API_KEY }}
-      PRAXIS_AI_GEMINI_MODEL: ${{ vars.PRAXIS_AI_GEMINI_MODEL || 'gemini-2.5-flash' }}
+      PRAXIS_AI_GEMINI_MODEL: ${{ inputs.gemini_model || vars.PRAXIS_AI_GEMINI_MODEL || 'gemini-2.5-flash' }}
       SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
       SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
       SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
