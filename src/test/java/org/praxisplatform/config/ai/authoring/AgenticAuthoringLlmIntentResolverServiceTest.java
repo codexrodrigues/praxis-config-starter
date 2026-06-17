@@ -142,6 +142,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("Decide from the user's meaning, not from backend keywords.")
                 .contains("which governed data can be used to create a table, form, chart, dashboard, page or other component")
                 .contains("Do not select a weak resource or ask for a materialization confirmation")
+                .contains("route_shared_rule_authoring")
                 .contains("\"candidateResources\"")
                 .contains("/api/risk-intelligence/vw-indicadores-incidentes")
                 .contains("Indicadores de incidentes com campo severidade.")
@@ -170,6 +171,71 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    @Test
+    void resolveRejectsIncompleteIntentPayloadMissingGovernedAuthoringFlag() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "dashboard",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/procurement/suppliers",
+                  "resourceSearchQuery": "fornecedor bloqueado compras",
+                  "followUpKind": "none",
+                  "assistantMessage": "Entendi: voce quer uma regra governada de elegibilidade para fornecedores.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        assertThat(service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(new AgenticAuthoringCandidate(
+                        "/api/procurement/suppliers",
+                        "POST",
+                        "/schemas/filtered?path=/api/procurement/suppliers&operation=post&schemaType=request",
+                        "/api/procurement/suppliers",
+                        "POST",
+                        0.49d,
+                        "Fornecedor candidato para compras.",
+                        List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                        null)),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local")).isEmpty();
     }
 
     @Test
@@ -368,6 +434,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": "/api/human-resources/funcionarios",
                   "resourceSearchQuery": null,
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Criei uma pagina com paineis expansíveis para funcionários.",
                   "visualizationDecision": {
                     "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
@@ -461,6 +528,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": null,
                   "resourceSearchQuery": null,
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Criei uma pre-visualizacao com um grafico simples.",
                   "visualizationDecision": {
                     "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
@@ -581,6 +649,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": "/api/vendas/pedidos",
                   "resourceSearchQuery": "pedidos de vendas para graficos",
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Encontrei pedidos como base para o grafico. Quer usar esse recurso?",
                   "visualizationDecision": {
                     "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
@@ -719,6 +788,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": null,
                   "resourceSearchQuery": null,
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Vou tratar isso como decisão governada.",
                   "quickReplies": [],
                   "clarificationQuestions": [],
@@ -805,6 +875,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": null,
                   "resourceSearchQuery": "indicadores para dashboard",
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "%s",
                   "quickReplies": [],
                   "clarificationQuestions": [],
@@ -857,6 +928,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": null,
                   "resourceSearchQuery": null,
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Vou investigar as capacidades e o dominio antes de responder.",
                   "consultativeRetrievalPlan": {
                     "schemaVersion": "praxis-agentic-authoring-consultative-retrieval-plan.v1",
@@ -958,6 +1030,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": "/api/human-resources/vw-analytics-folha-pagamento",
                   "resourceSearchQuery": null,
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Escolha a fonte de dados.",
                   "quickReplies": [
                     {
@@ -1021,6 +1094,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "selectedResourcePath": null,
                   "resourceSearchQuery": "api de cadastro de funcionario para formulario de RH",
                   "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
                   "assistantMessage": "Entendi que você quer uma ficha de cadastro. Vou buscar recursos de criação para funcionário.",
                   "quickReplies": [
                     {

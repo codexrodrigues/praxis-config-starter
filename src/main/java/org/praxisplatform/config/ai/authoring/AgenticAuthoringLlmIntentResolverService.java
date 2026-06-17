@@ -576,7 +576,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
                 For chart axes, use the grouping/time field in axes[].field and numeric measures in metricField/metricAggregation.
                 Field names may be proposed from the user's wording and candidate evidence; canonical schema validation runs after this step and may correct or reject them.
-                Set requiresGovernedAuthoring=true only for reusable governed business decisions, policies, compliance/access/eligibility/approval/privacy/enforcement rules that must go through shared-rule authoring. Keep it false for local visual formatting, masks, badges, labels, component configuration, layout, filters, and columns.
+                Set requiresGovernedAuthoring=true for reusable governed business decisions, policies, compliance/access/eligibility/approval/privacy/enforcement rules, backend validations, option-source eligibility, approval gates, or shared rules that must go through shared-rule authoring.
+                When requiresGovernedAuthoring=true, do not classify the turn as a materializable dashboard, chart, table, form or page preview. Use operationKind "create" or "modify", artifactKind "unknown", changeKind "route_shared_rule_authoring", and leave visualizationDecision null.
+                Keep requiresGovernedAuthoring=false only for local visual formatting, masks, badges, labels, component configuration, layout, filters, columns, and consultative catalog questions.
                 If the requested source/component cannot be resolved with this compact evidence, set resolved=false and leave visualizationDecision null.
                 Keep assistantMessage short and natural in the user's language.
                 Always include quickReplies, clarificationQuestions, warnings, visualizationDecision and consultativeRetrievalPlan fields.
@@ -734,6 +736,10 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (result == null || !result.isObject()) {
             return Optional.empty();
         }
+        if (missingRequiredIntentFields(result)) {
+            log.warn("Ignoring incomplete LLM intent resolution payload; required semantic routing fields are missing.");
+            return Optional.empty();
+        }
         boolean resolved = result.path("resolved").asBoolean(false);
         List<AgenticAuthoringQuickReply> quickReplies = quickReplies(result.path("quickReplies"));
         List<String> clarificationQuestions = strings(result.path("clarificationQuestions"));
@@ -777,6 +783,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 consultativeRetrievalPlan,
                 visualizationDecision,
                 requiresGovernedAuthoring));
+    }
+
+    private boolean missingRequiredIntentFields(JsonNode result) {
+        return !result.has("requiresGovernedAuthoring");
     }
 
     private AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan(JsonNode node) {
