@@ -86,6 +86,7 @@ Resultado:
   - `create_tag=true`, `bump=patch`
 - Novo RC:
   - `create_tag=true`, `bump=prerelease`, `preid=rc`
+  - continua a maior serie RC existente quando ela ainda nao foi superada por uma release estavel
 - Versao fixa:
   - `create_tag=true`, `version=1.2.0`
 
