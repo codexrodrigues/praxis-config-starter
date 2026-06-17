@@ -377,6 +377,15 @@ alimentar a UI com a interpretacao segura da intencao do usuario, por exemplo
 Clientes devem continuar aguardando `result`, `error` ou `cancelled` para
 encerrar o estado de processamento.
 
+Quando o turno seguir para resposta consultiva ou preview, o backend pode
+preservar a mesma decisao em `contextHints.resolvedIntent`
+(`schemaVersion=praxis-agentic-authoring-resolved-intent-context.v1`). Esse
+hint e backend-authored, replay/round-trip safe e serve para continuidade da
+rota ja resolvida, especialmente `explore/api_catalog/answer_api_catalog_question`.
+Clientes nao devem construir esse envelope localmente nem trata-lo como
+autorizacao para leitura, preview ou aplicacao; qualquer acao continua exigindo
+reconciliacao backend contra catalogo, runtime e contexto governado atuais.
+
 Durante turnos longos, especialmente quando a LLM esta resolvendo intencao ou
 revisando recursos recuperados por RAG/catalogos governados, o backend deve
 emitir fases conversacionais suficientes para evitar uma UI parada em um unico

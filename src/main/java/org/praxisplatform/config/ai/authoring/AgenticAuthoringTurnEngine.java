@@ -572,9 +572,13 @@ public class AgenticAuthoringTurnEngine {
                 eventSink,
                 "consultative.intent",
                 "A intencao foi entendida como pergunta consultiva; estou preparando a resposta com evidencias governadas.");
+        AgenticAuthoringTurnStreamRequest consultativeRequest = withResolvedIntentContext(
+                request,
+                intentResolution,
+                route);
         AgenticAuthoringConsultativeAnswer answer = consultativeAnswerService.answer(
-                        request,
-                        request.componentCapabilities(),
+                        consultativeRequest,
+                        consultativeRequest.componentCapabilities(),
                         principalContext.tenantId(),
                         principalContext.userId(),
                         principalContext.environment())
@@ -626,6 +630,30 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withResolvedIntentContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route) {
+        if (request == null || intentResolution == null) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode resolvedIntent = contextHints.putObject("resolvedIntent");
+        resolvedIntent.put("schemaVersion", "praxis-agentic-authoring-resolved-intent-context.v1");
+        resolvedIntent.put("source", "intent.resolved");
+        resolvedIntent.put("routeClass", safeText(route == null ? "" : route.routeClass()));
+        resolvedIntent.put("operationKind", safeText(intentResolution.operationKind()));
+        resolvedIntent.put("artifactKind", safeText(intentResolution.artifactKind()));
+        resolvedIntent.put("changeKind", safeText(intentResolution.changeKind()));
+        resolvedIntent.put("valid", intentResolution.valid());
+        if (intentResolution.selectedCandidate() != null) {
+            putText(resolvedIntent, "selectedResourcePath", intentResolution.selectedCandidate().resourcePath());
+        }
+        return copyWithContextHints(request, contextHints);
     }
 
     private boolean isPostIntentConsultativeRoute(AgenticAuthoringTurnRoute route) {

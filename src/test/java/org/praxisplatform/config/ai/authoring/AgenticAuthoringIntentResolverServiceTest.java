@@ -438,7 +438,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void concreteDashboardPromptWithResolvedResourceDoesNotBlockOnLlmIntent() {
+    void concreteDashboardPromptWithResolvedResourceStillConsultsLlmIntent() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -461,7 +461,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                         null,
                         null));
 
-        Mockito.verifyNoInteractions(llmIntentResolver);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
@@ -473,7 +482,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void simpleDashboardOverviewPromptWithResolvedResourceDoesNotBlockOnLlmIntent() {
+    void simpleDashboardOverviewPromptWithResolvedResourceStillConsultsLlmIntent() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -495,7 +504,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                         null,
                         null));
 
-        Mockito.verifyNoInteractions(llmIntentResolver);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
@@ -507,7 +525,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void simpleDashboardOverviewPromptWorksAcrossOperationalDomainsWithoutLlmIntent() {
+    void simpleDashboardOverviewPromptWorksAcrossOperationalDomainsAfterLlmMiss() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -529,7 +547,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                         null,
                         null));
 
-        Mockito.verifyNoInteractions(llmIntentResolver);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
@@ -542,7 +569,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void simpleDashboardOverviewPromptUsesListableResourceWhenNoAnalyticsEndpointExists() {
+    void simpleDashboardOverviewPromptUsesListableResourceWhenNoAnalyticsEndpointExistsAfterLlmMiss() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -564,7 +591,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                         null,
                         null));
 
-        Mockito.verifyNoInteractions(llmIntentResolver);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("dashboard");
@@ -937,6 +973,182 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(decision.reviewRequired()).isTrue();
         assertThat(decision.reviewReason()).isEqualTo("weak-lexical-evidence");
         assertThat(decision.confidence()).isLessThan(0.5d);
+    }
+
+    @Test
+    void unresolvedLlmIntentDoesNotPromoteWeakLexicalFormCandidateAsSelectedResource() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate weakLexicalCandidate = new AgenticAuthoringCandidate(
+                "/api/operations/bases",
+                "post",
+                "/schemas/filtered?path=/api/operations/bases&operation=post&schemaType=request",
+                "/api/operations/bases",
+                "post",
+                0.70d,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                "/api/operations/bases",
+                                "Lexical match only.",
+                                0.35d,
+                                List.of("formulario"),
+                                "",
+                                "",
+                                ""))));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(weakLexicalCandidate));
+
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "create",
+                        "form",
+                        "create_minimal_form",
+                        "",
+                        "catalogo de dados para formularios",
+                        "consultative_question",
+                        "Ainda preciso confirmar qual recurso governado deve alimentar o formulário.",
+                        List.of(),
+                        List.of("Qual fonte governada você quer usar?"),
+                        List.of("candidateResources are broad and weakly matched; no resource was selected."))));
+        AgenticAuthoringIntentResolverService serviceWithUnresolvedLlm =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        candidateCatalog,
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = serviceWithUnresolvedLlm.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "eu posso criar um formulário aqui para incluir quais tipos de dados?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.candidates()).contains(weakLexicalCandidate);
+        assertThat(result.warnings())
+                .contains("llm-unresolved-weak-lexical-selection-deferred")
+                .doesNotContain("resource-selection-lexical-fallback-selected");
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("selectedCandidateUsesLexicalFallback").asBoolean()).isFalse();
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("candidateSetContainsLexicalFallback").asBoolean()).isTrue();
+    }
+
+    @Test
+    void consultativeComponentQuestionDoesNotPromoteWeakLexicalCandidateAsSelectedResource() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate weakLexicalCandidate = new AgenticAuthoringCandidate(
+                "/api/operations/bases",
+                "post",
+                "/schemas/filtered?path=/api/operations/bases&operation=post&schemaType=request",
+                "/api/operations/bases",
+                "post",
+                0.70d,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                "/api/operations/bases",
+                                "Lexical match only.",
+                                0.35d,
+                                List.of("formulario"),
+                                "",
+                                "",
+                                ""))));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(weakLexicalCandidate));
+
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "form",
+                        "answer_component_catalog_question",
+                        "",
+                        "catalogo de dados para formularios",
+                        "consultative_question",
+                        "Você pode consultar o catálogo para escolher quais dados governados alimentarão o formulário.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService serviceWithConsultativeLlm =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        candidateCatalog,
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = serviceWithConsultativeLlm.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "eu posso criar um formulário aqui para incluir quais tipos de dados?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("answer_component_catalog_question");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.candidates()).contains(weakLexicalCandidate);
+        assertThat(result.warnings())
+                .contains("consultative-weak-lexical-selection-deferred")
+                .doesNotContain("resource-selection-lexical-fallback-selected");
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("selectedCandidateUsesLexicalFallback").asBoolean()).isFalse();
+        assertThat(result.llmDiagnostics().path("resolutionTelemetry")
+                .path("candidateSetContainsLexicalFallback").asBoolean()).isTrue();
     }
 
     @Test
@@ -1882,7 +2094,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void keepsEmployeeMasterDetailCanonicalWithoutCallingLlmWhenIntentIsAlreadyClear() {
+    void keepsEmployeeMasterDetailCanonicalWhenLlmResolvesPageIntent() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -1895,7 +2107,18 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_master_detail",
+                        null,
+                        null,
+                        "none",
+                        "Vou criar uma tela master-detail para empregados.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-master-detail-page"))));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
@@ -1918,7 +2141,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().schemaUrl())
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
         assertThat(result.selectedCandidate().evidence()).contains("quick-reply-context");
-        assertThat(result.warnings()).contains("llm-intent-resolution-fallback-deterministic");
+        assertThat(result.warnings()).contains("llm-intent-resolution-used", "llm-master-detail-page");
         Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
@@ -2231,7 +2454,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.valid()).isFalse();
@@ -2269,7 +2492,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.operationKind()).isEqualTo("explore");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.assistantMessage())
                 .contains("Para uma tabela de pessoas")
@@ -3788,7 +4011,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void consultativeDomainFallbackExplainsDataSourcesInsteadOfGenericOperations() {
+    void consultativeDomainLlmDecisionExplainsDataSourcesInsteadOfGenericOperations() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -3827,7 +4050,18 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        null,
+                        "none",
+                        "Posso comparar as fontes confirmadas e explicar quais dados existem antes de criar uma tela.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-consultative-domain-question"))));
         AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository),
@@ -3852,7 +4086,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.operationKind()).isEqualTo("explain");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.selectedCandidate()).isNull();
@@ -3860,12 +4094,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("fonte", "Posso comparar")
                 .doesNotContain("operacoes fazem sentido", "fonte de negócio e posso verificar");
         assertThat(result.warnings())
-                .contains("llm-intent-resolution-fallback-deterministic")
+                .contains("llm-intent-resolution-used", "llm-consultative-domain-question")
                 .doesNotContain("resource-selection-lexical-fallback-selected");
     }
 
     @Test
-    void consultativeDomainQuestionKeepsApiCatalogRouteWhenItAlsoAsksScreenRecommendations() {
+    void consultativeDomainQuestionDoesNotOverrideResolvedLlmRoute() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -3922,9 +4156,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("explore");
-        assertThat(result.artifactKind()).isEqualTo("api_catalog");
-        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("create_form");
         assertThat(result.failureCodes())
                 .doesNotContain(
                         "intent-resolution-selected-candidate-required",
@@ -3933,7 +4167,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void consultativeRetrievalPlanTriggersSecondLlmPassWithSemanticCandidates() {
+    void consultativeRetrievalPlanUsesSemanticCandidatesWithoutSecondLlmPass() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -4010,22 +4244,24 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.operationKind()).isEqualTo("explain");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.assistantMessage())
-                .contains("Aqui você pode criar painéis")
+                .contains("Encontrei 1 fonte de dados relacionada", "Funcionários")
                 .doesNotContain("fonte de negócio selecionada");
         assertThat(result.candidates())
                 .anySatisfy(candidate ->
                         assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios"));
         assertThat(result.warnings())
                 .contains(
-                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-used")
+                .doesNotContain(
                         "llm-intent-resolution-second-pass-used",
-                        "consultative-retrieval-second-pass")
-                .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
-        Mockito.verify(llmIntentResolver, Mockito.times(2)).resolve(
+                        "consultative-retrieval-second-pass",
+                        "keyword-fallback-applied",
+                        "keyword-fallback-fail-safe-applied");
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -5745,7 +5981,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("metadata-probe-not-run")
                 .contains("llm-intent-resolution-used", "llm-safe-code")
                 .doesNotContain("Metadados de schema/ações não estão disponíveis no momento.");
-        Mockito.verify(llm, Mockito.times(2)).resolve(
+        Mockito.verify(llm).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -5758,7 +5994,151 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void apiCatalogConsultativeQuestionPreservesNaturalLlmAnswerAboutOperations() {
+    void llmBackedConsultativeQuestionResolvesIntentBeforeApiCatalogDiscovery() {
+        AgenticAuthoringLlmIntentResolverService llm = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        Mockito.when(llm.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        "/api/human-resources/funcionarios",
+                        "folha de pagamento",
+                        null,
+                        "Vou consultar as fontes confirmadas para responder.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-fast-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        candidateCatalog,
+                        llm,
+                        new AgenticAuthoringComponentCapabilitiesService());
+        ArgumentCaptor<List<AgenticAuthoringCandidate>> preLlmCandidatesCaptor = ArgumentCaptor.forClass(List.class);
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Entre os dados existentes, quais eu posso usar para gerar graficos?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                        null,
+                        null));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.apiCatalogAnswer()).isNull();
+        assertThat(result.assistantMessage())
+                .contains("Ainda não encontrei uma fonte de negócio confiavel")
+                .doesNotContain("Vou consultar");
+        Mockito.verify(llm).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                preLlmCandidatesCaptor.capture(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+        assertThat(preLlmCandidatesCaptor.getValue()).isEmpty();
+        Mockito.verifyNoInteractions(candidateCatalog);
+    }
+
+    @Test
+    void nonFastConsultativeQuestionReusesGroundedDiscoveryDuringResourceSearch() {
+        AgenticAuthoringLlmIntentResolverService llm = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                Mockito.mock(AgenticAuthoringDomainCatalogCandidateEnhancer.class);
+        AgenticAuthoringCandidate payroll = richCandidate(
+                "/api/human-resources/folhas-pagamento",
+                0.92d,
+                "Folhas de pagamento",
+                "Dados operacionais de folha para tabelas, gráficos e conferências.");
+        Mockito.when(llm.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        "folha de pagamento",
+                        null,
+                        "Vou consultar as fontes confirmadas para responder.",
+                        List.of(),
+                        List.of(),
+                        List.of())));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.eq("api_catalog"),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(payroll));
+        Mockito.when(enhancer.enhance(
+                        Mockito.anyString(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        candidateCatalog,
+                        llm,
+                        new AgenticAuthoringComponentCapabilitiesService(),
+                        AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY,
+                        enhancer);
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Entre os dados existentes, quais eu posso usar para gerar graficos?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertApiCatalogAnswer(result);
+        Mockito.verify(enhancer, Mockito.times(1)).enhance(
+                Mockito.anyString(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
+    void apiCatalogConsultativeQuestionUsesGroundedGuidanceWhenLlmOnlyPromisesLookup() {
         AgenticAuthoringLlmIntentResolverService llm = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llm.resolve(
                         Mockito.any(),
@@ -5783,19 +6163,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 List.of(),
                                 List.of(),
                                 List.of())),
-                        Optional.of(new AgenticAuthoringLlmIntentResolution(
-                                true,
-                                "explore",
-                                "api_catalog",
-                                "answer_api_catalog_question",
-                                null,
-                                "folha de pagamento",
-                                null,
-                                "Para folha de pagamento, eu olharia primeiro as fontes operacionais e depois as visões analíticas. "
-                                        + "As operações disponíveis ajudam a separar consulta, conferencia e analise antes de criar uma tela.",
-                                List.of(),
-                                List.of(),
-                                List.of("llm-natural-answer"))));
+                        Optional.empty());
         AgenticAuthoringIntentResolverService llmBackedService =
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
@@ -5816,11 +6184,23 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertApiCatalogAnswer(result);
         assertThat(result.assistantMessage())
-                .contains("fontes operacionais", "visões analíticas", "operações disponíveis")
-                .doesNotContain("Encontrei ");
+                .contains("fonte")
+                .doesNotContain("Vou consultar", "/api/", "schema", "endpoint");
         assertThat(result.warnings())
-                .contains("llm-intent-resolution-used", "llm-natural-answer")
-                .doesNotContain("keyword-fallback-applied");
+                .contains("llm-intent-resolution-used")
+                .doesNotContain(
+                        "llm-intent-resolution-second-pass-used",
+                        "keyword-fallback-applied");
+        Mockito.verify(llm).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test
@@ -7186,7 +7566,18 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        null,
+                        "none",
+                        "Vou listar os campos detectados para a tabela sem criar uma prévia.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-consultative-field-discovery"))));
         Mockito.when(repository.findAll()).thenReturn(List.of(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
@@ -7238,12 +7629,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 contextHints));
 
-        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.operationKind()).isEqualTo("explain");
         assertThat(result.artifactKind()).isEqualTo("api_catalog");
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.assistantMessage())
-                .contains("fonte")
-                .contains("sem criar tela")
+                .contains("campos detectados")
+                .contains("sem criar uma prévia")
                 .doesNotContain("/schemas/")
                 .doesNotContain("/api/")
                 .doesNotContain("POST", "GET", "grounding estruturado", "LLM/RAG");
@@ -7971,7 +8362,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void humanDashboardPromptFallsBackToMaterializableDashboardWhenLlmIntentTimesOut() {
+    void humanDashboardPromptFailsClosedWhenPrimaryLlmIntentTimesOut() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -8013,17 +8404,29 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
-        assertThat(result.gate().status()).isEqualTo("eligible");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).contains("/api/human-resources/funcionarios");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("provider_error");
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
         assertThat(result.warnings())
-                .contains("keyword-fallback-applied", "pre-llm-governed-resource-choice-applied")
-                .doesNotContain("llm-intent-resolution-failed", "llm-provider-timeout");
-        Mockito.verifyNoInteractions(llmIntentResolver);
+                .contains(
+                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-provider-failed-clarification-required",
+                        "llm-intent-resolution-failed",
+                        "llm-provider-timeout",
+                        "pre-llm-governed-resource-choice-ranked")
+                .doesNotContain("keyword-fallback-applied", "pre-llm-governed-resource-choice-applied");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test

@@ -140,6 +140,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(promptCaptor.getValue())
                 .contains("praxis-agentic-authoring-fast-intent-context.v1")
                 .contains("Decide from the user's meaning, not from backend keywords.")
+                .contains("which governed data can be used to create a table, form, chart, dashboard, page or other component")
+                .contains("Do not select a weak resource or ask for a materialization confirmation")
                 .contains("\"candidateResources\"")
                 .contains("/api/risk-intelligence/vw-indicadores-incidentes")
                 .contains("Indicadores de incidentes com campo severidade.")
@@ -160,6 +162,183 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.visualizationDecision().includeDetailTable()).isFalse();
         assertThat(result.visualizationDecision().includeFilters()).isFalse();
         assertThat(result.visualizationDecision().includeKpis()).isFalse();
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void resolveCanUseFastLlmIntentPassForOpenApiCatalogQuestionsWithoutSelectedResource() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "explore",
+                  "artifactKind": "api_catalog",
+                  "changeKind": "answer_api_catalog_question",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": "fontes governadas para visualizações analíticas",
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou consultar o catálogo governado antes de sugerir gráficos.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": {
+                    "schemaVersion": "praxis-agentic-authoring-consultative-retrieval-plan.v1",
+                    "requiredContext": ["domain_catalog"],
+                    "semanticQueries": ["fontes governadas para gráficos e painéis"],
+                    "answerStrategy": "answer_with_confirmed_resources",
+                    "expectedEvidence": ["api_metadata", "domain_catalog"]
+                  },
+                  "quickReplies": [
+                    {
+                      "schemaVersion": "praxis-agentic-authoring-quick-reply.v1",
+                      "id": "show-confirmed-chart-sources",
+                      "kind": "api_catalog_followup",
+                      "label": "Ver fontes disponíveis",
+                      "prompt": "Mostre as fontes confirmadas para gráficos.",
+                      "intent": "api_catalog_followup"
+                    }
+                  ],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Entre os dados existentes, quais eu posso usar para gerar gráficos?",
+                        "page-builder",
+                        "praxis-chart",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                "Entre os dados existentes, quais eu posso usar para gerar gráficos?",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(weakCandidate("/api/analytics/folha-pagamento")),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-fast-intent-context.v1")
+                .contains("which governed data can be used to create a table, form, chart, dashboard, page or other component");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(12);
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.selectedResourcePath()).isNull();
+        assertThat(result.consultativeRetrievalPlan()).isNotNull();
+        assertThat(result.quickReplies()).extracting(AgenticAuthoringQuickReply::label)
+                .containsExactly("Ver fontes disponíveis");
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void resolveCanUseFastLlmIntentPassForOpenApiCatalogQuestionsWithoutCandidatesOrCapabilities() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "explore",
+                  "artifactKind": "api_catalog",
+                  "changeKind": "answer_api_catalog_question",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": "fontes governadas para tabelas",
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou consultar as fontes confirmadas para responder.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": {
+                    "schemaVersion": "praxis-agentic-authoring-consultative-retrieval-plan.v1",
+                    "requiredContext": ["api_metadata"],
+                    "semanticQueries": ["fontes governadas para tabelas"],
+                    "answerStrategy": "answer_with_confirmed_resources",
+                    "expectedEvidence": ["api_metadata"]
+                  },
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Eu posso criar tabelas com quais dados aqui?",
+                        "page-builder",
+                        "praxis-table",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                "Eu posso criar tabelas com quais dados aqui?",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                null,
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-fast-intent-context.v1")
+                .contains("\"candidateResources\" : [ ]");
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.selectedResourcePath()).isNull();
         assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
         Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
                 any(),
@@ -483,6 +662,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("\"formAuthoringPolicy\"");
         assertThat(prompt).contains("consultativeRetrievalPlan");
         assertThat(prompt).contains("consultative platform guidance");
+        assertThat(prompt).contains("which governed data can be used to create a table, form, chart, dashboard, page or other component");
+        assertThat(prompt).contains("Do not treat it as immediate component creation");
         assertThat(prompt).contains("Praxis is a governed AI authoring platform");
         assertThat(prompt).contains("Visualizar metricas");
         assertThat(prompt).contains("Select visualizationDecision.primaryComponent from authorableComponents");

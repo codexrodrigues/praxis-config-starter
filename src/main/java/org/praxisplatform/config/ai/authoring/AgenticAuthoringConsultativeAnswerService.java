@@ -119,11 +119,15 @@ public class AgenticAuthoringConsultativeAnswerService {
         if (request == null || !StringUtils.hasText(request.userPrompt())) {
             return Optional.empty();
         }
-        boolean domainAvailabilityQuestion = isDomainAvailabilityQuestion(request.userPrompt());
+        boolean resolvedApiCatalogQuestion = isResolvedApiCatalogQuestion(request);
+        boolean hasResolvedIntentContext = hasResolvedIntentContext(request);
+        boolean domainAvailabilityQuestion = resolvedApiCatalogQuestion
+                || (!hasResolvedIntentContext && isDomainAvailabilityQuestion(request.userPrompt()));
         ObjectNode initialRuntimeContext = runtimeConsultableContext(request);
         boolean pendingRuntimeDisambiguationContext =
                 safePendingRuntimeRelatedSurfaceDisambiguationContext(request, initialRuntimeContext) != null;
         if (!pendingRuntimeDisambiguationContext
+                && !hasResolvedIntentContext
                 && !domainAvailabilityQuestion
                 && clearlyRequestsMaterialization(request.userPrompt())) {
             return Optional.empty();
@@ -6155,7 +6159,22 @@ public class AgenticAuthoringConsultativeAnswerService {
         if (request == null || clearlyRequestsMaterialization(request.userPrompt())) {
             return false;
         }
-        return isDomainAvailabilityQuestion(request.userPrompt());
+        return isResolvedApiCatalogQuestion(request) || isDomainAvailabilityQuestion(request.userPrompt());
+    }
+
+    private boolean hasResolvedIntentContext(AgenticAuthoringTurnStreamRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().path("resolvedIntent").isObject();
+    }
+
+    private boolean isResolvedApiCatalogQuestion(AgenticAuthoringTurnStreamRequest request) {
+        if (!hasResolvedIntentContext(request)) {
+            return false;
+        }
+        JsonNode resolvedIntent = request.contextHints().path("resolvedIntent");
+        return "api_catalog".equals(value(resolvedIntent.path("artifactKind").asText("")))
+                && "answer_api_catalog_question".equals(value(resolvedIntent.path("changeKind").asText("")));
     }
 
     private boolean asksWhichGovernedDataCanFeedAuthoring(String text) {

@@ -146,12 +146,12 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = contextualPreviewArtifactKind(request, artifactKind);
             changeKind = valueOrDefault(jsonText(request.contextHints(), "changeKind"), changeKind);
         }
-        if (consultativePlatformCapabilityQuestion) {
+        if (!hasLlmIntentResolver && consultativePlatformCapabilityQuestion) {
             operationKind = "explain";
             artifactKind = "component";
             changeKind = platformCapabilityChangeKind(prompt);
         }
-        if (consultativeDomainQuestion) {
+        if (!hasLlmIntentResolver && consultativeDomainQuestion) {
             operationKind = "explore";
             artifactKind = "api_catalog";
             changeKind = "answer_api_catalog_question";
@@ -164,11 +164,22 @@ public class AgenticAuthoringIntentResolverService {
                 && isConcreteDashboardMaterializationPrompt(prompt)
                 && explicitResourcePath(prompt).isBlank()
                 && !isConfirmedDataSourceSelection(prompt);
-        if (deterministicDashboardMaterialization) {
+        if (deterministicDashboardMaterialization && !hasLlmIntentResolver) {
             shouldResolveLlmIntent = false;
         }
+        boolean hasExplicitSourceSelection =
+                !explicitResourcePath(prompt).isBlank() || isConfirmedDataSourceSelection(prompt);
+        boolean deferPreLlmApiMetadataDiscovery = shouldResolveLlmIntent
+                && !hasExplicitSourceSelection
+                && !shouldProvidePreLlmApiMetadataDiscoveryContext(prompt)
+                && (consultativeDomainQuestion || consultativePlatformCapabilityQuestion || isQuestionLike(prompt));
+        if (deterministicDashboardMaterialization || isExplicitDashboardMaterializationCommand(prompt)) {
+            deferPreLlmApiMetadataDiscovery = false;
+        }
         List<AgenticAuthoringCandidate> candidates = shouldResolveLlmIntent
-                ? discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
+                ? deferPreLlmApiMetadataDiscovery
+                        ? discoverPreLlmContextCandidates(discoveryPrompt, artifactKind, target)
+                        : discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
                 : discoverCandidates(discoveryPrompt, artifactKind, target, tenantId, environment);
         if (deterministicDashboardMaterialization) {
             List<AgenticAuthoringCandidate> dashboardCandidates = new ArrayList<>(candidates);
@@ -202,7 +213,9 @@ public class AgenticAuthoringIntentResolverService {
                 candidates,
                 contextHintCandidate);
         if (preLlmGovernedResourceChoiceApplied) {
-            shouldResolveLlmIntent = false;
+            if (!hasLlmIntentResolver) {
+                shouldResolveLlmIntent = false;
+            }
             if (preLlmGovernedResourceChoiceCandidate != null) {
                 candidates = withPriorityCandidate(candidates, preLlmGovernedResourceChoiceCandidate);
             }
@@ -287,24 +300,17 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (!primaryLlmIntentProviderFailure
                 && (llmIntent == null || !llmIntent.resolved())
+                && !hasLlmIntentResolver
                 && consultativeDomainQuestion) {
             operationKind = "explore";
             artifactKind = "api_catalog";
             changeKind = "answer_api_catalog_question";
-        } else if (llmIntent != null && llmIntent.resolved()) {
+        }
+        boolean postIntentApiCatalogCandidateDiscoverySkipped = false;
+        if (llmIntent != null && llmIntent.resolved()) {
             operationKind = valueOrUnknown(llmIntent.operationKind());
             artifactKind = valueOrUnknown(llmIntent.artifactKind());
             changeKind = valueOrUnknown(llmIntent.changeKind());
-            if (consultativePlatformCapabilityQuestion) {
-                operationKind = "explain";
-                artifactKind = "component";
-                changeKind = platformCapabilityChangeKind(prompt);
-            }
-            if (consultativeDomainQuestion) {
-                operationKind = "explore";
-                artifactKind = "api_catalog";
-                changeKind = "answer_api_catalog_question";
-            }
             changeKind = normalizeTargetlessCreationChangeKind(prompt, operationKind, artifactKind, changeKind, target);
             boolean llmCandidateBundleHasExplicitSource = hasExplicitSourceCandidate(llmCandidateOptions);
             String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource
@@ -313,7 +319,17 @@ public class AgenticAuthoringIntentResolverService {
                     && (!isDomainDataCatalogQuestion(prompt) || isConsultativeFormPolicyQuestion(prompt))
                     ? ""
                     : consultativeResourceSearchQuery(llmIntent).trim();
+            if (shouldSkipPostIntentApiCatalogCandidateDiscovery(
+                    prompt,
+                    operationKind,
+                    artifactKind,
+                    changeKind,
+                    llmIntent)) {
+                llmResourceSearchQuery = "";
+                postIntentApiCatalogCandidateDiscoverySkipped = true;
+            }
             if (!llmResourceSearchQuery.isBlank()) {
+                boolean emptyCandidateSetBeforeSearch = candidates.isEmpty();
                 List<AgenticAuthoringCandidate> refinedCandidates = new ArrayList<>(candidates);
                 refinedCandidates.addAll(discoverCandidates(
                         normalize(llmResourceSearchQuery),
@@ -323,53 +339,47 @@ public class AgenticAuthoringIntentResolverService {
                         environment));
                 refinedCandidates.addAll(contextHintCandidates(request));
                 candidates = deduplicateCandidates(refinedCandidates);
-                candidates = groundCandidates(
-                        normalize(llmResourceSearchQuery),
-                        candidates,
-                        tenantId,
-                        environment);
+                if (!emptyCandidateSetBeforeSearch) {
+                    candidates = groundCandidates(
+                            normalize(llmResourceSearchQuery),
+                            candidates,
+                            tenantId,
+                            environment);
+                }
                 llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
                 contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
                 if (contextHintCandidate != null) {
                     candidates = withPriorityCandidate(candidates, contextHintCandidate);
                     llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
                 }
-                AgenticAuthoringLlmIntentResolution refinedLlmIntent = resolveLlmIntentAfterCandidateRefinement(
-                        shouldResolveLlmIntent,
-                        request,
-                        effectivePrompt,
-                        currentPageSummary,
-                        target,
-                        llmCandidateOptions,
-                        componentCapabilities,
-                        llmIntent,
-                        tenantId,
-                        userId,
-                        environment);
-                if (refinedLlmIntent != llmIntent) {
-                    llmIntent = refinedLlmIntent;
-                    llmSecondPassUsed = true;
-                    operationKind = valueOrUnknown(llmIntent.operationKind());
-                    artifactKind = valueOrUnknown(llmIntent.artifactKind());
-                    changeKind = valueOrUnknown(llmIntent.changeKind());
-                    if (consultativePlatformCapabilityQuestion) {
-                        operationKind = "explain";
-                        artifactKind = "component";
-                        changeKind = platformCapabilityChangeKind(prompt);
+                if (shouldResolveLlmIntentAfterCandidateRefinement(llmIntent, operationKind, artifactKind, changeKind)) {
+                    AgenticAuthoringLlmIntentResolution refinedLlmIntent = resolveLlmIntentAfterCandidateRefinement(
+                            shouldResolveLlmIntent,
+                            request,
+                            effectivePrompt,
+                            currentPageSummary,
+                            target,
+                            llmCandidateOptions,
+                            componentCapabilities,
+                            llmIntent,
+                            tenantId,
+                            userId,
+                            environment);
+                    if (refinedLlmIntent != llmIntent) {
+                        llmIntent = refinedLlmIntent;
+                        llmSecondPassUsed = true;
+                        operationKind = valueOrUnknown(llmIntent.operationKind());
+                        artifactKind = valueOrUnknown(llmIntent.artifactKind());
+                        changeKind = valueOrUnknown(llmIntent.changeKind());
+                        changeKind = normalizeTargetlessCreationChangeKind(
+                                prompt,
+                                operationKind,
+                                artifactKind,
+                                changeKind,
+                                target);
                     }
-                    if (consultativeDomainQuestion) {
-                        operationKind = "explore";
-                        artifactKind = "api_catalog";
-                        changeKind = "answer_api_catalog_question";
-                    }
-                    changeKind = normalizeTargetlessCreationChangeKind(
-                            prompt,
-                            operationKind,
-                            artifactKind,
-                            changeKind,
-                            target);
                 }
-            } else if (candidates.isEmpty()) {
+            } else if (candidates.isEmpty() && !postIntentApiCatalogCandidateDiscoverySkipped) {
                 candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
             }
         } else if (llmIntent != null) {
@@ -614,6 +624,22 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
+        boolean unresolvedLlmWeakLexicalSelectionDeferred = shouldDeferUnresolvedLlmWeakLexicalSelection(
+                llmIntent,
+                selectedCandidate,
+                prompt,
+                candidates);
+        if (unresolvedLlmWeakLexicalSelectionDeferred) {
+            selectedCandidate = null;
+        }
+        boolean consultativeWeakLexicalSelectionDeferred = shouldDeferWeakLexicalConsultativeSelection(
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedCandidate);
+        if (consultativeWeakLexicalSelectionDeferred) {
+            selectedCandidate = null;
+        }
         boolean apiCatalogWeakLexicalSelectionDeferred = shouldDeferWeakLexicalApiCatalogSelection(
                 operationKind,
                 artifactKind,
@@ -659,6 +685,8 @@ public class AgenticAuthoringIntentResolverService {
         if (selectedCandidate == null
                 && !explicitLocalUiComposition
                 && !primaryLlmIntentProviderFailure
+                && !unresolvedLlmWeakLexicalSelectionDeferred
+                && !consultativeWeakLexicalSelectionDeferred
                 && !apiCatalogWeakLexicalSelectionDeferred) {
             selectedCandidate = selectCandidate(candidates, target, operationKind, artifactKind, prompt);
             if (selectedCandidate == null) {
@@ -756,7 +784,6 @@ public class AgenticAuthoringIntentResolverService {
             assistantMessage = platformCapabilityAssistantMessage(prompt, componentCapabilities);
         }
         if ("api_catalog".equals(artifactKind)
-                && isConsultativeDomainQuestion(prompt)
                 && shouldUseApiCatalogGuidanceMessage(assistantMessage)) {
             String sanitizedApiCatalogMessage = sanitizeApiCatalogConsultativeLanguage(
                     assistantMessage,
@@ -869,10 +896,18 @@ public class AgenticAuthoringIntentResolverService {
             warnings = withWarning(warnings, "semantic-refinement-applied");
         }
         if (preLlmGovernedResourceChoiceApplied) {
-            warnings = withWarning(warnings, "pre-llm-governed-resource-choice-applied");
+            warnings = withWarning(warnings, hasLlmIntentResolver
+                    ? "pre-llm-governed-resource-choice-ranked"
+                    : "pre-llm-governed-resource-choice-applied");
         }
         if (apiCatalogWeakLexicalSelectionDeferred) {
             warnings = withWarning(warnings, "api-catalog-weak-lexical-selection-deferred");
+        }
+        if (unresolvedLlmWeakLexicalSelectionDeferred) {
+            warnings = withWarning(warnings, "llm-unresolved-weak-lexical-selection-deferred");
+        }
+        if (consultativeWeakLexicalSelectionDeferred) {
+            warnings = withWarning(warnings, "consultative-weak-lexical-selection-deferred");
         }
         if (promotedAssistantChoiceToClarification) {
             warnings = withWarning(warnings, "llm-assistant-choice-promoted-to-quick-replies");
@@ -1613,6 +1648,71 @@ public class AgenticAuthoringIntentResolverService {
                 || (hasChart && hasFilter && hasDetails);
     }
 
+    private boolean isExplicitDashboardMaterializationCommand(String prompt) {
+        String normalized = normalize(prompt);
+        if (!isConcreteDashboardMaterializationPrompt(normalized)) {
+            return false;
+        }
+        if (isQuestionLike(normalized)
+                && containsAny(normalized, "posso", "podem", "quais", "que dados", "quais dados", "devo")) {
+            return false;
+        }
+        if (isQuestionLike(normalized) && !containsAny(normalized, "crie", "criar", "monte", "montar", "gere", "gerar")) {
+            return false;
+        }
+        return containsAny(normalized,
+                "quero",
+                "preciso",
+                "gostaria",
+                "crie",
+                "criar",
+                "monte",
+                "montar",
+                "gere",
+                "gerar",
+                "construa",
+                "construir",
+                "painel para",
+                "dashboard para");
+    }
+
+    private boolean shouldProvidePreLlmApiMetadataDiscoveryContext(String prompt) {
+        String normalized = normalize(prompt);
+        return isApiCatalogResourceListPrompt(normalized)
+                && containsAny(normalized,
+                "antes de criar",
+                "para criar",
+                "criar tabela",
+                "criar tabelas",
+                "criar formulario",
+                "criar formularios",
+                "criar formulário",
+                "criar formulários",
+                "criar dashboard",
+                "criar painel",
+                "criar grafico",
+                "criar graficos",
+                "criar gráfico",
+                "criar gráficos",
+                "criar indicadores");
+    }
+
+    private boolean isQuestionLike(String prompt) {
+        String normalized = normalize(prompt);
+        return normalized.contains("?")
+                || containsAny(normalized,
+                "qual",
+                "quais",
+                "o que",
+                "que dados",
+                "quais dados",
+                "posso",
+                "pode",
+                "podem",
+                "devo",
+                "como");
+    }
+
     private AgenticAuthoringLlmIntentResolution resolveLlmIntent(
             boolean shouldResolveLlmIntent,
             AgenticAuthoringIntentResolutionRequest request,
@@ -1627,7 +1727,7 @@ public class AgenticAuthoringIntentResolverService {
         if (!shouldResolveLlmIntent || llmIntentResolverService == null) {
             return null;
         }
-        return llmIntentResolverService.resolve(
+        Optional<AgenticAuthoringLlmIntentResolution> resolution = llmIntentResolverService.resolve(
                         request,
                         effectivePrompt,
                         currentPageSummary,
@@ -1636,8 +1736,49 @@ public class AgenticAuthoringIntentResolverService {
                         componentCapabilities,
                         tenantId,
                         userId,
-                        environment)
-                .orElse(null);
+                        environment);
+        return resolution == null ? null : resolution.orElse(null);
+    }
+
+    private boolean shouldResolveLlmIntentAfterCandidateRefinement(
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            String operationKind,
+            String artifactKind,
+            String changeKind) {
+        if (llmIntent == null || !llmIntent.resolved()) {
+            return true;
+        }
+        if (isApiCatalogQuestion(operationKind, artifactKind, changeKind)) {
+            return false;
+        }
+        if (!hasLlmWarning(llmIntent, "llm-fast-intent-resolution-used")) {
+            return true;
+        }
+        if (!"explore".equals(operationKind) && !"explain".equals(operationKind)) {
+            return true;
+        }
+        if ("api_catalog".equals(artifactKind)) {
+            return !"answer_api_catalog_question".equals(changeKind);
+        }
+        if ("component".equals(artifactKind)) {
+            return !"answer_component_catalog_question".equals(changeKind)
+                    && !"answer_component_capability_question".equals(changeKind);
+        }
+        return true;
+    }
+
+    private boolean shouldSkipPostIntentApiCatalogCandidateDiscovery(
+            String prompt,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            AgenticAuthoringLlmIntentResolution llmIntent) {
+        return isApiCatalogQuestion(operationKind, artifactKind, changeKind)
+                && llmIntent != null
+                && llmIntent.resolved()
+                && hasLlmWarning(llmIntent, "llm-fast-intent-resolution-used")
+                && explicitResourcePath(prompt).isBlank()
+                && !isConfirmedDataSourceSelection(prompt);
     }
 
     private AgenticAuthoringLlmIntentResolution resolveLlmIntentAfterCandidateRefinement(
@@ -1671,7 +1812,7 @@ public class AgenticAuthoringIntentResolverService {
                 tenantId,
                 userId,
                 environment);
-        return next.orElse(previousLlmIntent);
+        return next == null ? previousLlmIntent : next.orElse(previousLlmIntent);
     }
 
     private String consultativeResourceSearchQuery(AgenticAuthoringLlmIntentResolution llmIntent) {
@@ -2986,6 +3127,36 @@ public class AgenticAuthoringIntentResolverService {
                 && !hasTrustedSelectionEvidence(selectedCandidate);
     }
 
+    private boolean shouldDeferWeakLexicalConsultativeSelection(
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            AgenticAuthoringCandidate selectedCandidate) {
+        String normalizedChangeKind = valueOrDefault(changeKind, "");
+        return ("explore".equals(operationKind) || "explain".equals(operationKind))
+                && !"api_catalog".equals(artifactKind)
+                && normalizedChangeKind.startsWith("answer_")
+                && isWeakLexicalCandidate(selectedCandidate)
+                && !hasTrustedSelectionEvidence(selectedCandidate);
+    }
+
+    private boolean shouldDeferUnresolvedLlmWeakLexicalSelection(
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            AgenticAuthoringCandidate selectedCandidate,
+            String prompt,
+            List<AgenticAuthoringCandidate> candidates) {
+        return llmIntent != null
+                && !llmIntent.resolved()
+                && valueOrDefault(llmIntent.selectedResourcePath(), "").isBlank()
+                && isWeakLexicalCandidate(selectedCandidate)
+                && !hasTrustedSelectionEvidence(selectedCandidate)
+                && strongestPromptCandidateAlignmentScore(
+                        prompt,
+                        candidates == null || candidates.isEmpty()
+                                ? List.of(selectedCandidate)
+                                : candidates) < 6;
+    }
+
     private boolean isWeakLexicalCandidate(AgenticAuthoringCandidate candidate) {
         if (candidate == null) {
             return false;
@@ -3162,8 +3333,18 @@ public class AgenticAuthoringIntentResolverService {
         List<AgenticAuthoringCandidate> metadataCandidates = apiMetadataCandidateCatalog == null
                 ? List.of()
                 : apiMetadataCandidateCatalog.discover(prompt, effectiveArtifactKind, tenantId, environment, null);
+        if (metadataCandidates.isEmpty()
+                && "api_catalog".equals(effectiveArtifactKind)
+                && apiMetadataCandidateCatalog != null) {
+            metadataCandidates = apiMetadataCandidateCatalog.discover("", "unknown", tenantId, environment, null);
+        }
         if (metadataCandidates.isEmpty() && apiMetadataCandidateCatalog != null) {
             metadataCandidates = apiMetadataCandidateCatalog.discover("", effectiveArtifactKind, tenantId, environment, null);
+        }
+        if (metadataCandidates.isEmpty()
+                && "api_catalog".equals(effectiveArtifactKind)
+                && apiMetadataCandidateCatalog != null) {
+            metadataCandidates = apiMetadataCandidateCatalog.discover("", "unknown", tenantId, environment, null);
         }
         if (!metadataCandidates.isEmpty()) {
             candidates.addAll(metadataCandidates);
@@ -3206,7 +3387,7 @@ public class AgenticAuthoringIntentResolverService {
                     return groundCandidates(prompt, explicitSourceDiscoveryScope(candidates), tenantId, environment);
                 }
             }
-            candidates.addAll(apiMetadataCandidateCatalog.discover(prompt, "unknown", tenantId, environment, null));
+            candidates.addAll(apiMetadataCandidateCatalog.discover("", "unknown", tenantId, environment, null));
             if (hasExplicitSourceCandidate(candidates)) {
                 return groundCandidates(prompt, explicitSourceDiscoveryScope(candidates), tenantId, environment);
             }
@@ -3218,6 +3399,29 @@ public class AgenticAuthoringIntentResolverService {
                     null));
         }
         return groundCandidates(prompt, deduplicateCandidates(candidates), tenantId, environment);
+    }
+
+    private List<AgenticAuthoringCandidate> discoverPreLlmContextCandidates(
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringTarget target) {
+        String effectiveArtifactKind = discoveryArtifactKindForPrompt(prompt, artifactKind);
+        if ("component".equals(effectiveArtifactKind)
+                || target == null
+                || target.resourcePath() == null
+                || target.resourcePath().isBlank()
+                || shouldDetachCurrentTarget(prompt, effectiveArtifactKind, target)) {
+            return List.of();
+        }
+        String operation = target.submitMethod() == null || target.submitMethod().isBlank()
+                ? "post"
+                : target.submitMethod();
+        return List.of(candidate(
+                target.resourcePath(),
+                operation,
+                0.95d,
+                "resource resolved from current target widget",
+                "current-page"));
     }
 
     private String discoveryArtifactKindForPrompt(String prompt, String artifactKind) {
@@ -3783,6 +3987,8 @@ public class AgenticAuthoringIntentResolverService {
                 "quais dados",
                 "que dados",
                 "dados existem",
+                "dados que existem",
+                "dados existentes",
                 "dados disponiveis",
                 "dados disponíveis",
                 "o que posso consultar",
@@ -4665,8 +4871,28 @@ public class AgenticAuthoringIntentResolverService {
         if (rawMessage.contains("/api") || rawMessage.contains("/schemas") || rawMessage.contains("url")) {
             return true;
         }
+        if (rawMessage.indexOf("fonte confirmada") >= 0
+                && rawMessage.indexOf("fonte confirmada") != rawMessage.lastIndexOf("fonte confirmada")) {
+            return true;
+        }
         String normalizedMessage = normalize(assistantMessage);
         return containsAny(normalizedMessage,
+                "vou consultar",
+                "vou investigar",
+                "consultar o catalogo",
+                "consultar as fontes",
+                "investigar as capacidades",
+                "nao temos dados",
+                "não temos dados",
+                "nao encontrei dados",
+                "não encontrei dados",
+                "nao temos informacoes",
+                "não temos informações",
+                "informacoes especificas",
+                "informações específicas",
+                "dados especificos disponiveis",
+                "dados específicos disponíveis",
+                "dados governados",
                 "/api/",
                 "/schemas/",
                 "endpoint",
@@ -5076,7 +5302,12 @@ public class AgenticAuthoringIntentResolverService {
 
         String endpoints = usableCandidates.stream()
                 .limit(4)
-                .map(candidate -> valueOrDefault(candidate.reason(), "fonte de negocio do catalogo"))
+                .map(candidate -> {
+                    String reason = valueOrDefault(candidate.reason(), "");
+                    return isHumanCatalogReason(reason) ? reason : candidateLabel(candidate);
+                })
+                .map(this::humanizeCatalogCandidate)
+                .filter(label -> !label.isBlank())
                 .reduce((left, right) -> left + "; " + right)
                 .orElse("fonte de negocio do catalogo");
         String message = "Encontrei algumas fontes de negocio candidatas: " + endpoints;
@@ -5128,12 +5359,20 @@ public class AgenticAuthoringIntentResolverService {
     private boolean isHumanCatalogReason(String reason) {
         String normalized = normalize(reason);
         return !normalized.isBlank()
+                && !reason.contains("/")
                 && !containsAny(normalized,
+                "fonte confirmada",
+                "fonte governada",
+                "fonte de negocio",
+                "fonte de negócio",
                 "evidence",
                 "fallback",
                 "weak lexical",
                 "api metadata",
                 "api_metadata",
+                "broad artifact",
+                "artifact discovery",
+                "discovery",
                 "semantic retrieval",
                 "semantic_retrieval",
                 "retrieval",
@@ -5141,7 +5380,10 @@ public class AgenticAuthoringIntentResolverService {
                 "domain_catalog",
                 "grounded",
                 "resource selection",
-                "provenance");
+                "provenance",
+                "listar",
+                "filter",
+                "operation");
     }
 
     private String humanizeCatalogCandidate(String value) {

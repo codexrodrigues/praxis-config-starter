@@ -21,7 +21,6 @@ public class AgenticAuthoringCandidateEligibilityGate {
                 && ("answer_api_catalog_question".equals(changeKind)
                 || "answer_catalog_question".equals(changeKind));
         boolean componentCatalogQuestion = ("explore".equals(operationKind) || "explain".equals(operationKind))
-                && "component".equals(artifactKind)
                 && ("answer_component_catalog_question".equals(changeKind)
                 || "answer_component_capability_question".equals(changeKind));
         if (("explore".equals(operationKind) || "explain".equals(operationKind))

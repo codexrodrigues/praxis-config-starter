@@ -174,7 +174,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             String userId,
             String environment) {
         List<AgenticAuthoringCandidate> fastCandidates = fastIntentCandidateOptions(candidateOptions);
-        if (!shouldTryFastIntentResolution(request, effectivePrompt, target, fastCandidates)) {
+        if (!shouldTryFastIntentResolution(request, effectivePrompt, target, fastCandidates, componentCapabilities)) {
             return Optional.empty();
         }
         try {
@@ -233,6 +233,9 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (!resolution.resolved()) {
             return "unresolved";
         }
+        if (fastConsultativeResolutionComplete(resolution)) {
+            return "complete-consultative-resolution";
+        }
         if (!"create".equals(valueOrDefault(resolution.operationKind(), ""))) {
             return "operation-not-create";
         }
@@ -262,26 +265,41 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             String effectivePrompt,
             AgenticAuthoringTarget target,
-            List<AgenticAuthoringCandidate> candidateOptions) {
+            List<AgenticAuthoringCandidate> candidateOptions,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         if (request == null
                 || request.pendingClarification() != null
                 || request.activeSemanticDecision() != null
-                || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt)
-                || candidateOptions == null
-                || candidateOptions.isEmpty()) {
+                || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt)) {
             return false;
         }
         if (target != null && StringUtils.hasText(target.widgetKey())) {
             return false;
         }
-        return candidateOptions.stream()
-                .anyMatch(candidate -> hasEvidence(candidate, "explicit-source-match")
-                        || hasEvidence(candidate, "context-hint")
-                        || hasEvidence(candidate, "quick-reply-context")
-                        || hasEvidence(candidate, "current-page")
-                        || hasEvidence(candidate, "explicit-resource-path")
-                        || hasEvidence(candidate, "tool-search-api-resources")
-                        || hasEvidence(candidate, "domain-catalog-context"));
+        if (!isEmpty(componentCapabilities)) {
+            return true;
+        }
+        if (!isEmpty(candidateOptions)) {
+            return candidateOptions.stream()
+                    .anyMatch(candidate -> hasEvidence(candidate, "explicit-source-match")
+                            || hasEvidence(candidate, "context-hint")
+                            || hasEvidence(candidate, "quick-reply-context")
+                            || hasEvidence(candidate, "current-page")
+                            || hasEvidence(candidate, "explicit-resource-path")
+                            || hasEvidence(candidate, "tool-search-api-resources")
+                            || hasEvidence(candidate, "domain-catalog-context"));
+        }
+        return true;
+    }
+
+    private boolean isEmpty(List<?> items) {
+        return items == null || items.isEmpty();
+    }
+
+    private boolean isEmpty(AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        return componentCapabilities == null
+                || componentCapabilities.catalogs() == null
+                || componentCapabilities.catalogs().isEmpty();
     }
 
     private boolean hasConversationHistoryBeyondCurrentPrompt(
@@ -372,6 +390,9 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (resolution == null || !resolution.resolved()) {
             return false;
         }
+        if (fastConsultativeResolutionComplete(resolution)) {
+            return true;
+        }
         if (!"create".equals(valueOrDefault(resolution.operationKind(), ""))) {
             return false;
         }
@@ -392,10 +413,28 @@ public class AgenticAuthoringLlmIntentResolverService {
         return true;
     }
 
+    private boolean fastConsultativeResolutionComplete(AgenticAuthoringLlmIntentResolution resolution) {
+        String operationKind = valueOrDefault(resolution.operationKind(), "");
+        if (!"explore".equals(operationKind) && !"explain".equals(operationKind)) {
+            return false;
+        }
+        String artifactKind = valueOrDefault(resolution.artifactKind(), "");
+        String changeKind = valueOrDefault(resolution.changeKind(), "");
+        if ("api_catalog".equals(artifactKind)) {
+            return "answer_api_catalog_question".equals(changeKind);
+        }
+        if ("component".equals(artifactKind)) {
+            return "answer_component_catalog_question".equals(changeKind)
+                    || "answer_component_capability_question".equals(changeKind);
+        }
+        return false;
+    }
+
     private AgenticAuthoringLlmIntentResolution withFastCandidateResourceWhenUnambiguous(
             AgenticAuthoringLlmIntentResolution resolution,
             List<AgenticAuthoringCandidate> fastCandidates) {
         if (resolution == null
+                || fastConsultativeResolutionComplete(resolution)
                 || StringUtils.hasText(resolution.selectedResourcePath())
                 || fastCandidates == null
                 || fastCandidates.isEmpty()) {
@@ -532,6 +571,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
                 Select visualizationDecision.primaryComponent only from authorableComponents.
                 For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
+                If the user asks which governed data can be used to create a table, form, chart, dashboard, page or other component, classify the turn as a consultative catalog answer: operationKind "explore" or "explain", artifactKind "api_catalog", changeKind "answer_api_catalog_question". Do not select a weak resource or ask for a materialization confirmation before answering the catalog question.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
                 For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
                 For chart axes, use the grouping/time field in axes[].field and numeric measures in metricField/metricAggregation.
